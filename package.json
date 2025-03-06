@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "@apollo/client": "^3.8.1",
+    "@babel/node": "^7.22.10",
+    "@babel/polyfill": "^7.12.1",
+    "@react-navigation/native": "^6.1.7",
+    "expo": "^49.0.7",
+    "express": "^4.18.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.22.10",
+    "@babel/core": "^7.22.10",
+    "@babel/preset-env": "^7.22.10",
+    "@babel/preset-react": "^7.22.5",
+    "metro-config": "^0.78.0"
+  }
+}
