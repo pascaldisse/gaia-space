@@ -830,7 +830,7 @@ class WorkspaceListCard extends StatelessWidget {
 }
 
 // Workspace Detail Screen
-class WorkspaceDetailScreen extends StatelessWidget {
+class WorkspaceDetailScreen extends ConsumerStatefulWidget {
   final Workspace workspace;
   final VoidCallback onBack;
   
@@ -841,14 +841,33 @@ class WorkspaceDetailScreen extends StatelessWidget {
   });
 
   @override
+  ConsumerState<WorkspaceDetailScreen> createState() => _WorkspaceDetailScreenState();
+}
+
+class _WorkspaceDetailScreenState extends ConsumerState<WorkspaceDetailScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+  
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: onBack,
+          onPressed: widget.onBack,
         ),
-        title: Text(workspace.name),
+        title: Text(widget.workspace.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.groups),
@@ -865,167 +884,363 @@ class WorkspaceDetailScreen extends StatelessWidget {
             tooltip: 'Workspace Settings',
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Overview'),
+            Tab(text: 'Integrations'),
+          ],
+        ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          // Workspace header
-          _buildWorkspaceHeader(context),
-          
-          const SizedBox(height: 24),
-          
-          // Channels section
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Channels',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: () {
-                          // Add channel functionality
-                        },
-                        tooltip: 'Add Channel',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _buildChannelTile(context, 'general', 'General discussion channel'),
-                  _buildChannelTile(context, 'announcements', 'Important workspace announcements'),
-                  if (workspace.name == 'Engineering')
-                    _buildChannelTile(context, 'development', 'Software development discussions'),
-                  if (workspace.name == 'Engineering')
-                    _buildChannelTile(context, 'deployments', 'Release and deployment coordination'),
-                  if (workspace.name == 'Product')
-                    _buildChannelTile(context, 'roadmap', 'Product roadmap planning'),
-                  if (workspace.name == 'Product')
-                    _buildChannelTile(context, 'design', 'UI/UX design discussions'),
-                  if (workspace.name == 'Marketing')
-                    _buildChannelTile(context, 'campaigns', 'Marketing campaign planning'),
-                  if (workspace.name == 'Marketing')
-                    _buildChannelTile(context, 'social-media', 'Social media strategy and content'),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Members section
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Members',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: () {
-                          // Add member functionality
-                        },
-                        tooltip: 'Add Member',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _buildMemberTile(context, 'John Doe', 'Admin', 'https://via.placeholder.com/150/92c952?text=JD'),
-                  _buildMemberTile(context, 'Jane Smith', 'Member', 'https://via.placeholder.com/150/771796?text=JS'),
-                  _buildMemberTile(context, 'Alex Johnson', 'Member', 'https://via.placeholder.com/150/24f355?text=AJ'),
-                  _buildMemberTile(context, AuthService.currentUser?.displayName ?? 'You', 'Admin', null),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Projects section
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Projects',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('Create Project'),
-                        onPressed: () {
-                          // Create project functionality
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (workspace.name == 'Engineering')
-                    _buildProjectTile(context, 'API Refactoring', 'In Progress'),
-                  if (workspace.name == 'Engineering')
-                    _buildProjectTile(context, 'Mobile App Bugfixes', 'To Do'),
-                  if (workspace.name == 'Product')
-                    _buildProjectTile(context, 'Q3 Roadmap Planning', 'Completed'),
-                  if (workspace.name == 'Product')
-                    _buildProjectTile(context, 'User Research', 'In Progress'),
-                  if (workspace.name == 'Marketing')
-                    _buildProjectTile(context, 'Summer Campaign', 'In Progress'),
-                  if (workspace.membersCount < 3)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Center(child: Text('No projects yet')),
-                    ),
-                ],
-              ),
-            ),
-          ),
+          _buildOverviewTab(),
+          _buildIntegrationsTab(),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Start a new conversation
-        },
-        icon: const Icon(Icons.chat),
-        label: const Text('New Discussion'),
+      floatingActionButton: _tabController.index == 0
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                // Start a new conversation
+              },
+              icon: const Icon(Icons.chat),
+              label: const Text('New Discussion'),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildOverviewTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Workspace header
+        _buildWorkspaceHeader(context),
+        
+        const SizedBox(height: 24),
+        
+        // Channels section
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Channels',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () {
+                        // Add channel functionality
+                      },
+                      tooltip: 'Add Channel',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildChannelTile(context, 'general', 'General discussion channel'),
+                _buildChannelTile(context, 'announcements', 'Important workspace announcements'),
+                if (widget.workspace.name == 'Engineering')
+                  _buildChannelTile(context, 'development', 'Software development discussions'),
+                if (widget.workspace.name == 'Engineering')
+                  _buildChannelTile(context, 'deployments', 'Release and deployment coordination'),
+                if (widget.workspace.name == 'Product')
+                  _buildChannelTile(context, 'roadmap', 'Product roadmap planning'),
+                if (widget.workspace.name == 'Product')
+                  _buildChannelTile(context, 'design', 'UI/UX design discussions'),
+                if (widget.workspace.name == 'Marketing')
+                  _buildChannelTile(context, 'campaigns', 'Marketing campaign planning'),
+                if (widget.workspace.name == 'Marketing')
+                  _buildChannelTile(context, 'social-media', 'Social media strategy and content'),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 24),
+        
+        // Members section
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Members',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () {
+                        // Add member functionality
+                      },
+                      tooltip: 'Add Member',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildMemberTile(context, 'John Doe', 'Admin', 'https://via.placeholder.com/150/92c952?text=JD'),
+                _buildMemberTile(context, 'Jane Smith', 'Member', 'https://via.placeholder.com/150/771796?text=JS'),
+                _buildMemberTile(context, 'Alex Johnson', 'Member', 'https://via.placeholder.com/150/24f355?text=AJ'),
+                _buildMemberTile(context, AuthService.currentUser?.displayName ?? 'You', 'Admin', null),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 24),
+        
+        // Projects section
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Projects',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Project'),
+                      onPressed: () {
+                        // Create project functionality
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (widget.workspace.name == 'Engineering')
+                  _buildProjectTile(context, 'API Refactoring', 'In Progress'),
+                if (widget.workspace.name == 'Engineering')
+                  _buildProjectTile(context, 'Mobile App Bugfixes', 'To Do'),
+                if (widget.workspace.name == 'Product')
+                  _buildProjectTile(context, 'Q3 Roadmap Planning', 'Completed'),
+                if (widget.workspace.name == 'Product')
+                  _buildProjectTile(context, 'User Research', 'In Progress'),
+                if (widget.workspace.name == 'Marketing')
+                  _buildProjectTile(context, 'Summer Campaign', 'In Progress'),
+                if (widget.workspace.membersCount < 3)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: Text('No projects yet')),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIntegrationsTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Integrations header
+        Text(
+          'Workspace Integrations',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Connect third-party services to enhance your workspace functionality.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 24),
+
+        // Discord Integration Card
+        _buildIntegrationCard(
+          title: 'Discord',
+          description: 'Connect Discord servers to sync channels and messages',
+          icon: Icons.discord,
+          iconColor: const Color(0xFF5865F2), // Discord brand color
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => DiscordIntegrationScreen(
+                  workspaceId: widget.workspace.id,
+                  workspaceName: widget.workspace.name,
+                  onBack: () => Navigator.of(context).pop(),
+                ),
+              ),
+            );
+          },
+        ),
+
+        const SizedBox(height: 16),
+
+        // Git Integration Card
+        _buildIntegrationCard(
+          title: 'Git Repositories',
+          description: 'Connect to GitHub, GitLab, or other Git providers',
+          icon: Icons.code,
+          iconColor: Colors.orange,
+          onTap: () {
+            // Navigate to Git repositories screen
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Git integration is already available in the Repositories section'),
+              ),
+            );
+          },
+        ),
+
+        const SizedBox(height: 16),
+
+        // Slack Integration Card (for future implementation)
+        _buildIntegrationCard(
+          title: 'Slack',
+          description: 'Connect Slack workspaces to sync channels and messages',
+          icon: Icons.message,
+          iconColor: Colors.green,
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Slack integration is coming soon'),
+              ),
+            );
+          },
+          isComingSoon: true,
+        ),
+
+        const SizedBox(height: 16),
+
+        // Jira Integration Card (for future implementation)
+        _buildIntegrationCard(
+          title: 'Jira',
+          description: 'Connect Jira projects to sync issues and workflows',
+          icon: Icons.task_alt,
+          iconColor: Colors.blue,
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Jira integration is coming soon'),
+              ),
+            );
+          },
+          isComingSoon: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIntegrationCard({
+    required String title,
+    required String description,
+    required IconData icon,
+    required Color iconColor,
+    required VoidCallback onTap,
+    bool isComingSoon = false,
+  }) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: isComingSoon ? null : onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: iconColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (isComingSoon)
+                          Container(
+                            margin: const EdgeInsets.only(left: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                            ),
+                            child: const Text(
+                              'Coming Soon',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.orange,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: isComingSoon ? Colors.grey : Colors.black54,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

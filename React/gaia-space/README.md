@@ -1,6 +1,6 @@
-# Gaia-Space - DevOps Collaboration Platform
+# Gaia Space - Collaborative Workspace Platform
 
-Gaia-Space is a comprehensive DevOps collaboration platform built with Flutter that integrates task management, team communication, Git repository management, CI/CD pipelines, documentation, and package management.
+Gaia Space is a modern Flutter application designed to provide a comprehensive workspace collaboration environment. It integrates team communication, project management, document sharing, and third-party services like Discord.
 
 ## Table of Contents
 
