@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gaia_space/core/models/repository.dart';
+import 'package:gaia_space/ui/screens/home/git_repository_detail_screen.dart';
 import 'package:gaia_space/ui/widgets/empty_state.dart';
 
 // Mock data provider for repositories
@@ -146,7 +147,13 @@ class RepositoryCard extends StatelessWidget {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          // TODO: Navigate to repository detail
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => GitRepositoryDetailScreen(
+                repositoryId: repository.id,
+              ),
+            ),
+          );
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
