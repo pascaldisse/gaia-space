@@ -1258,13 +1258,13 @@ class _WorkspaceDetailScreenState extends ConsumerState<WorkspaceDetailScreen> w
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    workspace.name,
+                    widget.workspace.name,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   Text(
-                    'Created by ${workspace.createdBy} · ${_formatDate(workspace.createdAt)}',
+                    'Created by ${widget.workspace.createdBy} · ${_formatDate(widget.workspace.createdAt)}',
                     style: TextStyle(
                       color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
                     ),
@@ -1275,17 +1275,17 @@ class _WorkspaceDetailScreenState extends ConsumerState<WorkspaceDetailScreen> w
           ],
         ),
         const SizedBox(height: 16),
-        if (workspace.description != null && workspace.description!.isNotEmpty)
+        if (widget.workspace.description != null && widget.workspace.description!.isNotEmpty)
           Text(
-            workspace.description!,
+            widget.workspace.description!,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         const SizedBox(height: 16),
         Row(
           children: [
-            _buildStat(context, Icons.people, '${workspace.membersCount} members'),
+            _buildStat(context, Icons.people, '${widget.workspace.membersCount} members'),
             const SizedBox(width: 24),
-            _buildStat(context, Icons.forum, '${workspace.channelsCount} channels'),
+            _buildStat(context, Icons.forum, '${widget.workspace.channelsCount} channels'),
           ],
         ),
       ],
@@ -1293,23 +1293,23 @@ class _WorkspaceDetailScreenState extends ConsumerState<WorkspaceDetailScreen> w
   }
   
   Widget _buildWorkspaceAvatar(BuildContext context) {
-    if (workspace.avatarUrl != null) {
+    if (widget.workspace.avatarUrl != null) {
       return CircleAvatar(
         radius: 32,
-        backgroundImage: NetworkImage(workspace.avatarUrl!),
+        backgroundImage: NetworkImage(widget.workspace.avatarUrl!),
         backgroundColor: Colors.grey.shade200,
       );
     }
     
     // Generate a color based on name
-    final colorValue = workspace.name.hashCode % Colors.primaries.length;
+    final colorValue = widget.workspace.name.hashCode % Colors.primaries.length;
     final color = Colors.primaries[colorValue];
     
     return CircleAvatar(
       radius: 32,
       backgroundColor: color,
       child: Text(
-        workspace.name[0].toUpperCase(),
+        widget.workspace.name[0].toUpperCase(),
         style: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.bold,
