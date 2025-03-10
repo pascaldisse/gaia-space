@@ -2,8 +2,32 @@
 
 Gaia Space is a modern Flutter application designed to provide a comprehensive workspace collaboration environment. It integrates team communication, project management, document sharing, and third-party services like Discord.
 
+## JetBrains Space Alternative
+
+Gaia Space is the open source spiritual successor to [JetBrains Space](https://www.jetbrains.com/space/), aiming to provide similar functionality with an open, community-driven approach. JetBrains Space is an all-in-one solution for software teams that combines project management, source code repositories, CI/CD pipelines, and team communication into a unified platform.
+
+While JetBrains Space is a proprietary solution, Gaia Space takes inspiration from its integrated approach but with complete transparency and flexibility through open source development. Key similarities and differences include:
+
+### Similarities
+- Unified workspace for software development teams
+- Git repository management
+- CI/CD pipeline integration
+- Project management with tasks and boards
+- Team communication tools
+- Document management
+
+### Differences
+- **Open Source**: Fully open source and community-driven
+- **Customizability**: Greater flexibility to modify and extend
+- **Self-hosted**: Complete control over your data and infrastructure
+- **Flutter-based**: Modern UI with cross-platform capabilities
+- **Integration-first**: Designed for seamless third-party integrations
+
+For teams that love the concept of JetBrains Space but prefer open source solutions, Gaia Space provides a compelling alternative that puts freedom and extensibility first.
+
 ## Table of Contents
 
+- [JetBrains Space Alternative](#jetbrains-space-alternative)
 - [Features Overview](#features-overview)
 - [Technical Architecture](#technical-architecture)
 - [Getting Started](#getting-started)
@@ -26,7 +50,7 @@ Gaia Space is a modern Flutter application designed to provide a comprehensive w
 
 ## Features Overview
 
-Gaia Space combines the functionality of multiple DevOps tools into a unified platform:
+Gaia Space combines the functionality of multiple DevOps tools into a unified platform, inspired by JetBrains Space but with an open-source approach:
 
 - **Team Collaboration** - Workspaces, channels, and real-time messaging
 - **Project Management** - Kanban boards, tasks, priorities, and deadlines
