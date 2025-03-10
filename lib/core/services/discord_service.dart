@@ -24,16 +24,16 @@ class DiscordService {
   static const String _tokenExpiryKey = 'discord_token_expiry';
   
   // App credentials from Discord Developer Portal
-  // For development, replace these with your actual credentials
-  // For production, use the environment variables
+  // For development, these are example credentials - replace with your actual ones
+  // For production, use the environment variables with --dart-define
   static const String _clientId = String.fromEnvironment(
     'DISCORD_CLIENT_ID',
-    defaultValue: 'YOUR_DISCORD_CLIENT_ID',
+    defaultValue: '1234567890123456789', // Replace with your Discord application Client ID
   );
   
   static const String _clientSecret = String.fromEnvironment(
     'DISCORD_CLIENT_SECRET',
-    defaultValue: 'YOUR_DISCORD_CLIENT_SECRET',
+    defaultValue: 'abcdefghijklmnopqrstuvwxyz123456', // Replace with your Discord Client Secret
   );
   
   final Dio _dio = Dio();
