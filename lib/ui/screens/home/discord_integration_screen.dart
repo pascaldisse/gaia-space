@@ -143,15 +143,21 @@ class _DiscordIntegrationScreenState extends ConsumerState<DiscordIntegrationScr
         await _showAddIntegrationDialog();
       } else {
         // Start the OAuth flow
-        final redirectUri = 'https://gaia-space.app/auth/discord/callback';
+        // Support both platforms - web URL for production, custom scheme for mobile/desktop
+        final webRedirectUri = 'https://gaia-space.app/auth/discord/callback';
+        final appRedirectUri = 'gaiaspace://discord_callback';
+        
+        // Use app scheme for better deep linking support
+        final redirectUri = appRedirectUri;
+        
         final success = await _discordService.launchOAuthFlow(
           redirectUri: redirectUri,
           scopes: ['identify', 'guilds', 'bot'],
         );
         
         if (success) {
-          // In a real app, you would handle the callback with the code
-          // For this demo flow, we'll show a dialog to enter the code manually
+          // The app should receive the callback via deep linking
+          // If that fails, allow manual entry as a fallback
           final code = await _showAuthCodeDialog();
           
           if (code != null && code.isNotEmpty) {
@@ -700,7 +706,13 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     
     try {
       // Launch OAuth flow with Discord
-      final redirectUri = 'https://gaia-space.app/auth/discord/callback';
+      // Support both platforms - web URL for production, custom scheme for mobile/desktop
+      final webRedirectUri = 'https://gaia-space.app/auth/discord/callback';
+      final appRedirectUri = 'gaiaspace://discord_callback';
+      
+      // Use app scheme for better deep linking support
+      final redirectUri = appRedirectUri;
+      
       final success = await _discordService.launchOAuthFlow(
         redirectUri: redirectUri,
         scopes: ['identify', 'guilds', 'bot'],
