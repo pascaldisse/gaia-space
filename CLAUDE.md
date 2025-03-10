@@ -1,60 +1,45 @@
 # Project Guidelines and Commands
 
 ## Build and Development
-- `npm install` - Install dependencies
-- `npm start` - Start development server
-- `expo start` - Start Expo development server
-- `expo start --ios` - Start on iOS simulator
-- `expo start --android` - Start on Android emulator
-- `expo start --web` - Start on web browser
+- `flutter pub get` - Install dependencies
+- `flutter run` - Start development server
+- `flutter run -d chrome` - Start on web browser
+- `flutter run -d ios` - Start on iOS simulator
+- `flutter run -d android` - Start on Android emulator
 
 ## Testing
-- `npm test` - Run all tests
-- `npm test -- -t "test name"` - Run specific test by name
-- `npm test -- --watch` - Run tests in watch mode
-- `npm test -- --coverage` - Generate test coverage report
+- `flutter test` - Run all tests
+- `flutter test test/path/to/test_file.dart` - Run specific test
+- `flutter test --coverage` - Generate test coverage report
+- `flutter test test/discord_integration_test.dart` - Run Discord integration tests
 
-## Linting and Formatting
-- `npm run lint` - Run ESLint on project
-- `npm run lint -- --fix` - Run ESLint with auto-fix
-- `npm run format` - Run Prettier formatter
-- `npm run format:check` - Check formatting without changing files
+## Linting and Analysis
+- `flutter analyze` - Run analyzer on project
+- `flutter format .` - Format code with dart formatter
+- `flutter pub run build_runner build` - Generate code for models and services
 
 ## Code Style Guidelines
-- **Imports**: Group imports by type in this order:
-  1. React/React Native imports
+- **Imports**: Group imports:
+  1. Dart/Flutter imports
   2. External library imports
-  3. Component imports
-  4. Utility/helper imports
-  5. Style/asset imports
+  3. Project imports (models, services, etc.)
 - **Formatting**: 
-  - 2-space indentation
-  - Single quotes for strings
-  - Semicolons required
-  - 80-character line length limit
+  - Standard Flutter formatting
+  - Prefer `const` for widgets
+- **Models**:
+  - Use Equatable for immutable data models
+  - Implement copyWith, toJson, fromJson methods
 - **Components**: 
-  - Use functional components with hooks
-  - One component per file
-  - Keep components focused on single responsibility
+  - Use functional/stateless widgets where possible
+  - Keep widgets focused on single responsibility
 - **Naming**: 
-  - PascalCase for components and files containing components
-  - camelCase for variables, functions, and utility files
-  - ALL_CAPS for constants
+  - PascalCase for widgets, classes, and files
+  - camelCase for functions, methods, and variables
+  - snake_case for file names
 - **Error Handling**: 
   - Use try/catch for async operations
-  - Implement proper error boundaries
-  - Log errors with contextual information
-- **Types**: 
-  - Define TypeScript interfaces for all component props
-  - Export types/interfaces from dedicated files
-  - Use explicit return types for non-trivial functions
+  - Log errors with AppLogger for contextual information
 - **State Management**: 
-  - Apollo Client for GraphQL data
-  - React Context for app-wide state
-  - useState/useReducer for component-level state
-
-## Project Structure
-- React and React Native components with Expo tooling
-- Apollo GraphQL for data fetching
-- Express for server-side functionality
-- Follows feature-based organization pattern
+  - Flutter Riverpod for state management
+  - ConsumerWidget for stateful components
+  - FutureProvider/StateProvider for async operations
