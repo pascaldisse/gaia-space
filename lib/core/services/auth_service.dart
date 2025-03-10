@@ -40,16 +40,16 @@ class AuthService {
             final userData = jsonDecode(storedUserJson);
             _currentUser = User.fromJson(userData);
             
-            AppLogger.info('User authenticated from stored credentials: ${_currentUser!.username}');
+            AppLogger.i('User authenticated from stored credentials: ${_currentUser!.username}');
           }
         } else {
           // Token is invalid or expired, clear storage
           await _clearAuthData();
-          AppLogger.info('Stored token expired or invalid, cleared auth data');
+          AppLogger.i('Stored token expired or invalid, cleared auth data');
         }
       }
     } catch (e, stackTrace) {
-      AppLogger.error('Error initializing auth service', e, stackTrace);
+      AppLogger.e('Error initializing auth service', e, stackTrace);
       await _clearAuthData();
     }
   }
@@ -70,7 +70,7 @@ class AuthService {
       // Placeholder for real implementation
       throw UnimplementedError('Real API authentication not implemented yet');
     } catch (e, stackTrace) {
-      AppLogger.error('Login failed', e, stackTrace);
+      AppLogger.e('Login failed', e, stackTrace);
       rethrow;
     }
   }
@@ -86,7 +86,7 @@ class AuthService {
       // TODO: Implement real API registration
       throw UnimplementedError('Real API registration not implemented yet');
     } catch (e, stackTrace) {
-      AppLogger.error('Registration failed', e, stackTrace);
+      AppLogger.e('Registration failed', e, stackTrace);
       rethrow;
     }
   }
@@ -96,9 +96,9 @@ class AuthService {
     try {
       // Clear auth data from storage
       await _clearAuthData();
-      AppLogger.info('User logged out');
+      AppLogger.i('User logged out');
     } catch (e, stackTrace) {
-      AppLogger.error('Error during logout', e, stackTrace);
+      AppLogger.e('Error during logout', e, stackTrace);
       rethrow;
     }
   }
@@ -129,7 +129,7 @@ class AuthService {
       _token = token;
       _currentUser = user;
     } catch (e, stackTrace) {
-      AppLogger.error('Error storing auth data', e, stackTrace);
+      AppLogger.e('Error storing auth data', e, stackTrace);
       rethrow;
     }
   }
@@ -143,7 +143,7 @@ class AuthService {
       _token = null;
       _currentUser = null;
     } catch (e, stackTrace) {
-      AppLogger.error('Error clearing auth data', e, stackTrace);
+      AppLogger.e('Error clearing auth data', e, stackTrace);
       rethrow;
     }
   }
@@ -185,7 +185,7 @@ class AuthService {
     // Store auth data
     await _storeAuthData(mockToken, user);
     
-    AppLogger.info('Mock login successful: ${user.username}');
+    AppLogger.i('Mock login successful: ${user.username}');
     return user;
   }
   
@@ -230,7 +230,7 @@ class AuthService {
     // Store auth data
     await _storeAuthData(mockToken, user);
     
-    AppLogger.info('Mock registration successful: ${user.username}');
+    AppLogger.i('Mock registration successful: ${user.username}');
     return user;
   }
 }

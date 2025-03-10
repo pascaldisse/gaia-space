@@ -49,7 +49,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       
       if (user != null && mounted) {
         // Navigate to home screen on success
-        AppLogger.info('User logged in: ${user.username}');
+        AppLogger.i('User logged in: ${user.username}');
         
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -62,7 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() {
         _errorMessage = e.toString();
       });
-      AppLogger.error('Login error', e);
+      AppLogger.e('Login error', e);
     } finally {
       if (mounted) {
         setState(() {

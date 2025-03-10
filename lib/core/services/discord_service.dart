@@ -38,7 +38,7 @@ class DiscordService {
   
   final Dio _dio = Dio();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
-  AppLogger _logger = AppLogger('DiscordService');
+  final AppLogger _logger = AppLogger('DiscordService');
   
   // Local storage for integrations until backend is implemented
   final List<DiscordIntegration> _integrations = [];
@@ -56,7 +56,7 @@ class DiscordService {
       // For now, we'll use the local storage
       return _integrations.where((integration) => integration.workspaceId == workspaceId).toList();
     } catch (e) {
-      _logger.error('Error fetching Discord integrations', error: e);
+      _logger.logError('Error fetching Discord integrations', error: e);
       rethrow;
     }
   }
@@ -88,7 +88,7 @@ class DiscordService {
       _integrations.add(integration);
       return integration;
     } catch (e) {
-      _logger.error('Error adding Discord integration', error: e);
+      _logger.logError('Error adding Discord integration', error: e);
       rethrow;
     }
   }
@@ -105,7 +105,7 @@ class DiscordService {
       }
       throw Exception('Integration not found');
     } catch (e) {
-      _logger.error('Error updating Discord integration', error: e);
+      _logger.logError('Error updating Discord integration', error: e);
       rethrow;
     }
   }
@@ -117,7 +117,7 @@ class DiscordService {
       // For now, we'll use the local storage
       _integrations.removeWhere((integration) => integration.id == integrationId);
     } catch (e) {
-      _logger.error('Error deleting Discord integration', error: e);
+      _logger.logError('Error deleting Discord integration', error: e);
       rethrow;
     }
   }
@@ -157,7 +157,7 @@ class DiscordService {
       }
       throw Exception('Integration not found');
     } catch (e) {
-      _logger.error('Error syncing Discord channels', error: e);
+      _logger.logError('Error syncing Discord channels', error: e);
       rethrow;
     }
   }
@@ -202,7 +202,7 @@ class DiscordService {
       final uri = Uri.parse(authUrl);
       return await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
-      _logger.error('Error launching Discord OAuth URL', error: e);
+      _logger.logError('Error launching Discord OAuth URL', error: e);
       return false;
     }
   }
@@ -242,13 +242,13 @@ class DiscordService {
         throw Exception('Failed to exchange code: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.error('Error exchanging Discord auth code', error: e);
+      _logger.logError('Error exchanging Discord auth code', error: e);
       rethrow;
     }
   }
   
   // Refresh an expired token
-  Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
+  Future<Map<String, dynamic>> refreshToken(String tokenToRefresh) async {
     try {
       final response = await _dio.post(
         _tokenUrl,
@@ -256,7 +256,7 @@ class DiscordService {
           'client_id': _clientId,
           'client_secret': _clientSecret,
           'grant_type': 'refresh_token',
-          'refresh_token': refreshToken,
+          'refresh_token': tokenToRefresh,
         }),
         options: Options(
           contentType: Headers.formUrlEncodedContentType,
@@ -282,7 +282,7 @@ class DiscordService {
         throw Exception('Failed to refresh token: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.error('Error refreshing Discord token', error: e);
+      _logger.logError('Error refreshing Discord token', error: e);
       rethrow;
     }
   }
@@ -304,7 +304,7 @@ class DiscordService {
       
       // Refresh if token expires in less than 5 minutes
       if (expiryTime.difference(now).inMinutes < 5) {
-        final refreshResult = await refreshToken(refreshToken);
+        final refreshResult = await this.refreshToken(refreshToken);
         return refreshResult['access_token'];
       }
     }
@@ -349,7 +349,7 @@ class DiscordService {
         throw Exception('Failed to fetch guilds: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.error('Error fetching Discord guilds', error: e);
+      _logger.logError('Error fetching Discord guilds', error: e);
       
       // If this is an authentication error, try to clear tokens
       if (e.toString().contains('401')) {
@@ -398,7 +398,7 @@ class DiscordService {
         throw Exception('Failed to fetch channels: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.error('Error fetching Discord channels', error: e);
+      _logger.logError('Error fetching Discord channels', error: e);
       
       // If this is an authentication error, try to clear tokens
       if (e.toString().contains('401')) {
@@ -416,7 +416,7 @@ class DiscordService {
       await _secureStorage.delete(key: _refreshTokenKey);
       await _secureStorage.delete(key: _tokenExpiryKey);
     } catch (e) {
-      _logger.error('Error clearing Discord tokens', error: e);
+      _logger.logError('Error clearing Discord tokens', error: e);
     }
   }
   

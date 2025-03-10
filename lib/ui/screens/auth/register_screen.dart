@@ -54,7 +54,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       
       if (user != null && mounted) {
         // Navigate to home screen on success
-        AppLogger.info('User registered: ${user.username}');
+        AppLogger.i('User registered: ${user.username}');
         
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -67,7 +67,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       setState(() {
         _errorMessage = e.toString();
       });
-      AppLogger.error('Registration error', e);
+      AppLogger.e('Registration error', e);
     } finally {
       if (mounted) {
         setState(() {

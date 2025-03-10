@@ -1676,6 +1676,82 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     );
   }
 
+  void _startAddIntegration() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Check if already authenticated
+      final isAuthenticated = await _discordService.isAuthenticated();
+      
+      if (isAuthenticated) {
+        // If already authenticated, go straight to server selection
+        setState(() {
+          _currentStep = 1;
+          _isLoading = false;
+        });
+      } else {
+        // Start the OAuth flow
+        final appRedirectUri = 'gaiaspace://discord_callback';
+        
+        final success = await _discordService.launchOAuthFlow(
+          redirectUri: appRedirectUri,
+          scopes: ['identify', 'guilds', 'bot'],
+        );
+        
+        if (success) {
+          // The app should receive the callback via deep linking
+          // If that fails, allow manual entry as a fallback
+          final code = await _showAuthCodeInputDialog();
+          
+          if (code != null && code.isNotEmpty) {
+            // Exchange the code for a token
+            await _discordService.exchangeCodeForToken(code, appRedirectUri);
+            
+            // Now show the server selection
+            if (mounted) {
+              setState(() {
+                _currentStep = 1;
+                _isLoading = false;
+              });
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to launch Discord authentication'),
+                backgroundColor: Colors.red,
+              ),
+            );
+            setState(() {
+              _isLoading = false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error connecting to Discord: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   void _nextStep() {
     if (_currentStep == 0) {
       // Start OAuth process via the connect method

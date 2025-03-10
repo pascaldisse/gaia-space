@@ -27,26 +27,26 @@ void main() async {
 
 void initDeepLinks() {
   final logger = AppLogger('DeepLinks');
-  logger.info('Setting up deep linking');
+  logger.logInfo('Setting up deep linking');
   
   // Handle initial URI (app opened from link)
   getInitialUri().then((Uri? initialUri) {
     if (initialUri != null) {
-      logger.info('App opened with deep link: $initialUri');
+      logger.logInfo('App opened with deep link: $initialUri');
       _handleDeepLink(initialUri);
     }
   }).catchError((error) {
-    logger.error('Error getting initial link', error: error);
+    logger.logError('Error getting initial link', error: error);
   });
 
   // Handle URI when app is already running
   uriLinkStream.listen((Uri? uri) {
     if (uri != null) {
-      logger.info('Received deep link while running: $uri');
+      logger.logInfo('Received deep link while running: $uri');
       _handleDeepLink(uri);
     }
   }, onError: (error) {
-    logger.error('Error receiving deep link', error: error);
+    logger.logError('Error receiving deep link', error: error);
   });
 }
 
@@ -59,7 +59,7 @@ void _handleDeepLink(Uri uri) {
     
     final code = uri.queryParameters['code'];
     if (code != null && code.isNotEmpty) {
-      logger.info('Processing Discord auth code from deep link');
+      logger.logInfo('Processing Discord auth code from deep link');
       final discordService = DiscordService();
       
       // Determine redirect URI based on link source
@@ -69,14 +69,14 @@ void _handleDeepLink(Uri uri) {
       
       // Process the authorization code
       discordService.exchangeCodeForToken(code, redirectUri).then((_) {
-        logger.info('Successfully authenticated with Discord');
+        logger.logInfo('Successfully authenticated with Discord');
         // You might want to navigate to a specific screen or refresh the current one
         // NavigationService.navigatorKey.currentState?.pushNamed('/workspace');
       }).catchError((error) {
-        logger.error('Error exchanging Discord auth code', error: error);
+        logger.logError('Error exchanging Discord auth code', error: error);
       });
     } else {
-      logger.error('No code parameter found in Discord callback URL');
+      logger.logError('No code parameter found in Discord callback URL');
     }
   }
 }
