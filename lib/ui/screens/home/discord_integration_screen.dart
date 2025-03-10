@@ -135,14 +135,105 @@ class _DiscordIntegrationScreenState extends ConsumerState<DiscordIntegrationScr
     });
 
     try {
-      // In a real app, this would redirect to Discord OAuth flow
-      // For demo purposes, we'll just show a dialog to select a server
-      await _showAddIntegrationDialog();
+      // Check if already authenticated
+      final isAuthenticated = await _discordService.isAuthenticated();
+      
+      if (isAuthenticated) {
+        // If already authenticated, go straight to server selection
+        await _showAddIntegrationDialog();
+      } else {
+        // Start the OAuth flow
+        final redirectUri = 'https://gaia-space.app/auth/discord/callback';
+        final success = await _discordService.launchOAuthFlow(
+          redirectUri: redirectUri,
+          scopes: ['identify', 'guilds', 'bot'],
+        );
+        
+        if (success) {
+          // In a real app, you would handle the callback with the code
+          // For this demo flow, we'll show a dialog to enter the code manually
+          final code = await _showAuthCodeDialog();
+          
+          if (code != null && code.isNotEmpty) {
+            // Exchange the code for a token
+            await _discordService.exchangeCodeForToken(code, redirectUri);
+            
+            // Now show the server selection
+            if (mounted) {
+              await _showAddIntegrationDialog();
+            }
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to launch Discord authentication'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error connecting to Discord: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isAddingIntegration = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isAddingIntegration = false;
+        });
+      }
     }
+  }
+  
+  // Show dialog to manually enter the authorization code
+  // In a real app with a proper redirect URI, this would be handled automatically
+  Future<String?> _showAuthCodeDialog() async {
+    final codeController = TextEditingController();
+    
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Discord Authorization Code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'After authorizing on Discord, copy the code from the redirect URL.\n\n'
+              'Look for the "code" parameter in the URL.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: codeController,
+              decoration: const InputDecoration(
+                labelText: 'Authorization Code',
+                border: OutlineInputBorder(),
+                hintText: 'Paste the code here...',
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(codeController.text.trim()),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showAddIntegrationDialog() async {
@@ -443,6 +534,7 @@ class AddDiscordIntegrationDialog extends ConsumerStatefulWidget {
 }
 
 class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrationDialog> {
+  final DiscordService _discordService = DiscordService();
   bool _isLoading = false;
   bool _isConnectingToDiscord = false;
   int _currentStep = 0;
@@ -607,22 +699,70 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     });
     
     try {
-      // In a real app, we would launch the browser with the OAuth URL
-      // and handle the callback with the authorization code
-      final authUrl = _discordService.generateAuthUrl();
+      // Launch OAuth flow with Discord
+      final redirectUri = 'https://gaia-space.app/auth/discord/callback';
+      final success = await _discordService.launchOAuthFlow(
+        redirectUri: redirectUri,
+        scopes: ['identify', 'guilds', 'bot'],
+      );
       
-      // For demo purposes, we'll simulate a successful authentication after a delay
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // Simulate exchanging the code for a token
-      await _discordService.exchangeCodeForToken('mock_code', 'mock_redirect_uri');
-      
-      // Move to the next step
-      if (mounted) {
-        setState(() {
-          _isConnectingToDiscord = false;
-          _currentStep = 1;
-        });
+      if (success) {
+        // For this demo flow, show a dialog to enter the code manually
+        // In a real app with proper deep linking, this would be automatic
+        final code = await _showAuthCodeInputDialog();
+        
+        if (code != null && code.isNotEmpty) {
+          // Show connecting status
+          setState(() {
+            _connectionStep = 2; // Authorizing application
+          });
+          
+          // Exchange code for token
+          await _discordService.exchangeCodeForToken(code, redirectUri);
+          
+          // Update connection step
+          setState(() {
+            _connectionStep = 3; // Fetching account information
+          });
+          
+          // Small delay to show progress
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          // Update connection step
+          setState(() {
+            _connectionStep = 4; // Retrieving servers
+          });
+          
+          // Prefetch user guilds to ensure we're authenticated
+          await ref.refresh(discordGuildsProvider.future);
+          
+          // Move to the next step
+          if (mounted) {
+            setState(() {
+              _isConnectingToDiscord = false;
+              _currentStep = 1;
+            });
+          }
+        } else {
+          // User cancelled code input
+          setState(() {
+            _isConnectingToDiscord = false;
+          });
+        }
+      } else {
+        // Browser launch failed
+        if (mounted) {
+          setState(() {
+            _isConnectingToDiscord = false;
+          });
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to launch browser for Discord authentication'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       // Handle errors
@@ -632,10 +772,59 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         });
         
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error connecting to Discord: $e')),
+          SnackBar(
+            content: Text('Error connecting to Discord: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
+  }
+  
+  // Connection step for UI feedback
+  int _connectionStep = 1;
+  
+  // Dialog to enter the authorization code
+  Future<String?> _showAuthCodeInputDialog() async {
+    final codeController = TextEditingController();
+    
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Authorization Code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'After authorizing on Discord, copy the code from the redirect URL.\n\n'
+              'Look for the "code" parameter in the URL.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: codeController,
+              decoration: const InputDecoration(
+                labelText: 'Authorization Code',
+                border: OutlineInputBorder(),
+                hintText: 'Paste the code here...',
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(codeController.text.trim()),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildConnectToDiscord() {
@@ -681,19 +870,26 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
           const SizedBox(height: 32),
           _buildConnectionStep(
             '1. Redirecting to Discord',
-            isCompleted: true,
+            isCompleted: _connectionStep > 1,
+            isActive: _connectionStep == 1,
           ),
           _buildConnectionStep(
             '2. Authorizing application',
-            isActive: true,
+            isCompleted: _connectionStep > 2,
+            isActive: _connectionStep == 2,
+            isUpcoming: _connectionStep < 2,
           ),
           _buildConnectionStep(
             '3. Fetching account information',
-            isUpcoming: true,
+            isCompleted: _connectionStep > 3,
+            isActive: _connectionStep == 3,
+            isUpcoming: _connectionStep < 3,
           ),
           _buildConnectionStep(
             '4. Retrieving your servers',
-            isUpcoming: true,
+            isCompleted: _connectionStep > 4,
+            isActive: _connectionStep == 4,
+            isUpcoming: _connectionStep < 4,
           ),
         ],
       ),
@@ -746,6 +942,50 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         
         return guildsAsync.when(
           data: (guilds) {
+            if (guilds.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, 
+                        color: Colors.orange, 
+                        size: 48
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No Discord servers found',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'You need to be a member of at least one Discord server with proper permissions.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () async {
+                          // Clear authentication and restart
+                          await _discordService.logout();
+                          setState(() {
+                            _currentStep = 0;
+                          });
+                          Navigator.of(context).pop();
+                          _startAddIntegration();
+                        },
+                        child: const Text('Try with another account'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -760,6 +1000,27 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                   style: TextStyle(fontSize: 14, color: Colors.grey),
                 ),
                 const SizedBox(height: 24),
+                
+                // Server count and refresh action
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Found ${guilds.length} servers',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Refresh'),
+                        onPressed: () {
+                          ref.refresh(discordGuildsProvider);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
                 
                 // Search input
                 TextField(
@@ -789,34 +1050,89 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
           },
           loading: () => const Center(
             child: Padding(
-              padding: EdgeInsets.all(16.0),
+              padding: EdgeInsets.all(24.0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Loading your Discord servers...'),
+                  Text(
+                    'Loading your Discord servers...',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'This may take a moment',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
                 ],
               ),
             ),
           ),
-          error: (error, stack) => Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline, color: Colors.red, size: 48),
-                SizedBox(height: 16),
-                Text('Error loading servers: $error'),
-                SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    ref.refresh(discordGuildsProvider);
-                  },
-                  child: Text('Retry'),
+          error: (error, stack) {
+            // Handle authentication errors specifically
+            final bool isAuthError = error.toString().contains('401') || 
+                                     error.toString().contains('authentication') || 
+                                     error.toString().contains('Not authenticated');
+            
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isAuthError ? Icons.lock : Icons.error_outline, 
+                      color: Colors.red, 
+                      size: 48
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      isAuthError ? 'Authentication Error' : 'Error Loading Servers',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isAuthError 
+                          ? 'Your Discord session has expired or is invalid.'
+                          : 'Unable to load your Discord servers: ${error.toString().split('\n').first}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                          onPressed: () {
+                            ref.refresh(discordGuildsProvider);
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.login),
+                          label: const Text('Reconnect'),
+                          onPressed: () async {
+                            await _discordService.logout();
+                            setState(() {
+                              _currentStep = 0;
+                            });
+                            Navigator.of(context).pop();
+                            _startAddIntegration();
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -945,6 +1261,82 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         
         return channelsAsync.when(
           data: (channels) {
+            if (channels.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, 
+                        color: Colors.orange, 
+                        size: 48
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No channels found',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'The server "${selectedGuild['name']}" doesn\'t have any text or voice channels, '
+                        'or you don\'t have permission to view them.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Refresh'),
+                            onPressed: () {
+                              ref.refresh(discordChannelsProvider(selectedGuild['id']));
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('Select Another Server'),
+                            onPressed: () {
+                              setState(() {
+                                _currentStep = 1;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            
+            // Group channels by category
+            final categorizedChannels = <String, List<Map<String, dynamic>>>{};
+            
+            // Add uncategorized section for channels without a parent
+            categorizedChannels['Uncategorized'] = [];
+            
+            // First find all text channels and sort by category
+            for (final channel in channels) {
+              final parentId = channel['parent_id'] as String?;
+              final channelType = channel['type'] as String;
+              
+              if (channelType == 'text' || channelType == 'voice') {
+                if (parentId == null || parentId.isEmpty) {
+                  categorizedChannels['Uncategorized']!.add(channel);
+                } else {
+                  final categoryName = _getCategoryName(parentId, channels) ?? 'Other';
+                  categorizedChannels.putIfAbsent(categoryName, () => []).add(channel);
+                }
+              }
+            }
+            
             final textChannels = channels.where((c) => c['type'] == 'text').toList();
             final voiceChannels = channels.where((c) => c['type'] == 'voice').toList();
             
@@ -1015,6 +1407,27 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                   ),
                 ),
                 
+                // Channel count + Refresh button
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Found ${channels.length} channels',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Refresh'),
+                        onPressed: () {
+                          ref.refresh(discordChannelsProvider(selectedGuild['id']));
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                
                 // Search input
                 TextField(
                   decoration: InputDecoration(
@@ -1028,83 +1441,50 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                 ),
                 const SizedBox(height: 16),
                 
-                // Text Channels
-                if (textChannels.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.tag, size: 16),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'TEXT CHANNELS',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                // Categorized channels
+                for (final category in categorizedChannels.keys) ...[
+                  if (categorizedChannels[category]!.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.folder, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            category.toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${textChannels.length}',
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                          const Spacer(),
+                          Text(
+                            '${categorizedChannels[category]!.length}',
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...textChannels.map((channel) => _buildChannelTile(
-                    channel,
-                    selectedChannels,
-                    ref,
-                  )),
-                  const SizedBox(height: 16),
-                ],
-                
-                // Voice Channels
-                if (voiceChannels.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.headset, size: 16),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'VOICE CHANNELS',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${voiceChannels.length}',
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...voiceChannels.map((channel) => _buildChannelTile(
-                    channel,
-                    selectedChannels,
-                    ref,
-                  )),
+                    const SizedBox(height: 8),
+                    ...categorizedChannels[category]!
+                      .where((channel) => 
+                          channel['type'] == 'text' ||
+                          channel['type'] == 'voice')
+                      .map((channel) => _buildChannelTile(
+                        channel,
+                        selectedChannels,
+                        ref,
+                      )),
+                    const SizedBox(height: 16),
+                  ],
                 ],
               ],
             );
@@ -1117,47 +1497,97 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Loading channels from Discord...'),
-                ],
-              ),
-            ),
-          ),
-          error: (error, stack) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline, color: Colors.red, size: 48),
-                  SizedBox(height: 16),
                   Text(
-                    'Error loading channels',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    'Loading channels from Discord...',
+                    style: TextStyle(fontSize: 16),
                   ),
                   SizedBox(height: 8),
                   Text(
-                    error.toString(),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.refresh),
-                    label: Text('Try Again'),
-                    onPressed: () {
-                      ref.refresh(discordChannelsProvider(selectedGuild['id']));
-                    },
+                    'This may take a moment',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                 ],
               ),
             ),
           ),
+          error: (error, stack) {
+            // Handle authentication errors specifically
+            final bool isAuthError = error.toString().contains('401') || 
+                                     error.toString().contains('authentication');
+            
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isAuthError ? Icons.lock : Icons.error_outline, 
+                      color: Colors.red, 
+                      size: 48
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      isAuthError ? 'Authentication Error' : 'Error Loading Channels',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isAuthError 
+                          ? 'Your Discord session has expired or is invalid.'
+                          : 'Unable to load channels: ${error.toString().split('\n').first}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Try Again'),
+                          onPressed: () {
+                            ref.refresh(discordChannelsProvider(selectedGuild['id']));
+                          },
+                        ),
+                        if (isAuthError) ...[
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.login),
+                            label: const Text('Reconnect'),
+                            onPressed: () async {
+                              await _discordService.logout();
+                              setState(() {
+                                _currentStep = 0;
+                              });
+                              Navigator.of(context).pop();
+                              _startAddIntegration();
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
+  }
+  
+  // Helper method to get category name from channel ID
+  String? _getCategoryName(String categoryId, List<Map<String, dynamic>> channels) {
+    for (final channel in channels) {
+      if (channel['id'] == categoryId) {
+        return channel['name'];
+      }
+    }
+    return null;
   }
   
   Widget _buildChannelTile(
@@ -1236,22 +1666,16 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
 
   void _nextStep() {
     if (_currentStep == 0) {
-      setState(() {
-        _isConnectingToDiscord = true;
-      });
-      
-      // Simulate OAuth flow
-      Future.delayed(const Duration(seconds: 2), () {
-        setState(() {
-          _isConnectingToDiscord = false;
-          _currentStep = 1;
-        });
-      });
+      // Start OAuth process via the connect method
+      _connectToDiscord();
     } else if (_currentStep == 1) {
       final selectedGuild = ref.read(selectedGuildProvider);
       if (selectedGuild == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a server')),
+          const SnackBar(
+            content: Text('Please select a server'),
+            backgroundColor: Colors.red,
+          ),
         );
         return;
       }
