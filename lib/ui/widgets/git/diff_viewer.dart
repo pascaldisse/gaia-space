@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/github.dart';
-import 'package:flutter_highlight/themes/github-dark.dart';
 import 'package:gaia_space/core/models/git_diff.dart';
 
 class GitDiffViewer extends StatefulWidget {
@@ -208,7 +207,7 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
   
   Widget _buildUnifiedDiff() {
     final language = _getLanguage();
-    final highlightTheme = _isDarkMode ? githubDarkTheme : githubTheme;
+    final highlightTheme = githubTheme;
     final lineNumberColor = _isDarkMode ? Colors.grey.shade600 : Colors.grey.shade400;
     
     return Scrollbar(
@@ -345,7 +344,7 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
   
   Widget _buildSideBySideDiff() {
     final language = _getLanguage();
-    final highlightTheme = _isDarkMode ? githubDarkTheme : githubTheme;
+    final highlightTheme = githubTheme;
     final lineNumberColor = _isDarkMode ? Colors.grey.shade600 : Colors.grey.shade400;
     
     // Prepare data for side-by-side view

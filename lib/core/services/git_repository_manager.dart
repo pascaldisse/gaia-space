@@ -12,7 +12,7 @@ class GitRepositoryManager {
   static final GitRepositoryManager _instance = GitRepositoryManager._internal();
   factory GitRepositoryManager() => _instance;
   
-  final AppLogger _logger = AppLogger('GitRepositoryManager');
+  static final _logger = AppLogger();
   final GitService _gitService = GitService();
   final GitActivityManager _activityManager = GitActivityManager();
   
@@ -29,7 +29,7 @@ class GitRepositoryManager {
       }
       return _repositories;
     } catch (e) {
-      _logger.error('Failed to get repositories', error: e);
+      AppLogger.error('Failed to get repositories', e);
       rethrow;
     }
   }

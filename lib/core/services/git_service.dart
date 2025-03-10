@@ -14,7 +14,7 @@ class GitService {
   static final GitService _instance = GitService._internal();
   factory GitService() => _instance;
   
-  final AppLogger _logger = AppLogger('GitService');
+  static final _logger = AppLogger();
   final Map<String, GitDir> _repoDirCache = {};
   
   GitService._internal();
@@ -30,7 +30,7 @@ class GitService {
       _repoDirCache[repoPath] = repoDir;
       return repoDir;
     } catch (e) {
-      _logger.error('Failed to open Git repository', error: e);
+      AppLogger.error('Failed to open Git repository', e);
       rethrow;
     }
   }

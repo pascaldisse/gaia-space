@@ -259,14 +259,15 @@ class _RepositorySidebarState extends State<RepositorySidebar> {
       );
     }
     
-    return TreeView<SidebarItem>(
+    return TreeView(
       shrinkWrap: true,
       treeController: _treeController,
-      nodeBuilder: (context, node) {
+      nodeBuilder: (BuildContext context, TreeEntry<SidebarItem> entry) {
+        final node = entry.node;
         final isSelected = widget.selectedItemId == node.id;
         
         return TreeIndentation(
-          node: node,
+          entry: entry,
           child: ListTile(
             dense: true,
             selected: isSelected,
@@ -363,7 +364,7 @@ class _RepositorySidebarState extends State<RepositorySidebar> {
       return ExpanderButton(
         padding: EdgeInsets.zero,
         treeController: _treeController,
-        node: node,
+        entry: TreeEntry<SidebarItem>(node),
         icon: const Icon(Icons.chevron_right, size: 18),
         expandedIcon: const Icon(Icons.expand_more, size: 18),
       );

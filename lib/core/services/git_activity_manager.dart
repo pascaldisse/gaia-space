@@ -91,7 +91,7 @@ class GitActivityManager {
   static final GitActivityManager _instance = GitActivityManager._internal();
   factory GitActivityManager() => _instance;
   
-  final AppLogger _logger = AppLogger('GitActivityManager');
+  static final _logger = AppLogger();
   final List<GitActivity> _activities = [];
   
   // Stream controllers for live updates
@@ -154,7 +154,7 @@ class GitActivityManager {
         _notifyListeners();
       }
     } catch (e) {
-      _logger.error('Failed to update activity', error: e);
+      AppLogger.error('Failed to update activity', e);
     }
   }
   
@@ -213,7 +213,7 @@ class GitActivityManager {
       completeActivity(activity.id, output: 'Operation completed successfully');
       return result;
     } catch (e) {
-      _logger.error('Failed to execute $action', error: e);
+      AppLogger.error('Failed to execute $action', e);
       completeActivity(activity.id, error: e.toString());
       rethrow;
     }
