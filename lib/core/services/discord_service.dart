@@ -23,10 +23,18 @@ class DiscordService {
   static const String _refreshTokenKey = 'discord_refresh_token';
   static const String _tokenExpiryKey = 'discord_token_expiry';
   
-  // App credentials - in a real app these would be environment variables
-  // You must register an application in the Discord Developer Portal
-  static const String _clientId = 'YOUR_DISCORD_CLIENT_ID'; // Replace with actual client ID
-  static const String _clientSecret = 'YOUR_DISCORD_CLIENT_SECRET'; // Replace with actual client secret
+  // App credentials from Discord Developer Portal
+  // For development, replace these with your actual credentials
+  // For production, use the environment variables
+  static const String _clientId = String.fromEnvironment(
+    'DISCORD_CLIENT_ID',
+    defaultValue: 'YOUR_DISCORD_CLIENT_ID',
+  );
+  
+  static const String _clientSecret = String.fromEnvironment(
+    'DISCORD_CLIENT_SECRET',
+    defaultValue: 'YOUR_DISCORD_CLIENT_SECRET',
+  );
   
   final Dio _dio = Dio();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();

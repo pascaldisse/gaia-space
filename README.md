@@ -6,7 +6,7 @@ Gaia Space is a modern Flutter application designed to provide a comprehensive w
 
 Gaia Space is the open source spiritual successor to [JetBrains Space](https://www.jetbrains.com/space/), aiming to provide similar functionality with an open, community-driven approach. JetBrains Space is an all-in-one solution for software teams that combines project management, source code repositories, CI/CD pipelines, and team communication into a unified platform.
 
-While JetBrains Space is a proprietary solution, Gaia Space takes inspiration from its integrated approach but with complete transparency and flexibility through open source development. Key similarities and differences include:
+With JetBrains announcing the discontinuation of Space (effective November 1, 2025), Gaia Space aims to be the community-driven successor to fill this gap. I'm openly inviting JetBrains to collaborate with me on this project - potentially open-sourcing parts of their backend to benefit the developer community that relied on Space. Key similarities and differences include:
 
 ### Similarities
 - Unified workspace for software development teams
@@ -57,7 +57,7 @@ Gaia Space combines the functionality of multiple DevOps tools into a unified pl
 - **Document Sharing** - Markdown support and collaborative editing
 - **Source Control** - Git repositories, branches, and merge requests with code reviews
 - **CI/CD** - Pipelines, jobs, and build automation
-- **Discord Integration** - Connect Discord servers to workspaces
+- **Discord Integration** - Connect Discord servers to workspaces ([Setup Guide](docs/DISCORD_SETUP.md))
 - **Extensible Platform** - Easy to add new integrations and features
 - **Documentation** - Document spaces, versioning, and collaborative editing
 - **Package Registry** - Package repositories for various formats
