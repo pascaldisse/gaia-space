@@ -527,41 +527,211 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
             'This integration will allow syncing channels and messages between your workspace and Discord.',
           ),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.login),
-            label: const Text('Connect Discord Account'),
-            onPressed: () {
-              setState(() {
-                _isConnectingToDiscord = true;
-              });
-              
-              // Simulate OAuth flow
-              Future.delayed(const Duration(seconds: 2), () {
-                setState(() {
-                  _isConnectingToDiscord = false;
-                  _currentStep = 1;
-                });
-              });
-            },
+          const Text(
+            'Gaia Space will request the following permissions:',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          _buildPermissionItem(
+            icon: Icons.person,
+            text: 'Access your Discord username and avatar',
+            subtitle: 'Required to identify your account',
+          ),
+          _buildPermissionItem(
+            icon: Icons.group,
+            text: 'View your Discord servers',
+            subtitle: 'Required to display available servers',
+          ),
+          _buildPermissionItem(
+            icon: Icons.chat,
+            text: 'Access your Discord channels',
+            subtitle: 'Required to sync channel content',
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.login),
+              label: const Text('Connect Discord Account'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                textStyle: const TextStyle(fontSize: 16)
+              ),
+              onPressed: () => _connectToDiscord(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Center(
+            child: Text(
+              'You\'ll be redirected to Discord to approve these permissions',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
           ),
         ],
       ),
     );
   }
+  
+  Widget _buildPermissionItem({
+    required IconData icon,
+    required String text,
+    required String subtitle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: Colors.blue),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(text, style: const TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _connectToDiscord() async {
+    setState(() {
+      _isConnectingToDiscord = true;
+    });
+    
+    try {
+      // In a real app, we would launch the browser with the OAuth URL
+      // and handle the callback with the authorization code
+      final authUrl = _discordService.generateAuthUrl();
+      
+      // For demo purposes, we'll simulate a successful authentication after a delay
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // Simulate exchanging the code for a token
+      await _discordService.exchangeCodeForToken('mock_code', 'mock_redirect_uri');
+      
+      // Move to the next step
+      if (mounted) {
+        setState(() {
+          _isConnectingToDiscord = false;
+          _currentStep = 1;
+        });
+      }
+    } catch (e) {
+      // Handle errors
+      if (mounted) {
+        setState(() {
+          _isConnectingToDiscord = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error connecting to Discord: $e')),
+        );
+      }
+    }
+  }
 
   Widget _buildConnectToDiscord() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Discord logo
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: const Color(0xFF5865F2), // Discord brand color
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.discord,
+              color: Colors.white,
+              size: 48,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Loading indicator and status
           const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          const Text('Connecting to Discord...'),
+          const SizedBox(height: 24),
+          const Text(
+            'Connecting to Discord',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
           const Text(
             'You will be redirected to authorize this application',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+          
+          // Connection steps
+          const SizedBox(height: 32),
+          _buildConnectionStep(
+            '1. Redirecting to Discord',
+            isCompleted: true,
+          ),
+          _buildConnectionStep(
+            '2. Authorizing application',
+            isActive: true,
+          ),
+          _buildConnectionStep(
+            '3. Fetching account information',
+            isUpcoming: true,
+          ),
+          _buildConnectionStep(
+            '4. Retrieving your servers',
+            isUpcoming: true,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildConnectionStep(
+    String label, {
+    bool isCompleted = false,
+    bool isActive = false,
+    bool isUpcoming = false,
+  }) {
+    Color? color;
+    IconData? icon;
+    
+    if (isCompleted) {
+      color = Colors.green;
+      icon = Icons.check_circle;
+    } else if (isActive) {
+      color = Colors.blue;
+      icon = Icons.refresh;
+    } else {
+      color = Colors.grey.shade400;
+      icon = Icons.circle_outlined;
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: TextStyle(
+              color: isUpcoming ? Colors.grey : Colors.black,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+            ),
           ),
         ],
       ),
@@ -579,48 +749,157 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Select a Discord server to integrate with this workspace:'),
+                const Text(
+                  'Select a Discord server to integrate with this workspace',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Choose which Discord server you want to connect to this workspace. '
+                  'You can sync channels from this server to enhance collaboration.',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                
+                // Search input
+                TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search servers...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
                 const SizedBox(height: 16),
-                ...guilds.map((guild) => _buildServerOption(guild, selectedGuild)),
+                
+                // Servers grid
+                GridView.count(
+                  crossAxisCount: 2,
+                  childAspectRatio: 1.2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: guilds.map((guild) => _buildServerCard(guild, selectedGuild)).toList(),
+                ),
               ],
             );
           },
           loading: () => const Center(
             child: Padding(
               padding: EdgeInsets.all(16.0),
-              child: CircularProgressIndicator(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading your Discord servers...'),
+                ],
+              ),
             ),
           ),
           error: (error, stack) => Center(
-            child: Text('Error loading servers: $error'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline, color: Colors.red, size: 48),
+                SizedBox(height: 16),
+                Text('Error loading servers: $error'),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    ref.refresh(discordGuildsProvider);
+                  },
+                  child: Text('Retry'),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildServerOption(Map<String, dynamic> guild, Map<String, dynamic>? selectedGuild) {
+  Widget _buildServerCard(Map<String, dynamic> guild, Map<String, dynamic>? selectedGuild) {
     final isSelected = selectedGuild != null && selectedGuild['id'] == guild['id'];
     
-    return ListTile(
-      leading: guild['icon'] != null
-          ? CircleAvatar(
-              backgroundImage: NetworkImage(guild['icon']),
-              backgroundColor: Colors.grey.shade200,
-            )
-          : CircleAvatar(
-              backgroundColor: Colors.primaries[guild['name'].hashCode % Colors.primaries.length],
-              child: Text(
-                guild['name'][0].toUpperCase(),
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-      title: Text(guild['name']),
-      trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.green) : null,
-      selected: isSelected,
+    return InkWell(
       onTap: () {
         ref.read(selectedGuildProvider.notifier).state = guild;
       },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: isSelected ? Colors.blue : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          color: isSelected ? Colors.blue.withOpacity(0.05) : null,
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Server icon
+            guild['icon'] != null
+                ? CircleAvatar(
+                    radius: 28,
+                    backgroundImage: NetworkImage(guild['icon']),
+                    backgroundColor: Colors.grey.shade200,
+                  )
+                : CircleAvatar(
+                    radius: 28,
+                    backgroundColor: Colors.primaries[guild['name'].hashCode % Colors.primaries.length],
+                    child: Text(
+                      guild['name'][0].toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+            const SizedBox(height: 12),
+            
+            // Server name
+            Text(
+              guild['name'],
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            
+            // Selection indicator
+            const SizedBox(height: 8),
+            isSelected
+                ? const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green, size: 16),
+                      SizedBox(width: 4),
+                      Text(
+                        'Selected',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  )
+                : const Text(
+                    'Click to select',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -630,7 +909,35 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         final selectedGuild = ref.watch(selectedGuildProvider);
         
         if (selectedGuild == null) {
-          return const Text('Please select a server first');
+          return Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.arrow_back, size: 48, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text(
+                  'Please select a server first',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Go back to the previous step to select a Discord server',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _currentStep = 1;
+                    });
+                  },
+                  child: const Text('Go Back to Server Selection'),
+                ),
+              ],
+            ),
+          );
         }
         
         final channelsAsync = ref.watch(discordChannelsProvider(selectedGuild['id']));
@@ -638,86 +945,292 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         
         return channelsAsync.when(
           data: (channels) {
+            final textChannels = channels.where((c) => c['type'] == 'text').toList();
+            final voiceChannels = channels.where((c) => c['type'] == 'voice').toList();
+            
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Select channels from "${selectedGuild['name']}" to sync:'),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        ref.read(selectedChannelsProvider.notifier).state =
-                            channels.map((channel) => channel['id'] as String).toList();
-                      },
-                      child: const Text('Select All'),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () {
-                        ref.read(selectedChannelsProvider.notifier).state = [];
-                      },
-                      child: const Text('Deselect All'),
-                    ),
-                  ],
+                // Header
+                Text(
+                  'Channels from "${selectedGuild['name']}"',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 8),
-                ...channels.map((channel) {
-                  final isSelected = selectedChannels.contains(channel['id']);
-                  IconData channelIcon;
-                  switch (channel['type']) {
-                    case 'text':
-                      channelIcon = Icons.tag;
-                      break;
-                    case 'voice':
-                      channelIcon = Icons.headset;
-                      break;
-                    default:
-                      channelIcon = Icons.chat;
-                  }
-                  
-                  return CheckboxListTile(
-                    value: isSelected,
-                    onChanged: (value) {
-                      if (value == true) {
-                        ref.read(selectedChannelsProvider.notifier).state = [
-                          ...selectedChannels,
-                          channel['id'],
-                        ];
-                      } else {
-                        ref.read(selectedChannelsProvider.notifier).state = selectedChannels
-                            .where((id) => id != channel['id'])
-                            .toList();
-                      }
-                    },
-                    title: Row(
+                const SizedBox(height: 4),
+                const Text(
+                  'Select which channels to sync with your workspace. '
+                  'Text channels will show messages, while voice channels will show activity.',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                
+                // Selection Controls
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('Channels selected:'),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${selectedChannels.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        icon: const Icon(Icons.select_all, size: 16),
+                        label: const Text('Select All'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: () {
+                          ref.read(selectedChannelsProvider.notifier).state =
+                              channels.map((channel) => channel['id'] as String).toList();
+                        },
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.deselect, size: 16),
+                        label: const Text('Deselect All'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: () {
+                          ref.read(selectedChannelsProvider.notifier).state = [];
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Search input
+                TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search channels...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Text Channels
+                if (textChannels.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
                       children: [
-                        Icon(channelIcon, size: 16),
+                        const Icon(Icons.tag, size: 16),
                         const SizedBox(width: 8),
-                        Text(channel['name']),
+                        const Text(
+                          'TEXT CHANNELS',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${textChannels.length}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
-                    subtitle: channel['type'] == 'voice'
-                        ? const Text('Voice channel')
-                        : null,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    dense: true,
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  ...textChannels.map((channel) => _buildChannelTile(
+                    channel,
+                    selectedChannels,
+                    ref,
+                  )),
+                  const SizedBox(height: 16),
+                ],
+                
+                // Voice Channels
+                if (voiceChannels.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.headset, size: 16),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'VOICE CHANNELS',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${voiceChannels.length}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...voiceChannels.map((channel) => _buildChannelTile(
+                    channel,
+                    selectedChannels,
+                    ref,
+                  )),
+                ],
               ],
             );
           },
           loading: () => const Center(
             child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: CircularProgressIndicator(),
+              padding: EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading channels from Discord...'),
+                ],
+              ),
             ),
           ),
           error: (error, stack) => Center(
-            child: Text('Error loading channels: $error'),
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, color: Colors.red, size: 48),
+                  SizedBox(height: 16),
+                  Text(
+                    'Error loading channels',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    error.toString(),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    icon: Icon(Icons.refresh),
+                    label: Text('Try Again'),
+                    onPressed: () {
+                      ref.refresh(discordChannelsProvider(selectedGuild['id']));
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
+    );
+  }
+  
+  Widget _buildChannelTile(
+    Map<String, dynamic> channel,
+    List<String> selectedChannels,
+    WidgetRef ref,
+  ) {
+    final isSelected = selectedChannels.contains(channel['id']);
+    IconData channelIcon;
+    Color iconColor;
+    
+    switch (channel['type']) {
+      case 'text':
+        channelIcon = Icons.tag;
+        iconColor = Colors.grey.shade700;
+        break;
+      case 'voice':
+        channelIcon = Icons.headset;
+        iconColor = Colors.green.shade700;
+        break;
+      default:
+        channelIcon = Icons.chat;
+        iconColor = Colors.blue.shade700;
+    }
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: isSelected ? Colors.blue.shade300 : Colors.grey.shade300,
+          width: isSelected ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        color: isSelected ? Colors.blue.withOpacity(0.05) : Colors.white,
+      ),
+      child: CheckboxListTile(
+        value: isSelected,
+        onChanged: (value) {
+          if (value == true) {
+            ref.read(selectedChannelsProvider.notifier).state = [
+              ...selectedChannels,
+              channel['id'],
+            ];
+          } else {
+            ref.read(selectedChannelsProvider.notifier).state = selectedChannels
+                .where((id) => id != channel['id'])
+                .toList();
+          }
+        },
+        title: Row(
+          children: [
+            Icon(channelIcon, size: 16, color: iconColor),
+            const SizedBox(width: 8),
+            Text(
+              channel['name'],
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+        subtitle: channel['type'] == 'voice'
+            ? const Text('Voice activity only', style: TextStyle(fontSize: 12))
+            : const Text('Text messages and threads', style: TextStyle(fontSize: 12)),
+        secondary: isSelected
+            ? const Icon(Icons.check_circle, color: Colors.green)
+            : null,
+        controlAffinity: ListTileControlAffinity.leading,
+        dense: true,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
     );
   }
 
@@ -752,25 +1265,56 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     final selectedGuild = ref.read(selectedGuildProvider);
     final selectedChannelIds = ref.read(selectedChannelsProvider);
     
+    // Validation
     if (selectedGuild == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a server')),
+        const SnackBar(
+          content: Text('Please select a Discord server'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
     
     if (selectedChannelIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one channel')),
+        const SnackBar(
+          content: Text('Please select at least one channel to integrate'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
     
+    // Show loading state
     setState(() {
       _isLoading = true;
     });
     
     try {
+      // Create a progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Creating Integration'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const LinearProgressIndicator(),
+              const SizedBox(height: 20),
+              Text('Integrating with "${selectedGuild['name']}"'),
+              const SizedBox(height: 8),
+              const Text(
+                'This may take a moment while we configure your integration',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+      
       // Get the channels data
       final channelsData = await ref.read(discordChannelsProvider(selectedGuild['id']).future);
       
@@ -789,8 +1333,11 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
               ))
           .toList();
       
+      // Add short delay to make the progress dialog visible
+      await Future.delayed(const Duration(seconds: 1));
+      
       // Add the integration
-      await ref.read(discordIntegrationsProvider(widget.workspaceId).notifier).addIntegration(
+      final integration = await ref.read(discordIntegrationsProvider(widget.workspaceId).notifier).addIntegration(
         guildId: selectedGuild['id'],
         guildName: selectedGuild['name'],
         guildIconUrl: selectedGuild['icon'],
@@ -798,19 +1345,125 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         createdBy: AuthService.currentUser?.displayName ?? 'Unknown User',
       );
       
+      // Close the progress dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
       if (!mounted) return;
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Successfully integrated with "${selectedGuild['name']}"'),
+      // Show success dialog
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: Container(
+            width: 60,
+            height: 60,
+            decoration: const BoxDecoration(
+              color: Colors.green,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.check,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+          title: const Text('Integration Successful'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Successfully connected to Discord server "${selectedGuild['name']}"',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Synced ${discordChannels.length} channels',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         ),
       );
       
-      Navigator.of(context).pop();
+      // Return to the main screen
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error creating integration: $e')),
+      // Close the progress dialog if it's open
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      
+      if (!mounted) return;
+      
+      // Show error dialog
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: Container(
+            width: 60,
+            height: 60,
+            decoration: const BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.error_outline,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+          title: const Text('Integration Failed'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'There was a problem connecting to Discord',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  e.toString(),
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: Colors.red,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Dismiss'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _finishIntegration();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       );
+      
       setState(() {
         _isLoading = false;
       });

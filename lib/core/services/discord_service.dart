@@ -187,9 +187,50 @@ class DiscordService {
   }
 
   // Generate a Discord OAuth URL for authorization
-  String generateAuthUrl() {
-    // In a real implementation, this would create a proper Discord OAuth URL
-    // with client_id, redirect_uri, scope, etc.
-    return 'https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&response_type=code&scope=identify%20guilds';
+  String generateAuthUrl({
+    String? redirectUri,
+    List<String> scopes = const ['identify', 'guilds', 'bot'],
+  }) {
+    // App credentials - in a real app these would be environment variables
+    const clientId = '123456789012345678'; // Replace with actual client ID in production
+    
+    // Build the OAuth URL
+    final scopeString = scopes.join('%20');
+    final redirect = redirectUri ?? 'https://gaia-space.app/auth/discord/callback';
+    final encodedRedirect = Uri.encodeComponent(redirect);
+    
+    return 'https://discord.com/api/oauth2/authorize'
+      '?client_id=$clientId'
+      '&redirect_uri=$encodedRedirect'
+      '&response_type=code'
+      '&scope=$scopeString';
+  }
+  
+  // Exchange authorization code for access token
+  Future<Map<String, dynamic>> exchangeCodeForToken(String code, String redirectUri) async {
+    // In a real implementation, this would call Discord's token endpoint
+    // For now, we'll return mock data
+    await Future.delayed(const Duration(seconds: 1));
+    
+    return {
+      'access_token': 'mock_access_token_${DateTime.now().millisecondsSinceEpoch}',
+      'refresh_token': 'mock_refresh_token',
+      'expires_in': 604800, // 7 days in seconds
+      'token_type': 'Bearer',
+    };
+  }
+  
+  // Refresh an expired token
+  Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
+    // In a real implementation, this would call Discord's token endpoint
+    // For now, we'll return mock data
+    await Future.delayed(const Duration(milliseconds: 800));
+    
+    return {
+      'access_token': 'mock_refreshed_token_${DateTime.now().millisecondsSinceEpoch}',
+      'refresh_token': refreshToken,
+      'expires_in': 604800, // 7 days in seconds
+      'token_type': 'Bearer',
+    };
   }
 }
