@@ -26,15 +26,18 @@ Gaia Space is a modern Flutter application designed to provide a comprehensive w
 
 ## Features Overview
 
-Gaia-Space combines the functionality of multiple DevOps tools into a unified platform:
+Gaia Space combines the functionality of multiple DevOps tools into a unified platform:
 
-- **Team Collaboration**: Workspaces, channels, and messaging
-- **Project Management**: Kanban boards, tasks, priorities, and dependencies
-- **Source Control**: Git repositories, branches, and merge requests with code reviews
-- **CI/CD**: Pipelines, jobs, and build automation
-- **Documentation**: Document spaces, versioning, and collaborative editing
-- **Package Registry**: Package repositories for various formats
-- **Organization Management**: Departments, teams, and roles
+- **Team Collaboration** - Workspaces, channels, and real-time messaging
+- **Project Management** - Kanban boards, tasks, priorities, and deadlines
+- **Document Sharing** - Markdown support and collaborative editing
+- **Source Control** - Git repositories, branches, and merge requests with code reviews
+- **CI/CD** - Pipelines, jobs, and build automation
+- **Discord Integration** - Connect Discord servers to workspaces
+- **Extensible Platform** - Easy to add new integrations and features
+- **Documentation** - Document spaces, versioning, and collaborative editing
+- **Package Registry** - Package repositories for various formats
+- **Organization Management** - Departments, teams, and roles
 
 ## Technical Architecture
 
