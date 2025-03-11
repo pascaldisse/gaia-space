@@ -18,6 +18,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _logger = AppLogger('RegisterScreen');
   
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -54,7 +55,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       
       if (user != null && mounted) {
         // Navigate to home screen on success
-        AppLogger.i('User registered: ${user.username}');
+        _logger.info('User registered: ${user.username}');
         
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -67,7 +68,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       setState(() {
         _errorMessage = e.toString();
       });
-      AppLogger.e('Registration error', e);
+      _logger.error('Registration error', error: e);
     } finally {
       if (mounted) {
         setState(() {

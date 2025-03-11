@@ -17,6 +17,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _logger = AppLogger('LoginScreen');
   
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -49,7 +50,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       
       if (user != null && mounted) {
         // Navigate to home screen on success
-        AppLogger.i('User logged in: ${user.username}');
+        _logger.info('User logged in: ${user.username}');
         
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -62,7 +63,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() {
         _errorMessage = e.toString();
       });
-      AppLogger.e('Login error', e);
+      _logger.error('Login error', error: e);
     } finally {
       if (mounted) {
         setState(() {
