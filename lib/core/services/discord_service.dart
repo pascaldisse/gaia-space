@@ -23,22 +23,15 @@ class DiscordService {
   static const String _refreshTokenKey = 'discord_refresh_token';
   static const String _tokenExpiryKey = 'discord_token_expiry';
   
-  // App credentials from Discord Developer Portal
-  // For development, these are example credentials - replace with your actual ones
-  // For production, use the environment variables with --dart-define
-  static const String _clientId = String.fromEnvironment(
-    'DISCORD_CLIENT_ID',
-    defaultValue: '1234567890123456789', // Replace with your Discord application Client ID
-  );
-  
-  static const String _clientSecret = String.fromEnvironment(
-    'DISCORD_CLIENT_SECRET',
-    defaultValue: 'abcdefghijklmnopqrstuvwxyz123456', // Replace with your Discord Client Secret
-  );
+  // App credentials - in a real app these would be environment variables
+  // You must register an application in the Discord Developer Portal
+  // Using dummy placeholder values for testing
+  static const String _clientId = '123456789012345678'; 
+  static const String _clientSecret = '123456789abcdef123456789abcdef123456789abcdef';
   
   final Dio _dio = Dio();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
-  final AppLogger _logger = AppLogger('DiscordService');
+  AppLogger _logger = AppLogger('DiscordService');
   
   // Local storage for integrations until backend is implemented
   final List<DiscordIntegration> _integrations = [];
@@ -56,7 +49,7 @@ class DiscordService {
       // For now, we'll use the local storage
       return _integrations.where((integration) => integration.workspaceId == workspaceId).toList();
     } catch (e) {
-      _logger.logError('Error fetching Discord integrations', error: e);
+      _logger.error('Error fetching Discord integrations', error: e);
       rethrow;
     }
   }
@@ -88,7 +81,7 @@ class DiscordService {
       _integrations.add(integration);
       return integration;
     } catch (e) {
-      _logger.logError('Error adding Discord integration', error: e);
+      _logger.error('Error adding Discord integration', error: e);
       rethrow;
     }
   }
@@ -105,7 +98,7 @@ class DiscordService {
       }
       throw Exception('Integration not found');
     } catch (e) {
-      _logger.logError('Error updating Discord integration', error: e);
+      _logger.error('Error updating Discord integration', error: e);
       rethrow;
     }
   }
@@ -117,7 +110,7 @@ class DiscordService {
       // For now, we'll use the local storage
       _integrations.removeWhere((integration) => integration.id == integrationId);
     } catch (e) {
-      _logger.logError('Error deleting Discord integration', error: e);
+      _logger.error('Error deleting Discord integration', error: e);
       rethrow;
     }
   }
@@ -157,7 +150,7 @@ class DiscordService {
       }
       throw Exception('Integration not found');
     } catch (e) {
-      _logger.logError('Error syncing Discord channels', error: e);
+      _logger.error('Error syncing Discord channels', error: e);
       rethrow;
     }
   }
@@ -202,7 +195,7 @@ class DiscordService {
       final uri = Uri.parse(authUrl);
       return await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
-      _logger.logError('Error launching Discord OAuth URL', error: e);
+      _logger.error('Error launching Discord OAuth URL', error: e);
       return false;
     }
   }
@@ -242,13 +235,13 @@ class DiscordService {
         throw Exception('Failed to exchange code: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.logError('Error exchanging Discord auth code', error: e);
+      _logger.error('Error exchanging Discord auth code', error: e);
       rethrow;
     }
   }
   
   // Refresh an expired token
-  Future<Map<String, dynamic>> refreshToken(String tokenToRefresh) async {
+  Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     try {
       final response = await _dio.post(
         _tokenUrl,
@@ -256,10 +249,11 @@ class DiscordService {
           'client_id': _clientId,
           'client_secret': _clientSecret,
           'grant_type': 'refresh_token',
-          'refresh_token': tokenToRefresh,
+          'refresh_token': refreshToken,
         }),
         options: Options(
           contentType: Headers.formUrlEncodedContentType,
+          validateStatus: (status) => status != null && status < 500,
         ),
       );
       
@@ -282,7 +276,7 @@ class DiscordService {
         throw Exception('Failed to refresh token: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.logError('Error refreshing Discord token', error: e);
+      _logger.error('Error refreshing Discord token', error: e);
       rethrow;
     }
   }
@@ -349,7 +343,7 @@ class DiscordService {
         throw Exception('Failed to fetch guilds: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.logError('Error fetching Discord guilds', error: e);
+      _logger.error('Error fetching Discord guilds', error: e);
       
       // If this is an authentication error, try to clear tokens
       if (e.toString().contains('401')) {
@@ -378,14 +372,8 @@ class DiscordService {
         final channels = response.data as List;
         
         // Transform the response to match our expected format
-        // Only include text and voice channels (not categories)
-        return channels
-            .where((channel) => 
-                channel['type'] == 0 || // text
-                channel['type'] == 2 || // voice
-                channel['type'] == 5 || // announcement
-                channel['type'] == 13)  // stage
-            .map((channel) {
+        // Include all categories for proper parent-child relationship
+        final allChannels = channels.map((channel) {
           return {
             'id': channel['id'],
             'name': channel['name'],
@@ -394,11 +382,21 @@ class DiscordService {
             'position': channel['position'],
           };
         }).toList();
+        
+        // For the UI, filter to only show these channel types
+        return allChannels.where((channel) => 
+            channel['type'] == 'text' || 
+            channel['type'] == 'voice' ||
+            channel['type'] == 'announcement' ||
+            channel['type'] == 'stage' ||
+            channel['type'] == 'category' ||
+            channel['type'] == 'forum'
+        ).toList();
       } else {
         throw Exception('Failed to fetch channels: ${response.statusCode} ${response.data}');
       }
     } catch (e) {
-      _logger.logError('Error fetching Discord channels', error: e);
+      _logger.error('Error fetching Discord channels', error: e);
       
       // If this is an authentication error, try to clear tokens
       if (e.toString().contains('401')) {
@@ -416,7 +414,7 @@ class DiscordService {
       await _secureStorage.delete(key: _refreshTokenKey);
       await _secureStorage.delete(key: _tokenExpiryKey);
     } catch (e) {
-      _logger.logError('Error clearing Discord tokens', error: e);
+      _logger.error('Error clearing Discord tokens', error: e);
     }
   }
   

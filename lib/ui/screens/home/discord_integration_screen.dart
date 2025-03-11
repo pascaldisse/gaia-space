@@ -143,21 +143,15 @@ class _DiscordIntegrationScreenState extends ConsumerState<DiscordIntegrationScr
         await _showAddIntegrationDialog();
       } else {
         // Start the OAuth flow
-        // Support both platforms - web URL for production, custom scheme for mobile/desktop
-        final webRedirectUri = 'https://gaia-space.app/auth/discord/callback';
-        final appRedirectUri = 'gaiaspace://discord_callback';
-        
-        // Use app scheme for better deep linking support
-        final redirectUri = appRedirectUri;
-        
+        final redirectUri = 'https://gaia-space.app/auth/discord/callback';
         final success = await _discordService.launchOAuthFlow(
           redirectUri: redirectUri,
           scopes: ['identify', 'guilds', 'bot'],
         );
         
         if (success) {
-          // The app should receive the callback via deep linking
-          // If that fails, allow manual entry as a fallback
+          // In a real app, you would handle the callback with the code
+          // For this demo flow, we'll show a dialog to enter the code manually
           final code = await _showAuthCodeDialog();
           
           if (code != null && code.isNotEmpty) {
@@ -706,13 +700,7 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     
     try {
       // Launch OAuth flow with Discord
-      // Support both platforms - web URL for production, custom scheme for mobile/desktop
-      final webRedirectUri = 'https://gaia-space.app/auth/discord/callback';
-      final appRedirectUri = 'gaiaspace://discord_callback';
-      
-      // Use app scheme for better deep linking support
-      final redirectUri = appRedirectUri;
-      
+      final redirectUri = 'https://gaia-space.app/auth/discord/callback';
       final success = await _discordService.launchOAuthFlow(
         redirectUri: redirectUri,
         scopes: ['identify', 'guilds', 'bot'],
@@ -988,7 +976,6 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                             _currentStep = 0;
                           });
                           Navigator.of(context).pop();
-                          _startAddIntegration();
                         },
                         child: const Text('Try with another account'),
                       ),
@@ -1135,7 +1122,6 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                               _currentStep = 0;
                             });
                             Navigator.of(context).pop();
-                            _startAddIntegration();
                           },
                         ),
                       ],
@@ -1334,16 +1320,26 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
             // Add uncategorized section for channels without a parent
             categorizedChannels['Uncategorized'] = [];
             
+            // Find all category channels and map them by ID
+            final categoryMap = <String, String>{};
+            for (final channel in channels) {
+              if (channel['type'] == 'category') {
+                categoryMap[channel['id']] = channel['name'];
+              }
+            }
+            
             // First find all text channels and sort by category
             for (final channel in channels) {
               final parentId = channel['parent_id'] as String?;
               final channelType = channel['type'] as String;
               
-              if (channelType == 'text' || channelType == 'voice') {
+              if (channelType == 'text' || channelType == 'voice' || 
+                  channelType == 'announcement' || channelType == 'stage' ||
+                  channelType == 'forum') {
                 if (parentId == null || parentId.isEmpty) {
                   categorizedChannels['Uncategorized']!.add(channel);
                 } else {
-                  final categoryName = _getCategoryName(parentId, channels) ?? 'Other';
+                  final categoryName = categoryMap[parentId] ?? 'Other';
                   categorizedChannels.putIfAbsent(categoryName, () => []).add(channel);
                 }
               }
@@ -1576,7 +1572,6 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                                 _currentStep = 0;
                               });
                               Navigator.of(context).pop();
-                              _startAddIntegration();
                             },
                           ),
                         ],
@@ -1592,10 +1587,10 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
     );
   }
   
-  // Helper method to get category name from channel ID
+  // Helper method to get category name from channel ID (this method is no longer needed but kept for reference)
   String? _getCategoryName(String categoryId, List<Map<String, dynamic>> channels) {
     for (final channel in channels) {
-      if (channel['id'] == categoryId) {
+      if (channel['id'] == categoryId && channel['type'] == 'category') {
         return channel['name'];
       }
     }
@@ -1674,82 +1669,6 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
         ),
       ),
     );
-  }
-
-  void _startAddIntegration() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // Check if already authenticated
-      final isAuthenticated = await _discordService.isAuthenticated();
-      
-      if (isAuthenticated) {
-        // If already authenticated, go straight to server selection
-        setState(() {
-          _currentStep = 1;
-          _isLoading = false;
-        });
-      } else {
-        // Start the OAuth flow
-        final appRedirectUri = 'gaiaspace://discord_callback';
-        
-        final success = await _discordService.launchOAuthFlow(
-          redirectUri: appRedirectUri,
-          scopes: ['identify', 'guilds', 'bot'],
-        );
-        
-        if (success) {
-          // The app should receive the callback via deep linking
-          // If that fails, allow manual entry as a fallback
-          final code = await _showAuthCodeInputDialog();
-          
-          if (code != null && code.isNotEmpty) {
-            // Exchange the code for a token
-            await _discordService.exchangeCodeForToken(code, appRedirectUri);
-            
-            // Now show the server selection
-            if (mounted) {
-              setState(() {
-                _currentStep = 1;
-                _isLoading = false;
-              });
-            }
-          } else {
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-              });
-            }
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Failed to launch Discord authentication'),
-                backgroundColor: Colors.red,
-              ),
-            );
-            setState(() {
-              _isLoading = false;
-            });
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error connecting to Discord: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
   }
 
   void _nextStep() {
@@ -1848,68 +1767,149 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
       // Add short delay to make the progress dialog visible
       await Future.delayed(const Duration(seconds: 1));
       
-      // Add the integration
-      final integration = await ref.read(discordIntegrationsProvider(widget.workspaceId).notifier).addIntegration(
-        guildId: selectedGuild['id'],
-        guildName: selectedGuild['name'],
-        guildIconUrl: selectedGuild['icon'],
-        channels: discordChannels,
-        createdBy: AuthService.currentUser?.displayName ?? 'Unknown User',
-      );
-      
-      // Close the progress dialog
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-      
-      if (!mounted) return;
-      
-      // Show success dialog
-      await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          icon: Container(
-            width: 60,
-            height: 60,
-            decoration: const BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.check,
-              color: Colors.white,
-              size: 40,
-            ),
-          ),
-          title: const Text('Integration Successful'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Successfully connected to Discord server "${selectedGuild['name']}"',
-                textAlign: TextAlign.center,
+      try {
+        // Add the integration
+        final integration = await ref.read(discordIntegrationsProvider(widget.workspaceId).notifier).addIntegration(
+          guildId: selectedGuild['id'],
+          guildName: selectedGuild['name'],
+          guildIconUrl: selectedGuild['icon'],
+          channels: discordChannels,
+          createdBy: AuthService.currentUser?.displayName ?? 'Unknown User',
+        );
+        
+        // Close the progress dialog
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+        
+        if (!mounted) return;
+        
+        // Show success dialog
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: Container(
+              width: 60,
+              height: 60,
+              decoration: const BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Synced ${discordChannels.length} channels',
-                style: const TextStyle(color: Colors.grey),
+              child: const Icon(
+                Icons.check,
+                color: Colors.white,
+                size: 40,
+              ),
+            ),
+            title: const Text('Integration Successful'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Successfully connected to Discord server "${selectedGuild['name']}"',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Synced ${discordChannels.length} channels',
+                  style: const TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
+        );
+        
+        // Return to the main screen
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      } catch (specificError) {
+        // Handle specific integration errors separately
+        // Close the progress dialog if it's open
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.of(context).pop();
+        }
+        
+        if (!mounted) return;
+        
+        // Show specific error dialog
+        String errorMessage = specificError.toString();
+        bool isDuplicateError = errorMessage.contains('already exists');
+        
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: isDuplicateError ? Colors.amber : Colors.red,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isDuplicateError ? Icons.warning : Icons.error_outline,
+                color: Colors.white,
+                size: 40,
+              ),
             ),
-          ],
-        ),
-      );
-      
-      // Return to the main screen
-      if (mounted) {
-        Navigator.of(context).pop();
+            title: Text(isDuplicateError ? 'Integration Already Exists' : 'Integration Failed'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isDuplicateError
+                    ? 'This Discord server is already integrated with this workspace.'
+                    : 'There was a problem connecting to Discord',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    errorMessage,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: isDuplicateError ? Colors.amber.shade900 : Colors.red,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  if (isDuplicateError) {
+                    Navigator.of(context).pop(); // Also close integration dialog
+                  }
+                },
+                child: const Text('Dismiss'),
+              ),
+              if (!isDuplicateError)
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _finishIntegration();
+                  },
+                  child: const Text('Retry'),
+                ),
+            ],
+          ),
+        );
       }
-    } catch (e) {
+    } catch (generalError) {
+      // Handle other general errors
       // Close the progress dialog if it's open
       if (mounted && Navigator.canPop(context)) {
         Navigator.of(context).pop();
@@ -1917,7 +1917,7 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
       
       if (!mounted) return;
       
-      // Show error dialog
+      // Show general error dialog
       await showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -1934,7 +1934,7 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
               size: 40,
             ),
           ),
-          title: const Text('Integration Failed'),
+          title: const Text('Connection Failed'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1950,7 +1950,7 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  e.toString(),
+                  generalError.toString(),
                   style: const TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 12,
@@ -1975,7 +1975,7 @@ class _AddDiscordIntegrationDialogState extends ConsumerState<AddDiscordIntegrat
           ],
         ),
       );
-      
+    } finally {
       setState(() {
         _isLoading = false;
       });

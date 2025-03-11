@@ -21,7 +21,7 @@ class DiscordIntegrationsNotifier extends StateNotifier<AsyncValue<List<DiscordI
     }
   }
 
-  Future<void> addIntegration({
+  Future<DiscordIntegration> addIntegration({
     required String guildId,
     required String guildName,
     String? guildIconUrl,
@@ -29,6 +29,14 @@ class DiscordIntegrationsNotifier extends StateNotifier<AsyncValue<List<DiscordI
     required String createdBy,
   }) async {
     try {
+      // Check if an integration for this guild already exists
+      if (state.hasValue) {
+        final existingIntegration = state.value!.where((i) => i.guildId == guildId).firstOrNull;
+        if (existingIntegration != null) {
+          throw Exception('An integration for this Discord server already exists');
+        }
+      }
+      
       final integration = await _discordService.addIntegration(
         workspaceId: workspaceId,
         guildId: guildId,
@@ -43,8 +51,10 @@ class DiscordIntegrationsNotifier extends StateNotifier<AsyncValue<List<DiscordI
       } else {
         await loadIntegrations();
       }
+      return integration;
     } catch (e, stack) {
       state = AsyncValue.error(e, stack);
+      throw e;
     }
   }
 
