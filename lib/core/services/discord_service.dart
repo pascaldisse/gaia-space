@@ -72,6 +72,7 @@ class DiscordService {
         guildId: guildId,
         guildName: guildName,
         guildIconUrl: guildIconUrl,
+        botToken: 'placeholder-bot-token', // Real token would be supplied by user
         channels: channels,
         createdBy: createdBy,
         createdAt: DateTime.now(),
@@ -137,6 +138,7 @@ class DiscordService {
             isSelected: existing?.isSelected ?? false,
             messageCount: existing?.messageCount ?? 0,
             lastMessageAt: existing?.lastMessageAt,
+            parentId: channelData['parent_id'],
           );
         }).toList();
         
