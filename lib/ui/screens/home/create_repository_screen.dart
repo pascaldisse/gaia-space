@@ -50,96 +50,231 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
       _logger.info('Picking directory. isWeb: $isWeb');
       
       if (isWeb) {
-        // Web mode with virtual file system
-        _logger.info('Using web virtual directory browser');
+        // Web mode with real file system access or virtual directory
+        _logger.info('Web mode: Showing options for directory selection');
         
-        // Create virtual directory root if needed
-        final rootDirectory = VirtualDirectory.createRoot();
-        final nameController = TextEditingController();
-        
-        // Show virtual directory browser dialog
-        final result = await showDialog<Map<String, dynamic>?>(
+        // Let user choose between real file access or virtual directory
+        final directoryType = await showDialog<String>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Select Virtual Directory'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 400,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'In web mode, you cannot access your actual filesystem. '
-                    'Please select or create a virtual directory for your repository.',
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  const Divider(),
-                  Expanded(
-                    child: VirtualDirectoryBrowser(
-                      rootDirectory: rootDirectory,
-                      onDirectorySelected: (selectedDir) {
-                        // Pass selected directory back along with repository name
-                        Navigator.of(context).pop({
-                          'directory': selectedDir,
-                          'name': nameController.text.trim(),
-                        });
-                      },
-                    ),
-                  ),
-                  const Divider(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Repository Name',
-                        border: OutlineInputBorder(),
-                        hintText: 'MyRepository',
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            title: const Text('Select Directory Type'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'How would you like to select a repository directory?',
+                  style: TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.folder),
+                  title: const Text('Real File System'),
+                  subtitle: const Text('Browse and select a real directory from your computer'),
+                  onTap: () => Navigator.of(context).pop('real'),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.cloud_outlined),
+                  title: const Text('Virtual Directory'),
+                  subtitle: const Text('Use a simulated file system for web demo'),
+                  onTap: () => Navigator.of(context).pop('virtual'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
           ),
         );
         
-        if (result != null && result['directory'] != null) {
-          final selectedDir = result['directory'] as VirtualDirectory;
-          String repoName = result['name'] as String? ?? '';
-          
-          // If no repo name provided, use directory name
-          if (repoName.isEmpty) {
-            repoName = selectedDir.name;
-          }
-          
-          _logger.info('User selected virtual directory: ${selectedDir.path}');
-          
-          // Create a unique virtual path
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final webPath = '/virtual/$timestamp${selectedDir.path}';
-          
-          _logger.info('Using virtual path: $webPath');
-          
-          setState(() {
-            _pathController.text = webPath;
+        if (directoryType == 'real') {
+          // Use FilePicker in web mode to access real file system
+          _logger.info('Using real file system access in web mode');
+          try {
+            // For web, we need to use directory picker or allow different file types
+            // We'll try different approaches
+            FilePickerResult? result;
             
-            // Update name based on the entered name
-            if (_nameController.text.isEmpty) {
-              _nameController.text = repoName;
+            // We need to handle directory picking differently
+            try {
+              _logger.info('Attempting directory picker for web');
+              String? directoryPath = await FilePicker.platform.getDirectoryPath();
+              
+              if (directoryPath != null) {
+                _logger.info('Got directory path: $directoryPath');
+                
+                // For web, we'll create a special path format
+                final dirName = path.basename(directoryPath);
+                final webDirPath = 'web_dir://${DateTime.now().millisecondsSinceEpoch}/$dirName';
+                
+                _logger.info('Created web directory path: $webDirPath');
+                
+                setState(() {
+                  _pathController.text = webDirPath;
+                  
+                  // Update name based on the selected directory
+                  if (_nameController.text.isEmpty) {
+                    _nameController.text = dirName;
+                  }
+                });
+                
+                return; // Exit early since we handled the path
+              }
+            } catch (e) {
+              _logger.warning('Directory picker failed: $e');
             }
-          });
-        } else {
-          _logger.info('User canceled virtual directory selection');
+            
+            // If directory picker fails, try file picker with git extension or any file
+            try {
+              _logger.info('Trying file picker instead');
+              result = await FilePicker.platform.pickFiles(
+                type: FileType.custom,
+                allowMultiple: false,
+                allowedExtensions: ['git', 'gitignore', 'md', 'txt'],
+                lockParentWindow: true,
+              );
+            } catch (e) {
+              _logger.error('File picker also failed: $e');
+              setState(() {
+                _error = 'File system access failed. Try virtual mode or use the desktop app.';
+              });
+              return; // Exit early on complete failure
+            }
+            
+            if (result != null && result.files.isNotEmpty) {
+              // On web, path is always null - we need to use name instead
+              final fileName = result.files.first.name;
+              _logger.info('Selected file name: $fileName');
+              
+              if (fileName != null && fileName.isNotEmpty) {
+                // Create a web-safe path using the file name
+                final webPath = 'web_file://${DateTime.now().millisecondsSinceEpoch}/$fileName';
+                _logger.info('Created web path: $webPath');
+                
+                // Extract repo name from filename
+                final repoName = fileName.endsWith('.git') 
+                    ? fileName.substring(0, fileName.length - 4) 
+                    : fileName;
+                
+                setState(() {
+                  _pathController.text = webPath;
+                  
+                  // Update name based on the selected file
+                  if (_nameController.text.isEmpty) {
+                    _nameController.text = repoName;
+                  }
+                });
+                
+                // Store file bytes for later use if needed
+                if (result.files.first.bytes != null) {
+                  _logger.info('File has binary data: ${result.files.first.bytes!.length} bytes');
+                  // We could store this data for later processing if needed
+                }
+              } else {
+                _logger.error('No valid filename obtained from file picker');
+                setState(() {
+                  _error = 'Could not get valid file name. Try virtual mode or use the desktop app.';
+                });
+              }
+            } else {
+              _logger.info('No file selected');
+            }
+          } catch (e) {
+            _logger.error('Error with FilePicker in web mode', error: e);
+            setState(() {
+              _error = 'Browser may not support full file system access. Try virtual mode or use the desktop app.';
+            });
+          }
+        } else if (directoryType == 'virtual') {
+          // Virtual directory browser
+          _logger.info('Using web virtual directory browser');
+          
+          // Create virtual directory root if needed
+          final rootDirectory = VirtualDirectory.createRoot();
+          final nameController = TextEditingController();
+          
+          // Show virtual directory browser dialog
+          final result = await showDialog<Map<String, dynamic>?>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Select Virtual Directory'),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Using a simulated file system. '
+                      'Please select or create a virtual directory for your repository.',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(),
+                    Expanded(
+                      child: VirtualDirectoryBrowser(
+                        rootDirectory: rootDirectory,
+                        onDirectorySelected: (selectedDir) {
+                          // Pass selected directory back along with repository name
+                          Navigator.of(context).pop({
+                            'directory': selectedDir,
+                            'name': nameController.text.trim(),
+                          });
+                        },
+                      ),
+                    ),
+                    const Divider(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Repository Name',
+                          border: OutlineInputBorder(),
+                          hintText: 'MyRepository',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          );
+          
+          if (result != null && result['directory'] != null) {
+            final selectedDir = result['directory'] as VirtualDirectory;
+            String repoName = result['name'] as String? ?? '';
+            
+            // If no repo name provided, use directory name
+            if (repoName.isEmpty) {
+              repoName = selectedDir.name;
+            }
+            
+            _logger.info('User selected virtual directory: ${selectedDir.path}');
+            
+            // Create a unique virtual path
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            final webPath = '/virtual/$timestamp${selectedDir.path}';
+            
+            _logger.info('Using virtual path: $webPath');
+            
+            setState(() {
+              _pathController.text = webPath;
+              
+              // Update name based on the entered name
+              if (_nameController.text.isEmpty) {
+                _nameController.text = repoName;
+              }
+            });
+          } else {
+            _logger.info('User canceled virtual directory selection');
+          }
         }
       } else {
         // Native platforms - use directory picker
@@ -215,16 +350,75 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     bool isWeb = identical(0, 0.0);
     _logger.info('Adding existing repository. Name: $name, Path: $path, isWeb: $isWeb');
     
-    if (isWeb && path.startsWith('/virtual/')) {
-      _logger.info('Using web mock repository');
-      // Web mode with simulated repository
-      await _repositoryManager.addRepository(
-        name: name,
-        path: path,
-        description: description.isNotEmpty ? description : null,
-        isWebMock: true,
-      );
-      _logger.info('Successfully added web mock repository');
+    if (isWeb) {
+      if (path.startsWith('/virtual/')) {
+        _logger.info('Using web mock repository (virtual path)');
+        // Web mode with simulated repository
+        await _repositoryManager.addRepository(
+          name: name,
+          path: path,
+          description: description.isNotEmpty ? description : null,
+          isWebMock: true,
+        );
+        _logger.info('Successfully added web mock repository');
+      } else if (path.startsWith('web_file://') || path.startsWith('web_dir://')) {
+        _logger.info('Using web real file/directory repository: $path');
+        // Web with real file access result via file picker
+        try {
+          // Extract file name from the web path to use as reference
+          final originalFileName = path.split('/').last;
+          _logger.info('Extracted file name: $originalFileName');
+          
+          // Add as real repository, but mark as web to handle browser limitations
+          await _repositoryManager.addRepository(
+            name: name,
+            path: path, // Keep the web path as is
+            description: description.isNotEmpty ? description : null,
+            isWebReal: true,
+            originalPath: originalFileName, // Store original filename for reference
+          );
+          _logger.info('Successfully added real file from web browser');
+        } catch (e) {
+          _logger.error('Error with web file access', error: e);
+          throw Exception('Browser file system access error: $e. Consider using virtual mode instead.');
+        }
+      } else {
+        _logger.info('Attempting to use real file system on web with legacy path');
+        // Web with real file access attempt (File System Access API)
+        try {
+          // Web with file picker might provide a file rather than directory
+          // We'll check if it's a .git directory or a git repository first
+          if (path.endsWith('.git') || path.contains('.git/')) {
+            _logger.info('Path appears to be a git repository: $path');
+            
+            // Add as real repository, but mark as web to handle browser limitations
+            await _repositoryManager.addRepository(
+              name: name,
+              path: path,
+              description: description.isNotEmpty ? description : null,
+              isWebReal: true, // New flag for web real repository
+            );
+            _logger.info('Successfully added real repository from web');
+          } else {
+            // Fallback to virtual mode if the path doesn't look like a git repo
+            _logger.warning('Path does not appear to be a git repo, using mock: $path');
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            final webPath = '/virtual/$timestamp/${path.split('/').last}';
+            
+            await _repositoryManager.addRepository(
+              name: name,
+              path: webPath,
+              description: description.isNotEmpty ? description : null,
+              isWebMock: true,
+              originalPath: path, // Store original path for reference
+            );
+            _logger.info('Fallback to mock repository with reference to real path');
+          }
+        } catch (e) {
+          _logger.error('Error with web file system access', error: e);
+          throw Exception('Browser file system access error: $e. Consider using virtual mode instead.');
+        }
+      }
     } else {
       _logger.info('Using native file system repository');
       // Native platform with real file system access
@@ -263,17 +457,59 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     bool isWeb = identical(0, 0.0);
     _logger.info('Cloning repository. Name: $name, Path: $path, URL: $url, isWeb: $isWeb');
     
-    if (isWeb && path.startsWith('/virtual/')) {
-      _logger.info('Using web mock repository for cloning');
-      // Web mode with simulated repository
-      await _repositoryManager.addRepository(
-        name: name,
-        path: path,
-        description: description.isNotEmpty ? description : null,
-        isWebMock: true,
-        remoteUrl: url,
-      );
-      _logger.info('Successfully added web mock repository (cloned)');
+    if (isWeb) {
+      if (path.startsWith('/virtual/')) {
+        _logger.info('Using web mock repository for cloning');
+        // Web mode with simulated repository
+        await _repositoryManager.addRepository(
+          name: name,
+          path: path,
+          description: description.isNotEmpty ? description : null,
+          isWebMock: true,
+          remoteUrl: url,
+        );
+        _logger.info('Successfully added web mock repository (cloned)');
+      } else if (path.startsWith('web_file://') || path.startsWith('web_dir://')) {
+        _logger.info('Using web real file/directory repository for cloning: $path');
+        // Web with real file access result via file picker
+        try {
+          // Extract file name from the web path
+          final originalFileName = path.split('/').last;
+          _logger.info('Extracted file name: $originalFileName');
+          
+          // Add as real repository with remote URL
+          await _repositoryManager.addRepository(
+            name: name,
+            path: path, // Keep the web path as is
+            description: description.isNotEmpty ? description : null,
+            isWebReal: true,
+            remoteUrl: url,
+            originalPath: originalFileName,
+          );
+          _logger.info('Successfully added web real file for cloning');
+        } catch (e) {
+          _logger.error('Error with web file access for cloning', error: e);
+          throw Exception('Browser file system access error: $e. Consider using virtual mode instead.');
+        }
+      } else {
+        _logger.info('Using web real repository for cloning (legacy path)');
+        // Web with real file access attempt
+        try {
+          // Add as real repository, but mark as web to handle browser limitations
+          await _repositoryManager.addRepository(
+            name: name,
+            path: path,
+            description: description.isNotEmpty ? description : null,
+            isWebReal: true,
+            remoteUrl: url,
+            originalPath: path,
+          );
+          _logger.info('Successfully added web real repository for cloning');
+        } catch (e) {
+          _logger.error('Error with web file system access for cloning', error: e);
+          throw Exception('Browser file system access error: $e');
+        }
+      }
     } else {
       _logger.info('Using native git clone');
       // Native platform with real file system access
@@ -301,17 +537,59 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     bool isWeb = identical(0, 0.0);
     _logger.info('Initializing new repository. Name: $name, Path: $path, isWeb: $isWeb');
     
-    if (isWeb && path.startsWith('/virtual/')) {
-      _logger.info('Using web mock repository for new repo');
-      // Web mode with simulated repository
-      await _repositoryManager.addRepository(
-        name: name,
-        path: path,
-        description: description.isNotEmpty ? description : null,
-        isWebMock: true,
-        isNewRepo: true,
-      );
-      _logger.info('Successfully added web mock repository (new)');
+    if (isWeb) {
+      if (path.startsWith('/virtual/')) {
+        _logger.info('Using web mock repository for new repo');
+        // Web mode with simulated repository
+        await _repositoryManager.addRepository(
+          name: name,
+          path: path,
+          description: description.isNotEmpty ? description : null,
+          isWebMock: true,
+          isNewRepo: true,
+        );
+        _logger.info('Successfully added web mock repository (new)');
+      } else if (path.startsWith('web_file://') || path.startsWith('web_dir://')) {
+        _logger.info('Using web real file/directory repository for new repo: $path');
+        // Web with real file access result via file picker
+        try {
+          // Extract file name from the web path
+          final originalFileName = path.split('/').last;
+          _logger.info('Extracted file name: $originalFileName');
+          
+          // Add as new repository
+          await _repositoryManager.addRepository(
+            name: name,
+            path: path, // Keep the web path as is
+            description: description.isNotEmpty ? description : null,
+            isWebReal: true,
+            isNewRepo: true,
+            originalPath: originalFileName,
+          );
+          _logger.info('Successfully added web real file for new repo');
+        } catch (e) {
+          _logger.error('Error with web file access for new repo', error: e);
+          throw Exception('Browser file system access error: $e. Consider using virtual mode instead.');
+        }
+      } else {
+        _logger.info('Using web real repository for new repo (legacy path)');
+        // Web with real file access attempt
+        try {
+          // Add as real repository, but mark as web to handle browser limitations
+          await _repositoryManager.addRepository(
+            name: name,
+            path: path,
+            description: description.isNotEmpty ? description : null,
+            isWebReal: true,
+            isNewRepo: true,
+            originalPath: path,
+          );
+          _logger.info('Successfully added web real repository (new)');
+        } catch (e) {
+          _logger.error('Error with web file system access for new repo', error: e);
+          throw Exception('Browser file system access error: $e');
+        }
+      }
     } else {
       _logger.info('Using native git init');
       // Native platform with real file system access

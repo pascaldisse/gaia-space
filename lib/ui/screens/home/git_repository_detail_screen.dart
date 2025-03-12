@@ -8,6 +8,8 @@ import 'package:gaia_space/core/models/git_file.dart';
 import 'package:gaia_space/core/models/repository.dart';
 import 'package:gaia_space/core/services/git_repository_manager.dart';
 import 'package:gaia_space/core/services/git_service.dart';
+import 'package:gaia_space/ui/screens/home/fork_repository_screen.dart';
+import 'package:gaia_space/ui/screens/home/pull_request_screen.dart';
 import 'package:gaia_space/ui/widgets/git/activity_manager_view.dart';
 import 'package:gaia_space/ui/widgets/git/commit_dialog.dart';
 import 'package:gaia_space/ui/widgets/git/commit_graph.dart';
@@ -877,6 +879,37 @@ class _GitRepositoryDetailScreenState extends ConsumerState<GitRepositoryDetailS
       appBar: AppBar(
         title: Text(_repository!.name),
         actions: [
+          // Fork button
+          IconButton(
+            icon: const Icon(Icons.fork_right),
+            tooltip: 'Fork Repository',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => ForkRepositoryScreen(
+                    repository: _repository!,
+                  ),
+                ),
+              );
+            },
+          ),
+          
+          // Pull requests button
+          IconButton(
+            icon: const Icon(Icons.merge),
+            tooltip: 'Pull Requests',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => PullRequestListScreen(
+                    repositoryId: widget.repositoryId,
+                  ),
+                ),
+              );
+            },
+          ),
+          
+          // Activity panel toggle
           IconButton(
             icon: Icon(_isActivityPanelExpanded 
                 ? Icons.expand_less 

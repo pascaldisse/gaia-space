@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gaia_space/core/models/project.dart';
+import 'package:gaia_space/core/services/avatar_service/avatar_service.dart';
 import 'package:gaia_space/ui/widgets/empty_state.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drag_and_drop_lists/drag_and_drop_lists.dart';
@@ -1012,18 +1013,15 @@ class ProjectCard extends StatelessWidget {
                             children: project.assignees.take(3).map((assignee) => 
                               Tooltip(
                                 message: '${assignee.userName} (${assignee.role})',
-                                child: CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Theme.of(context).primaryColor,
-                                  backgroundImage: assignee.avatarUrl != null 
-                                      ? NetworkImage(assignee.avatarUrl!)
-                                      : null,
-                                  child: assignee.avatarUrl == null
-                                      ? Text(
-                                          assignee.userName.substring(0, 1),
-                                          style: const TextStyle(fontSize: 10, color: Colors.white),
-                                        )
-                                      : null,
+                                child: SizedBox(
+                                  width: 24, 
+                                  height: 24,
+                                  child: AvatarService().avatarWidget(
+                                    avatarUrl: assignee.avatarUrl, 
+                                    name: assignee.userName,
+                                    size: 24,
+                                    backgroundColor: Theme.of(context).primaryColor,
+                                  ),
                                 ),
                               )
                             ).toList(),
@@ -1188,9 +1186,11 @@ class ProjectCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (assignee.avatarUrl != null) ...[
-            CircleAvatar(
-              radius: 8,
-              backgroundImage: NetworkImage(assignee.avatarUrl!),
+            AvatarService().avatarWidget(
+              avatarUrl: assignee.avatarUrl,
+              name: assignee.userName,
+              size: 16,
+              backgroundColor: Theme.of(context).primaryColor,
             ),
             const SizedBox(width: 4),
           ],
@@ -1428,11 +1428,12 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
               runSpacing: 8,
               children: _editedProject.assignees.map((assignee) {
                 return Chip(
-                  avatar: assignee.avatarUrl != null
-                      ? CircleAvatar(
-                          backgroundImage: NetworkImage(assignee.avatarUrl!),
-                        )
-                      : null,
+                  avatar: AvatarService().avatarWidget(
+                    avatarUrl: assignee.avatarUrl,
+                    name: assignee.userName,
+                    size: 20,
+                    backgroundColor: Theme.of(context).primaryColor,
+                  ),
                   label: Text('${assignee.userName} (${assignee.role})'),
                   onDeleted: () {
                     setState(() {

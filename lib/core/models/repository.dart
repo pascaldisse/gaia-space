@@ -16,6 +16,8 @@ class GitRepository extends Equatable {
   final bool isFork;
   final String? parentRepositoryUrl;
   final String? remoteUrl;
+  // Add metadata for web-specific information
+  final Map<String, dynamic>? metadata;
 
   const GitRepository({
     required this.id,
@@ -33,6 +35,7 @@ class GitRepository extends Equatable {
     this.isFork = false,
     this.parentRepositoryUrl,
     this.remoteUrl,
+    this.metadata,
   });
 
   // Copy with method for immutability
@@ -52,6 +55,7 @@ class GitRepository extends Equatable {
     bool? isFork,
     String? parentRepositoryUrl,
     String? remoteUrl,
+    Map<String, dynamic>? metadata,
   }) {
     return GitRepository(
       id: id ?? this.id,
@@ -69,6 +73,7 @@ class GitRepository extends Equatable {
       isFork: isFork ?? this.isFork,
       parentRepositoryUrl: parentRepositoryUrl ?? this.parentRepositoryUrl,
       remoteUrl: remoteUrl ?? this.remoteUrl,
+      metadata: metadata ?? this.metadata,
     );
   }
 
@@ -90,6 +95,7 @@ class GitRepository extends Equatable {
       'isFork': isFork,
       'parentRepositoryUrl': parentRepositoryUrl,
       'remoteUrl': remoteUrl,
+      'metadata': metadata,
     };
   }
 
@@ -111,6 +117,9 @@ class GitRepository extends Equatable {
       isFork: json['isFork'] ?? false,
       parentRepositoryUrl: json['parentRepositoryUrl'],
       remoteUrl: json['remoteUrl'],
+      metadata: json['metadata'] != null 
+          ? Map<String, dynamic>.from(json['metadata']) 
+          : null,
     );
   }
 
@@ -131,5 +140,15 @@ class GitRepository extends Equatable {
     isFork,
     parentRepositoryUrl,
     remoteUrl,
+    metadata,
   ];
+  
+  // Helper method to check if this is a web real repository
+  bool get isWebReal => metadata != null && metadata!['isWebReal'] == true;
+  
+  // Helper method to check if this is a web mock repository
+  bool get isWebMock => path != null && path!.startsWith('/virtual/');
+  
+  // Helper method to get original path if available
+  String? get originalPath => metadata != null ? metadata!['originalPath'] as String? : null;
 }

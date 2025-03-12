@@ -1,5 +1,7 @@
-import 'dart:io';
+// Use conditional import to handle web platform
+import 'dart:io' if (dart.library.html) 'package:gaia_space/core/utils/web_io_stub.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gaia_space/core/models/repository.dart';
 import 'package:gaia_space/core/services/git_repository_manager.dart';
@@ -17,21 +19,37 @@ final repositoriesProvider = FutureProvider<List<GitRepository>>((ref) async {
   
   // If no repositories exist, create test repository if it's the first run
   if (repositories.isEmpty) {
-    // Create a temporary test repository for first-time users
+    // Create a different sample repo depending on platform
     try {
-      final tempDir = Directory.systemTemp.createTempSync('gaia_space_demo');
-      
-      await repositoryManager.addRepository(
-        name: 'Sample Repository',
-        path: tempDir.path,
-        description: 'A sample repository for demonstration',
-        workspaceId: 'default',
-        createdBy: 'system',
-      );
-      
-      // Initialize the repository
-      final gitService = GitService();
-      await gitService.initRepository(tempDir.path);
+      if (kIsWeb) {
+        // For web, create a virtual sample repository
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final webPath = '/virtual/$timestamp/sample_repo';
+        
+        await repositoryManager.addRepository(
+          name: 'Sample Web Repository',
+          path: webPath,
+          description: 'A sample virtual repository for web demonstration',
+          workspaceId: 'default',
+          createdBy: 'system',
+          isWebMock: true,
+        );
+      } else {
+        // For native platforms, create an actual repository
+        final tempDir = Directory.systemTemp.createTempSync('gaia_space_demo');
+        
+        await repositoryManager.addRepository(
+          name: 'Sample Repository',
+          path: tempDir.path,
+          description: 'A sample repository for demonstration',
+          workspaceId: 'default',
+          createdBy: 'system',
+        );
+        
+        // Initialize the repository
+        final gitService = GitService();
+        await gitService.initRepository(tempDir.path);
+      }
       
       // Reload repositories
       return await repositoryManager.getRepositories();
@@ -273,7 +291,7 @@ class RepositoryCard extends StatelessWidget {
                     _buildStat(
                       context,
                       Icons.folder,
-                      repository.path!.split(Platform.pathSeparator).last,
+                      _getDisplayPath(repository.path!),
                     ),
                   ],
                 ],
@@ -377,6 +395,35 @@ class RepositoryCard extends StatelessWidget {
       return '${difference.inMinutes} minutes ago';
     } else {
       return 'Just now';
+    }
+  }
+  
+  String _getDisplayPath(String fullPath) {
+    // Check if we're on web (using Flutter's kIsWeb constant)
+    if (kIsWeb) {
+      // For web paths, extract useful info based on path format
+      if (fullPath.startsWith('/virtual/')) {
+        // Virtual directory path format
+        final parts = fullPath.split('/');
+        if (parts.length > 2) {
+          return parts.last.isEmpty ? parts[parts.length - 2] : parts.last;
+        }
+        return 'Virtual Repo';
+      } else if (fullPath.startsWith('web_file://')) {
+        // Web file path format from file picker
+        final fileName = fullPath.split('/').last;
+        return fileName.isEmpty ? 'Web File' : fileName;
+      } else if (fullPath.startsWith('web_dir://')) {
+        // Web directory path format from directory picker
+        final dirName = fullPath.split('/').last;
+        return dirName.isEmpty ? 'Web Folder' : dirName;
+      } else {
+        // Generic fallback for web
+        return fullPath.split('/').last;
+      }
+    } else {
+      // Native platform - use platform-aware path handling
+      return fullPath.split(Platform.pathSeparator).last;
     }
   }
 }
