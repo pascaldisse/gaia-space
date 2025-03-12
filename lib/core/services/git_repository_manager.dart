@@ -300,15 +300,17 @@ class GitRepositoryManager {
         // Create a mock commit
         return [
           GitCommit(
-            hash: 'mock-commit-${DateTime.now().millisecondsSinceEpoch}',
-            parentHashes: ['mock-parent-hash'],
+            sha: 'mock-commit-${DateTime.now().millisecondsSinceEpoch}',
+            parentShas: ['mock-parent-hash'],
             author: 'Web User',
             email: 'web.user@example.com',
             message: 'Initial commit (web simulation)',
             date: now.subtract(const Duration(days: 1)),
-            fileChanges: 1,
-            insertions: 10,
-            deletions: 0,
+            stats: {
+              'fileChanges': 1,
+              'insertions': 10,
+              'deletions': 0,
+            },
           )
         ];
       }
@@ -333,6 +335,9 @@ class GitRepositoryManager {
         return [
           GitBranch(
             name: 'main',
+            shortName: 'main',
+            targetCommitSha: 'mock-commit-1',
+            isLocal: true,
             isHead: true,
             isRemote: false,
             upstream: 'origin/main',
@@ -357,6 +362,12 @@ class GitRepositoryManager {
         throw Exception('Repository not found');
       }
       
+      // Skip web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        _logger.info('Skipping fetch for web mock repository ${repository.name}');
+        return;
+      }
+      
       await _activityManager.executeWithActivity(
         action: 'Fetch ${remote ?? 'all remotes'}',
         repositoryId: repoId,
@@ -378,6 +389,12 @@ class GitRepositoryManager {
         throw Exception('Repository not found');
       }
       
+      // Skip web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        _logger.info('Skipping pull for web mock repository ${repository.name}');
+        return;
+      }
+      
       await _activityManager.executeWithActivity(
         action: 'Pull ${remote ?? 'origin'}/${branch ?? 'current branch'}',
         repositoryId: repoId,
@@ -397,6 +414,12 @@ class GitRepositoryManager {
       final repository = await getRepository(repoId);
       if (repository == null || repository.path == null) {
         throw Exception('Repository not found');
+      }
+      
+      // Skip web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        _logger.info('Skipping push for web mock repository ${repository.name}');
+        return;
       }
       
       await _activityManager.executeWithActivity(
