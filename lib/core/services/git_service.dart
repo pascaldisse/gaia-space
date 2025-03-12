@@ -84,6 +84,48 @@ class GitService {
       rethrow;
     }
   }
+  
+  Future<void> initRepository(String path) async {
+    try {
+      _logger.info('Initializing new Git repository at $path');
+      
+      final directory = Directory(path);
+      if (!directory.existsSync()) {
+        directory.createSync(recursive: true);
+      }
+      
+      // Execute git init command directly
+      final process = await Process.run('git', ['init'], workingDirectory: path);
+      final result = ProcessResult(
+        process.pid, 
+        process.exitCode, 
+        process.stdout, 
+        process.stderr
+      );
+      
+      if (result.exitCode != 0) {
+        throw Exception('Failed to initialize repository: ${result.stderr}');
+      }
+      
+      _logger.info('Git repository initialized: ${result.stdout}');
+      
+      // Create an initial commit with a README file
+      final readmePath = '$path/README.md';
+      final readmeFile = File(readmePath);
+      final folderName = path.split(Platform.pathSeparator).last;
+      await readmeFile.writeAsString('# $folderName\n\nInitialized with Gaia Space');
+      
+      // Stage and commit the README
+      final gitDir = await openRepository(path);
+      await gitDir.runCommand(['add', 'README.md']);
+      await gitDir.runCommand(['commit', '-m', 'Initial commit']);
+      
+      _logger.info('Created initial commit with README.md');
+    } catch (e) {
+      _logger.error('Failed to initialize repository', error: e);
+      rethrow;
+    }
+  }
 
   // Branch operations
   Future<List<GitBranch>> getBranches(String repoPath) async {

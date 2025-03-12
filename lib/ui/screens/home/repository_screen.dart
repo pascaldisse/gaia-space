@@ -1,61 +1,47 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gaia_space/core/models/repository.dart';
+import 'package:gaia_space/core/services/git_repository_manager.dart';
+import 'package:gaia_space/core/services/git_service.dart';
+import 'package:gaia_space/ui/screens/home/create_repository_screen.dart';
 import 'package:gaia_space/ui/screens/home/git_repository_detail_screen.dart';
 import 'package:gaia_space/ui/widgets/empty_state.dart';
 
-// Mock data provider for repositories
+// Repository provider
 final repositoriesProvider = FutureProvider<List<GitRepository>>((ref) async {
-  // Simulate API call
-  await Future.delayed(const Duration(seconds: 1));
+  final repositoryManager = GitRepositoryManager();
   
-  // Return mock data
-  return [
-    GitRepository(
-      id: '1',
-      name: 'mobile-app',
-      description: 'Mobile application codebase',
-      workspaceId: '1',
-      createdBy: 'User1',
-      createdAt: DateTime.now().subtract(const Duration(days: 120)),
-      lastActivityAt: DateTime.now().subtract(const Duration(hours: 3)),
-      branchesCount: 8,
-      language: 'Flutter',
-    ),
-    GitRepository(
-      id: '2',
-      name: 'api-server',
-      description: 'Backend API server code',
-      workspaceId: '1',
-      createdBy: 'User2',
-      createdAt: DateTime.now().subtract(const Duration(days: 90)),
-      lastActivityAt: DateTime.now().subtract(const Duration(days: 1)),
-      branchesCount: 5,
-      language: 'Kotlin',
-    ),
-    GitRepository(
-      id: '3',
-      name: 'web-client',
-      description: 'Web client application',
-      workspaceId: '1',
-      createdBy: 'User3',
-      createdAt: DateTime.now().subtract(const Duration(days: 60)),
-      lastActivityAt: DateTime.now().subtract(const Duration(hours: 12)),
-      branchesCount: 3,
-      language: 'TypeScript',
-    ),
-    GitRepository(
-      id: '4',
-      name: 'documentation',
-      description: 'Project documentation',
-      workspaceId: '2',
-      createdBy: 'User2',
-      createdAt: DateTime.now().subtract(const Duration(days: 30)),
-      lastActivityAt: DateTime.now().subtract(const Duration(days: 2)),
-      branchesCount: 2,
-      language: 'Markdown',
-    ),
-  ];
+  // Get all repositories
+  final repositories = await repositoryManager.getRepositories();
+  
+  // If no repositories exist, create test repository if it's the first run
+  if (repositories.isEmpty) {
+    // Create a temporary test repository for first-time users
+    try {
+      final tempDir = Directory.systemTemp.createTempSync('gaia_space_demo');
+      
+      await repositoryManager.addRepository(
+        name: 'Sample Repository',
+        path: tempDir.path,
+        description: 'A sample repository for demonstration',
+        workspaceId: 'default',
+        createdBy: 'system',
+      );
+      
+      // Initialize the repository
+      final gitService = GitService();
+      await gitService.initRepository(tempDir.path);
+      
+      // Reload repositories
+      return await repositoryManager.getRepositories();
+    } catch (e) {
+      // Return empty list if sample can't be created
+      return [];
+    }
+  }
+  
+  return repositories;
 });
 
 class RepositoryScreen extends ConsumerWidget {
@@ -69,16 +55,30 @@ class RepositoryScreen extends ConsumerWidget {
       body: repositoriesAsync.when(
         data: (repositories) {
           if (repositories.isEmpty) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.code,
               title: 'No Repositories',
               message: 'Create your first Git repository to get started',
               actionText: 'Create Repository',
+              onActionPressed: () async {
+                final result = await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const CreateRepositoryScreen(),
+                  ),
+                );
+                
+                if (result == true) {
+                  // Refresh repositories list
+                  ref.refresh(repositoriesProvider);
+                }
+              },
             );
           }
           
           return RefreshIndicator(
-            onRefresh: () async => await Future.delayed(const Duration(seconds: 1)),
+            onRefresh: () async {
+              ref.refresh(repositoriesProvider);
+            },
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: repositories.length,
@@ -86,7 +86,37 @@ class RepositoryScreen extends ConsumerWidget {
               itemBuilder: (context, index) {
                 final repository = repositories[index];
                 
-                return RepositoryCard(repository: repository);
+                return RepositoryCard(
+                  repository: repository,
+                  onDelete: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Remove Repository'),
+                        content: Text('Are you sure you want to remove "${repository.name}" from Gaia Space?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ),
+                    );
+                    
+                    if (confirm == true) {
+                      final repositoryManager = GitRepositoryManager();
+                      await repositoryManager.deleteRepository(repository.id);
+                      ref.refresh(repositoriesProvider);
+                    }
+                  },
+                );
               },
             ),
           );
@@ -124,8 +154,17 @@ class RepositoryScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Implement repository creation
+        onPressed: () async {
+          final result = await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => const CreateRepositoryScreen(),
+            ),
+          );
+          
+          if (result == true) {
+            // Refresh repositories list
+            ref.refresh(repositoriesProvider);
+          }
         },
         child: const Icon(Icons.add),
       ),
@@ -135,10 +174,12 @@ class RepositoryScreen extends ConsumerWidget {
 
 class RepositoryCard extends StatelessWidget {
   final GitRepository repository;
+  final VoidCallback? onDelete;
   
   const RepositoryCard({
     super.key,
     required this.repository,
+    this.onDelete,
   });
 
   @override
@@ -183,11 +224,25 @@ class RepositoryCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
+                  PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert),
-                    onPressed: () {
-                      // TODO: Show repository options menu
+                    onSelected: (value) {
+                      if (value == 'delete' && onDelete != null) {
+                        onDelete!();
+                      }
                     },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Remove Repository'),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -213,6 +268,14 @@ class RepositoryCard extends StatelessWidget {
                     Icons.update,
                     'Updated ${_formatLastActivity(repository.lastActivityAt)}',
                   ),
+                  const SizedBox(width: 24),
+                  if (repository.path != null) ...[
+                    _buildStat(
+                      context,
+                      Icons.folder,
+                      repository.path!.split(Platform.pathSeparator).last,
+                    ),
+                  ],
                 ],
               ),
             ],
