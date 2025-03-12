@@ -15,13 +15,18 @@
 ## Linting and Analysis
 - `flutter analyze` - Run analyzer on project
 - `flutter format .` - Format code with dart formatter
-- `flutter pub run build_runner build` - Generate code for models and services
+- `flutter pub run build_runner build` - Generate code
+
+## Git Operations
+- `git branch` - List local branches
+- `git checkout -b feature/name` - Create and switch to new branch
+- `git commit -m "Message"` - Commit changes with message
 
 ## Code Style Guidelines
-- **Imports**: Group imports: Dart/Flutter, external libraries, project imports
+- **Imports**: Group by: 1) Dart/Flutter, 2) External libraries, 3) Project imports
 - **Formatting**: Use standard Flutter formatting, prefer `const` for widgets
-- **Models**: Use Equatable for immutable data models with copyWith, toJson, fromJson methods
-- **Components**: Create functional/stateless widgets where possible, maintain single responsibility
-- **Naming**: PascalCase for widgets/classes, camelCase for functions/variables, snake_case for files
-- **Error Handling**: Use try/catch for async operations, log errors with AppLogger
-- **State Management**: Use Flutter Riverpod with ConsumerWidget, FutureProvider, StateProvider
+- **Models**: Use Equatable with copyWith, toJson, fromJson methods
+- **State Management**: Flutter Riverpod (ConsumerWidget, FutureProvider, StateProvider)
+- **Error Handling**: Try/catch blocks with contextual AppLogger (debug/info/warning/error)
+- **Naming**: PascalCase (widgets/classes), camelCase (methods/variables), snake_case (files)
+- **Components**: Single responsibility, stateless widgets when possible
