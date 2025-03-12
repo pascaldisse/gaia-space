@@ -888,4 +888,15 @@ class GitService {
       hunks: hunks,
     );
   }
+  
+  /// Add a new remote to the repository
+  Future<void> addRemote(String repoPath, String remoteName, String remoteUrl) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      await repoDir.runCommand(['remote', 'add', remoteName, remoteUrl]);
+    } catch (e) {
+      _logger.error('Failed to add remote', error: e);
+      rethrow;
+    }
+  }
 }

@@ -41,14 +41,18 @@ class GitRepositoryManager {
     String? workspaceId,
     String? createdBy,
     bool isWebMock = false,
+    bool isWebReal = false,
     bool isNewRepo = false,
+    bool isFork = false,
+    String? parentRepositoryUrl,
     String? remoteUrl,
+    String? originalPath,
   }) async {
     try {
-      _logger.info('Adding repository: name=$name, path=$path, isWebMock=$isWebMock');
+      _logger.info('Adding repository: name=$name, path=$path, isWebMock=$isWebMock, isWebReal=$isWebReal');
       
-      // If not web mock, validate it's a Git repository
-      if (!isWebMock) {
+      // If not web mock or web real, validate it's a Git repository
+      if (!isWebMock && !isWebReal) {
         _logger.info('Validating repository is a git repository');
         try {
           await _gitService.openRepository(path);
@@ -58,12 +62,21 @@ class GitRepositoryManager {
           rethrow;
         }
       } else {
-        _logger.info('Skipping git validation for web mock repository');
+        _logger.info('Skipping git validation for web repository');
       }
       
       // Create repository metadata
       final repositoryId = const Uuid().v4();
       _logger.info('Creating repository with ID: $repositoryId');
+      
+      // Store original path for web real repositories
+      Map<String, dynamic> metadata = {};
+      if (isWebReal && originalPath != null) {
+        metadata['originalPath'] = originalPath;
+      }
+      if (isWebReal) {
+        metadata['isWebReal'] = true;
+      }
       
       final repository = GitRepository(
         id: repositoryId,
@@ -74,21 +87,24 @@ class GitRepositoryManager {
         createdBy: createdBy ?? 'system',
         createdAt: DateTime.now(),
         lastActivityAt: DateTime.now(),
-        branchesCount: isWebMock ? 1 : 0, // Default to 1 branch for web mock
-        commitsCount: isWebMock ? 1 : 0,  // Default to 1 commit for web mock
-        language: isWebMock ? 'Flutter' : null, // Default language for web mock
+        branchesCount: (isWebMock || isWebReal) ? 1 : 0, // Default to 1 branch for web
+        commitsCount: (isWebMock || isWebReal) ? 1 : 0,  // Default to 1 commit for web
+        language: (isWebMock || isWebReal) ? 'Flutter' : null, // Default language for web
+        isFork: isFork,
+        parentRepositoryUrl: parentRepositoryUrl,
         remoteUrl: remoteUrl,
+        metadata: metadata.isNotEmpty ? metadata : null,
       );
       
       _logger.info('Adding repository to in-memory store');
       _repositories.add(repository);
       
-      // Only update stats for real repositories
-      if (!isWebMock) {
+      // Only update stats for real non-web repositories
+      if (!isWebMock && !isWebReal) {
         _logger.info('Updating repository stats');
         await _updateRepositoryStats(repository.id);
       } else {
-        _logger.info('Skipping stats update for web mock repository');
+        _logger.info('Skipping stats update for web repository');
       }
       
       _logger.info('Repository added successfully with ID: ${repository.id}');
@@ -202,9 +218,9 @@ class GitRepositoryManager {
       
       _logger.info('Updating repository stats for ${repository.name}');
       
-      // Skip web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
-        _logger.info('Skipping stats update for web mock repository ${repository.name}');
+      // Skip web mock or web real repositories
+      if (repository.isWebMock || repository.isWebReal) {
+        _logger.info('Skipping stats update for web repository ${repository.name}');
         return;
       }
       
@@ -240,7 +256,7 @@ class GitRepositoryManager {
       // Check if running on web
       bool isWeb = identical(0, 0.0);
       
-      // Skip for web mode or web mock repositories
+      // Skip for web mode or virtual repositories
       if (isWeb || repoPath.startsWith('/virtual/')) {
         return 'Flutter';
       }
@@ -320,22 +336,30 @@ class GitRepositoryManager {
         return [];
       }
       
-      // Handle web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
+      // Handle web mock or web real repositories
+      if (repository.isWebMock || repository.isWebReal) {
         final now = DateTime.now();
         // Create a mock commit
+        String commitType = repository.isWebReal ? "real-web" : "mock";
+        String commitPath = repository.isWebReal ? 
+            (repository.originalPath ?? repository.path!) : 
+            repository.path!;
+            
         return [
           GitCommit(
-            sha: 'mock-commit-${DateTime.now().millisecondsSinceEpoch}',
-            parentShas: ['mock-parent-hash'],
+            sha: '$commitType-commit-${DateTime.now().millisecondsSinceEpoch}',
+            parentShas: ['$commitType-parent-hash'],
             author: 'Web User',
             email: 'web.user@example.com',
-            message: 'Initial commit (web simulation)',
+            message: repository.isWebReal ? 
+                'Initial commit from ${repository.originalPath ?? "web file system"}' : 
+                'Initial commit (web simulation)',
             date: now.subtract(const Duration(days: 1)),
             stats: {
               'fileChanges': 1,
               'insertions': 10,
               'deletions': 0,
+              'path': commitPath,
             },
           )
         ];
@@ -355,18 +379,21 @@ class GitRepositoryManager {
         return [];
       }
       
-      // Handle web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
+      // Handle web mock or web real repositories
+      if (repository.isWebMock || repository.isWebReal) {
         // Create a mock branch
+        String branchName = repository.isWebReal ? "main-web" : "main";
+        String branchType = repository.isWebReal ? "web-real" : "web-mock";
+        
         return [
           GitBranch(
-            name: 'main',
-            shortName: 'main',
-            targetCommitSha: 'mock-commit-1',
+            name: branchName,
+            shortName: branchName,
+            targetCommitSha: '$branchType-commit-1',
             isLocal: true,
             isHead: true,
             isRemote: false,
-            upstream: 'origin/main',
+            upstream: 'origin/$branchName',
             ahead: 0,
             behind: 0,
           )
@@ -388,9 +415,15 @@ class GitRepositoryManager {
         throw Exception('Repository not found');
       }
       
-      // Skip web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
-        _logger.info('Skipping fetch for web mock repository ${repository.name}');
+      // Skip web repositories (mock or real)
+      if (repository.isWebMock || repository.isWebReal) {
+        String repoType = repository.isWebReal ? "web real" : "web mock";
+        _logger.info('Skipping fetch for $repoType repository ${repository.name}');
+        
+        // For web real repos, show a message that operation is not supported
+        if (repository.isWebReal) {
+          _logger.warning('Git operations on web real repositories are limited due to browser security restrictions');
+        }
         return;
       }
       
@@ -415,9 +448,15 @@ class GitRepositoryManager {
         throw Exception('Repository not found');
       }
       
-      // Skip web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
-        _logger.info('Skipping pull for web mock repository ${repository.name}');
+      // Skip web repositories (mock or real)
+      if (repository.isWebMock || repository.isWebReal) {
+        String repoType = repository.isWebReal ? "web real" : "web mock";
+        _logger.info('Skipping pull for $repoType repository ${repository.name}');
+        
+        // For web real repos, show a message that operation is not supported
+        if (repository.isWebReal) {
+          _logger.warning('Git operations on web real repositories are limited due to browser security restrictions');
+        }
         return;
       }
       
@@ -442,9 +481,15 @@ class GitRepositoryManager {
         throw Exception('Repository not found');
       }
       
-      // Skip web mock repositories
-      if (repository.path!.startsWith('/virtual/')) {
-        _logger.info('Skipping push for web mock repository ${repository.name}');
+      // Skip web repositories (mock or real)
+      if (repository.isWebMock || repository.isWebReal) {
+        String repoType = repository.isWebReal ? "web real" : "web mock";
+        _logger.info('Skipping push for $repoType repository ${repository.name}');
+        
+        // For web real repos, show a message that operation is not supported
+        if (repository.isWebReal) {
+          _logger.warning('Git operations on web real repositories are limited due to browser security restrictions');
+        }
         return;
       }
       
