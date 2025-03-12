@@ -219,67 +219,75 @@ class GitRepositoryManager {
   
   Future<String?> _determinePrimaryLanguage(String repoPath) async {
     try {
-      // Skip for web mock repositories
-      if (repoPath.startsWith('/virtual/')) {
+      // Check if running on web
+      bool isWeb = identical(0, 0.0);
+      
+      // Skip for web mode or web mock repositories
+      if (isWeb || repoPath.startsWith('/virtual/')) {
         return 'Flutter';
       }
       
       // This is just a simple implementation - in a real app we would analyze files by extension
       // or use a language detection library
-      final directory = Directory(repoPath);
-      
-      int dartCount = 0;
-      int jsCount = 0;
-      int pythonCount = 0;
-      int tsCount = 0;
-      int cppCount = 0;
-      
-      await for (final entity in directory.list(recursive: true, followLinks: false)) {
-        if (entity is File) {
-          final extension = path.extension(entity.path).toLowerCase();
-          
-          switch (extension) {
-            case '.dart':
-              dartCount++;
-              break;
-            case '.js':
-              jsCount++;
-              break;
-            case '.py':
-              pythonCount++;
-              break;
-            case '.ts':
-              tsCount++;
-              break;
-            case '.cpp':
-            case '.cc':
-            case '.cxx':
-              cppCount++;
-              break;
+      try {
+        final directory = Directory(repoPath);
+        
+        int dartCount = 0;
+        int jsCount = 0;
+        int pythonCount = 0;
+        int tsCount = 0;
+        int cppCount = 0;
+        
+        await for (final entity in directory.list(recursive: true, followLinks: false)) {
+          if (entity is File) {
+            final extension = path.extension(entity.path).toLowerCase();
+            
+            switch (extension) {
+              case '.dart':
+                dartCount++;
+                break;
+              case '.js':
+                jsCount++;
+                break;
+              case '.py':
+                pythonCount++;
+                break;
+              case '.ts':
+                tsCount++;
+                break;
+              case '.cpp':
+              case '.cc':
+              case '.cxx':
+                cppCount++;
+                break;
+            }
           }
         }
+        
+        // Return the language with the most files
+        final counts = {
+          'Dart': dartCount,
+          'JavaScript': jsCount,
+          'Python': pythonCount,
+          'TypeScript': tsCount,
+          'C++': cppCount,
+        };
+        
+        String? primaryLanguage;
+        int maxCount = 0;
+        
+        counts.forEach((lang, count) {
+          if (count > maxCount) {
+            maxCount = count;
+            primaryLanguage = lang;
+          }
+        });
+        
+        return primaryLanguage;
+      } catch (e) {
+        _logger.error('Error scanning directory: $e');
+        return 'Unknown';
       }
-      
-      // Return the language with the most files
-      final counts = {
-        'Dart': dartCount,
-        'JavaScript': jsCount,
-        'Python': pythonCount,
-        'TypeScript': tsCount,
-        'C++': cppCount,
-      };
-      
-      String? primaryLanguage;
-      int maxCount = 0;
-      
-      counts.forEach((lang, count) {
-        if (count > maxCount) {
-          maxCount = count;
-          primaryLanguage = lang;
-        }
-      });
-      
-      return primaryLanguage;
     } catch (e) {
       _logger.error('Failed to determine primary language', error: e);
       return null;
