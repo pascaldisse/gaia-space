@@ -126,25 +126,33 @@ class GitDiff extends Equatable {
   final String newFile;
   final List<GitDiffHunk> hunks;
   final bool isBinary;
-
+  final String status; // Added for pull request screen
+  final String file; // Added for pull request screen
+  
   const GitDiff({
     required this.oldFile,
     required this.newFile,
     required this.hunks,
     this.isBinary = false,
-  });
+    this.status = 'modified',
+    String? file,
+  }) : file = file ?? newFile;
 
   GitDiff copyWith({
     String? oldFile,
     String? newFile,
     List<GitDiffHunk>? hunks,
     bool? isBinary,
+    String? status,
+    String? file,
   }) {
     return GitDiff(
       oldFile: oldFile ?? this.oldFile,
       newFile: newFile ?? this.newFile,
       hunks: hunks ?? this.hunks,
       isBinary: isBinary ?? this.isBinary,
+      status: status ?? this.status,
+      file: file ?? this.file,
     );
   }
 
@@ -154,6 +162,8 @@ class GitDiff extends Equatable {
       'newFile': newFile,
       'hunks': hunks.map((hunk) => hunk.toJson()).toList(),
       'isBinary': isBinary,
+      'status': status,
+      'file': file,
     };
   }
 
@@ -165,6 +175,8 @@ class GitDiff extends Equatable {
           .map((hunk) => GitDiffHunk.fromJson(hunk))
           .toList(),
       isBinary: json['isBinary'] ?? false,
+      status: json['status'] ?? 'modified',
+      file: json['file'],
     );
   }
 
@@ -178,7 +190,11 @@ class GitDiff extends Equatable {
       .expand((hunk) => hunk.lines)
       .where((line) => line.isDeletion)
       .length;
+  
+  // Aliases for pull request screen
+  int get additions => additionCount;
+  int get deletions => deletionCount;
       
   @override
-  List<Object?> get props => [oldFile, newFile, hunks, isBinary];
+  List<Object?> get props => [oldFile, newFile, hunks, isBinary, status, file];
 }

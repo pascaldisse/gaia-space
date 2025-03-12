@@ -8,6 +8,8 @@ class GitDiffViewer extends StatefulWidget {
   final bool sideBySide;
   final bool showLineNumbers;
   final bool? isDarkMode;
+  final bool showMinimap;
+  final Function(String)? onCopyDiffAsPatch;
   
   const GitDiffViewer({
     Key? key,
@@ -15,6 +17,8 @@ class GitDiffViewer extends StatefulWidget {
     this.sideBySide = true,
     this.showLineNumbers = true,
     this.isDarkMode,
+    this.showMinimap = true,
+    this.onCopyDiffAsPatch,
   }) : super(key: key);
 
   @override
@@ -26,6 +30,13 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _leftScrollController = ScrollController();
   final ScrollController _rightScrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  
+  bool _showSearch = false;
+  String _searchQuery = '';
+  List<int> _searchResults = [];
+  int _currentSearchIndex = -1;
+  bool _showDiffOptions = false;
   
   bool get _isDarkMode => 
       widget.isDarkMode ?? 
@@ -104,11 +115,117 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
   }
   
   @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query != _searchQuery) {
+      setState(() {
+        _searchQuery = query;
+        _searchResults = _findSearchResults(query);
+        _currentSearchIndex = _searchResults.isNotEmpty ? 0 : -1;
+      });
+      
+      if (_currentSearchIndex >= 0) {
+        _scrollToSearchResult(_currentSearchIndex);
+      }
+    }
+  }
+
+  List<int> _findSearchResults(String query) {
+    if (query.isEmpty || widget.diff == null) return [];
+    
+    final List<int> results = [];
+    int lineIndex = 0;
+    
+    for (final hunk in widget.diff!.hunks) {
+      // Skip hunk header
+      lineIndex++;
+      
+      for (final line in hunk.lines) {
+        if (line.content.toLowerCase().contains(query)) {
+          results.add(lineIndex);
+        }
+        lineIndex++;
+      }
+    }
+    
+    return results;
+  }
+
+  void _scrollToSearchResult(int index) {
+    if (index < 0 || index >= _searchResults.length) return;
+    
+    // Calculate approximate scroll position based on line height
+    final double lineHeight = 20.0; // Estimate
+    final double targetOffset = _searchResults[index] * lineHeight;
+    
+    _verticalController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+  
+  void _nextSearchResult() {
+    if (_searchResults.isEmpty) return;
+    
+    setState(() {
+      _currentSearchIndex = (_currentSearchIndex + 1) % _searchResults.length;
+    });
+    
+    _scrollToSearchResult(_currentSearchIndex);
+  }
+  
+  void _previousSearchResult() {
+    if (_searchResults.isEmpty) return;
+    
+    setState(() {
+      _currentSearchIndex = (_currentSearchIndex - 1 + _searchResults.length) % _searchResults.length;
+    });
+    
+    _scrollToSearchResult(_currentSearchIndex);
+  }
+  
+  // Generate diff as patch format for copying
+  String _generatePatchFormat() {
+    if (widget.diff == null) return '';
+    
+    final buffer = StringBuffer();
+    
+    // Add file headers
+    buffer.writeln('--- a/${widget.diff!.oldFile}');
+    buffer.writeln('+++ b/${widget.diff!.newFile}');
+    
+    // Add hunks
+    for (final hunk in widget.diff!.hunks) {
+      buffer.writeln(hunk.header);
+      
+      for (final line in hunk.lines) {
+        if (line.isAddition) {
+          buffer.writeln('+${line.content}');
+        } else if (line.isDeletion) {
+          buffer.writeln('-${line.content}');
+        } else if (line.isContext) {
+          buffer.writeln(' ${line.content}');
+        }
+      }
+    }
+    
+    return buffer.toString();
+  }
+
+  @override
   void dispose() {
     _verticalController.dispose();
     _horizontalController.dispose();
     _leftScrollController.dispose();
     _rightScrollController.dispose();
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
     super.dispose();
   }
   
@@ -180,6 +297,30 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              // Search button
+              IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: 'Search in diff',
+                onPressed: () {
+                  setState(() {
+                    _showSearch = !_showSearch;
+                    if (!_showSearch) {
+                      _searchController.clear();
+                    }
+                  });
+                },
+              ),
+              // More options button
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'More options',
+                onPressed: () {
+                  setState(() {
+                    _showDiffOptions = !_showDiffOptions;
+                  });
+                },
+              ),
+              // View toggle
               TextButton.icon(
                 icon: Icon(widget.sideBySide 
                     ? Icons.view_headline
@@ -195,11 +336,100 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
           ),
         ),
         
+        // Search bar (if shown)
+        if (_showSearch)
+          Container(
+            color: _isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search in diff',
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      suffixText: _searchResults.isNotEmpty 
+                          ? '${_currentSearchIndex + 1}/${_searchResults.length}'
+                          : null,
+                    ),
+                    onSubmitted: (_) => _nextSearchResult(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.navigate_before),
+                  tooltip: 'Previous result',
+                  onPressed: _searchResults.isEmpty ? null : _previousSearchResult,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.navigate_next),
+                  tooltip: 'Next result',
+                  onPressed: _searchResults.isEmpty ? null : _nextSearchResult,
+                ),
+              ],
+            ),
+          ),
+          
+        // Options menu (if shown)
+        if (_showDiffOptions)
+          Container(
+            color: _isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.content_copy),
+                  label: const Text('Copy as Patch'),
+                  onPressed: () {
+                    final patch = _generatePatchFormat();
+                    if (widget.onCopyDiffAsPatch != null) {
+                      widget.onCopyDiffAsPatch!(patch);
+                    }
+                  },
+                ),
+                TextButton.icon(
+                  icon: Icon(widget.showLineNumbers ? Icons.visibility_off : Icons.visibility),
+                  label: Text(widget.showLineNumbers ? 'Hide Line Numbers' : 'Show Line Numbers'),
+                  onPressed: () {
+                    // You would implement the toggle in the parent
+                  },
+                ),
+                TextButton.icon(
+                  icon: Icon(widget.showMinimap ? Icons.hide_image : Icons.map),
+                  label: Text(widget.showMinimap ? 'Hide Minimap' : 'Show Minimap'),
+                  onPressed: () {
+                    // You would implement the toggle in the parent
+                  },
+                ),
+              ],
+            ),
+          ),
+        
         // Diff content
         Expanded(
-          child: widget.sideBySide
-              ? _buildSideBySideDiff()
-              : _buildUnifiedDiff(),
+          child: Stack(
+            children: [
+              widget.sideBySide
+                  ? _buildSideBySideDiff()
+                  : _buildUnifiedDiff(),
+              
+              // Minimap if enabled
+              if (widget.showMinimap)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 60,
+                  child: _buildMinimap(),
+                ),
+            ],
+          ),
         ),
       ],
     );
@@ -342,6 +572,88 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
     );
   }
   
+  // Build the minimap for quick navigation
+  Widget _buildMinimap() {
+    if (widget.diff == null) return const SizedBox.shrink();
+    
+    // Calculate ratio of visible area to entire document
+    final totalLines = _getTotalLines();
+    final visibleRatio = _verticalController.hasClients && totalLines > 0
+        ? _verticalController.position.viewportDimension / (_verticalController.position.maxScrollExtent + _verticalController.position.viewportDimension)
+        : 1.0;
+    
+    // Calculate position of viewport in minimap
+    final scrollRatio = _verticalController.hasClients && _verticalController.position.maxScrollExtent > 0
+        ? _verticalController.offset / _verticalController.position.maxScrollExtent
+        : 0.0;
+    
+    return GestureDetector(
+      onVerticalDragStart: (details) => _handleMinimapDrag(details.localPosition.dy),
+      onVerticalDragUpdate: (details) => _handleMinimapDrag(details.localPosition.dy),
+      child: Container(
+        color: _isDarkMode ? Colors.grey.shade900.withOpacity(0.5) : Colors.grey.shade200.withOpacity(0.5),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Draw the minimap content
+            CustomPaint(
+              painter: _MinimapPainter(
+                diff: widget.diff!,
+                isDarkMode: _isDarkMode,
+              ),
+            ),
+            // Draw the viewport indicator
+            Positioned(
+              top: scrollRatio * (1.0 - visibleRatio) * MediaQuery.of(context).size.height,
+              left: 0,
+              right: 0,
+              height: visibleRatio * MediaQuery.of(context).size.height,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                    width: 2,
+                  ),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  void _handleMinimapDrag(double dragPositionY) {
+    if (!_verticalController.hasClients) return;
+    
+    // Calculate ratio based on drag position
+    final heightRatio = dragPositionY / MediaQuery.of(context).size.height;
+    
+    // Limit to valid range
+    final clampedRatio = heightRatio.clamp(0.0, 1.0);
+    
+    // Scroll to the position
+    _verticalController.jumpTo(
+      _verticalController.position.maxScrollExtent * clampedRatio
+    );
+  }
+  
+  int _getTotalLines() {
+    if (widget.diff == null) return 0;
+    
+    int total = 0;
+    for (final hunk in widget.diff!.hunks) {
+      // Count hunk header
+      total++;
+      
+      // Count all lines in the hunk
+      total += hunk.lines.length;
+    }
+    
+    return total;
+  }
+
   Widget _buildSideBySideDiff() {
     final language = _getLanguage();
     final highlightTheme = githubTheme;
@@ -569,5 +881,87 @@ class _GitDiffViewerState extends State<GitDiffViewer> {
         ),
       ),
     );
+  }
+}
+
+/// Custom painter for the minimap view of the diff
+class _MinimapPainter extends CustomPainter {
+  final GitDiff diff;
+  final bool isDarkMode;
+  
+  _MinimapPainter({
+    required this.diff,
+    required this.isDarkMode,
+  });
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (diff.hunks.isEmpty) return;
+    
+    // Calculate total number of lines
+    int totalLines = 0;
+    for (final hunk in diff.hunks) {
+      totalLines += 1 + hunk.lines.length; // 1 for header
+    }
+    
+    // Calculate line height
+    final lineHeight = size.height / totalLines;
+    
+    // Prepare paints
+    final addPaint = Paint()
+      ..color = isDarkMode ? Colors.green.shade800 : Colors.green.shade200
+      ..style = PaintingStyle.fill;
+      
+    final deletePaint = Paint()
+      ..color = isDarkMode ? Colors.red.shade800 : Colors.red.shade200
+      ..style = PaintingStyle.fill;
+      
+    final contextPaint = Paint()
+      ..color = isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300
+      ..style = PaintingStyle.fill;
+      
+    final headerPaint = Paint()
+      ..color = isDarkMode ? Colors.blueGrey.shade800 : Colors.blueGrey.shade200
+      ..style = PaintingStyle.fill;
+    
+    // Current y position
+    double y = 0;
+    
+    // Draw lines
+    for (final hunk in diff.hunks) {
+      // Draw hunk header
+      canvas.drawRect(
+        Rect.fromLTWH(0, y, size.width, lineHeight),
+        headerPaint,
+      );
+      y += lineHeight;
+      
+      // Draw hunk lines
+      for (final line in hunk.lines) {
+        if (line.isAddition) {
+          canvas.drawRect(
+            Rect.fromLTWH(0, y, size.width, lineHeight),
+            addPaint,
+          );
+        } else if (line.isDeletion) {
+          canvas.drawRect(
+            Rect.fromLTWH(0, y, size.width, lineHeight),
+            deletePaint,
+          );
+        } else {
+          // Context line
+          canvas.drawRect(
+            Rect.fromLTWH(0, y, size.width, lineHeight),
+            contextPaint,
+          );
+        }
+        y += lineHeight;
+      }
+    }
+  }
+  
+  @override
+  bool shouldRepaint(covariant _MinimapPainter oldDelegate) {
+    return diff != oldDelegate.diff || isDarkMode != oldDelegate.isDarkMode;
   }
 }
