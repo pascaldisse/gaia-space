@@ -19,15 +19,19 @@ class GitFileList extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _GitFileListState createState() => _GitFileListState();
+  GitFileListState createState() => GitFileListState();
 }
 
-class _GitFileListState extends State<GitFileList> {
+class GitFileListState extends State<GitFileList> {
   // Group files by category
   List<GitFile> _stagedFiles = [];
   List<GitFile> _modifiedFiles = [];
   List<GitFile> _untrackedFiles = [];
   List<GitFile> _conflictedFiles = [];
+  
+  // Directory navigation
+  String _currentDirectory = '';
+  bool _showDirectoryView = false;
   
   @override
   void initState() {
@@ -50,47 +54,217 @@ class _GitFileListState extends State<GitFileList> {
     _conflictedFiles = widget.files.where((file) => file.isConflicted).toList();
   }
   
+  // Check if there are directories in the current set of files
+  bool _hasDirectories() {
+    final allFiles = [..._stagedFiles, ..._modifiedFiles, ..._untrackedFiles, ..._conflictedFiles];
+    for (final file in allFiles) {
+      if (file.path.contains('/')) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  // Navigate to a directory
+  void _navigateToDirectory(String dirPath) {
+    setState(() {
+      _currentDirectory = dirPath;
+      _showDirectoryView = true;
+    });
+  }
+  
+  // Navigate up one level
+  void _navigateUp() {
+    setState(() {
+      if (_currentDirectory.isEmpty) {
+        _showDirectoryView = false;
+      } else {
+        final parentDir = _currentDirectory.contains('/')
+            ? _currentDirectory.substring(0, _currentDirectory.lastIndexOf('/'))
+            : '';
+        _currentDirectory = parentDir;
+      }
+    });
+  }
+  
+  // Get unique directories at the current level
+  Set<String> _getDirectoriesAtCurrentLevel(List<GitFile> files) {
+    final dirs = <String>{};
+    
+    for (final file in files) {
+      if (_currentDirectory.isEmpty) {
+        // At root level, get top-level directories
+        if (file.path.contains('/')) {
+          final topDir = file.path.substring(0, file.path.indexOf('/'));
+          dirs.add(topDir);
+        }
+      } else {
+        // In a subdirectory, get immediate child directories
+        if (file.isInDirectory(_currentDirectory)) {
+          final childPath = file.getChildPath(_currentDirectory);
+          if (childPath.contains('/')) {
+            dirs.add('$_currentDirectory/$childPath');
+          }
+        }
+      }
+    }
+    
+    return dirs;
+  }
+  
+  // Filter files for the current view
+  List<GitFile> _filterFilesForCurrentView(List<GitFile> files) {
+    if (!_showDirectoryView) {
+      // Show only root-level files when not in directory view
+      return files.where((file) => !file.path.contains('/')).toList();
+    } else if (_currentDirectory.isEmpty) {
+      // At root level in directory view, show only top-level files
+      return files.where((file) => !file.path.contains('/')).toList();
+    } else {
+      // In a subdirectory, show only immediate children that are files
+      return files.where((file) {
+        if (!file.path.startsWith('$_currentDirectory/')) return false;
+        
+        final relativePath = file.path.substring(_currentDirectory.length + 1);
+        return !relativePath.contains('/');
+      }).toList();
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      child: ListView(
-        children: [
-          // Conflicted files
-          if (_conflictedFiles.isNotEmpty)
-            _buildSection('Conflicts', _conflictedFiles, Colors.red),
-          
-          // Staged files
-          if (_stagedFiles.isNotEmpty) 
-            _buildSection('Staged Changes', _stagedFiles, Colors.green),
-          
-          // Modified files
-          if (_modifiedFiles.isNotEmpty)
-            _buildSection('Changes', _modifiedFiles, Colors.amber),
-          
-          // Untracked files
-          if (_untrackedFiles.isNotEmpty && widget.showUntracked)
-            _buildSection('Untracked Files', _untrackedFiles, Colors.grey),
-          
-          // Empty state
-          if (widget.files.isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text(
-                  'No changes',
-                  style: TextStyle(
-                    fontStyle: FontStyle.italic,
-                    color: Colors.grey,
+    // Detect if we have directories and should enable directory navigation
+    final hasDirectories = _hasDirectories();
+    
+    return Column(
+      children: [
+        // Directory navigation bar
+        if (hasDirectories)
+          _buildDirectoryNavigationBar(),
+        
+        // File list
+        Expanded(
+          child: Scrollbar(
+            child: ListView(
+              children: [
+                // Directories at current level (only in directory view)
+                if (_showDirectoryView)
+                  _buildDirectoriesSection(),
+                
+                // Conflicted files
+                if (_conflictedFiles.isNotEmpty)
+                  _buildSection('Conflicts', _filterFilesForCurrentView(_conflictedFiles), Colors.red),
+                
+                // Staged files
+                if (_stagedFiles.isNotEmpty) 
+                  _buildSection('Staged Changes', _filterFilesForCurrentView(_stagedFiles), Colors.green),
+                
+                // Modified files
+                if (_modifiedFiles.isNotEmpty)
+                  _buildSection('Changes', _filterFilesForCurrentView(_modifiedFiles), Colors.amber),
+                
+                // Untracked files
+                if (_untrackedFiles.isNotEmpty && widget.showUntracked)
+                  _buildSection('Untracked Files', _filterFilesForCurrentView(_untrackedFiles), Colors.grey),
+                
+                // Empty state
+                if (widget.files.isEmpty)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text(
+                        'No changes',
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildDirectoryNavigationBar() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade800
+            : Colors.grey.shade100,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+      child: Row(
+        children: [
+          // Toggle directory view
+          IconButton(
+            icon: Icon(_showDirectoryView ? Icons.folder_open : Icons.folder),
+            tooltip: _showDirectoryView ? 'Directory view' : 'File view',
+            onPressed: () {
+              setState(() {
+                _showDirectoryView = !_showDirectoryView;
+                if (!_showDirectoryView) {
+                  _currentDirectory = '';
+                }
+              });
+            },
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
+          ),
+          
+          // Up button
+          if (_showDirectoryView)
+            IconButton(
+              icon: const Icon(Icons.arrow_upward),
+              tooltip: 'Up one level',
+              onPressed: _navigateUp,
+              iconSize: 18,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
               ),
             ),
+          
+          // Current path
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: SelectableText(
+                _currentDirectory.isEmpty ? '/' : _currentDirectory,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
+                maxLines: 1,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
   
-  Widget _buildSection(String title, List<GitFile> files, Color color) {
+  Widget _buildDirectoriesSection() {
+    // Get all directories at current level
+    final allFiles = [..._stagedFiles, ..._modifiedFiles, ..._untrackedFiles, ..._conflictedFiles];
+    final dirs = _getDirectoriesAtCurrentLevel(allFiles);
+    
+    if (dirs.isEmpty) return const SizedBox.shrink();
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -98,7 +272,83 @@ class _GitFileListState extends State<GitFileList> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Row(
             children: [
-              Text(
+              const SelectableText(
+                'Directories',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withAlpha(25),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${dirs.length}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.blue,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...dirs.map((dir) => _buildDirectoryItem(dir)).toList(),
+        const Divider(),
+      ],
+    );
+  }
+  
+  Widget _buildDirectoryItem(String dirPath) {
+    final dirName = dirPath.contains('/')
+        ? dirPath.substring(dirPath.lastIndexOf('/') + 1)
+        : dirPath;
+        
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _navigateToDirectory(dirPath),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.folder,
+                color: Colors.blue,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SelectableText(
+                  dirName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.normal,
+                  ),
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildSection(String title, List<GitFile> files, Color color) {
+    if (files.isEmpty) return const SizedBox.shrink();
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              SelectableText(
                 title,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -109,7 +359,7 @@ class _GitFileListState extends State<GitFileList> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withAlpha(25),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -132,6 +382,13 @@ class _GitFileListState extends State<GitFileList> {
   Widget _buildFileItem(GitFile file, Color color) {
     final isSelected = widget.selectedFilePath == file.path;
     
+    // In directory view, show only filenames
+    final displayName = _showDirectoryView
+        ? file.fileName
+        : (file.directory.isEmpty
+            ? file.fileName
+            : '${file.fileName} (${file.directory})');
+    
     return Slidable(
       endActionPane: ActionPane(
         motion: const DrawerMotion(),
@@ -139,7 +396,7 @@ class _GitFileListState extends State<GitFileList> {
       ),
       child: Material(
         color: isSelected 
-            ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15)
+            ? Theme.of(context).colorScheme.primaryContainer.withAlpha(38)
             : Colors.transparent,
         child: InkWell(
           onTap: () => widget.onFileSelected(file),
@@ -154,31 +411,17 @@ class _GitFileListState extends State<GitFileList> {
                 
                 // File path
                 Expanded(
-                  child: Text(
-                    file.fileName,
+                  child: SelectableText(
+                    displayName,
                     style: TextStyle(
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                       color: isSelected 
                           ? Theme.of(context).colorScheme.primary
                           : Theme.of(context).textTheme.bodyMedium?.color,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
-                
-                // Optional folder indicator for better organization
-                if (file.directory.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: Text(
-                      file.directory,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).textTheme.bodySmall?.color,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
               ],
             ),
           ),
@@ -190,7 +433,9 @@ class _GitFileListState extends State<GitFileList> {
   Widget _buildStatusIcon(GitFile file, Color color) {
     IconData iconData;
     
-    if (file.isModified) {
+    if (file.isDirectory) {
+      iconData = Icons.folder;
+    } else if (file.isModified) {
       iconData = Icons.edit;
     } else if (file.isAdded) {
       iconData = Icons.add_circle_outline;

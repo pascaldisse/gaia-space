@@ -2,9 +2,11 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gaia_space/core/models/virtual_directory.dart';
 import 'package:gaia_space/core/services/git_repository_manager.dart';
 import 'package:gaia_space/core/services/git_service.dart';
 import 'package:gaia_space/core/utils/app_logger.dart';
+import 'package:gaia_space/ui/widgets/virtual_directory_browser.dart';
 import 'package:path/path.dart' as path;
 
 enum RepositoryCreationType { existing, clone, create }
@@ -48,63 +50,83 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
       _logger.info('Picking directory. isWeb: $isWeb');
       
       if (isWeb) {
-        // Web fallback: Allow selecting a single directory or file
-        _logger.info('Using web file picker fallback');
+        // Web mode with virtual file system
+        _logger.info('Using web virtual directory browser');
         
-        // In web mode, we'll let the user manually enter a path
+        // Create virtual directory root if needed
+        final rootDirectory = VirtualDirectory.createRoot();
         final nameController = TextEditingController();
-        String? manualPath = await showDialog<String>(
+        
+        // Show virtual directory browser dialog
+        final result = await showDialog<Map<String, dynamic>?>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Enter Repository Name'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'In web mode, you cannot select actual directories from your filesystem. '
-                  'Please enter a repository name and we will create a simulated repository.',
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Repository Name',
-                    border: OutlineInputBorder(),
-                    hintText: 'MyRepository',
+            title: const Text('Select Virtual Directory'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'In web mode, you cannot access your actual filesystem. '
+                    'Please select or create a virtual directory for your repository.',
+                    style: TextStyle(fontSize: 14),
                   ),
-                  onSubmitted: (value) {
-                    Navigator.of(context).pop(value.isNotEmpty ? value : 'MyRepository');
-                  },
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  const Divider(),
+                  Expanded(
+                    child: VirtualDirectoryBrowser(
+                      rootDirectory: rootDirectory,
+                      onDirectorySelected: (selectedDir) {
+                        // Pass selected directory back along with repository name
+                        Navigator.of(context).pop({
+                          'directory': selectedDir,
+                          'name': nameController.text.trim(),
+                        });
+                      },
+                    ),
+                  ),
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Repository Name',
+                        border: OutlineInputBorder(),
+                        hintText: 'MyRepository',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Cancel'),
               ),
-              TextButton(
-                onPressed: () {
-                  final text = nameController.text;
-                  Navigator.of(context).pop(text.isNotEmpty ? text : 'MyRepository');
-                },
-                child: const Text('Confirm'),
-              ),
             ],
           ),
         );
         
-        if (manualPath != null && manualPath.isNotEmpty) {
-          _logger.info('User entered manual path: $manualPath');
+        if (result != null && result['directory'] != null) {
+          final selectedDir = result['directory'] as VirtualDirectory;
+          String repoName = result['name'] as String? ?? '';
           
-          // For web, we create a virtual path
-          final sanitizedPath = manualPath
-              .replaceAll(RegExp(r'[^\w\s\-\.]'), '')  // Remove special chars
-              .trim();
+          // If no repo name provided, use directory name
+          if (repoName.isEmpty) {
+            repoName = selectedDir.name;
+          }
+          
+          _logger.info('User selected virtual directory: ${selectedDir.path}');
           
           // Create a unique virtual path
           final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final webPath = '/virtual/$timestamp/$sanitizedPath';
+          final webPath = '/virtual/$timestamp${selectedDir.path}';
           
           _logger.info('Using virtual path: $webPath');
           
@@ -113,11 +135,11 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
             
             // Update name based on the entered name
             if (_nameController.text.isEmpty) {
-              _nameController.text = sanitizedPath;
+              _nameController.text = repoName;
             }
           });
         } else {
-          _logger.info('User canceled manual path entry');
+          _logger.info('User canceled virtual directory selection');
         }
       } else {
         // Native platforms - use directory picker
@@ -144,7 +166,7 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
       // Show a user-friendly message when on web
       if (identical(0, 0.0)) {
         setState(() {
-          _error = 'Directory selection is limited in web browsers. You can enter a path manually or use the desktop app for full functionality.';
+          _error = 'An error occurred while selecting the directory. Please try again.';
         });
       }
     }
@@ -429,7 +451,7 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
                         const SizedBox(height: 16),
                         Container(
                           padding: const EdgeInsets.all(8),
-                          color: Colors.red.withOpacity(0.1),
+                          color: Colors.red.withAlpha(25),
                           child: Row(
                             children: [
                               const Icon(Icons.error_outline, color: Colors.red),

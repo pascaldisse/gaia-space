@@ -78,6 +78,45 @@ class GitFile extends Equatable {
     return lastSeparator != -1 ? path.substring(0, lastSeparator) : '';
   }
   
+  // Get the parent directory of this file's path
+  String get parentDirectory {
+    final dirPath = directory;
+    if (dirPath.isEmpty) return '';
+    
+    final lastSeparator = dirPath.lastIndexOf('/');
+    return lastSeparator != -1 ? dirPath.substring(0, lastSeparator) : '';
+  }
+  
+  // Check if this file is inside the specified directory
+  bool isInDirectory(String dirPath) {
+    if (path == dirPath) return false; // It's the directory itself
+    
+    // For directory path "/foo/bar", a file "/foo/bar/baz.txt" is inside it
+    // Also handle the root directory case
+    if (dirPath.isEmpty || dirPath == '/') {
+      return !path.contains('/') || path.indexOf('/') == path.length - 1;
+    }
+    
+    return path.startsWith('$dirPath/');
+  }
+  
+  // Get the immediate child path segment of this file relative to dirPath
+  String getChildPath(String dirPath) {
+    if (!isInDirectory(dirPath)) return path;
+    
+    if (dirPath.isEmpty || dirPath == '/') {
+      // Handle root directory case
+      final firstSeparator = path.indexOf('/');
+      if (firstSeparator == -1) return path;
+      return path.substring(0, firstSeparator);
+    }
+    
+    final relativePath = path.substring(dirPath.length + 1); // +1 for the trailing slash
+    final firstSeparator = relativePath.indexOf('/');
+    if (firstSeparator == -1) return relativePath;
+    return relativePath.substring(0, firstSeparator);
+  }
+  
   // Helper methods to categorize file
   bool get isModified => status == GitFileStatus.modified;
   bool get isAdded => status == GitFileStatus.added;

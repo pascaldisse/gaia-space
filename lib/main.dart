@@ -28,8 +28,20 @@ class GaiaSpaceApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Gaia Space',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
+      theme: AppTheme.lightTheme.copyWith(
+        textSelectionTheme: const TextSelectionThemeData(
+          selectionColor: Color(0x332563EB), // Primary color with opacity
+          cursorColor: Color(0xFF2563EB),
+          selectionHandleColor: Color(0xFF2563EB),
+        ),
+      ),
+      darkTheme: AppTheme.darkTheme.copyWith(
+        textSelectionTheme: const TextSelectionThemeData(
+          selectionColor: Color(0x332563EB), // Primary color with opacity
+          cursorColor: Color(0xFF2563EB),
+          selectionHandleColor: Color(0xFF2563EB),
+        ),
+      ),
       themeMode: ThemeMode.system,
       navigatorKey: NavigationService.navigatorKey,
       home: const SplashScreen(),

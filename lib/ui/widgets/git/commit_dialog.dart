@@ -37,10 +37,10 @@ class CommitDialog extends StatefulWidget {
   }
 
   @override
-  _CommitDialogState createState() => _CommitDialogState();
+  CommitDialogState createState() => CommitDialogState();
 }
 
-class _CommitDialogState extends State<CommitDialog> {
+class CommitDialogState extends State<CommitDialog> {
   late TextEditingController _messageController;
   bool _isAmendChecked = false;
   
@@ -66,7 +66,7 @@ class _CommitDialogState extends State<CommitDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Staged files summary
-            Text(
+            SelectableText(
               'Staged Files (${widget.stagedFiles.length})',
               style: Theme.of(context).textTheme.titleSmall,
             ),
@@ -90,10 +90,10 @@ class _CommitDialogState extends State<CommitDialog> {
                   return ListTile(
                     dense: true,
                     visualDensity: VisualDensity.compact,
-                    title: Text(
+                    title: SelectableText(
                       file.path,
                       style: Theme.of(context).textTheme.bodySmall,
-                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     leading: Icon(
                       _getFileStatusIcon(file),
@@ -108,7 +108,7 @@ class _CommitDialogState extends State<CommitDialog> {
             const SizedBox(height: 16),
             
             // Commit message
-            Text(
+            SelectableText(
               'Commit Message',
               style: Theme.of(context).textTheme.titleSmall,
             ),
@@ -130,7 +130,7 @@ class _CommitDialogState extends State<CommitDialog> {
               // Amend option
               CheckboxListTile(
                 title: const Text('Amend previous commit'),
-                subtitle: const Text(
+                subtitle: const SelectableText(
                   'Add staged changes to the previous commit and edit its message',
                   style: TextStyle(fontSize: 12),
                 ),
