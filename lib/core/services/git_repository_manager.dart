@@ -45,16 +45,28 @@ class GitRepositoryManager {
     String? remoteUrl,
   }) async {
     try {
-      _logger.info('Adding repository at $path');
+      _logger.info('Adding repository: name=$name, path=$path, isWebMock=$isWebMock');
       
       // If not web mock, validate it's a Git repository
       if (!isWebMock) {
-        await _gitService.openRepository(path);
+        _logger.info('Validating repository is a git repository');
+        try {
+          await _gitService.openRepository(path);
+          _logger.info('Git repository validated successfully');
+        } catch (e) {
+          _logger.error('Failed to open git repository', error: e);
+          rethrow;
+        }
+      } else {
+        _logger.info('Skipping git validation for web mock repository');
       }
       
       // Create repository metadata
+      final repositoryId = const Uuid().v4();
+      _logger.info('Creating repository with ID: $repositoryId');
+      
       final repository = GitRepository(
-        id: const Uuid().v4(),
+        id: repositoryId,
         name: name,
         description: description,
         path: path,
@@ -65,15 +77,21 @@ class GitRepositoryManager {
         branchesCount: isWebMock ? 1 : 0, // Default to 1 branch for web mock
         commitsCount: isWebMock ? 1 : 0,  // Default to 1 commit for web mock
         language: isWebMock ? 'Flutter' : null, // Default language for web mock
+        remoteUrl: remoteUrl,
       );
       
+      _logger.info('Adding repository to in-memory store');
       _repositories.add(repository);
       
       // Only update stats for real repositories
       if (!isWebMock) {
+        _logger.info('Updating repository stats');
         await _updateRepositoryStats(repository.id);
+      } else {
+        _logger.info('Skipping stats update for web mock repository');
       }
       
+      _logger.info('Repository added successfully with ID: ${repository.id}');
       return _repositories.firstWhere((repo) => repo.id == repository.id);
     } catch (e) {
       _logger.error('Failed to add repository', error: e);

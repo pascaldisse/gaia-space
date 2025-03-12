@@ -45,28 +45,87 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     try {
       // Check if running on web
       bool isWeb = identical(0, 0.0);
+      _logger.info('Picking directory. isWeb: $isWeb');
       
       if (isWeb) {
         // Web fallback: Allow selecting a single directory or file
-        FilePickerResult? result = await FilePicker.platform.pickFiles();
+        _logger.info('Using web file picker fallback');
         
-        if (result != null) {
-          // For web, we just get a representation of the path
-          String webPath = result.files.single.name;
+        // In web mode, we'll let the user manually enter a path
+        final nameController = TextEditingController();
+        String? manualPath = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Enter Repository Name'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'In web mode, you cannot select actual directories from your filesystem. '
+                  'Please enter a repository name and we will create a simulated repository.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Repository Name',
+                    border: OutlineInputBorder(),
+                    hintText: 'MyRepository',
+                  ),
+                  onSubmitted: (value) {
+                    Navigator.of(context).pop(value.isNotEmpty ? value : 'MyRepository');
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  final text = nameController.text;
+                  Navigator.of(context).pop(text.isNotEmpty ? text : 'MyRepository');
+                },
+                child: const Text('Confirm'),
+              ),
+            ],
+          ),
+        );
+        
+        if (manualPath != null && manualPath.isNotEmpty) {
+          _logger.info('User entered manual path: $manualPath');
+          
+          // For web, we create a virtual path
+          final sanitizedPath = manualPath
+              .replaceAll(RegExp(r'[^\w\s\-\.]'), '')  // Remove special chars
+              .trim();
+          
+          // Create a unique virtual path
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final webPath = '/virtual/$timestamp/$sanitizedPath';
+          
+          _logger.info('Using virtual path: $webPath');
+          
           setState(() {
-            _pathController.text = '/virtual/${webPath}';
+            _pathController.text = webPath;
             
-            // Update name based on the selected file/directory
+            // Update name based on the entered name
             if (_nameController.text.isEmpty) {
-              _nameController.text = webPath.split('/').last.split('.').first;
+              _nameController.text = sanitizedPath;
             }
           });
+        } else {
+          _logger.info('User canceled manual path entry');
         }
       } else {
         // Native platforms - use directory picker
+        _logger.info('Using native directory picker');
         String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
         
         if (selectedDirectory != null) {
+          _logger.info('Selected directory: $selectedDirectory');
           setState(() {
             _pathController.text = selectedDirectory;
             
@@ -75,6 +134,8 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
               _nameController.text = path.basename(selectedDirectory);
             }
           });
+        } else {
+          _logger.info('No directory selected');
         }
       }
     } catch (e) {
@@ -130,8 +191,10 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     
     // Check if running on web
     bool isWeb = identical(0, 0.0);
+    _logger.info('Adding existing repository. Name: $name, Path: $path, isWeb: $isWeb');
     
     if (isWeb && path.startsWith('/virtual/')) {
+      _logger.info('Using web mock repository');
       // Web mode with simulated repository
       await _repositoryManager.addRepository(
         name: name,
@@ -139,20 +202,32 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
         description: description.isNotEmpty ? description : null,
         isWebMock: true,
       );
+      _logger.info('Successfully added web mock repository');
     } else {
+      _logger.info('Using native file system repository');
       // Native platform with real file system access
-      // Validate it's a git repository
-      final gitDir = Directory(path);
-      final gitConfigDir = Directory('${gitDir.path}/.git');
-      if (!await gitConfigDir.exists()) {
-        throw Exception('The selected directory is not a git repository');
+      try {
+        // Validate it's a git repository
+        final gitDir = Directory(path);
+        final gitConfigDir = Directory('${gitDir.path}/.git');
+        
+        _logger.info('Checking if directory is a git repository: ${gitConfigDir.path}');
+        if (!await gitConfigDir.exists()) {
+          _logger.error('Not a git repository: .git directory does not exist');
+          throw Exception('The selected directory is not a git repository');
+        }
+        
+        _logger.info('Valid git repository found');
+        await _repositoryManager.addRepository(
+          name: name,
+          path: path,
+          description: description.isNotEmpty ? description : null,
+        );
+        _logger.info('Successfully added repository');
+      } catch (e) {
+        _logger.error('Error validating git repository', error: e);
+        throw Exception('Error accessing the directory: $e');
       }
-      
-      await _repositoryManager.addRepository(
-        name: name,
-        path: path,
-        description: description.isNotEmpty ? description : null,
-      );
     }
   }
   
@@ -164,8 +239,10 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     
     // Check if running on web
     bool isWeb = identical(0, 0.0);
+    _logger.info('Cloning repository. Name: $name, Path: $path, URL: $url, isWeb: $isWeb');
     
     if (isWeb && path.startsWith('/virtual/')) {
+      _logger.info('Using web mock repository for cloning');
       // Web mode with simulated repository
       await _repositoryManager.addRepository(
         name: name,
@@ -174,14 +251,22 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
         isWebMock: true,
         remoteUrl: url,
       );
+      _logger.info('Successfully added web mock repository (cloned)');
     } else {
+      _logger.info('Using native git clone');
       // Native platform with real file system access
-      await _repositoryManager.cloneRepository(
-        url: url,
-        destinationPath: path,
-        name: name,
-        description: description.isNotEmpty ? description : null,
-      );
+      try {
+        await _repositoryManager.cloneRepository(
+          url: url,
+          destinationPath: path,
+          name: name,
+          description: description.isNotEmpty ? description : null,
+        );
+        _logger.info('Successfully cloned repository');
+      } catch (e) {
+        _logger.error('Error cloning repository', error: e);
+        throw Exception('Error cloning the repository: $e');
+      }
     }
   }
   
@@ -192,8 +277,10 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     
     // Check if running on web
     bool isWeb = identical(0, 0.0);
+    _logger.info('Initializing new repository. Name: $name, Path: $path, isWeb: $isWeb');
     
     if (isWeb && path.startsWith('/virtual/')) {
+      _logger.info('Using web mock repository for new repo');
       // Web mode with simulated repository
       await _repositoryManager.addRepository(
         name: name,
@@ -202,23 +289,35 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
         isWebMock: true,
         isNewRepo: true,
       );
+      _logger.info('Successfully added web mock repository (new)');
     } else {
+      _logger.info('Using native git init');
       // Native platform with real file system access
-      // Create the directory if it doesn't exist
-      final directory = Directory(path);
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
+      try {
+        // Create the directory if it doesn't exist
+        final directory = Directory(path);
+        _logger.info('Checking if directory exists: ${directory.path}');
+        if (!await directory.exists()) {
+          _logger.info('Creating directory: ${directory.path}');
+          await directory.create(recursive: true);
+        }
+        
+        // Initialize git repository
+        _logger.info('Initializing git repository');
+        await _gitService.initRepository(path);
+        
+        // Add to manager
+        _logger.info('Adding repository to manager');
+        await _repositoryManager.addRepository(
+          name: name,
+          path: path,
+          description: description.isNotEmpty ? description : null,
+        );
+        _logger.info('Successfully initialized repository');
+      } catch (e) {
+        _logger.error('Error initializing repository', error: e);
+        throw Exception('Error initializing the repository: $e');
       }
-      
-      // Initialize git repository
-      await _gitService.initRepository(path);
-      
-      // Add to manager
-      await _repositoryManager.addRepository(
-        name: name,
-        path: path,
-        description: description.isNotEmpty ? description : null,
-      );
     }
   }
 

@@ -15,6 +15,7 @@ class GitRepository extends Equatable {
   final String? avatarUrl;
   final bool isFork;
   final String? parentRepositoryUrl;
+  final String? remoteUrl;
 
   const GitRepository({
     required this.id,
@@ -31,6 +32,7 @@ class GitRepository extends Equatable {
     this.avatarUrl,
     this.isFork = false,
     this.parentRepositoryUrl,
+    this.remoteUrl,
   });
 
   // Copy with method for immutability
@@ -49,6 +51,7 @@ class GitRepository extends Equatable {
     String? avatarUrl,
     bool? isFork,
     String? parentRepositoryUrl,
+    String? remoteUrl,
   }) {
     return GitRepository(
       id: id ?? this.id,
@@ -65,6 +68,7 @@ class GitRepository extends Equatable {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       isFork: isFork ?? this.isFork,
       parentRepositoryUrl: parentRepositoryUrl ?? this.parentRepositoryUrl,
+      remoteUrl: remoteUrl ?? this.remoteUrl,
     );
   }
 
@@ -85,6 +89,7 @@ class GitRepository extends Equatable {
       'avatarUrl': avatarUrl,
       'isFork': isFork,
       'parentRepositoryUrl': parentRepositoryUrl,
+      'remoteUrl': remoteUrl,
     };
   }
 
@@ -105,6 +110,7 @@ class GitRepository extends Equatable {
       avatarUrl: json['avatarUrl'],
       isFork: json['isFork'] ?? false,
       parentRepositoryUrl: json['parentRepositoryUrl'],
+      remoteUrl: json['remoteUrl'],
     );
   }
 
@@ -124,5 +130,6 @@ class GitRepository extends Equatable {
     avatarUrl,
     isFork,
     parentRepositoryUrl,
+    remoteUrl,
   ];
 }
