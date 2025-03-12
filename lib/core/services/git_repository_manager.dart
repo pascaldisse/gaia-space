@@ -40,12 +40,17 @@ class GitRepositoryManager {
     String? description,
     String? workspaceId,
     String? createdBy,
+    bool isWebMock = false,
+    bool isNewRepo = false,
+    String? remoteUrl,
   }) async {
     try {
       _logger.info('Adding repository at $path');
       
-      // Validate it's a Git repository
-      await _gitService.openRepository(path);
+      // If not web mock, validate it's a Git repository
+      if (!isWebMock) {
+        await _gitService.openRepository(path);
+      }
       
       // Create repository metadata
       final repository = GitRepository(
@@ -57,11 +62,17 @@ class GitRepositoryManager {
         createdBy: createdBy ?? 'system',
         createdAt: DateTime.now(),
         lastActivityAt: DateTime.now(),
-        branchesCount: 0, // We'll update this after analyzing the repo
+        branchesCount: isWebMock ? 1 : 0, // Default to 1 branch for web mock
+        commitsCount: isWebMock ? 1 : 0,  // Default to 1 commit for web mock
+        language: isWebMock ? 'Flutter' : null, // Default language for web mock
       );
       
       _repositories.add(repository);
-      await _updateRepositoryStats(repository.id);
+      
+      // Only update stats for real repositories
+      if (!isWebMock) {
+        await _updateRepositoryStats(repository.id);
+      }
       
       return _repositories.firstWhere((repo) => repo.id == repository.id);
     } catch (e) {
@@ -173,6 +184,12 @@ class GitRepositoryManager {
       
       _logger.info('Updating repository stats for ${repository.name}');
       
+      // Skip web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        _logger.info('Skipping stats update for web mock repository ${repository.name}');
+        return;
+      }
+      
       // Get branch count
       final branches = await _gitService.getBranches(repository.path!);
       
@@ -202,6 +219,11 @@ class GitRepositoryManager {
   
   Future<String?> _determinePrimaryLanguage(String repoPath) async {
     try {
+      // Skip for web mock repositories
+      if (repoPath.startsWith('/virtual/')) {
+        return 'Flutter';
+      }
+      
       // This is just a simple implementation - in a real app we would analyze files by extension
       // or use a language detection library
       final directory = Directory(repoPath);
@@ -272,6 +294,25 @@ class GitRepositoryManager {
         return [];
       }
       
+      // Handle web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        final now = DateTime.now();
+        // Create a mock commit
+        return [
+          GitCommit(
+            hash: 'mock-commit-${DateTime.now().millisecondsSinceEpoch}',
+            parentHashes: ['mock-parent-hash'],
+            author: 'Web User',
+            email: 'web.user@example.com',
+            message: 'Initial commit (web simulation)',
+            date: now.subtract(const Duration(days: 1)),
+            fileChanges: 1,
+            insertions: 10,
+            deletions: 0,
+          )
+        ];
+      }
+      
       return await _gitService.getCommits(repository.path!, limit: limit);
     } catch (e) {
       _logger.error('Failed to get recent commits', error: e);
@@ -284,6 +325,21 @@ class GitRepositoryManager {
       final repository = await getRepository(repoId);
       if (repository == null || repository.path == null) {
         return [];
+      }
+      
+      // Handle web mock repositories
+      if (repository.path!.startsWith('/virtual/')) {
+        // Create a mock branch
+        return [
+          GitBranch(
+            name: 'main',
+            isHead: true,
+            isRemote: false,
+            upstream: 'origin/main',
+            ahead: 0,
+            behind: 0,
+          )
+        ];
       }
       
       return await _gitService.getBranches(repository.path!);

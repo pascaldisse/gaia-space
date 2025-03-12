@@ -43,20 +43,49 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
 
   Future<void> _pickDirectory() async {
     try {
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      // Check if running on web
+      bool isWeb = identical(0, 0.0);
       
-      if (selectedDirectory != null) {
-        setState(() {
-          _pathController.text = selectedDirectory;
-          
-          // Update name based on the selected directory
-          if (_nameController.text.isEmpty) {
-            _nameController.text = path.basename(selectedDirectory);
-          }
-        });
+      if (isWeb) {
+        // Web fallback: Allow selecting a single directory or file
+        FilePickerResult? result = await FilePicker.platform.pickFiles();
+        
+        if (result != null) {
+          // For web, we just get a representation of the path
+          String webPath = result.files.single.name;
+          setState(() {
+            _pathController.text = '/virtual/${webPath}';
+            
+            // Update name based on the selected file/directory
+            if (_nameController.text.isEmpty) {
+              _nameController.text = webPath.split('/').last.split('.').first;
+            }
+          });
+        }
+      } else {
+        // Native platforms - use directory picker
+        String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+        
+        if (selectedDirectory != null) {
+          setState(() {
+            _pathController.text = selectedDirectory;
+            
+            // Update name based on the selected directory
+            if (_nameController.text.isEmpty) {
+              _nameController.text = path.basename(selectedDirectory);
+            }
+          });
+        }
       }
     } catch (e) {
       _logger.error('Error picking directory', error: e);
+      
+      // Show a user-friendly message when on web
+      if (identical(0, 0.0)) {
+        setState(() {
+          _error = 'Directory selection is limited in web browsers. You can enter a path manually or use the desktop app for full functionality.';
+        });
+      }
     }
   }
 
@@ -99,18 +128,32 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     final description = _descriptionController.text.trim();
     final path = _pathController.text.trim();
     
-    // Validate it's a git repository
-    final gitDir = Directory(path);
-    final gitConfigDir = Directory('${gitDir.path}/.git');
-    if (!await gitConfigDir.exists()) {
-      throw Exception('The selected directory is not a git repository');
-    }
+    // Check if running on web
+    bool isWeb = identical(0, 0.0);
     
-    await _repositoryManager.addRepository(
-      name: name,
-      path: path,
-      description: description.isNotEmpty ? description : null,
-    );
+    if (isWeb && path.startsWith('/virtual/')) {
+      // Web mode with simulated repository
+      await _repositoryManager.addRepository(
+        name: name,
+        path: path,
+        description: description.isNotEmpty ? description : null,
+        isWebMock: true,
+      );
+    } else {
+      // Native platform with real file system access
+      // Validate it's a git repository
+      final gitDir = Directory(path);
+      final gitConfigDir = Directory('${gitDir.path}/.git');
+      if (!await gitConfigDir.exists()) {
+        throw Exception('The selected directory is not a git repository');
+      }
+      
+      await _repositoryManager.addRepository(
+        name: name,
+        path: path,
+        description: description.isNotEmpty ? description : null,
+      );
+    }
   }
   
   Future<void> _cloneRepository() async {
@@ -119,12 +162,27 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     final path = _pathController.text.trim();
     final url = _urlController.text.trim();
     
-    await _repositoryManager.cloneRepository(
-      url: url,
-      destinationPath: path,
-      name: name,
-      description: description.isNotEmpty ? description : null,
-    );
+    // Check if running on web
+    bool isWeb = identical(0, 0.0);
+    
+    if (isWeb && path.startsWith('/virtual/')) {
+      // Web mode with simulated repository
+      await _repositoryManager.addRepository(
+        name: name,
+        path: path,
+        description: description.isNotEmpty ? description : null,
+        isWebMock: true,
+        remoteUrl: url,
+      );
+    } else {
+      // Native platform with real file system access
+      await _repositoryManager.cloneRepository(
+        url: url,
+        destinationPath: path,
+        name: name,
+        description: description.isNotEmpty ? description : null,
+      );
+    }
   }
   
   Future<void> _initNewRepository() async {
@@ -132,21 +190,36 @@ class _CreateRepositoryScreenState extends ConsumerState<CreateRepositoryScreen>
     final description = _descriptionController.text.trim();
     final path = _pathController.text.trim();
     
-    // Create the directory if it doesn't exist
-    final directory = Directory(path);
-    if (!await directory.exists()) {
-      await directory.create(recursive: true);
+    // Check if running on web
+    bool isWeb = identical(0, 0.0);
+    
+    if (isWeb && path.startsWith('/virtual/')) {
+      // Web mode with simulated repository
+      await _repositoryManager.addRepository(
+        name: name,
+        path: path,
+        description: description.isNotEmpty ? description : null,
+        isWebMock: true,
+        isNewRepo: true,
+      );
+    } else {
+      // Native platform with real file system access
+      // Create the directory if it doesn't exist
+      final directory = Directory(path);
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+      
+      // Initialize git repository
+      await _gitService.initRepository(path);
+      
+      // Add to manager
+      await _repositoryManager.addRepository(
+        name: name,
+        path: path,
+        description: description.isNotEmpty ? description : null,
+      );
     }
-    
-    // Initialize git repository
-    await _gitService.initRepository(path);
-    
-    // Add to manager
-    await _repositoryManager.addRepository(
-      name: name,
-      path: path,
-      description: description.isNotEmpty ? description : null,
-    );
   }
 
   @override
