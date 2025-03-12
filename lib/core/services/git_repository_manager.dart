@@ -29,7 +29,7 @@ class GitRepositoryManager {
       }
       return _repositories;
     } catch (e) {
-      AppLogger.error('Failed to get repositories', e);
+      _logger.error('Failed to get repositories', error: e);
       rethrow;
     }
   }

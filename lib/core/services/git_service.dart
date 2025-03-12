@@ -30,7 +30,7 @@ class GitService {
       _repoDirCache[repoPath] = repoDir;
       return repoDir;
     } catch (e) {
-      AppLogger.error('Failed to open Git repository', e);
+      _logger.error('Failed to open Git repository', error: e);
       rethrow;
     }
   }
@@ -49,7 +49,14 @@ class GitService {
         args.addAll(['-b', branch]);
       }
       
-      final result = await Git.runGit(args);
+      // Execute git command directly since we don't have a GitDir instance yet
+      final process = await Process.run('git', args);
+      final result = ProcessResult(
+        process.pid, 
+        process.exitCode, 
+        process.stdout, 
+        process.stderr
+      );
       _logger.info('Clone result: ${result.stdout}');
       
       // Open the newly cloned repository
@@ -64,6 +71,8 @@ class GitService {
         name: repoName,
         description: 'Cloned from $url',
         path: destinationPath,
+        workspaceId: 'default',  // Add required workspaceId
+        createdBy: 'user',       // Add required createdBy
         createdAt: DateTime.now(),
         lastActivityAt: DateTime.now(),
         branchesCount: 0,  // Will be updated later

@@ -360,13 +360,23 @@ class _RepositorySidebarState extends State<RepositorySidebar> {
     }
     
     // For parent items, show expand/collapse button
-    if (_treeController.getChildren(node).isNotEmpty) {
-      return ExpanderButton(
+    final childrenList = _items.where((item) => item.parentId == node.id).toList();
+    if (childrenList.isNotEmpty) {
+      final isExpanded = _treeController.getExpansionState(node);
+      return IconButton(
         padding: EdgeInsets.zero,
-        treeController: _treeController,
-        entry: TreeEntry<SidebarItem>(node),
-        icon: const Icon(Icons.chevron_right, size: 18),
-        expandedIcon: const Icon(Icons.expand_more, size: 18),
+        constraints: const BoxConstraints(),
+        iconSize: 18,
+        icon: Icon(
+          isExpanded ? Icons.expand_more : Icons.chevron_right,
+        ),
+        onPressed: () {
+          if (isExpanded) {
+            _treeController.collapse(node);
+          } else {
+            _treeController.expand(node);
+          }
+        },
       );
     }
     

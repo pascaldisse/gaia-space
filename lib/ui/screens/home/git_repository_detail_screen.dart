@@ -856,7 +856,10 @@ class _GitRepositoryDetailScreenState extends ConsumerState<GitRepositoryDetailS
     final selectedSidebarItem = ref.watch(selectedSidebarItemProvider);
     
     if (_isLoading) {
-      return const LoadingOverlay();
+      return const LoadingOverlay(
+        isLoading: true,
+        child: SizedBox(),
+      );
     }
     
     if (_repository == null) {

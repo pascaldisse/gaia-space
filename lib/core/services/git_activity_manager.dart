@@ -154,7 +154,7 @@ class GitActivityManager {
         _notifyListeners();
       }
     } catch (e) {
-      AppLogger.error('Failed to update activity', e);
+      _logger.error('Failed to update activity', error: e);
     }
   }
   
@@ -213,7 +213,7 @@ class GitActivityManager {
       completeActivity(activity.id, output: 'Operation completed successfully');
       return result;
     } catch (e) {
-      AppLogger.error('Failed to execute $action', e);
+      _logger.error('Failed to execute $action', error: e);
       completeActivity(activity.id, error: e.toString());
       rethrow;
     }
