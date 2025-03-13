@@ -1070,9 +1070,10 @@ class GitService {
       final currentBranchResult = await repoDir.runCommand(['branch', '--show-current']);
       final currentBranch = currentBranchResult.stdout.toString().trim();
       
+      // Create a temporary branch from target branch
+      final tempBranchName = 'merge-check-${DateTime.now().millisecondsSinceEpoch}';
+      
       try {
-        // Create a temporary branch from target branch
-        final tempBranchName = 'merge-check-${DateTime.now().millisecondsSinceEpoch}';
         await repoDir.runCommand(['checkout', '-b', tempBranchName, targetBranch]);
         
         // Try to merge source branch
