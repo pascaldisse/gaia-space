@@ -899,4 +899,274 @@ class GitService {
       rethrow;
     }
   }
+  
+  /// Merge branches in a repository
+  Future<String> mergeBranches(
+    String repoPath, {
+    required String sourceBranch,
+    required String targetBranch,
+    String? message,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Checkout target branch
+      await repoDir.runCommand(['checkout', targetBranch]);
+      
+      // Merge source branch into target branch
+      final args = ['merge', '--no-ff'];
+      if (message != null) {
+        args.addAll(['-m', message]);
+      }
+      args.add(sourceBranch);
+      
+      await repoDir.runCommand(args);
+      
+      // Get the commit SHA of the new merge commit
+      final result = await repoDir.runCommand(['rev-parse', 'HEAD']);
+      return result.stdout.toString().trim();
+    } catch (e) {
+      _logger.error('Failed to merge branches', error: e);
+      rethrow;
+    }
+  }
+  
+  /// Squash merge branches in a repository
+  Future<String> squashMergeBranches(
+    String repoPath, {
+    required String sourceBranch,
+    required String targetBranch,
+    String? message,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Checkout target branch
+      await repoDir.runCommand(['checkout', targetBranch]);
+      
+      // Create a temporary branch to avoid modifying the source branch
+      final tmpBranchName = 'squash-tmp-${DateTime.now().millisecondsSinceEpoch}';
+      await repoDir.runCommand(['checkout', '-b', tmpBranchName, targetBranch]);
+      
+      // Merge with squash
+      await repoDir.runCommand(['merge', '--squash', sourceBranch]);
+      
+      // Commit the changes
+      final commitMsg = message ?? 'Squash merge branch $sourceBranch';
+      await repoDir.runCommand(['commit', '-m', commitMsg]);
+      
+      // Get the commit SHA of the new squash commit
+      final shaResult = await repoDir.runCommand(['rev-parse', 'HEAD']);
+      final commitSha = shaResult.stdout.toString().trim();
+      
+      // Checkout target branch
+      await repoDir.runCommand(['checkout', targetBranch]);
+      
+      // Fast-forward merge the squash commit
+      await repoDir.runCommand(['merge', tmpBranchName]);
+      
+      // Delete temporary branch
+      await repoDir.runCommand(['branch', '-D', tmpBranchName]);
+      
+      return commitSha;
+    } catch (e) {
+      _logger.error('Failed to squash merge branches', error: e);
+      rethrow;
+    }
+  }
+  
+  /// Rebase branches in a repository
+  Future<String> rebaseBranches(
+    String repoPath, {
+    required String sourceBranch,
+    required String targetBranch,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Checkout source branch
+      await repoDir.runCommand(['checkout', sourceBranch]);
+      
+      // Rebase onto target branch
+      await repoDir.runCommand(['rebase', targetBranch]);
+      
+      // Get the commit SHA after rebase
+      final sourceResult = await repoDir.runCommand(['rev-parse', 'HEAD']);
+      final sourceSha = sourceResult.stdout.toString().trim();
+      
+      // Checkout target branch
+      await repoDir.runCommand(['checkout', targetBranch]);
+      
+      // Fast-forward merge rebased source branch
+      await repoDir.runCommand(['merge', '--ff-only', sourceBranch]);
+      
+      // Get final merge commit SHA
+      final result = await repoDir.runCommand(['rev-parse', 'HEAD']);
+      return result.stdout.toString().trim();
+    } catch (e) {
+      _logger.error('Failed to rebase branches', error: e);
+      rethrow;
+    }
+  }
+  
+  /// Get list of commits between two branches
+  Future<List<GitCommit>> getCommitsBetweenBranches(
+    String repoPath, {
+    required String baseBranch,
+    required String compareBranch,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Get the list of commits that are in compareBranch but not in baseBranch
+      final result = await repoDir.runCommand([
+        'log', '--format=%H|%P|%an|%ae|%at|%s', 
+        '$baseBranch..$compareBranch'
+      ]);
+      
+      final lines = result.stdout.toString().trim().split('\n');
+      final commits = <GitCommit>[];
+      
+      for (final line in lines) {
+        if (line.isEmpty) continue;
+        
+        final parts = line.split('|');
+        if (parts.length < 6) continue;
+        
+        final sha = parts[0].trim();
+        final parentShas = parts[1].trim().split(' ').where((s) => s.isNotEmpty).toList();
+        final author = parts[2].trim();
+        final email = parts[3].trim();
+        final timestamp = int.parse(parts[4].trim());
+        final message = parts[5].trim();
+        
+        commits.add(GitCommit(
+          sha: sha,
+          message: message,
+          author: author,
+          email: email,
+          date: DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
+          parentShas: parentShas,
+        ));
+      }
+      
+      return commits;
+    } catch (e) {
+      _logger.error('Failed to get commits between branches', error: e);
+      return [];
+    }
+  }
+  
+  /// Check if there would be merge conflicts between branches
+  Future<bool> hasMergeConflicts(
+    String repoPath, {
+    required String sourceBranch,
+    required String targetBranch,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Save current branch
+      final currentBranchResult = await repoDir.runCommand(['branch', '--show-current']);
+      final currentBranch = currentBranchResult.stdout.toString().trim();
+      
+      try {
+        // Create a temporary branch from target branch
+        final tempBranchName = 'merge-check-${DateTime.now().millisecondsSinceEpoch}';
+        await repoDir.runCommand(['checkout', '-b', tempBranchName, targetBranch]);
+        
+        // Try to merge source branch
+        try {
+          await repoDir.runCommand(['merge', '--no-commit', '--no-ff', sourceBranch]);
+          
+          // If we got here, there are no conflicts
+          // Abort the merge
+          await repoDir.runCommand(['merge', '--abort']);
+          
+          return false;
+        } catch (mergeError) {
+          // Merge had conflicts, abort the merge
+          try {
+            await repoDir.runCommand(['merge', '--abort']);
+          } catch (abortError) {
+            // Ignore abort errors
+          }
+          
+          return true;
+        }
+      } finally {
+        // Return to the original branch
+        try {
+          await repoDir.runCommand(['checkout', currentBranch]);
+        } catch (checkoutError) {
+          _logger.error('Failed to checkout original branch', error: checkoutError);
+        }
+        
+        // Delete temporary branch
+        try {
+          await repoDir.runCommand(['branch', '-D', tempBranchName]);
+        } catch (deleteBranchError) {
+          // Ignore delete branch errors
+        }
+      }
+    } catch (e) {
+      _logger.error('Failed to check for merge conflicts', error: e);
+      return false;
+    }
+  }
+  
+  /// Get diff between two branches
+  Future<List<GitDiff>> getDiffBetweenBranches(
+    String repoPath, {
+    required String baseBranch,
+    required String compareBranch,
+  }) async {
+    try {
+      final repoDir = await openRepository(repoPath);
+      
+      // Get list of files that changed between branches
+      final filesResult = await repoDir.runCommand([
+        'diff', '--name-status', '$baseBranch...$compareBranch'
+      ]);
+      
+      final fileList = filesResult.stdout.toString().trim().split('\n');
+      final diffs = <GitDiff>[];
+      
+      for (final fileEntry in fileList) {
+        if (fileEntry.isEmpty) continue;
+        
+        final parts = fileEntry.split('\t');
+        if (parts.length < 2) continue;
+        
+        final status = parts[0];
+        final filePath = parts[1];
+        
+        String fileStatus;
+        // Convert git status to our status format
+        switch (status[0]) {
+          case 'A': fileStatus = 'added'; break;
+          case 'D': fileStatus = 'removed'; break;
+          case 'M': fileStatus = 'modified'; break;
+          case 'R': fileStatus = 'renamed'; break;
+          default: fileStatus = 'modified';
+        }
+        
+        // Get the diff for this file
+        final diffResult = await repoDir.runCommand([
+          'diff', '$baseBranch...$compareBranch', '--', filePath
+        ]);
+        
+        final diff = _parseDiff(diffResult.stdout.toString(), filePath);
+        diffs.add(diff.copyWith(
+          status: fileStatus,
+          file: filePath,
+        ));
+      }
+      
+      return diffs;
+    } catch (e) {
+      _logger.error('Failed to get diff between branches', error: e);
+      return [];
+    }
+  }
 }
