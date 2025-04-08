@@ -47,6 +47,10 @@ For teams that love the concept of JetBrains Space but prefer open source soluti
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [License](#license)
+- [Troubleshooting](#troubleshooting)
+  - [App Stuck on Loading Screen](#app-stuck-on-loading-screen)
+  - [Permissions Issues](#permissions-issues)
+  - [Web Platform Issues](#web-platform-issues)
 
 ## Features Overview
 
@@ -831,3 +835,48 @@ We welcome contributions to Gaia-Space! Please follow these steps:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Troubleshooting
+
+### App Stuck on Loading Screen
+
+If you encounter the app getting stuck on the loading screen, particularly in web mode, this has been fixed with the following changes:
+
+1. **Web Platform Storage Fixes**:
+   - Modified `AuthService` to handle web platform differently
+   - Skipped secure storage operations on web to avoid errors with crypto.subtle 
+   - Used in-memory storage only on web platform
+
+2. **Robust Navigation in SplashScreen**:
+   - Added a 15-second failsafe timer to force navigation
+   - Added an emergency "Skip to Login" button after 8 seconds
+   - Added special handling for web platform to skip auto-login
+
+3. **Enhanced Error Recovery**:
+   - Improved error handling throughout the app
+   - Added better debug information and status messages
+   - Added fallback navigation paths for error scenarios
+
+When using the app in web mode, you'll now see:
+
+1. A detailed debugging panel showing the app's loading progress
+2. A Skip to Login button after 8 seconds (emergency bypass)
+3. A failsafe timer that will force navigation after 15 seconds
+4. More detailed logs in the console with information about what's happening
+
+### Permissions Issues
+
+If you encounter permission issues with file access:
+
+```bash
+sudo chmod -R 777 /path/to/gaia-space
+```
+
+### Web Platform Issues
+
+For web-specific issues:
+
+1. Use Chrome for development
+2. Check browser console for errors
+3. Enable the emergency skip button if stuck on loading
+4. Try running with `flutter run -d web-server --web-renderer html` if canvas rendering fails

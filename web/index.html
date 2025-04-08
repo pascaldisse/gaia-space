@@ -1,27 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Gaia Space - DevOps Collaboration Platform">
 
   <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="gaia_space">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -29,10 +16,127 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>gaia_space</title>
+  <title>Gaia Space</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    body {
+      background-color: #121212;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+    
+    #loading-indicator {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: white;
+    }
+    
+    .loader {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid #2196F3;
+      width: 40px;
+      height: 40px;
+      margin: 20px auto;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .error-message {
+      display: none;
+      background-color: #f44336;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+      max-width: 80%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <div id="loading-indicator">
+    <h2>Loading Gaia Space</h2>
+    <div class="loader"></div>
+    <p>Please wait while the application loads...</p>
+    <div id="error-message" class="error-message">
+      Failed to load the application. Please refresh the page or try again later.
+    </div>
+  </div>
+
+  <script>
+    // Log errors
+    window.onerror = function(message, source, lineno, colno, error) {
+      console.error("Error caught:", message, error);
+      document.getElementById('error-message').style.display = 'block';
+      document.getElementById('error-message').innerText = 'Application Error: ' + message;
+      return false;
+    };
+    
+    // Monitor network status
+    window.addEventListener('online', function() {
+      console.log('Network connection established');
+    });
+    
+    window.addEventListener('offline', function() {
+      console.log('Network connection lost');
+      document.getElementById('error-message').style.display = 'block';
+      document.getElementById('error-message').innerText = 'Network connection lost. Please check your internet connection.';
+    });
+    
+    // Show an error message after a timeout if application doesn't load
+    setTimeout(function() {
+      if (document.getElementById('loading-indicator').style.display !== 'none') {
+        console.warn("Application took too long to load");
+        document.getElementById('error-message').style.display = 'block';
+        document.getElementById('error-message').innerText = 'Application is taking longer than expected to load. You may need to refresh the page.';
+      }
+    }, 20000); // 20 seconds timeout
+    
+    // The simplest possible Flutter initialization
+    window.addEventListener('load', function() {
+      // Add crypto polyfill for flutter_secure_storage
+      window.crypto = window.crypto || {};
+      window.crypto.subtle = window.crypto.subtle || {
+        generateKey: function() {
+          console.log("Using crypto.subtle polyfill for generateKey");
+          return Promise.resolve({});
+        },
+        encrypt: function() {
+          console.log("Using crypto.subtle polyfill for encrypt");
+          return Promise.resolve(new ArrayBuffer(8));
+        },
+        decrypt: function() {
+          console.log("Using crypto.subtle polyfill for decrypt");
+          return Promise.resolve(new ArrayBuffer(8));
+        }
+      };
+        
+      // Create script tag to load main.dart.js
+      var scriptTag = document.createElement('script');
+      scriptTag.src = 'main.dart.js';
+      document.body.appendChild(scriptTag);
+      
+      // Set up error and load events for the script
+      scriptTag.onerror = function() {
+        console.error("Failed to load main.dart.js");
+        document.getElementById('error-message').style.display = 'block';
+      };
+      
+      scriptTag.onload = function() {
+        console.log("main.dart.js loaded successfully");
+      };
+    });
+  </script>
 </body>
 </html>

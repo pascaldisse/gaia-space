@@ -1,7 +1,7 @@
 #!/bin/sh
 # This is a generated file; do not edit or check into version control.
-export "FLUTTER_ROOT=/opt/homebrew/Caskroom/flutter/3.29.1/flutter"
-export "FLUTTER_APPLICATION_PATH=/Users/pascaldisse/React/gaia-space"
+export "FLUTTER_ROOT=/root/snap/flutter/common/flutter"
+export "FLUTTER_APPLICATION_PATH=/var/www/gaia-space"
 export "COCOAPODS_PARALLEL_CODE_SIGN=true"
 export "FLUTTER_TARGET=lib/main.dart"
 export "FLUTTER_BUILD_DIR=build"
