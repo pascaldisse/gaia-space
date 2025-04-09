@@ -10,100 +10,101 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
 
-// Project state notifier
-class ProjectNotifier extends StateNotifier<List<Project>> {
-  ProjectNotifier() : super([]) {
-    _loadProjects();
+// Task state notifier
+class TaskNotifier extends StateNotifier<List<Task>> {
+  TaskNotifier() : super([]) {
+    _loadTasks();
   }
 
-  Future<void> _loadProjects() async {
+  Future<void> _loadTasks() async {
     // Simulate API call
     await Future.delayed(const Duration(seconds: 1));
     
-    state = _mockProjects;
+    state = _mockTasks;
   }
 
-  void updateProject(Project updatedProject) {
-    state = state.map((project) => 
-      project.id == updatedProject.id ? updatedProject : project
+  void updateTask(Task updatedTask) {
+    state = state.map((task) => 
+      task.id == updatedTask.id ? updatedTask : task
     ).toList();
   }
 
-  void updateProjectStatus(String projectId, ProjectStatus newStatus) {
-    state = state.map((project) => 
-      project.id == projectId ? project.copyWith(status: newStatus) : project
+  void updateTaskStatus(String taskId, TaskStatus newStatus) {
+    state = state.map((task) => 
+      task.id == taskId ? task.copyWith(status: newStatus) : task
     ).toList();
   }
 
-  void addSubTask(String projectId, String title) {
-    final project = state.firstWhere((p) => p.id == projectId);
+  void addSubTask(String taskId, String title) {
+    final task = state.firstWhere((p) => p.id == taskId);
     final newSubTask = SubTask(
       id: const Uuid().v4(),
       title: title,
     );
     
-    final updatedSubTasks = [...project.subTasks, newSubTask];
-    updateProject(project.copyWith(subTasks: updatedSubTasks));
+    final updatedSubTasks = [...task.subTasks, newSubTask];
+    updateTask(task.copyWith(subTasks: updatedSubTasks));
   }
 
-  void toggleSubTaskCompletion(String projectId, String subTaskId) {
-    final project = state.firstWhere((p) => p.id == projectId);
-    final updatedSubTasks = project.subTasks.map((task) => 
-      task.id == subTaskId ? task.copyWith(isCompleted: !task.isCompleted) : task
+  void toggleSubTaskCompletion(String taskId, String subTaskId) {
+    final task = state.firstWhere((p) => p.id == taskId);
+    final updatedSubTasks = task.subTasks.map((subtask) => 
+      subtask.id == subTaskId ? subtask.copyWith(isCompleted: !subtask.isCompleted) : subtask
     ).toList();
     
-    updateProject(project.copyWith(subTasks: updatedSubTasks));
+    updateTask(task.copyWith(subTasks: updatedSubTasks));
   }
 
-  void addAssignee(String projectId, ProjectRole assignee) {
-    final project = state.firstWhere((p) => p.id == projectId);
-    final updatedAssignees = [...project.assignees, assignee];
+  void addAssignee(String taskId, TaskRole assignee) {
+    final task = state.firstWhere((p) => p.id == taskId);
+    final updatedAssignees = [...task.assignees, assignee];
     
-    updateProject(project.copyWith(assignees: updatedAssignees));
+    updateTask(task.copyWith(assignees: updatedAssignees));
   }
 
-  void addGitReference(String projectId, GitReference reference) {
-    final project = state.firstWhere((p) => p.id == projectId);
-    final updatedReferences = [...project.gitReferences, reference];
+  void addGitReference(String taskId, GitReference reference) {
+    final task = state.firstWhere((p) => p.id == taskId);
+    final updatedReferences = [...task.gitReferences, reference];
     
-    updateProject(project.copyWith(gitReferences: updatedReferences));
+    updateTask(task.copyWith(gitReferences: updatedReferences));
   }
 
-  void updateProjectNotes(String projectId, String notes) {
-    final project = state.firstWhere((p) => p.id == projectId);
-    updateProject(project.copyWith(notes: notes));
+  void updateTaskNotes(String taskId, String notes) {
+    final task = state.firstWhere((p) => p.id == taskId);
+    updateTask(task.copyWith(notes: notes));
   }
 
-  void reorderProjects(List<Project> newOrder) {
+  void reorderTasks(List<Task> newOrder) {
     state = newOrder;
   }
 }
 
-// Projects provider
-final projectsProvider = StateNotifierProvider<ProjectNotifier, List<Project>>((ref) {
-  return ProjectNotifier();
+// Tasks provider
+final tasksProvider = StateNotifierProvider<TaskNotifier, List<Task>>((ref) {
+  return TaskNotifier();
 });
 
 // Mock data
-final _mockProjects = [
-  Project(
+final _mockTasks = [
+  Task(
     id: '1',
     name: 'Mobile App Redesign',
     description: 'Redesign the mobile app UI/UX for better usability and performance',
     workspaceId: '1',
+    projectId: 'proj1',
     createdBy: 'User1',
     createdAt: DateTime.now().subtract(const Duration(days: 15)),
     dueDate: DateTime.now().add(const Duration(days: 30)),
-    status: ProjectStatus.inProgress,
+    status: TaskStatus.inProgress,
     assignees: [
-      ProjectRole(
+      TaskRole(
         id: '101',
         userId: 'user123',
         userName: 'Jane Smith',
         role: 'Designer',
         avatarUrl: 'https://i.pravatar.cc/150?img=1',
       ),
-      ProjectRole(
+      TaskRole(
         id: '102',
         userId: 'user456',
         userName: 'Mike Johnson',
@@ -148,17 +149,18 @@ final _mockProjects = [
     priority: 'High',
     order: 0,
   ),
-  Project(
+  Task(
     id: '2',
     name: 'Backend API Migration',
     description: 'Migrate our APIs to the new infrastructure with improved security',
     workspaceId: '1',
+    projectId: 'proj1',
     createdBy: 'User2',
     createdAt: DateTime.now().subtract(const Duration(days: 30)),
     dueDate: DateTime.now().add(const Duration(days: 15)),
-    status: ProjectStatus.inProgress,
+    status: TaskStatus.inProgress,
     assignees: [
-      ProjectRole(
+      TaskRole(
         id: '103',
         userId: 'user789',
         userName: 'Alex Chen',
@@ -210,17 +212,18 @@ final _mockProjects = [
     priority: 'Critical',
     order: 1,
   ),
-  Project(
+  Task(
     id: '3',
     name: 'Documentation Update',
     description: 'Update all product documentation for the new release',
     workspaceId: '2',
+    projectId: 'proj2',
     createdBy: 'User1',
     createdAt: DateTime.now().subtract(const Duration(days: 10)),
     dueDate: DateTime.now().add(const Duration(days: 5)),
-    status: ProjectStatus.todo,
+    status: TaskStatus.todo,
     assignees: [
-      ProjectRole(
+      TaskRole(
         id: '104',
         userId: 'user101',
         userName: 'Sarah Lee',
@@ -256,17 +259,18 @@ final _mockProjects = [
     priority: 'Medium',
     order: 0,
   ),
-  Project(
+  Task(
     id: '4',
     name: 'Performance Optimization',
     description: 'Optimize application performance for better user experience',
     workspaceId: '1',
+    projectId: 'proj1',
     createdBy: 'User3',
     createdAt: DateTime.now().subtract(const Duration(days: 45)),
     dueDate: DateTime.now().subtract(const Duration(days: 10)),
-    status: ProjectStatus.completed,
+    status: TaskStatus.completed,
     assignees: [
-      ProjectRole(
+      TaskRole(
         id: '105',
         userId: 'user202',
         userName: 'David Kim',
@@ -317,17 +321,18 @@ final _mockProjects = [
     priority: 'High',
     order: 0,
   ),
-  Project(
+  Task(
     id: '5',
     name: 'Security Audit',
     description: 'Perform comprehensive security audit across all systems',
     workspaceId: '3',
+    projectId: 'proj3',
     createdBy: 'User4',
     createdAt: DateTime.now().subtract(const Duration(days: 5)),
     dueDate: DateTime.now().add(const Duration(days: 25)),
-    status: ProjectStatus.todo,
+    status: TaskStatus.todo,
     assignees: [
-      ProjectRole(
+      TaskRole(
         id: '106',
         userId: 'user303',
         userName: 'Emma Wilson',
@@ -371,31 +376,31 @@ final _mockProjects = [
 ];
 
 
-// Project board view toggle
-enum ProjectViewType {
+// Task board view toggle
+enum TaskViewType {
   kanban,
   list,
 }
 
-final projectViewTypeProvider = StateProvider<ProjectViewType>((ref) {
-  return ProjectViewType.kanban;
+final taskViewTypeProvider = StateProvider<TaskViewType>((ref) {
+  return TaskViewType.kanban;
 });
 
-class ProjectScreen extends ConsumerStatefulWidget {
-  const ProjectScreen({super.key});
+class TaskScreen extends ConsumerStatefulWidget {
+  const TaskScreen({super.key});
 
   @override
-  ConsumerState<ProjectScreen> createState() => _ProjectScreenState();
+  ConsumerState<TaskScreen> createState() => _TaskScreenState();
 }
 
-class _ProjectScreenState extends ConsumerState<ProjectScreen> {
+class _TaskScreenState extends ConsumerState<TaskScreen> {
   late List<DragAndDropList> _kanbanLists;
   bool _isExpanded = false;
   
   @override
   Widget build(BuildContext context) {
-    final projects = ref.watch(projectsProvider);
-    final viewType = ref.watch(projectViewTypeProvider);
+    final tasks = ref.watch(tasksProvider);
+    final viewType = ref.watch(taskViewTypeProvider);
     
     return Scaffold(
       appBar: AppBar(
@@ -403,36 +408,36 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
         title: const Text('Tasks'),
         actions: [
           IconButton(
-            icon: Icon(viewType == ProjectViewType.kanban ? Icons.view_list : Icons.dashboard),
+            icon: Icon(viewType == TaskViewType.kanban ? Icons.view_list : Icons.dashboard),
             onPressed: () {
-              ref.read(projectViewTypeProvider.notifier).state = 
-                viewType == ProjectViewType.kanban ? ProjectViewType.list : ProjectViewType.kanban;
+              ref.read(taskViewTypeProvider.notifier).state = 
+                viewType == TaskViewType.kanban ? TaskViewType.list : TaskViewType.kanban;
             },
-            tooltip: viewType == ProjectViewType.kanban ? 'Switch to list view' : 'Switch to kanban view',
+            tooltip: viewType == TaskViewType.kanban ? 'Switch to list view' : 'Switch to kanban view',
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              // Refresh projects
-              ref.invalidate(projectsProvider);
+              // Refresh tasks
+              ref.invalidate(tasksProvider);
             },
-            tooltip: 'Refresh projects',
+            tooltip: 'Refresh tasks',
           ),
         ],
       ),
-      body: projects.isEmpty
+      body: tasks.isEmpty
           ? const EmptyState(
               icon: Icons.task_alt,
               title: 'No Tasks',
               message: 'Create your first task to get started',
               actionText: 'Create Task',
             )
-          : viewType == ProjectViewType.kanban
-              ? _buildKanbanBoard(context, projects)
-              : _buildListView(context, projects),
+          : viewType == TaskViewType.kanban
+              ? _buildKanbanBoard(context, tasks)
+              : _buildListView(context, tasks),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // TODO: Implement project creation
+          // TODO: Implement task creation
           _showCreateTaskDialog(context);
         },
         tooltip: 'Create new task',
@@ -441,30 +446,30 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
     );
   }
 
-  Widget _buildKanbanBoard(BuildContext context, List<Project> allProjects) {
-    // Group projects by status
-    final Map<ProjectStatus, List<Project>> groupedProjects = {
-      ProjectStatus.todo: [],
-      ProjectStatus.inProgress: [],
-      ProjectStatus.completed: [],
+  Widget _buildKanbanBoard(BuildContext context, List<Task> allTasks) {
+    // Group tasks by status
+    final Map<TaskStatus, List<Task>> groupedTasks = {
+      TaskStatus.todo: [],
+      TaskStatus.inProgress: [],
+      TaskStatus.completed: [],
     };
     
-    for (final project in allProjects) {
-      groupedProjects[project.status]!.add(project);
+    for (final task in allTasks) {
+      groupedTasks[task.status]!.add(task);
     }
     
     // Sort each list by order property
-    for (final status in groupedProjects.keys) {
-      groupedProjects[status]!.sort((a, b) => 
+    for (final status in groupedTasks.keys) {
+      groupedTasks[status]!.sort((a, b) => 
         (a.order ?? 0).compareTo(b.order ?? 0)
       );
     }
     
     // Create DragAndDropLists
     _kanbanLists = [
-      _buildKanbanList(context, 'To Do', groupedProjects[ProjectStatus.todo]!, ProjectStatus.todo),
-      _buildKanbanList(context, 'In Progress', groupedProjects[ProjectStatus.inProgress]!, ProjectStatus.inProgress),
-      _buildKanbanList(context, 'Completed', groupedProjects[ProjectStatus.completed]!, ProjectStatus.completed),
+      _buildKanbanList(context, 'To Do', groupedTasks[TaskStatus.todo]!, TaskStatus.todo),
+      _buildKanbanList(context, 'In Progress', groupedTasks[TaskStatus.inProgress]!, TaskStatus.inProgress),
+      _buildKanbanList(context, 'Completed', groupedTasks[TaskStatus.completed]!, TaskStatus.completed),
     ];
     
     // Use horizontal layout for the Kanban board
@@ -508,7 +513,7 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
       itemDraggingWidth: MediaQuery.of(context).size.width * 0.32,
       disableScrolling: false,
       contentsWhenEmpty: const Center(
-        child: Text('No tasks in this category'),
+        child: Text('No projects in this category'),
       ),
       lastItemTargetHeight: 8,
       addLastItemTargetHeightToTop: true,
@@ -519,8 +524,8 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
   DragAndDropList _buildKanbanList(
     BuildContext context, 
     String title, 
-    List<Project> projects,
-    ProjectStatus status,
+    List<Task> tasks,
+    TaskStatus status,
   ) {
     final Color statusColor = _getStatusColor(context, status);
     
@@ -554,7 +559,7 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '${projects.length}',
+                    '${tasks.length}',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: statusColor,
@@ -576,7 +581,7 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
           ],
         ),
       ),
-      children: projects.isEmpty
+      children: tasks.isEmpty
           ? [
               DragAndDropItem(
                 child: Container(
@@ -611,15 +616,15 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
                 ),
               ),
             ]
-          : projects.map((project) {
+          : tasks.map((task) {
               return DragAndDropItem(
-                child: ProjectCard(
-                  project: project,
+                child: TaskCard(
+                  task: task,
                   expanded: _isExpanded,
-                  onTap: () => _showTaskDetailsDialog(context, project),
+                  onTap: () => _showTaskDetailsDialog(context, task),
                   onStatusChange: (newStatus) {
-                    ref.read(projectsProvider.notifier).updateProjectStatus(
-                      project.id, 
+                    ref.read(tasksProvider.notifier).updateTaskStatus(
+                      task.id, 
                       newStatus,
                     );
                   },
@@ -629,9 +634,9 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
     );
   }
 
-  Widget _buildListView(BuildContext context, List<Project> allProjects) {
-    // Sort projects by status
-    final sortedProjects = List<Project>.from(allProjects)
+  Widget _buildListView(BuildContext context, List<Task> allTasks) {
+    // Sort tasks by status
+    final sortedTasks = List<Task>.from(allTasks)
       ..sort((a, b) {
         // First by status order (todo, inProgress, completed)
         final statusComparison = a.status.index.compareTo(b.status.index);
@@ -649,7 +654,7 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${allProjects.length} Tasks',
+                '${allTasks.length} Tasks',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               TextButton.icon(
@@ -667,18 +672,18 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: sortedProjects.length,
+            itemCount: sortedTasks.length,
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
-              final project = sortedProjects[index];
+              final task = sortedTasks[index];
               
-              return ProjectCard(
-                project: project,
+              return TaskCard(
+                task: task,
                 expanded: _isExpanded,
-                onTap: () => _showTaskDetailsDialog(context, project),
+                onTap: () => _showTaskDetailsDialog(context, task),
                 onStatusChange: (newStatus) {
-                  ref.read(projectsProvider.notifier).updateProjectStatus(
-                    project.id, 
+                  ref.read(tasksProvider.notifier).updateTaskStatus(
+                    task.id, 
                     newStatus,
                   );
                 },
@@ -703,16 +708,16 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
       // Insert it into new place
       _kanbanLists[newListIndex].children.insert(newItemIndex, movedItem);
       
-      // Update project status based on the list it was moved to
-      final ProjectStatus newStatus = _getStatusForListIndex(newListIndex);
+      // Update task status based on the list it was moved to
+      final TaskStatus newStatus = _getStatusForListIndex(newListIndex);
       
-      // Extract project card from the moved item
-      final projectCard = movedItem.child as ProjectCard;
-      final Project project = projectCard.project;
+      // Extract task card from the moved item
+      final taskCard = movedItem.child as TaskCard;
+      final Task task = taskCard.task;
       
       // First update status change
-      if (project.status != newStatus) {
-        ref.read(projectsProvider.notifier).updateProjectStatus(project.id, newStatus);
+      if (task.status != newStatus) {
+        ref.read(tasksProvider.notifier).updateTaskStatus(task.id, newStatus);
       }
       
       // Then update order for both lists if needed
@@ -728,7 +733,7 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Task moved successfully'),
+        content: const Text('Project moved successfully'),
         duration: const Duration(seconds: 1),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
@@ -745,76 +750,76 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
     });
   }
 
-  ProjectStatus _getStatusForListIndex(int index) {
+  TaskStatus _getStatusForListIndex(int index) {
     switch (index) {
       case 0:
-        return ProjectStatus.todo;
+        return TaskStatus.todo;
       case 1:
-        return ProjectStatus.inProgress;
+        return TaskStatus.inProgress;
       case 2:
-        return ProjectStatus.completed;
+        return TaskStatus.completed;
       default:
-        return ProjectStatus.todo;
+        return TaskStatus.todo;
     }
   }
 
   void _updateProjectOrders(int listIndex) {
     final status = _getStatusForListIndex(listIndex);
-    final projects = ref.read(projectsProvider);
+    final tasks = ref.read(tasksProvider);
     
-    // Get all projects of the given status
-    final statusProjects = projects.where((p) => p.status == status).toList();
+    // Get all tasks of the given status
+    final statusTasks = tasks.where((t) => t.status == status).toList();
     
     // Determine new order from the kanban list
     final List<String> newOrderIds = [];
     for (final item in _kanbanLists[listIndex].children) {
-      final projectCard = item.child as ProjectCard;
-      newOrderIds.add(projectCard.project.id);
+      final taskCard = item.child as TaskCard;
+      newOrderIds.add(taskCard.task.id);
     }
     
-    // Update order for each project
-    for (int i = 0; i < statusProjects.length; i++) {
-      final project = statusProjects[i];
-      if (newOrderIds.contains(project.id)) {
-        final newOrder = newOrderIds.indexOf(project.id);
-        if (project.order != newOrder) {
-          ref.read(projectsProvider.notifier).updateProject(
-            project.copyWith(order: newOrder)
+    // Update order for each task
+    for (int i = 0; i < statusTasks.length; i++) {
+      final task = statusTasks[i];
+      if (newOrderIds.contains(task.id)) {
+        final newOrder = newOrderIds.indexOf(task.id);
+        if (task.order != newOrder) {
+          ref.read(tasksProvider.notifier).updateTask(
+            task.copyWith(order: newOrder)
           );
         }
       }
     }
   }
 
-  Color _getStatusColor(BuildContext context, ProjectStatus status) {
+  Color _getStatusColor(BuildContext context, TaskStatus status) {
     switch (status) {
-      case ProjectStatus.todo:
+      case TaskStatus.todo:
         return Colors.grey;
-      case ProjectStatus.inProgress:
+      case TaskStatus.inProgress:
         return Theme.of(context).primaryColor;
-      case ProjectStatus.completed:
+      case TaskStatus.completed:
         return Colors.green;
     }
   }
 
-  IconData _getIconForStatus(ProjectStatus status) {
+  IconData _getIconForStatus(TaskStatus status) {
     switch (status) {
-      case ProjectStatus.todo:
+      case TaskStatus.todo:
         return Icons.assignment;
-      case ProjectStatus.inProgress:
+      case TaskStatus.inProgress:
         return Icons.build;
-      case ProjectStatus.completed:
+      case TaskStatus.completed:
         return Icons.check_circle;
     }
   }
 
-  void _showTaskDetailsDialog(BuildContext context, Project project) {
+  void _showTaskDetailsDialog(BuildContext context, Task task) {
     showDialog(
       context: context,
-      builder: (context) => ProjectDetailsDialog(
-        project: project,
-        onUpdate: (updatedProject) {
-          ref.read(projectsProvider.notifier).updateProject(updatedProject);
+      builder: (context) => TaskDetailsDialog(
+        task: task,
+        onUpdate: (updatedTask) {
+          ref.read(tasksProvider.notifier).updateTask(updatedTask);
           Navigator.of(context).pop();
         },
       ),
@@ -827,15 +832,15 @@ class _ProjectScreenState extends ConsumerState<ProjectScreen> {
   }
 }
 
-class ProjectCard extends StatelessWidget {
-  final Project project;
+class TaskCard extends StatelessWidget {
+  final Task task;
   final bool expanded;
-  final Function(ProjectStatus) onStatusChange;
+  final Function(TaskStatus) onStatusChange;
   final VoidCallback onTap;
   
-  const ProjectCard({
+  const TaskCard({
     super.key,
-    required this.project,
+    required this.task,
     this.expanded = false,
     required this.onStatusChange,
     required this.onTap,
@@ -849,7 +854,7 @@ class ProjectCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: _getPriorityColor(project.priority).withOpacity(0.5),
+          color: _getPriorityColor(task.priority).withOpacity(0.5),
           width: 1.5,
         ),
       ),
@@ -862,7 +867,7 @@ class ProjectCard extends StatelessWidget {
             // Header with priority and more options
             Container(
               decoration: BoxDecoration(
-                color: _getPriorityColor(project.priority).withOpacity(0.05),
+                color: _getPriorityColor(task.priority).withOpacity(0.05),
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(10)
                 ),
@@ -887,11 +892,11 @@ class ProjectCard extends StatelessWidget {
                   ),
                   Row(
                     children: [
-                      if (project.gitReferences.isNotEmpty)
+                      if (task.gitReferences.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Tooltip(
-                            message: '${project.gitReferences.length} git references',
+                            message: '${task.gitReferences.length} git references',
                             child: Container(
                               padding: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
@@ -906,14 +911,14 @@ class ProjectCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                      PopupMenuButton<ProjectStatus>(
+                      PopupMenuButton<TaskStatus>(
                         tooltip: 'Change status',
                         icon: const Icon(Icons.more_vert, size: 18),
                         padding: EdgeInsets.zero,
                         onSelected: onStatusChange,
                         itemBuilder: (context) => [
                           const PopupMenuItem(
-                            value: ProjectStatus.todo,
+                            value: TaskStatus.todo,
                             child: Row(
                               children: [
                                 Icon(Icons.assignment, size: 18),
@@ -923,7 +928,7 @@ class ProjectCard extends StatelessWidget {
                             ),
                           ),
                           const PopupMenuItem(
-                            value: ProjectStatus.inProgress,
+                            value: TaskStatus.inProgress,
                             child: Row(
                               children: [
                                 Icon(Icons.build, size: 18),
@@ -933,7 +938,7 @@ class ProjectCard extends StatelessWidget {
                             ),
                           ),
                           const PopupMenuItem(
-                            value: ProjectStatus.completed,
+                            value: TaskStatus.completed,
                             child: Row(
                               children: [
                                 Icon(Icons.check_circle, size: 18),
@@ -958,15 +963,15 @@ class ProjectCard extends StatelessWidget {
                 children: [
                   // Title and description
                   Text(
-                    project.name,
+                    task.name,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (project.description != null && project.description!.isNotEmpty) ...[
+                  if (task.description != null && task.description!.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
-                      project.description!,
+                      task.description!,
                       maxLines: expanded ? 5 : 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium,
@@ -975,14 +980,14 @@ class ProjectCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   
                   // Progress bar
-                  if (project.completionPercentage != null) ...[
+                  if (task.completionPercentage != null) ...[
                     Row(
                       children: [
                         Expanded(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
-                              value: project.completionPercentage! / 100,
+                              value: task.completionPercentage! / 100,
                               backgroundColor: Colors.grey.withOpacity(0.2),
                               minHeight: 6,
                             ),
@@ -990,7 +995,7 @@ class ProjectCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '${project.completionPercentage!.toInt()}%',
+                          '${task.completionPercentage!.toInt()}%',
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
@@ -1002,7 +1007,7 @@ class ProjectCard extends StatelessWidget {
                   ],
                   
                   // Assignees (compact view)
-                  if (project.assignees.isNotEmpty) ...[
+                  if (task.assignees.isNotEmpty) ...[
                     Row(
                       children: [
                         const Icon(Icons.people_outline, size: 16, color: Colors.blueGrey),
@@ -1010,7 +1015,7 @@ class ProjectCard extends StatelessWidget {
                         Expanded(
                           child: Wrap(
                             spacing: -8, // Negative spacing for overlapping effect
-                            children: project.assignees.take(3).map((assignee) => 
+                            children: task.assignees.take(3).map((assignee) => 
                               Tooltip(
                                 message: '${assignee.userName} (${assignee.role})',
                                 child: SizedBox(
@@ -1034,23 +1039,23 @@ class ProjectCard extends StatelessWidget {
                   
                   // Expanded content
                   if (expanded) ...[
-                    if (project.subTasks.isNotEmpty) ...[
+                    if (task.subTasks.isNotEmpty) ...[
                       const Divider(),
                       const SizedBox(height: 4),
                       Text(
-                        'Subtasks (${project.subTasks.where((t) => t.isCompleted).length}/${project.subTasks.length})',
+                        'Subtasks (${task.subTasks.where((t) => t.isCompleted).length}/${task.subTasks.length})',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      ...project.subTasks.take(3).map((task) => _buildSubtaskItem(context, task)),
-                      if (project.subTasks.length > 3)
+                      ...task.subTasks.take(3).map((subtask) => _buildSubtaskItem(context, subtask)),
+                      if (task.subTasks.length > 3)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            '+ ${project.subTasks.length - 3} more subtasks',
+                            '+ ${task.subTasks.length - 3} more subtasks',
                             style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).disabledColor,
@@ -1059,7 +1064,7 @@ class ProjectCard extends StatelessWidget {
                         ),
                       const SizedBox(height: 8),
                     ],
-                    if (project.assignees.length > 3) ...[
+                    if (task.assignees.length > 3) ...[
                       const Divider(),
                       const SizedBox(height: 4),
                       Row(
@@ -1071,7 +1076,7 @@ class ProjectCard extends StatelessWidget {
                             child: Wrap(
                               spacing: 8,
                               runSpacing: 8,
-                              children: project.assignees.map((assignee) => _buildAssigneeChip(context, assignee)).toList(),
+                              children: task.assignees.map((assignee) => _buildAssigneeChip(context, assignee)).toList(),
                             ),
                           ),
                         ],
@@ -1095,14 +1100,14 @@ class ProjectCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: _getPriorityColor(project.priority).withOpacity(0.1),
+        color: _getPriorityColor(task.priority).withOpacity(0.1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        project.priority ?? 'Normal',
+        task.priority ?? 'Normal',
         style: TextStyle(
           fontSize: 12,
-          color: _getPriorityColor(project.priority),
+          color: _getPriorityColor(task.priority),
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -1175,7 +1180,7 @@ class ProjectCard extends StatelessWidget {
     );
   }
   
-  Widget _buildAssigneeChip(BuildContext context, ProjectRole assignee) {
+  Widget _buildAssigneeChip(BuildContext context, TaskRole assignee) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -1217,8 +1222,8 @@ class ProjectCard extends StatelessWidget {
   }
   
   Widget _buildDueDate(BuildContext context) {
-    final bool isOverdue = project.dueDate.isBefore(DateTime.now()) &&
-        project.status != ProjectStatus.completed;
+    final bool isOverdue = task.dueDate.isBefore(DateTime.now()) &&
+        task.status != TaskStatus.completed;
     
     return Row(
       children: [
@@ -1229,7 +1234,7 @@ class ProjectCard extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          'Due ${_formatDueDate(project.dueDate)}',
+          'Due ${_formatDueDate(task.dueDate)}',
           style: TextStyle(
             fontSize: 12,
             color: isOverdue ? Colors.red : Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
@@ -1258,24 +1263,24 @@ class ProjectCard extends StatelessWidget {
   }
 }
 
-class ProjectDetailsDialog extends StatefulWidget {
-  final Project project;
-  final Function(Project) onUpdate;
+class TaskDetailsDialog extends StatefulWidget {
+  final Task task;
+  final Function(Task) onUpdate;
 
-  const ProjectDetailsDialog({
+  const TaskDetailsDialog({
     super.key, 
-    required this.project,
+    required this.task,
     required this.onUpdate,
   });
 
   @override
-  State<ProjectDetailsDialog> createState() => _ProjectDetailsDialogState();
+  State<TaskDetailsDialog> createState() => _TaskDetailsDialogState();
 }
 
-class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with SingleTickerProviderStateMixin {
+class _TaskDetailsDialogState extends State<TaskDetailsDialog> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   late TextEditingController _notesController;
-  late Project _editedProject;
+  late Task _editedTask;
   late TextEditingController _newSubtaskController;
   late TextEditingController _newGitRefController;
   late TextEditingController _gitRefTitleController;
@@ -1284,8 +1289,8 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _notesController = TextEditingController(text: widget.project.notes);
-    _editedProject = widget.project;
+    _notesController = TextEditingController(text: widget.task.notes);
+    _editedTask = widget.task;
     _newSubtaskController = TextEditingController();
     _newGitRefController = TextEditingController();
     _gitRefTitleController = TextEditingController();
@@ -1316,7 +1321,7 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
               children: [
                 Expanded(
                   child: Text(
-                    widget.project.name,
+                    widget.task.name,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                 ),
@@ -1327,11 +1332,11 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
               ],
             ),
             const SizedBox(height: 8),
-            if (widget.project.description != null && widget.project.description!.isNotEmpty)
+            if (widget.task.description != null && widget.task.description!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: Text(
-                  widget.project.description!,
+                  widget.task.description!,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -1385,10 +1390,10 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
                 ElevatedButton(
                   onPressed: () {
                     // Save notes from the controller
-                    final updatedProject = _editedProject.copyWith(
+                    final updatedTask = _editedTask.copyWith(
                       notes: _notesController.text,
                     );
-                    widget.onUpdate(updatedProject);
+                    widget.onUpdate(updatedTask);
                   },
                   child: const Text('Save Changes'),
                 ),
@@ -1406,11 +1411,11 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildDetailRow('Status', _getStatusText(_editedProject.status)),
-          _buildDetailRow('Priority', _editedProject.priority ?? 'Not set'),
-          _buildDetailRow('Due Date', DateFormat('MMMM d, yyyy').format(_editedProject.dueDate)),
-          _buildDetailRow('Created by', _editedProject.createdBy),
-          _buildDetailRow('Created on', DateFormat('MMMM d, yyyy').format(_editedProject.createdAt)),
+          _buildDetailRow('Status', _getStatusText(_editedTask.status)),
+          _buildDetailRow('Priority', _editedTask.priority ?? 'Not set'),
+          _buildDetailRow('Due Date', DateFormat('MMMM d, yyyy').format(_editedTask.dueDate)),
+          _buildDetailRow('Created by', _editedTask.createdBy),
+          _buildDetailRow('Created on', DateFormat('MMMM d, yyyy').format(_editedTask.createdAt)),
           
           const SizedBox(height: 16),
           const Text(
@@ -1420,13 +1425,13 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
             ),
           ),
           const SizedBox(height: 8),
-          if (_editedProject.assignees.isEmpty)
+          if (_editedTask.assignees.isEmpty)
             const Text('No assignees yet')
           else
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _editedProject.assignees.map((assignee) {
+              children: _editedTask.assignees.map((assignee) {
                 return Chip(
                   avatar: AvatarService().avatarWidget(
                     avatarUrl: assignee.avatarUrl,
@@ -1437,9 +1442,9 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
                   label: Text('${assignee.userName} (${assignee.role})'),
                   onDeleted: () {
                     setState(() {
-                      final updatedAssignees = List<ProjectRole>.from(_editedProject.assignees)
+                      final updatedAssignees = List<TaskRole>.from(_editedTask.assignees)
                         ..removeWhere((a) => a.id == assignee.id);
-                      _editedProject = _editedProject.copyWith(assignees: updatedAssignees);
+                      _editedTask = _editedTask.copyWith(assignees: updatedAssignees);
                     });
                   },
                 );
@@ -1460,8 +1465,8 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
   }
 
   Widget _buildTasksTab() {
-    final completedTasks = _editedProject.subTasks.where((task) => task.isCompleted).length;
-    final totalTasks = _editedProject.subTasks.length;
+    final completedTasks = _editedTask.subTasks.where((subtask) => subtask.isCompleted).length;
+    final totalTasks = _editedTask.subTasks.length;
     final completionPercentage = totalTasks > 0 
         ? (completedTasks / totalTasks * 100).roundToDouble() 
         : 0.0;
@@ -1520,55 +1525,55 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
           const SizedBox(height: 8),
           
           // Tasks list
-          if (_editedProject.subTasks.isEmpty)
+          if (_editedTask.subTasks.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Center(
-                child: Text('No tasks added yet'),
+                child: Text('No subtasks added yet'),
               ),
             )
           else
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: _editedProject.subTasks.length,
+              itemCount: _editedTask.subTasks.length,
               itemBuilder: (context, index) {
-                final task = _editedProject.subTasks[index];
+                final subtask = _editedTask.subTasks[index];
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Checkbox(
-                    value: task.isCompleted,
+                    value: subtask.isCompleted,
                     onChanged: (value) {
                       setState(() {
-                        final updatedTasks = List<SubTask>.from(_editedProject.subTasks);
-                        updatedTasks[index] = task.copyWith(isCompleted: value ?? false);
-                        _editedProject = _editedProject.copyWith(
-                          subTasks: updatedTasks,
-                          completionPercentage: updatedTasks.where((t) => t.isCompleted).length / updatedTasks.length * 100,
+                        final updatedSubTasks = List<SubTask>.from(_editedTask.subTasks);
+                        updatedSubTasks[index] = subtask.copyWith(isCompleted: value ?? false);
+                        _editedTask = _editedTask.copyWith(
+                          subTasks: updatedSubTasks,
+                          completionPercentage: updatedSubTasks.where((t) => t.isCompleted).length / updatedSubTasks.length * 100,
                         );
                       });
                     },
                   ),
                   title: Text(
-                    task.title,
+                    subtask.title,
                     style: TextStyle(
-                      decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                      decoration: subtask.isCompleted ? TextDecoration.lineThrough : null,
                     ),
                   ),
-                  subtitle: task.dueDate != null 
-                      ? Text('Due: ${DateFormat('MMM d, yyyy').format(task.dueDate!)}')
+                  subtitle: subtask.dueDate != null 
+                      ? Text('Due: ${DateFormat('MMM d, yyyy').format(subtask.dueDate!)}')
                       : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () {
                       setState(() {
-                        final updatedTasks = List<SubTask>.from(_editedProject.subTasks)
+                        final updatedSubTasks = List<SubTask>.from(_editedTask.subTasks)
                           ..removeAt(index);
-                        _editedProject = _editedProject.copyWith(
-                          subTasks: updatedTasks,
-                          completionPercentage: updatedTasks.isEmpty 
+                        _editedTask = _editedTask.copyWith(
+                          subTasks: updatedSubTasks,
+                          completionPercentage: updatedSubTasks.isEmpty 
                               ? 0 
-                              : updatedTasks.where((t) => t.isCompleted).length / updatedTasks.length * 100,
+                              : updatedSubTasks.where((t) => t.isCompleted).length / updatedSubTasks.length * 100,
                         );
                       });
                     },
@@ -1596,14 +1601,14 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
                 onPressed: () {
                   if (_newSubtaskController.text.trim().isNotEmpty) {
                     setState(() {
-                      final newTask = SubTask(
+                      final newSubTask = SubTask(
                         id: const Uuid().v4(),
                         title: _newSubtaskController.text.trim(),
                       );
-                      final updatedTasks = List<SubTask>.from(_editedProject.subTasks)..add(newTask);
-                      _editedProject = _editedProject.copyWith(
-                        subTasks: updatedTasks,
-                        completionPercentage: updatedTasks.where((t) => t.isCompleted).length / updatedTasks.length * 100,
+                      final updatedSubTasks = List<SubTask>.from(_editedTask.subTasks)..add(newSubTask);
+                      _editedTask = _editedTask.copyWith(
+                        subTasks: updatedSubTasks,
+                        completionPercentage: updatedSubTasks.where((t) => t.isCompleted).length / updatedSubTasks.length * 100,
                       );
                       _newSubtaskController.clear();
                     });
@@ -1648,7 +1653,7 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
           const SizedBox(height: 8),
           
           // Git references list
-          if (_editedProject.gitReferences.isEmpty)
+          if (_editedTask.gitReferences.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Center(
@@ -1659,9 +1664,9 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: _editedProject.gitReferences.length,
+              itemCount: _editedTask.gitReferences.length,
               itemBuilder: (context, index) {
-                final ref = _editedProject.gitReferences[index];
+                final ref = _editedTask.gitReferences[index];
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.code),
@@ -1692,9 +1697,9 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
                         icon: const Icon(Icons.delete_outline),
                         onPressed: () {
                           setState(() {
-                            final updatedRefs = List<GitReference>.from(_editedProject.gitReferences)
+                            final updatedRefs = List<GitReference>.from(_editedTask.gitReferences)
                               ..removeAt(index);
-                            _editedProject = _editedProject.copyWith(gitReferences: updatedRefs);
+                            _editedTask = _editedTask.copyWith(gitReferences: updatedRefs);
                           });
                         },
                       ),
@@ -1739,8 +1744,8 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
                         url: _newGitRefController.text.trim(),
                         title: _gitRefTitleController.text.trim(),
                       );
-                      final updatedRefs = List<GitReference>.from(_editedProject.gitReferences)..add(newRef);
-                      _editedProject = _editedProject.copyWith(gitReferences: updatedRefs);
+                      final updatedRefs = List<GitReference>.from(_editedTask.gitReferences)..add(newRef);
+                      _editedTask = _editedTask.copyWith(gitReferences: updatedRefs);
                       _newGitRefController.clear();
                       _gitRefTitleController.clear();
                     });
@@ -1778,13 +1783,13 @@ class _ProjectDetailsDialogState extends State<ProjectDetailsDialog> with Single
     );
   }
 
-  String _getStatusText(ProjectStatus status) {
+  String _getStatusText(TaskStatus status) {
     switch (status) {
-      case ProjectStatus.todo:
+      case TaskStatus.todo:
         return 'To Do';
-      case ProjectStatus.inProgress:
+      case TaskStatus.inProgress:
         return 'In Progress';
-      case ProjectStatus.completed:
+      case TaskStatus.completed:
         return 'Completed';
     }
   }

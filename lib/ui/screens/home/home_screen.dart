@@ -36,7 +36,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ),
     NavigationDestination(
       icon: Icon(Icons.task_alt),
-      label: 'Projects',
+      label: 'Tasks',
     ),
     NavigationDestination(
       icon: Icon(Icons.code),
