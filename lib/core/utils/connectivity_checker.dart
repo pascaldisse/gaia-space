@@ -58,19 +58,12 @@ class ConnectivityChecker {
             
             // If running on localhost, always return true to avoid connection checks
             // that might fail in development environment
-            final isLocalhost = true;
-            if (isLocalhost) {
-              print('ConnectivityChecker: Running on localhost, assuming connected');
-              _logger.debug('Running on localhost, assuming connected without HTTP check');
-              _isConnected = true;
-              return _isConnected;
-            }
-            
-            // We'll set this to true as default for web since we'll rely on browser events
+            final bool isLocalhost = true; // Force this to true for all environments to avoid connection checks
+            print('ConnectivityChecker: Running on web mode, assuming connected');
+            _logger.debug('Running on web mode, assuming connected without HTTP check');
             _isConnected = true;
-            print('ConnectivityChecker: Web platform, assuming connected');
-            _logger.debug('Web platform, assuming connected without HTTP check');
             return _isConnected;
+            // This code is unreachable due to the early return above
           } catch (e) {
             print('ConnectivityChecker: Error in web platform check: $e');
             _logger.error('Error in web platform connectivity check', error: e);

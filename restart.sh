@@ -17,6 +17,12 @@ if [ ! -w "logs" ]; then
   chmod 777 logs || true
 fi
 
+# Ensure proper permissions for build directory
+if [ -d "build" ]; then
+  echo "Ensuring proper permissions for build directory..."
+  chmod -R 755 build || true
+fi
+
 # Get current timestamp for log files
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
@@ -95,8 +101,9 @@ flutter pub get 2>&1 | {
 }
 
 # Check if pub get was successful
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-  log_message "${RED}Error: Flutter pub get failed.${NC}"
+PUB_GET_STATUS=${PIPESTATUS[0]}
+if [ $PUB_GET_STATUS -ne 0 ]; then
+  log_message "${RED}Error: Flutter pub get failed with exit code $PUB_GET_STATUS.${NC}"
   exit 1
 fi
 
@@ -116,17 +123,19 @@ log_message "${YELLOW}Note: If the app gets stuck on the splash screen, it might
 log_message "${YELLOW}The app should eventually proceed to the login screen even if connectivity checks fail.${NC}"
 
 # Run Flutter web server with logging
+log_message "${YELLOW}Ignoring file_picker package warnings (known issue)...${NC}"
+
 if [ "$LOG_TO_FILE" = true ]; then
-  flutter run -d web-server --web-port=$WEB_PORT --web-hostname=$WEB_HOSTNAME 2>&1 | tee -a "$LOG_FILE"
+  flutter run -d web-server --web-port=$WEB_PORT --web-hostname=$WEB_HOSTNAME 2>&1 | grep -v "Package file_picker" | tee -a "$LOG_FILE"
   FLUTTER_EXIT_CODE=${PIPESTATUS[0]}
 else
-  flutter run -d web-server --web-port=$WEB_PORT --web-hostname=$WEB_HOSTNAME
+  flutter run -d web-server --web-port=$WEB_PORT --web-hostname=$WEB_HOSTNAME 2>&1 | grep -v "Package file_picker"
   FLUTTER_EXIT_CODE=$?
 fi
 
 # Check if app started successfully
 if [ $FLUTTER_EXIT_CODE -ne 0 ]; then
-  log_message "${RED}Error: Failed to start the application in web mode.${NC}"
+  log_message "${RED}Error: Failed to start the application in web mode (exit code $FLUTTER_EXIT_CODE).${NC}"
   log_message "${YELLOW}You can try running the app manually with:${NC}"
   log_message "flutter run -d web-server --web-port=$WEB_PORT --web-hostname=$WEB_HOSTNAME"
   if [ "$LOG_TO_FILE" = true ]; then
