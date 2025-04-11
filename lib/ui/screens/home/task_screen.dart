@@ -827,8 +827,109 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
   }
 
   void _showCreateTaskDialog(BuildContext context) {
-    // Implementation will be added later
-    // This will show a dialog to create a new task
+    final nameController = TextEditingController();
+    final descriptionController = TextEditingController();
+    String priority = 'Medium';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create New Task'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Task Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descriptionController,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(
+                  labelText: 'Priority',
+                  border: OutlineInputBorder(),
+                ),
+                value: priority,
+                items: ['Low', 'Medium', 'High', 'Critical']
+                    .map((p) => DropdownMenuItem(
+                          value: p,
+                          child: Text(p),
+                        ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    priority = value;
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (nameController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Task name is required')),
+                );
+                return;
+              }
+              
+              final newTask = Task(
+                id: const Uuid().v4(),
+                name: nameController.text.trim(),
+                description: descriptionController.text.trim(),
+                workspaceId: '1', // Default workspace
+                projectId: 'proj1', // Default project
+                createdBy: 'Current User', // Replace with actual user
+                createdAt: DateTime.now(),
+                dueDate: DateTime.now().add(const Duration(days: 14)), // Default due date
+                status: TaskStatus.todo,
+                assignees: [],
+                subTasks: [],
+                gitReferences: [],
+                completionPercentage: 0,
+                priority: priority,
+                order: 0,
+              );
+              
+              ref.read(tasksProvider.notifier).state = [
+                newTask,
+                ...ref.read(tasksProvider)
+              ];
+              
+              Navigator.of(context).pop();
+              
+              // Show success message
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Task created successfully'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
