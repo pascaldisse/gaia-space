@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import { createStore, produce } from "solid-js/store";
 import { api } from "../api";
 import {
   pipelinesApi,
@@ -94,9 +95,13 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
   }
 
   // ---------- structured job/step editor, synced from the selected script's source ----------
+  // A `createStore` (not a plain signal) so editing one job's field mutates that job's proxy
+  // in place instead of replacing the array item's reference — with a signal + spread-copy
+  // update, <For>'s reconciliation sees a new object identity per keystroke and remounts the
+  // row, dropping focus/cursor position on every character typed.
   const [path, setPath] = createSignal("");
   const [repository, setRepository] = createSignal("");
-  const [jobs, setJobs] = createSignal<EditJob[]>([]);
+  const [jobs, setJobs] = createStore<EditJob[]>([]);
   createEffect(() => {
     const s = selected();
     if (s) {
@@ -106,13 +111,13 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     }
   });
   function addJob() {
-    setJobs((prev) => [...prev, { name: `job-${prev.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], stepsText: "" }]);
+    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], stepsText: "" }); }));
   }
   function removeJob(i: number) {
-    setJobs((prev) => prev.filter((_, idx) => idx !== i));
+    setJobs(produce((draft) => { draft.splice(i, 1); }));
   }
   function updateJob(i: number, patch: Partial<EditJob>) {
-    setJobs((prev) => prev.map((j, idx) => (idx === i ? { ...j, ...patch } : j)));
+    setJobs(i, patch);
   }
 
   async function saveScript() {
@@ -120,7 +125,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (!s) return;
     props.setError(null);
     try {
-      const source = JSON.stringify({ jobs: jobs().map(fromEditJob) });
+      const source = JSON.stringify({ jobs: jobs.map(fromEditJob) });
       await pipelinesApi.updateScript({ ...s, path: path().trim() || ".space.kts", repository: repository().trim() || null, source });
       await refetchScripts();
     } catch (err) {
@@ -201,8 +206,8 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
               </header>
 
               <section class="jobs-editor">
-                <h3>Jobs ({jobs().length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
-                <For each={jobs()}>
+                <h3>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
+                <For each={jobs}>
                   {(job, i) => (
                     <div class="job-card">
                       <div class="job-row">
