@@ -4,7 +4,7 @@ use rusqlite::{Connection, Result};
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -20,7 +20,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
-    tx.execute_batch(SCHEMA_V1)?;
+    if version < 1 {
+        tx.execute_batch(SCHEMA_V1)?;
+    }
+    if version < 2 {
+        tx.execute_batch(SCHEMA_V2)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -38,6 +43,17 @@ pub fn migrate_path(path: &Path) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
+CREATE TABLE IF NOT EXISTS absences (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), reason_type TEXT NOT NULL, date_from TEXT NOT NULL, date_to TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK(date_to >= date_from));
+CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, entity_type TEXT, entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), read_at INTEGER, CHECK((entity_type IS NULL) = (entity_id IS NULL)));
+CREATE TABLE IF NOT EXISTS subscription_settings (profile_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type));
+CREATE TABLE IF NOT EXISTS member_locations (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), location TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('Region','Campus','Building','Floor','Room','ConferenceRoom')), created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS todos_profile_done_due ON todos(profile_id, done, due_date);
+CREATE INDEX IF NOT EXISTS absences_dates ON absences(date_from, date_to);
+CREATE INDEX IF NOT EXISTS notifications_recipient_read ON notifications(recipient_id, read_at, created_at);
+"#;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, email TEXT, avatar_url TEXT, external INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
@@ -91,6 +107,23 @@ CREATE TABLE IF NOT EXISTS package_versions (id TEXT PRIMARY KEY, repository_id 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn v1_database_upgrades_to_v2() {
+        let path = std::env::temp_dir().join(format!("gaia-space-v1-upgrade-{}.sqlite", std::process::id()));
+        let conn = Connection::open(&path).expect("v1 database");
+        conn.execute_batch(SCHEMA_V1).expect("v1 schema");
+        conn.pragma_update(None, "user_version", 1).expect("v1 version");
+        migrate(&conn).expect("v2 migration");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 2);
+        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations"] {
+            let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
+            assert_eq!(exists, 1, "{table}");
+        }
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn migration_and_domain_roundtrips() {
         let path =
