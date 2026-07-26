@@ -231,10 +231,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text(
-                                'Don\'t have an account?',
-                                style: TextStyle(
-                                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+                              Flexible(
+                                child: Text(
+                                  'Don\'t have an account?',
+                                  style: TextStyle(
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               TextButton(

@@ -70,3 +70,8 @@ void logNativePlatformInfo() {
 void logWebPlatformInfo() {
   // Not used in native context
 }
+
+// Stub for API consistency with web_main
+void setupWebDebugTools() {
+  // Not used in native context
+}

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gaia_space/core/models/custom_command.dart';
 import 'package:gaia_space/core/models/repository.dart';
 import 'package:gaia_space/core/services/custom_command_service.dart';
+import 'package:gaia_space/core/utils/app_logger.dart';
 import 'package:mockito/mockito.dart';
 import 'package:uuid/uuid.dart';
 
@@ -26,6 +27,12 @@ class MockGitRepository extends Mock implements GitRepository {
 void main() {
   group('CustomCommandService', () {
     late CustomCommandService service;
+
+    setUpAll(() async {
+      // AppLogger uses a `late` static Logger that only becomes usable
+      // after init() runs; CustomCommandService logs during construction.
+      await AppLogger.init();
+    });
 
     setUp(() {
       service = CustomCommandService();
