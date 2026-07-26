@@ -1,5 +1,13 @@
+mod chat;
+mod db;
 mod debug_server;
+mod documents;
 mod git;
+mod issues;
+mod meetings;
+mod pipelines;
+mod platform;
+mod review;
 
 use serde::Serialize;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -41,8 +49,54 @@ pub fn run() {
             git::repo_diff,
             git::repo_stage,
             git::repo_commit,
+            platform::list_profiles,
+            platform::get_profile,
+            platform::create_profile,
+            platform::update_profile,
+            platform::list_teams,
+            platform::list_projects,
+            platform::get_project,
+            platform::create_project,
+            platform::update_project,
+            platform::list_roles,
+            issues::list_issues,
+            issues::get_issue,
+            issues::create_issue,
+            issues::update_issue,
+            issues::list_issue_statuses,
+            issues::list_boards,
+            issues::list_sprints,
+            chat::list_channels,
+            chat::get_channel,
+            chat::create_channel,
+            chat::update_channel,
+            chat::list_messages,
+            chat::create_message,
+            chat::update_message,
+            review::list_reviews,
+            review::get_review,
+            review::create_review,
+            review::update_review,
+            documents::list_documents,
+            documents::get_document,
+            documents::create_document,
+            documents::update_document,
+            documents::list_document_folders,
+            meetings::list_meetings,
+            meetings::get_meeting,
+            meetings::create_meeting,
+            meetings::update_meeting,
+            pipelines::list_pipeline_scripts,
+            pipelines::create_pipeline_script,
+            pipelines::update_pipeline_script,
+            pipelines::list_jobs,
+            pipelines::list_job_runs,
+            pipelines::list_deploy_targets,
+            pipelines::list_package_repositories,
         ])
         .setup(|app| {
+            let conn = db::connection(app.handle()).map_err(|e| std::io::Error::other(e))?;
+            db::seed(&conn).map_err(|e| std::io::Error::other(e.to_string()))?;
             // Built manually (instead of via tauri.conf.json's `app.windows`) so we
             // can attach the debug-server's console-capture init script before the
             // page ever loads. See src/debug_server.rs + skills/app-tools.
