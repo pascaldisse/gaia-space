@@ -44,7 +44,7 @@ pub fn migrate_path(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-const SCHEMA_V2: &str = r#"
+pub(crate) const SCHEMA_V2: &str = r#"
 CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
 CREATE TABLE IF NOT EXISTS absences (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), reason_type TEXT NOT NULL, date_from TEXT NOT NULL, date_to TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK(date_to >= date_from));
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, entity_type TEXT, entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), read_at INTEGER, CHECK((entity_type IS NULL) = (entity_id IS NULL)));
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS absences_dates ON absences(date_from, date_to);
 CREATE INDEX IF NOT EXISTS notifications_recipient_read ON notifications(recipient_id, read_at, created_at);
 "#;
 
-const SCHEMA_V1: &str = r#"
+pub(crate) const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, email TEXT, avatar_url TEXT, external INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, parent_id TEXT REFERENCES teams(id), channel_id TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS team_memberships (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), team_id TEXT NOT NULL REFERENCES teams(id), role_id TEXT REFERENCES roles(id), lead INTEGER NOT NULL DEFAULT 0, manager_id TEXT REFERENCES profiles(id), since_date TEXT, till_date TEXT, requires_approval INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0);

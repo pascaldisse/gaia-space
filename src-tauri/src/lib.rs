@@ -8,6 +8,7 @@ mod meetings;
 mod calls;
 mod pipelines;
 mod platform;
+mod personal;
 mod review;
 
 use serde::Serialize;
@@ -152,7 +153,15 @@ pub fn run() {
             documents::get_document,
             documents::create_document,
             documents::update_document,
+            documents::move_document,
+            documents::archive_document,
+            documents::save_document,
+            documents::list_doc_versions,
+            documents::restore_doc_version,
             documents::list_document_folders,
+            documents::create_document_folder,
+            documents::update_document_folder,
+            documents::move_document_folder,
             meetings::list_meetings,
             meetings::get_meeting,
             meetings::create_meeting,
@@ -172,6 +181,23 @@ pub fn run() {
             pipelines::list_job_runs,
             pipelines::list_deploy_targets,
             pipelines::list_package_repositories,
+            personal::list_todos,
+            personal::create_todo,
+            personal::update_todo,
+            personal::delete_todo,
+            personal::list_absences,
+            personal::create_absence,
+            personal::update_absence,
+            personal::delete_absence,
+            personal::current_absences,
+            personal::emit_notification,
+            personal::list_notifications,
+            personal::mark_notification_read,
+            personal::list_subscription_settings,
+            personal::save_subscription_setting,
+            personal::delete_subscription_setting,
+            personal::goto_search,
+            personal::dashboard_aggregate,
         ])
         .setup(|app| {
             let conn = db::connection(app.handle()).map_err(|e| std::io::Error::other(e))?;
