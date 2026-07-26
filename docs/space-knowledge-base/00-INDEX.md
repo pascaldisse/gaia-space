@@ -38,6 +38,7 @@ What *did* survive and became the real source of truth:
 | 04 | [04-collaboration.md](04-collaboration.md) | Chat (`m2`), Documents/Knowledge Base, Meetings, Calendar |
 | 05 | [05-platform-auth-permissions.md](05-platform-auth-permissions.md) | Rights/Roles/Permissions, Org/Workspace/Teams, Auth (2FA/tokens/OAuth/invites), on-prem architecture |
 | 06 | [06-personal-org.md](06-personal-org.md) | Personal/Org layer: To-Dos, Absences/Vacations, Org Chart/Locations, Member Profiles, Blogs, Notifications+Subscriptions, Global Search, Dashboards |
+| 08 | [08-video-calls-meet.md](08-video-calls-meet.md) | Video calls via suitenumerique/meet recon (LiveKit stack, booted+verified) — DECISION: native LiveKit (livekit-client + Rust token mint), meet clone at ~/projects/meet = reference |
 | 07 | [07-devenv-apps-api.md](07-devenv-apps-api.md) | Dev Environments (verdict: no build lane — cloud-VM out of scope; devfile/"open in IDE" transferable) & Applications/Extensibility (HTTP API, webhooks, chatbots, UI extensions, SDKs — build AFTER foundations) |
 
 **Completeness (audited 07-26): circlet package census (69 dirs) diffed against files — 11 uncovered feature modules found, all captured in 06; 07 covers Dev Environments + Applications; remainder = infra plumbing, deliberately excluded. KB = feature-complete vs decompile.**
