@@ -49,7 +49,22 @@ path/page didn't exist rather than guessing).
 
 ---
 
-## gaia-space coverage — aggregate scorecard
+## REBUILD STATUS — Tauri/Solid (2026-07-26): ALL DOMAINS LIVE
+Stack: Tauri 2 + Solid TS + SQLite (46 tables v1 + 5 v2). 40/40 cargo tests · tsc/build clean · every domain live-verified over real IPC (debug port 9433) w/ screenshots in .gaia/artifacts/.
+| Domain | Commits |
+|---|---|
+| Foundation: schema, per-domain modules, Space nav shell | b62f6b5…3da160d |
+| Git spine (repos/log/branches/diff) | e81ae63 |
+| Code Review: MRs from real branches, turn-based, quality gates, safe-merge dry-run (never mutates real repos) | 586e864 |
+| Planning: issues/statuses/boards/sprints/swimlanes/tags/checklists/time/links | a0bd8db…50e1917 |
+| Chat m2: channels/threads/reactions/read-state/entity-bound (consumed by review) | 7d11bf2 |
+| Documents/KB: containers/folders/versioning+restore/books/markdown | 96adde4 |
+| Meetings/Calendar + native LiveKit calls (media published; claims mirror ~/projects/meet) | 1d7ed04 |
+| Personal/org: dashboard/to-do/absences/notifications/Ctrl-K goto (schema v2) | 80f2445…fd9f03a |
+| Platform: Right×Role×Scope check_right (48-right seed) + Custom Fields engine | 3ca84a4 |
+| Packages/CI-CD: registry, real parallel executor w/ Space limits, deployment state machine | 707ef00, b4d19da |
+
+## Legacy Flutter coverage audit (historical — informed the build order above)
 
 | Domain | Coverage | One-line verdict |
 |---|---|---|
