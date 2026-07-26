@@ -1,5 +1,6 @@
 //! SQLite persistence: one application-data database, versioned migrations, first-run seed.
 use rusqlite::{Connection, Result};
+#[cfg(test)]
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
