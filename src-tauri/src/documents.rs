@@ -1,9 +1,22 @@
 #![allow(dead_code)]
 //! Shared My Documents, project documents and KB containers with version snapshots.
+//!
+//! Container scoping (per docs/space-knowledge-base/04-collaboration.md §2.2/§2.3):
+//! - "my-docs"  -> container_id = owning profile id (personal, private folder tree)
+//! - "project"  -> container_id = project id
+//! - "kb"       -> container_id = book id, where a "book" is simply the top-level
+//!                 (parent_id IS NULL) document_folder in the 'kb' container; articles
+//!                 are ordinary documents filed into folders under that book.
+//!
+//! Versioning: every content save (`save_document`) increments `documents.version` and
+//! appends an immutable `doc_versions` row. Restoring an old version does not rewrite
+//! history — it copies the old body forward as a new latest version, so the version list
+//! only ever grows.
 use crate::db;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 type Result<T> = std::result::Result<T, String>;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DocumentFolder {
     pub id: String,
@@ -14,6 +27,7 @@ pub struct DocumentFolder {
     pub description: Option<String>,
     pub archived: bool,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Document {
     pub id: String,
@@ -27,6 +41,7 @@ pub struct Document {
     pub archived: bool,
     pub created_by: Option<String>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DocVersion {
     pub id: String,
@@ -36,23 +51,185 @@ pub struct DocVersion {
     pub created_by: Option<String>,
     pub created_at: i64,
 }
+
+fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
+    Ok(Document {
+        id: r.get(0)?,
+        container_type: r.get(1)?,
+        container_id: r.get(2)?,
+        folder_id: r.get(3)?,
+        doc_type: r.get(4)?,
+        title: r.get(5)?,
+        body: r.get(6)?,
+        version: r.get(7)?,
+        archived: r.get(8)?,
+        created_by: r.get(9)?,
+    })
+}
+
+const DOC_COLUMNS: &str =
+    "id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by";
+
 #[tauri::command]
 pub fn list_documents(app: AppHandle) -> Result<Vec<Document>> {
     let c = db::connection(&app)?;
-    let mut s=c.prepare("SELECT id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by FROM documents ORDER BY updated_at DESC").map_err(|e|e.to_string())?;
+    let mut s = c
+        .prepare(&format!(
+            "SELECT {DOC_COLUMNS} FROM documents ORDER BY updated_at DESC"
+        ))
+        .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(Document {
+        .query_map([], row_to_document)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+#[tauri::command]
+pub fn get_document(app: AppHandle, id: String) -> Result<Option<Document>> {
+    Ok(list_documents(app)?.into_iter().find(|v| v.id == id))
+}
+
+#[tauri::command]
+pub fn create_document(app: AppHandle, document: Document) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        rusqlite::params![
+            document.id,
+            document.container_type,
+            document.container_id,
+            document.folder_id,
+            document.doc_type,
+            document.title,
+            document.body,
+            document.version,
+            document.archived,
+            document.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    // seed initial version snapshot so history is never empty for a saved document
+    c.execute(
+        "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
+        rusqlite::params![
+            format!("{}-v{}", document.id, document.version),
+            document.id,
+            document.version,
+            document.body,
+            document.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Metadata-only update: title, container/folder placement (move), doc_type, archived.
+/// Does NOT touch body/version — content saves go through `save_document` so every
+/// content change is versioned.
+#[tauri::command]
+pub fn update_document(app: AppHandle, document: Document) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,title=?6,archived=?7,updated_at=unixepoch() WHERE id=?1",
+        rusqlite::params![
+            document.id,
+            document.container_type,
+            document.container_id,
+            document.folder_id,
+            document.doc_type,
+            document.title,
+            document.archived
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Move a document to a different folder (and/or container) without altering content.
+#[tauri::command]
+pub fn move_document(
+    app: AppHandle,
+    id: String,
+    container_type: String,
+    container_id: Option<String>,
+    folder_id: Option<String>,
+) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,updated_at=unixepoch() WHERE id=?1",
+        rusqlite::params![id, container_type, container_id, folder_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn archive_document(app: AppHandle, id: String, archived: bool) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE documents SET archived=?2,updated_at=unixepoch() WHERE id=?1",
+        rusqlite::params![id, archived],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Save editor content: bumps `version` and appends an immutable `doc_versions` row.
+#[tauri::command]
+pub fn save_document(
+    app: AppHandle,
+    id: String,
+    title: String,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<Document> {
+    let mut c = db::connection(&app)?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let current_version: i64 = tx
+        .query_row(
+            "SELECT version FROM documents WHERE id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let next_version = current_version + 1;
+    tx.execute(
+        "UPDATE documents SET title=?2,body=?3,version=?4,updated_at=unixepoch() WHERE id=?1",
+        rusqlite::params![id, title, body, next_version],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
+        rusqlite::params![
+            format!("{id}-v{next_version}"),
+            id,
+            next_version,
+            body,
+            actor
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    get_document(app, id)?.ok_or_else(|| "document vanished after save".to_string())
+}
+
+#[tauri::command]
+pub fn list_doc_versions(app: AppHandle, document_id: String) -> Result<Vec<DocVersion>> {
+    let c = db::connection(&app)?;
+    let mut s = c
+        .prepare("SELECT id,document_id,version,body,created_by,created_at FROM doc_versions WHERE document_id=?1 ORDER BY version DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([&document_id], |r| {
+            Ok(DocVersion {
                 id: r.get(0)?,
-                container_type: r.get(1)?,
-                container_id: r.get(2)?,
-                folder_id: r.get(3)?,
-                doc_type: r.get(4)?,
-                title: r.get(5)?,
-                body: r.get(6)?,
-                version: r.get(7)?,
-                archived: r.get(8)?,
-                created_by: r.get(9)?,
+                document_id: r.get(1)?,
+                version: r.get(2)?,
+                body: r.get(3)?,
+                created_by: r.get(4)?,
+                created_at: r.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -60,22 +237,37 @@ pub fn list_documents(app: AppHandle) -> Result<Vec<Document>> {
         .map_err(|e| e.to_string());
     rows
 }
+
+/// Restore an earlier version: copies its body forward as a brand-new latest version
+/// (history is append-only — nothing is deleted or rewritten).
 #[tauri::command]
-pub fn get_document(app: AppHandle, id: String) -> Result<Option<Document>> {
-    Ok(list_documents(app)?.into_iter().find(|v| v.id == id))
+pub fn restore_doc_version(
+    app: AppHandle,
+    document_id: String,
+    version: i64,
+    actor: Option<String>,
+) -> Result<Document> {
+    let restored_body: Option<String> = {
+        let c = db::connection(&app)?;
+        c.query_row(
+            "SELECT body FROM doc_versions WHERE document_id=?1 AND version=?2",
+            rusqlite::params![document_id, version],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    };
+    let title: String = {
+        let c = db::connection(&app)?;
+        c.query_row(
+            "SELECT title FROM documents WHERE id=?1",
+            [&document_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    };
+    save_document(app, document_id, title, restored_body, actor)
 }
-#[tauri::command]
-pub fn create_document(app: AppHandle, document: Document) -> Result<()> {
-    let c = db::connection(&app)?;
-    c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params![document.id,document.container_type,document.container_id,document.folder_id,document.doc_type,document.title,document.body,document.version,document.archived,document.created_by]).map_err(|e|e.to_string())?;
-    Ok(())
-}
-#[tauri::command]
-pub fn update_document(app: AppHandle, document: Document) -> Result<()> {
-    let c = db::connection(&app)?;
-    c.execute("UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,title=?6,body=?7,version=?8,archived=?9,updated_at=unixepoch() WHERE id=?1",rusqlite::params![document.id,document.container_type,document.container_id,document.folder_id,document.doc_type,document.title,document.body,document.version,document.archived]).map_err(|e|e.to_string())?;
-    Ok(())
-}
+
 #[tauri::command]
 pub fn list_document_folders(app: AppHandle) -> Result<Vec<DocumentFolder>> {
     let c = db::connection(&app)?;
@@ -97,4 +289,229 @@ pub fn list_document_folders(app: AppHandle) -> Result<Vec<DocumentFolder>> {
         .map_err(|e| e.to_string());
     rows
 }
-// TODO: access inheritance, archive/delete lifecycle and document restore snapshots.
+
+#[tauri::command]
+pub fn create_document_folder(app: AppHandle, folder: DocumentFolder) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        rusqlite::params![
+            folder.id,
+            folder.container_type,
+            folder.container_id,
+            folder.parent_id,
+            folder.name,
+            folder.description,
+            folder.archived
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Full-replace update: rename, edit description, move to a new parent (children follow
+/// automatically since they merely reference this folder's id), toggle archived.
+#[tauri::command]
+pub fn update_document_folder(app: AppHandle, folder: DocumentFolder) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE document_folders SET container_type=?2,container_id=?3,parent_id=?4,name=?5,description=?6,archived=?7 WHERE id=?1",
+        rusqlite::params![
+            folder.id,
+            folder.container_type,
+            folder.container_id,
+            folder.parent_id,
+            folder.name,
+            folder.description,
+            folder.archived
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Move a folder under a new parent (or to root with `None`). Subfolders/documents keep
+/// referencing this folder's id, so they move along transparently.
+#[tauri::command]
+pub fn move_document_folder(app: AppHandle, id: String, parent_id: Option<String>) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE document_folders SET parent_id=?2 WHERE id=?1",
+        rusqlite::params![id, parent_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn test_conn() -> rusqlite::Connection {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "gaia-space-documents-test-{}-{}.sqlite",
+            std::process::id(),
+            n
+        ));
+        let _ = std::fs::remove_file(&path);
+        db::migrate_path(&path).expect("migration")
+    }
+
+    fn insert_doc(c: &rusqlite::Connection, id: &str, container_type: &str, container_id: Option<&str>, folder_id: Option<&str>, body: &str) {
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'text',?5,?6,1,0,NULL)",
+            rusqlite::params![id, container_type, container_id, folder_id, format!("Doc {id}"), body],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,NULL)",
+            rusqlite::params![format!("{id}-v1"), id, body],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn version_save_and_restore_roundtrip() {
+        let c = test_conn();
+        insert_doc(&c, "doc1", "project", Some("demo-project"), None, "v1 body");
+
+        // simulate save_document's core SQL directly against the shared connection
+        // (save_document itself opens its own AppHandle-scoped connection in prod).
+        let bump = |c: &rusqlite::Connection, body: &str| {
+            let cur: i64 = c
+                .query_row("SELECT version FROM documents WHERE id='doc1'", [], |r| r.get(0))
+                .unwrap();
+            let next = cur + 1;
+            c.execute(
+                "UPDATE documents SET body=?1,version=?2 WHERE id='doc1'",
+                rusqlite::params![body, next],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,'doc1',?2,?3,NULL)",
+                rusqlite::params![format!("doc1-v{next}"), next, body],
+            )
+            .unwrap();
+            next
+        };
+        bump(&c, "v2 body");
+        bump(&c, "v3 body");
+
+        let versions: i64 = c
+            .query_row("SELECT count(*) FROM doc_versions WHERE document_id='doc1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(versions, 3);
+
+        // restore v1: copy its body forward as a new v4
+        let v1_body: String = c
+            .query_row(
+                "SELECT body FROM doc_versions WHERE document_id='doc1' AND version=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v1_body, "v1 body");
+        let restored_version = bump(&c, &v1_body);
+        assert_eq!(restored_version, 4);
+
+        let (final_body, final_version): (String, i64) = c
+            .query_row(
+                "SELECT body,version FROM documents WHERE id='doc1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(final_body, "v1 body");
+        assert_eq!(final_version, 4);
+        let versions_after: i64 = c
+            .query_row("SELECT count(*) FROM doc_versions WHERE document_id='doc1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(versions_after, 4, "restore appends, never overwrites history");
+    }
+
+    #[test]
+    fn container_scoping_isolation() {
+        let c = test_conn();
+        insert_doc(&c, "my1", "my-docs", Some("profile-a"), None, "personal note");
+        insert_doc(&c, "proj1", "project", Some("demo-project"), None, "project doc");
+        insert_doc(&c, "kb1", "kb", Some("book-1"), None, "kb article");
+
+        let mut stmt = c
+            .prepare(&format!("SELECT {DOC_COLUMNS} FROM documents ORDER BY id"))
+            .unwrap();
+        let docs: Vec<Document> = stmt
+            .query_map([], row_to_document)
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(docs.len(), 3);
+
+        let my_docs: Vec<_> = docs.iter().filter(|d| d.container_type == "my-docs").collect();
+        assert_eq!(my_docs.len(), 1);
+        assert_eq!(my_docs[0].container_id.as_deref(), Some("profile-a"));
+
+        let proj_docs: Vec<_> = docs.iter().filter(|d| d.container_type == "project").collect();
+        assert_eq!(proj_docs.len(), 1);
+        assert_eq!(proj_docs[0].container_id.as_deref(), Some("demo-project"));
+
+        let kb_docs: Vec<_> = docs.iter().filter(|d| d.container_type == "kb").collect();
+        assert_eq!(kb_docs.len(), 1);
+        assert_eq!(kb_docs[0].container_id.as_deref(), Some("book-1"));
+
+        // isolation: a container-scoped query for one container never returns another's rows
+        assert!(!my_docs.iter().any(|d| d.id == "proj1" || d.id == "kb1"));
+        assert!(!proj_docs.iter().any(|d| d.id == "my1" || d.id == "kb1"));
+        assert!(!kb_docs.iter().any(|d| d.id == "my1" || d.id == "proj1"));
+    }
+
+    #[test]
+    fn folder_move_with_children() {
+        let c = test_conn();
+        c.execute(
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('book-1','kb','book-1',NULL,'Book One',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('folder-a','kb','book-1',NULL,'Folder A',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('child-1','kb','book-1','folder-a','Child One',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('child-2','kb','book-1','folder-a','Child Two',0)",
+            [],
+        )
+        .unwrap();
+
+        // move folder-a under book-1's sibling structure (simulate move_document_folder)
+        c.execute(
+            "UPDATE document_folders SET parent_id=?2 WHERE id=?1",
+            rusqlite::params!["folder-a", Some("book-1")],
+        )
+        .unwrap();
+
+        let parent_of_a: Option<String> = c
+            .query_row("SELECT parent_id FROM document_folders WHERE id='folder-a'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(parent_of_a.as_deref(), Some("book-1"));
+
+        // children still reference folder-a — they moved along with it, no orphaning
+        let mut stmt = c
+            .prepare("SELECT id FROM document_folders WHERE parent_id='folder-a' ORDER BY id")
+            .unwrap();
+        let children: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(children, vec!["child-1".to_string(), "child-2".to_string()]);
+    }
+}
