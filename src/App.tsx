@@ -3,6 +3,7 @@ import { Dynamic } from "solid-js/web";
 import "./App.css";
 import Projects from "./views/Projects";
 import Repos from "./views/Repos";
+import Reviews from "./views/Reviews";
 import Issues from "./views/Issues";
 import Boards from "./views/Boards";
 import Chat from "./views/Chat";
@@ -16,6 +17,7 @@ import Admin from "./views/Admin";
 
 const views: { name: string; icon: string; component: Component }[] = [
   { name: "Projects", icon: "◈", component: Projects }, { name: "Repos", icon: "⌘", component: Repos },
+  { name: "Code Reviews", icon: "⇄", component: Reviews },
   { name: "Issues", icon: "✓", component: Issues }, { name: "Boards", icon: "▦", component: Boards },
   { name: "Chat", icon: "◌", component: Chat }, { name: "Documents", icon: "▤", component: Documents },
   { name: "Meetings", icon: "◷", component: Meetings }, { name: "Calendar", icon: "□", component: Calendar },
