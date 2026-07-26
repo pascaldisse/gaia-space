@@ -208,7 +208,7 @@ pub struct Dashboard { pub open_todos: Vec<Todo>, pub assigned_issues: Vec<Assig
 pub fn dashboard_aggregate(app: AppHandle, profile_id: String) -> Result<Dashboard> {
     if profile_id.trim().is_empty() { return Err("Dashboard profile is required".into()); }
     let c = db::connection(&app)?;
-    let mut statement = err(c.prepare("SELECT id,project_id,number,title,due_date FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.assignee_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0 ORDER BY i.due_date IS NULL,i.due_date,i.number"))?;
+    let mut statement = err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.due_date FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.assignee_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0 ORDER BY i.due_date IS NULL,i.due_date,i.number"))?;
     let assigned_issues = err(statement.query_map([&profile_id], |row| Ok(AssignedIssue { id: row.get(0)?, project_id: row.get(1)?, number: row.get(2)?, title: row.get(3)?, due_date: row.get(4)? })))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     let now = Utc::now();
     let today = now.date_naive().to_string();
