@@ -1,3 +1,240 @@
+import { createResource, createSignal, createEffect, For, Show } from "solid-js";
 import { api } from "../api";
-import { ResourceView } from "./ResourceView";
-export default function Packages() { return <ResourceView title="Packages" description="Package repositories across Space-supported formats." load={api.listPackageRepositories} primary={item => item.name as string} />; }
+import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type PackageRepository, type PackageVersion } from "../api/pipelines";
+import "./Packages.css";
+
+export default function Packages() {
+  const [error, setError] = createSignal<string | null>(null);
+  const [projects] = createResource(() => api.listProjects());
+
+  const [repos, { refetch: refetchRepos }] = createResource(() => pipelinesApi.listPackageRepositories());
+  const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  createEffect(() => {
+    if (!selectedId() && repos()?.length) setSelectedId(repos()![0].id);
+  });
+  const selected = (): PackageRepository | null => repos()?.find((r) => r.id === selectedId()) ?? null;
+
+  // ---------- new repository ----------
+  const [formName, setFormName] = createSignal("");
+  const [formProjectId, setFormProjectId] = createSignal("");
+  const [formFormat, setFormFormat] = createSignal<string>(PACKAGE_FORMATS[0]);
+  const [formMode, setFormMode] = createSignal<string>(REPO_MODES[0]);
+  const [formDescription, setFormDescription] = createSignal("");
+  createEffect(() => {
+    if (!formProjectId() && projects()?.length) setFormProjectId(projects()![0].id);
+  });
+
+  async function createRepo(e: SubmitEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!formName().trim()) {
+      setError("repository name is required");
+      return;
+    }
+    try {
+      const repo: PackageRepository = {
+        id: newId("pkgrepo"),
+        project_id: formProjectId() || null,
+        name: formName().trim(),
+        format: formFormat(),
+        mode: formMode(),
+        description: formDescription().trim() || null,
+        archived: false,
+      };
+      await pipelinesApi.createPackageRepository(repo);
+      setFormName("");
+      setFormDescription("");
+      await refetchRepos();
+      setSelectedId(repo.id);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function toggleArchived(repo: PackageRepository) {
+    try {
+      await pipelinesApi.updatePackageRepository({ ...repo, archived: !repo.archived });
+      refetchRepos();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function deleteRepo(id: string) {
+    try {
+      await pipelinesApi.deletePackageRepository(id);
+      if (selectedId() === id) setSelectedId(null);
+      await refetchRepos();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // ---------- versions ----------
+  const [search, setSearch] = createSignal("");
+  const [versions, { refetch: refetchVersions }] = createResource(
+    () => (selectedId() ? { id: selectedId()!, q: search() } : null),
+    (k) => (k ? pipelinesApi.listPackageVersions(k.id, k.q) : Promise.resolve([])),
+  );
+  const [viewingMeta, setViewingMeta] = createSignal<PackageVersion | null>(null);
+
+  // ---------- publish ----------
+  const [pubName, setPubName] = createSignal("");
+  const [pubVersion, setPubVersion] = createSignal("");
+  const [pubMetadata, setPubMetadata] = createSignal("{}");
+  const [pubFilename, setPubFilename] = createSignal("");
+  const [pubContent, setPubContent] = createSignal("");
+
+  async function publish(e: SubmitEvent) {
+    e.preventDefault();
+    setError(null);
+    const repo = selected();
+    if (!repo || !pubName().trim() || !pubVersion().trim()) {
+      setError("package name and version are required");
+      return;
+    }
+    try {
+      await pipelinesApi.publishPackageVersion({
+        repositoryId: repo.id,
+        packageName: pubName().trim(),
+        version: pubVersion().trim(),
+        metadataJson: pubMetadata().trim() || "{}",
+        payloadFilename: pubFilename().trim() || null,
+        payloadContent: pubFilename().trim() ? pubContent() : null,
+      });
+      setPubName("");
+      setPubVersion("");
+      setPubMetadata("{}");
+      setPubFilename("");
+      setPubContent("");
+      refetchVersions();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function deleteVersion(id: string) {
+    try {
+      await pipelinesApi.deletePackageVersion(id);
+      if (viewingMeta()?.id === id) setViewingMeta(null);
+      refetchVersions();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  return (
+    <section class="packages-view">
+      <header class="packages-head">
+        <h1>Packages</h1>
+        <p>Package repositories across Space-supported formats — publish and browse versions, no upstream proxying.</p>
+      </header>
+
+      <Show when={error()}>
+        <div class="packages-error" onClick={() => setError(null)}>{error()}</div>
+      </Show>
+
+      <form class="new-repo-form" onSubmit={createRepo}>
+        <input placeholder="repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
+        <select value={formProjectId()} onChange={(e) => setFormProjectId(e.currentTarget.value)}>
+          <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+        </select>
+        <select value={formFormat()} onChange={(e) => setFormFormat(e.currentTarget.value)}>
+          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{f}</option>}</For>
+        </select>
+        <select value={formMode()} onChange={(e) => setFormMode(e.currentTarget.value)}>
+          <For each={REPO_MODES}>{(m) => <option value={m}>{m}</option>}</For>
+        </select>
+        <input class="grow" placeholder="description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
+        <button class="primary">Create repository</button>
+      </form>
+
+      <div class="packages-body">
+        <aside class="repos-list">
+          <Show when={repos()?.length} fallback={<p class="hint pad">No repositories yet — create one above.</p>}>
+            <ul>
+              <For each={repos()}>
+                {(r) => (
+                  <li classList={{ active: r.id === selectedId(), archived: r.archived }} onClick={() => setSelectedId(r.id)}>
+                    <strong>{r.name}</strong>
+                    <span class="fmt">{r.format}</span>
+                    <span class="mode">{r.mode}</span>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
+        </aside>
+
+        <Show when={selected()} fallback={<p class="hint pad">Select or create a repository.</p>}>
+          {(repo) => (
+            <section class="repo-detail">
+              <header class="repo-detail-head">
+                <h2>{repo().name}</h2>
+                <span class="fmt">{repo().format}</span>
+                <span class="mode">{repo().mode}</span>
+                <div class="repo-actions">
+                  <button class="ghost small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</button>
+                  <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete</button>
+                </div>
+              </header>
+              <p class="hint">{repo().description ?? "no description"}</p>
+
+              <section class="publish-section">
+                <h3>Publish version</h3>
+                <form class="publish-form" onSubmit={publish}>
+                  <div class="publish-row">
+                    <input placeholder="package name" value={pubName()} onInput={(e) => setPubName(e.currentTarget.value)} />
+                    <input placeholder="version" value={pubVersion()} onInput={(e) => setPubVersion(e.currentTarget.value)} />
+                    <input placeholder="payload filename (optional)" value={pubFilename()} onInput={(e) => setPubFilename(e.currentTarget.value)} />
+                  </div>
+                  <textarea class="meta-input" placeholder="metadata JSON" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
+                  <Show when={pubFilename().trim()}>
+                    <textarea class="payload-input" placeholder="payload content (stored as text under app-data/packages/…)" rows="3" value={pubContent()} onInput={(e) => setPubContent(e.currentTarget.value)} />
+                  </Show>
+                  <button class="primary">Publish</button>
+                </form>
+              </section>
+
+              <section class="versions-section">
+                <header class="versions-head">
+                  <h3>Versions</h3>
+                  <input class="search" placeholder="search by package name…" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+                </header>
+                <Show when={versions()?.length} fallback={<p class="hint pad">No versions published yet.</p>}>
+                  <table class="versions-table">
+                    <thead><tr><th>Package</th><th>Version</th><th>Published</th><th></th></tr></thead>
+                    <tbody>
+                      <For each={versions()}>
+                        {(v) => (
+                          <tr>
+                            <td>{v.package_name}</td>
+                            <td><code>{v.version}</code></td>
+                            <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
+                            <td class="row-actions">
+                              <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
+                              <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
+                            </td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                </Show>
+                <Show when={viewingMeta()}>
+                  {(v) => (
+                    <div class="metadata-view">
+                      <header>
+                        <strong>{v().package_name}@{v().version}</strong>
+                        <button class="ghost small" onClick={() => setViewingMeta(null)}>×</button>
+                      </header>
+                      <pre>{JSON.stringify(JSON.parse(v().metadata_json || "{}"), null, 2)}</pre>
+                    </div>
+                  )}
+                </Show>
+              </section>
+            </section>
+          )}
+        </Show>
+      </div>
+    </section>
+  );
+}

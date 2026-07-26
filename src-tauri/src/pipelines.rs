@@ -1,9 +1,58 @@
 #![allow(dead_code)]
-//! Automation, deployment and package-registry persistence. Jobs are intentionally independent/parallel.
+//! Automation (CI/CD), deployment and package-registry persistence.
+//!
+//! Config-as-code, JetBrains-Space-style: a `pipeline_scripts` row's `source` column is the
+//! single source of truth for that script's jobs+steps (mirrors `.space.kts`), stored here as
+//! JSON (`ScriptDef`) rather than a Kotlin DSL — no DSL parser in scope, same information
+//! shape. The `jobs` table (fixed schema, no steps/timeout column) is kept as a queryable
+//! materialization of job names for FK joins from `job_runs`; it is resynced from the parsed
+//! script on every create/update. Job ids are deterministic (`{script_id}::{name}`) so history
+//! survives script edits that don't rename jobs.
+//!
+//! Real Space product limits (docs/space-knowledge-base/03-packages-cicd.md §1.2), enforced
+//! as validation constants below: jobs within one script always run in parallel (no dependency
+//! graph — never build one), max 100 jobs/script, max 50 steps/job, max (and default) job
+//! timeout 2h. Deploy-target health checks are explicitly "(Not yet available)" even in the
+//! real product per the KB — not built here either.
+//!
+//! Execution model: `trigger_pipeline_script` inserts one `SCHEDULED` `job_runs` row per job
+//! and returns immediately (a 2h job cannot hold a Tauri IPC call open); each job then runs on
+//! its own OS thread against a shared `Arc<Mutex<Connection>>`, steps sequential, real
+//! `sh -c` child processes, stdout+stderr captured and appended to the run's `log` column as
+//! they complete so the UI can poll for live progress.
 use crate::db;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use std::{
+    collections::HashSet,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tauri::{AppHandle, Manager};
+
 type Result<T> = std::result::Result<T, String>;
+
+// ---------- Space's real Automation limits (KB §1.2) ----------
+pub const MAX_JOBS_PER_SCRIPT: usize = 100;
+pub const MAX_STEPS_PER_JOB: usize = 50;
+pub const MAX_JOB_TIMEOUT_SECS: u64 = 7200; // 2h — also the max, per docs
+pub const DEFAULT_JOB_TIMEOUT_SECS: u64 = 7200;
+
+const PACKAGE_FORMATS: [&str; 8] = ["maven", "npm", "nuget", "pypi", "dart", "container", "composer", "file"];
+const REPO_MODES: [&str; 2] = ["HOSTING", "PROXY"];
+
+fn now_secs() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+fn now_nanos() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PipelineScript {
     pub id: String,
@@ -21,7 +70,7 @@ pub struct Job {
     pub trigger_type: String,
     pub archived: bool,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JobRun {
     pub id: String,
     pub job_id: String,
@@ -49,6 +98,16 @@ pub struct Deployment {
     pub status: String,
     pub description: Option<String>,
     pub job_run_id: Option<String>,
+    pub scheduled_at: Option<i64>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+}
+#[derive(Debug, Deserialize)]
+pub struct ScheduleDeploymentRequest {
+    pub id: String,
+    pub target_id: String,
+    pub version: String,
+    pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackageRepository {
@@ -69,20 +128,113 @@ pub struct PackageVersion {
     pub metadata_json: Option<String>,
     pub created_at: i64,
 }
+
+// ---------- script JSON model (the ".space.kts equivalent") ----------
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ScriptJobDef {
+    pub name: String,
+    #[serde(default = "default_trigger_type")]
+    pub trigger_type: String,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub steps: Vec<String>,
+}
+fn default_trigger_type() -> String {
+    "MANUAL".into()
+}
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ScriptDef {
+    #[serde(default)]
+    pub jobs: Vec<ScriptJobDef>,
+}
+
+/// Parses `source` as a `ScriptDef` and enforces Space's real Automation limits.
+pub fn parse_and_validate_script(source: &str) -> Result<ScriptDef> {
+    let def: ScriptDef = serde_json::from_str(source).map_err(|e| format!("invalid pipeline script JSON: {e}"))?;
+    if def.jobs.len() > MAX_JOBS_PER_SCRIPT {
+        return Err(format!("script exceeds max {MAX_JOBS_PER_SCRIPT} jobs/script (has {})", def.jobs.len()));
+    }
+    let mut seen = HashSet::new();
+    for job in &def.jobs {
+        if job.name.trim().is_empty() {
+            return Err("every job needs a non-empty name".into());
+        }
+        if !seen.insert(job.name.clone()) {
+            return Err(format!("duplicate job name '{}' in script", job.name));
+        }
+        if job.steps.is_empty() {
+            return Err(format!("job '{}' needs at least one step", job.name));
+        }
+        if job.steps.len() > MAX_STEPS_PER_JOB {
+            return Err(format!("job '{}' exceeds max {MAX_STEPS_PER_JOB} steps/job (has {})", job.name, job.steps.len()));
+        }
+        if let Some(t) = job.timeout_secs {
+            if t == 0 || t > MAX_JOB_TIMEOUT_SECS {
+                return Err(format!("job '{}' timeout_secs must be in 1..={MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)", job.name));
+            }
+        }
+    }
+    Ok(def)
+}
+
+fn job_id_for(script_id: &str, name: &str) -> String {
+    format!("{script_id}::{name}")
+}
+
+/// Resyncs the `jobs` index table from a validated script def: upserts current jobs,
+/// archives ones no longer present (soft-delete, same convention as the rest of the schema).
+fn sync_jobs_tx(conn: &Connection, script_id: &str, def: &ScriptDef) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT id FROM jobs WHERE script_id=?1").map_err(|e| e.to_string())?;
+    let existing: HashSet<String> = stmt
+        .query_map(params![script_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    let mut kept = HashSet::new();
+    for job in &def.jobs {
+        let id = job_id_for(script_id, &job.name);
+        conn.execute(
+            "INSERT INTO jobs(id,script_id,name,trigger_type,archived) VALUES(?1,?2,?3,?4,0)
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name, trigger_type=excluded.trigger_type, archived=0",
+            params![id, script_id, job.name, job.trigger_type],
+        )
+        .map_err(|e| e.to_string())?;
+        kept.insert(id);
+    }
+    for id in existing.difference(&kept) {
+        conn.execute("UPDATE jobs SET archived=1 WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn create_pipeline_script_tx(conn: &Connection, script: &PipelineScript) -> Result<()> {
+    let def = parse_and_validate_script(&script.source)?;
+    conn.execute(
+        "INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived)VALUES(?1,?2,?3,?4,?5,?6)",
+        params![script.id, script.project_id, script.repository, script.path, script.source, script.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    sync_jobs_tx(conn, &script.id, &def)
+}
+fn update_pipeline_script_tx(conn: &Connection, script: &PipelineScript) -> Result<()> {
+    let def = parse_and_validate_script(&script.source)?;
+    conn.execute(
+        "UPDATE pipeline_scripts SET project_id=?2,repository=?3,path=?4,source=?5,archived=?6 WHERE id=?1",
+        params![script.id, script.project_id, script.repository, script.path, script.source, script.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    sync_jobs_tx(conn, &script.id, &def)
+}
+
 #[tauri::command]
 pub fn list_pipeline_scripts(app: AppHandle) -> Result<Vec<PipelineScript>> {
     let c = db::connection(&app)?;
-    let mut s=c.prepare("SELECT id,project_id,repository,path,source,archived FROM pipeline_scripts ORDER BY path").map_err(|e|e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,repository,path,source,archived FROM pipeline_scripts ORDER BY path").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(PipelineScript {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                repository: r.get(2)?,
-                path: r.get(3)?,
-                source: r.get(4)?,
-                archived: r.get(5)?,
-            })
+            Ok(PipelineScript { id: r.get(0)?, project_id: r.get(1)?, repository: r.get(2)?, path: r.get(3)?, source: r.get(4)?, archived: r.get(5)? })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -92,72 +244,244 @@ pub fn list_pipeline_scripts(app: AppHandle) -> Result<Vec<PipelineScript>> {
 #[tauri::command]
 pub fn create_pipeline_script(app: AppHandle, script: PipelineScript) -> Result<()> {
     let c = db::connection(&app)?;
-    c.execute("INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived)VALUES(?1,?2,?3,?4,?5,?6)",rusqlite::params![script.id,script.project_id,script.repository,script.path,script.source,script.archived]).map_err(|e|e.to_string())?;
-    Ok(())
+    create_pipeline_script_tx(&c, &script)
 }
 #[tauri::command]
 pub fn update_pipeline_script(app: AppHandle, script: PipelineScript) -> Result<()> {
     let c = db::connection(&app)?;
-    c.execute("UPDATE pipeline_scripts SET project_id=?2,repository=?3,path=?4,source=?5,archived=?6 WHERE id=?1",rusqlite::params![script.id,script.project_id,script.repository,script.path,script.source,script.archived]).map_err(|e|e.to_string())?;
+    update_pipeline_script_tx(&c, &script)
+}
+#[tauri::command]
+pub fn delete_pipeline_script(app: AppHandle, id: String) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "DELETE FROM job_runs WHERE job_id IN (SELECT id FROM jobs WHERE script_id=?1)",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM jobs WHERE script_id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM pipeline_scripts WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }
+
 #[tauri::command]
 pub fn list_jobs(app: AppHandle) -> Result<Vec<Job>> {
     let c = db::connection(&app)?;
-    let mut s = c
-        .prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs ORDER BY name")
-        .map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(Job {
-                id: r.get(0)?,
-                script_id: r.get(1)?,
-                name: r.get(2)?,
-                trigger_type: r.get(3)?,
-                archived: r.get(4)?,
-            })
-        })
+        .query_map([], |r| Ok(Job { id: r.get(0)?, script_id: r.get(1)?, name: r.get(2)?, trigger_type: r.get(3)?, archived: r.get(4)? }))
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
 }
+#[tauri::command]
+pub fn list_jobs_for_script(app: AppHandle, script_id: String) -> Result<Vec<Job>> {
+    let c = db::connection(&app)?;
+    let mut s = c
+        .prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs WHERE script_id=?1 ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(params![script_id], |r| Ok(Job { id: r.get(0)?, script_id: r.get(1)?, name: r.get(2)?, trigger_type: r.get(3)?, archived: r.get(4)? }))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
 #[tauri::command]
 pub fn list_job_runs(app: AppHandle) -> Result<Vec<JobRun>> {
     let c = db::connection(&app)?;
-    let mut s=c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at FROM job_runs ORDER BY triggered_at DESC").map_err(|e|e.to_string())?;
+    let mut s = c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at FROM job_runs ORDER BY triggered_at DESC").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(JobRun {
-                id: r.get(0)?,
-                job_id: r.get(1)?,
-                status: r.get(2)?,
-                log: r.get(3)?,
-                triggered_at: r.get(4)?,
-                started_at: r.get(5)?,
-                finished_at: r.get(6)?,
-            })
+            Ok(JobRun { id: r.get(0)?, job_id: r.get(1)?, status: r.get(2)?, log: r.get(3)?, triggered_at: r.get(4)?, started_at: r.get(5)?, finished_at: r.get(6)? })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
 }
+#[tauri::command]
+pub fn list_job_runs_for_script(app: AppHandle, script_id: String) -> Result<Vec<JobRun>> {
+    let c = db::connection(&app)?;
+    let mut s = c
+        .prepare(
+            "SELECT job_runs.id,job_runs.job_id,job_runs.status,job_runs.log,job_runs.triggered_at,job_runs.started_at,job_runs.finished_at
+             FROM job_runs JOIN jobs ON jobs.id=job_runs.job_id WHERE jobs.script_id=?1 ORDER BY job_runs.triggered_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(params![script_id], |r| {
+            Ok(JobRun { id: r.get(0)?, job_id: r.get(1)?, status: r.get(2)?, log: r.get(3)?, triggered_at: r.get(4)?, started_at: r.get(5)?, finished_at: r.get(6)? })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+// ---------- real local executor: parallel jobs, sequential steps, real processes ----------
+
+/// Runs one shell step to completion (or until `deadline`), capturing combined stdout+stderr.
+/// Std-lib only: reader threads drain the piped streams while the main thread polls
+/// `try_wait`, so a hung/long step can still be killed at the deadline without deadlocking on
+/// a full pipe buffer.
+fn run_step(cmd: &str, cwd: &Path, deadline: Instant) -> Result<(bool, String)> {
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let out_handle = thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stdout.read_to_string(&mut s);
+        s
+    });
+    let err_handle = thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stderr.read_to_string(&mut s);
+        s
+    });
+    loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(status) => {
+                let out = out_handle.join().unwrap_or_default();
+                let err = err_handle.join().unwrap_or_default();
+                return Ok((status.success(), format!("{out}{err}")));
+            }
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let out = out_handle.join().unwrap_or_default();
+                    let err = err_handle.join().unwrap_or_default();
+                    return Ok((false, format!("{out}{err}[step timed out]\n")));
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+
+fn set_run_running(conn: &Arc<Mutex<Connection>>, run_id: &str, started_at: i64) {
+    if let Ok(c) = conn.lock() {
+        let _ = c.execute("UPDATE job_runs SET status='RUNNING', started_at=?2 WHERE id=?1", params![run_id, started_at]);
+    }
+}
+fn set_run_log(conn: &Arc<Mutex<Connection>>, run_id: &str, log: &str) {
+    if let Ok(c) = conn.lock() {
+        let _ = c.execute("UPDATE job_runs SET log=?2 WHERE id=?1", params![run_id, log]);
+    }
+}
+fn finish_run(conn: &Arc<Mutex<Connection>>, run_id: &str, status: &str, log: &str, finished_at: i64) {
+    if let Ok(c) = conn.lock() {
+        let _ = c.execute("UPDATE job_runs SET status=?2, log=?3, finished_at=?4 WHERE id=?1", params![run_id, status, log, finished_at]);
+    }
+}
+
+/// Executes one job run's steps sequentially against a per-run workdir. Runs on its own
+/// thread; jobs of the same script never wait on each other (no dependency graph, by design).
+fn execute_job_run(conn: Arc<Mutex<Connection>>, run_dir: PathBuf, run_id: String, steps: Vec<String>, timeout_secs: u64) {
+    let _ = fs::create_dir_all(&run_dir);
+    set_run_running(&conn, &run_id, now_secs());
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs.max(1));
+    let mut log = String::new();
+    let mut failed = false;
+    for step in &steps {
+        if Instant::now() >= deadline {
+            log.push_str(&format!("$ {step}\n[skipped: job timed out]\n"));
+            failed = true;
+            break;
+        }
+        log.push_str(&format!("$ {step}\n"));
+        match run_step(step, &run_dir, deadline) {
+            Ok((success, output)) => {
+                log.push_str(&output);
+                if !output.ends_with('\n') {
+                    log.push('\n');
+                }
+                set_run_log(&conn, &run_id, &log);
+                if !success {
+                    failed = true;
+                    break;
+                }
+            }
+            Err(e) => {
+                log.push_str(&format!("[step error: {e}]\n"));
+                failed = true;
+                break;
+            }
+        }
+    }
+    finish_run(&conn, &run_id, if failed { "FAILED" } else { "FINISHED" }, &log, now_secs());
+}
+
+/// Inserts `SCHEDULED` run rows for every (non-archived-in-current-source) job of a script
+/// and spawns one background thread per job — this is the "jobs always run in parallel"
+/// contract. Returns the initial rows immediately; callers that need to await completion
+/// (tests) can join the returned handles, production code (the tauri command) drops them,
+/// which detaches the threads to keep running without blocking the IPC call.
+fn spawn_script_jobs(conn: Arc<Mutex<Connection>>, workdir_root: PathBuf, script_id: &str) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
+    let def = {
+        let c = conn.lock().map_err(|_| "pipeline db lock poisoned".to_string())?;
+        let source: String = c
+            .query_row("SELECT source FROM pipeline_scripts WHERE id=?1", params![script_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        parse_and_validate_script(&source)?
+    };
+    let mut runs = Vec::new();
+    let mut handles = Vec::new();
+    for job in &def.jobs {
+        let job_id = job_id_for(script_id, &job.name);
+        let run_id = format!("{job_id}::run-{}", now_nanos());
+        let triggered_at = now_secs();
+        {
+            let c = conn.lock().map_err(|_| "pipeline db lock poisoned".to_string())?;
+            c.execute(
+                "INSERT INTO job_runs(id,job_id,status,log,triggered_at) VALUES(?1,?2,'SCHEDULED',NULL,?3)",
+                params![run_id, job_id, triggered_at],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        runs.push(JobRun { id: run_id.clone(), job_id: job_id.clone(), status: "SCHEDULED".into(), log: None, triggered_at, started_at: None, finished_at: None });
+        let conn2 = conn.clone();
+        let run_dir = workdir_root.join(&run_id);
+        let run_id2 = run_id.clone();
+        let steps = job.steps.clone();
+        let timeout = job.timeout_secs.unwrap_or(DEFAULT_JOB_TIMEOUT_SECS);
+        handles.push(thread::spawn(move || execute_job_run(conn2, run_dir, run_id2, steps, timeout)));
+    }
+    Ok((runs, handles))
+}
+
+/// Manual trigger for every job in a script — Space's `.space.kts` scripts default to git-push
+/// triggers, but this desktop build has no daemon watching repos, so triggers are manual-only
+/// (surfaced as such in Pipelines.tsx).
+#[tauri::command]
+pub fn trigger_pipeline_script(app: AppHandle, script_id: String) -> Result<Vec<JobRun>> {
+    let conn = db::connection(&app)?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+    let workdir_root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("pipeline-runs");
+    let shared = Arc::new(Mutex::new(conn));
+    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id)?;
+    Ok(runs)
+}
+
+// ---------- deploy targets + deployments ----------
+
 #[tauri::command]
 pub fn list_deploy_targets(app: AppHandle) -> Result<Vec<DeployTarget>> {
     let c = db::connection(&app)?;
-    let mut s=c.prepare("SELECT id,project_id,name,target_key,description,manual_control,archived FROM deploy_targets ORDER BY name").map_err(|e|e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,name,target_key,description,manual_control,archived FROM deploy_targets ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(DeployTarget {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                name: r.get(2)?,
-                target_key: r.get(3)?,
-                description: r.get(4)?,
-                manual_control: r.get(5)?,
-                archived: r.get(6)?,
-            })
+            Ok(DeployTarget { id: r.get(0)?, project_id: r.get(1)?, name: r.get(2)?, target_key: r.get(3)?, description: r.get(4)?, manual_control: r.get(5)?, archived: r.get(6)? })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -165,24 +489,445 @@ pub fn list_deploy_targets(app: AppHandle) -> Result<Vec<DeployTarget>> {
     rows
 }
 #[tauri::command]
+pub fn create_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "INSERT INTO deploy_targets(id,project_id,name,target_key,description,manual_control,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![target.id, target.project_id, target.name, target.target_key, target.description, target.manual_control, target.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub fn update_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE deploy_targets SET name=?2,target_key=?3,description=?4,manual_control=?5,archived=?6 WHERE id=?1",
+        params![target.id, target.name, target.target_key, target.description, target.manual_control, target.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub fn delete_deploy_target(app: AppHandle, id: String) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute("DELETE FROM deployments WHERE target_id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM deploy_targets WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn deployment_from_row(r: &rusqlite::Row) -> rusqlite::Result<Deployment> {
+    Ok(Deployment {
+        id: r.get(0)?,
+        target_id: r.get(1)?,
+        version: r.get(2)?,
+        status: r.get(3)?,
+        description: r.get(4)?,
+        job_run_id: r.get(5)?,
+        scheduled_at: r.get(6)?,
+        started_at: r.get(7)?,
+        finished_at: r.get(8)?,
+    })
+}
+const DEPLOYMENT_COLUMNS: &str = "id,target_id,version,status,description,job_run_id,scheduled_at,started_at,finished_at";
+
+#[tauri::command]
+pub fn list_deployments_for_target(app: AppHandle, target_id: String) -> Result<Vec<Deployment>> {
+    let c = db::connection(&app)?;
+    let mut s = c
+        .prepare(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE target_id=?1 ORDER BY scheduled_at DESC"))
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(params![target_id], deployment_from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+fn schedule_deployment_tx(conn: &Connection, req: &ScheduleDeploymentRequest) -> Result<Deployment> {
+    let now = now_secs();
+    conn.execute(
+        "INSERT INTO deployments(id,target_id,version,status,description,scheduled_at) VALUES(?1,?2,?3,'SCHEDULED',?4,?5)",
+        params![req.id, req.target_id, req.version, req.description, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Deployment { id: req.id.clone(), target_id: req.target_id.clone(), version: req.version.clone(), status: "SCHEDULED".into(), description: req.description.clone(), job_run_id: None, scheduled_at: Some(now), started_at: None, finished_at: None })
+}
+#[tauri::command]
+pub fn schedule_deployment(app: AppHandle, req: ScheduleDeploymentRequest) -> Result<Deployment> {
+    let c = db::connection(&app)?;
+    schedule_deployment_tx(&c, &req)
+}
+
+/// Space's real `DeploymentStatus` state machine (KB §2.4): SCHEDULED -> DEPLOYING ->
+/// {CURRENT|FAILED|HANGING}; only one deployment may be CURRENT per target ("only one
+/// deployment for a Git branch"), so promoting one to CURRENT auto-supersedes ("completed" /
+/// `OBSOLETE`) whichever was previously CURRENT on the same target.
+fn allowed_deployment_transition(from: &str, to: &str) -> bool {
+    matches!(
+        (from, to),
+        ("SCHEDULED", "DEPLOYING")
+            | ("SCHEDULED", "FAILED")
+            | ("DEPLOYING", "CURRENT")
+            | ("DEPLOYING", "FAILED")
+            | ("DEPLOYING", "HANGING")
+            | ("HANGING", "FAILED")
+            | ("HANGING", "CURRENT")
+            | ("CURRENT", "OBSOLETE")
+            | ("CURRENT", "FAILED")
+    )
+}
+fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Deployment> {
+    let (target_id, from): (String, String) = conn
+        .query_row("SELECT target_id,status FROM deployments WHERE id=?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?;
+    if !allowed_deployment_transition(&from, to) {
+        return Err(format!("illegal deployment transition {from} -> {to}"));
+    }
+    let now = now_secs();
+    match to {
+        "DEPLOYING" => {
+            conn.execute("UPDATE deployments SET status=?2, started_at=?3 WHERE id=?1", params![id, to, now]).map_err(|e| e.to_string())?;
+        }
+        "CURRENT" => {
+            // Only one CURRENT per target: whichever deployment held it becomes OBSOLETE ("completed").
+            conn.execute(
+                "UPDATE deployments SET status='OBSOLETE', finished_at=?2 WHERE target_id=?1 AND status='CURRENT'",
+                params![target_id, now],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute("UPDATE deployments SET status=?2 WHERE id=?1", params![id, to]).map_err(|e| e.to_string())?;
+        }
+        _ => {
+            conn.execute("UPDATE deployments SET status=?2, finished_at=?3 WHERE id=?1", params![id, to, now]).map_err(|e| e.to_string())?;
+        }
+    }
+    conn.query_row(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE id=?1"), params![id], deployment_from_row).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn transition_deployment(app: AppHandle, id: String, status: String) -> Result<Deployment> {
+    let c = db::connection(&app)?;
+    transition_deployment_tx(&c, &id, &status)
+}
+
+// ---------- package repositories + versions ----------
+
+fn validate_package_format(format: &str) -> Result<()> {
+    if PACKAGE_FORMATS.contains(&format) {
+        Ok(())
+    } else {
+        Err(format!("unsupported package format '{format}' (must be one of {PACKAGE_FORMATS:?})"))
+    }
+}
+fn validate_repo_mode(mode: &str) -> Result<()> {
+    if REPO_MODES.contains(&mode) {
+        Ok(())
+    } else {
+        Err(format!("repository mode must be one of {REPO_MODES:?} (got '{mode}')"))
+    }
+}
+
+#[tauri::command]
 pub fn list_package_repositories(app: AppHandle) -> Result<Vec<PackageRepository>> {
     let c = db::connection(&app)?;
-    let mut s=c.prepare("SELECT id,project_id,name,format,mode,description,archived FROM package_repositories ORDER BY name").map_err(|e|e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,name,format,mode,description,archived FROM package_repositories ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(PackageRepository {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                name: r.get(2)?,
-                format: r.get(3)?,
-                mode: r.get(4)?,
-                description: r.get(5)?,
-                archived: r.get(6)?,
-            })
+            Ok(PackageRepository { id: r.get(0)?, project_id: r.get(1)?, name: r.get(2)?, format: r.get(3)?, mode: r.get(4)?, description: r.get(5)?, archived: r.get(6)? })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
 }
-// TODO: DSL evaluation/runs, deployment state transitions and per-format package metadata.
+#[tauri::command]
+pub fn create_package_repository(app: AppHandle, repo: PackageRepository) -> Result<()> {
+    validate_package_format(&repo.format)?;
+    validate_repo_mode(&repo.mode)?;
+    let c = db::connection(&app)?;
+    c.execute(
+        "INSERT INTO package_repositories(id,project_id,name,format,mode,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![repo.id, repo.project_id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub fn update_package_repository(app: AppHandle, repo: PackageRepository) -> Result<()> {
+    validate_package_format(&repo.format)?;
+    validate_repo_mode(&repo.mode)?;
+    let c = db::connection(&app)?;
+    c.execute(
+        "UPDATE package_repositories SET name=?2,format=?3,mode=?4,description=?5,archived=?6 WHERE id=?1",
+        params![repo.id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub fn delete_package_repository(app: AppHandle, id: String) -> Result<()> {
+    let c = db::connection(&app)?;
+    c.execute("DELETE FROM package_versions WHERE repository_id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM package_repositories WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_package_versions(app: AppHandle, repository_id: String, query: Option<String>) -> Result<Vec<PackageVersion>> {
+    let c = db::connection(&app)?;
+    let like = format!("%{}%", query.unwrap_or_default());
+    let mut s = c
+        .prepare("SELECT id,repository_id,package_name,version,metadata_json,created_at FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(params![repository_id, like], |r| {
+            Ok(PackageVersion { id: r.get(0)?, repository_id: r.get(1)?, package_name: r.get(2)?, version: r.get(3)?, metadata_json: r.get(4)?, created_at: r.get(5)? })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+/// Publishes one version: merges caller metadata with `_format`/`_file_path`/`_file_size`
+/// bookkeeping and, if a payload is supplied, writes it under the app-data packages dir
+/// (`<app-data>/packages/<repo>/<name>/<version>/<filename>`, all path segments parameterized
+/// — never a fixed/guessed location). Payload is stored as UTF-8 text (this local registry
+/// has no upload transport for arbitrary binaries yet; real Space's binary artifact storage is
+/// future work — noted here rather than faked).
+fn publish_package_version_tx(
+    conn: &Connection,
+    base_dir: &Path,
+    repository_id: &str,
+    package_name: &str,
+    version: &str,
+    metadata_json: Option<&str>,
+    payload_filename: Option<&str>,
+    payload_content: Option<&str>,
+) -> Result<PackageVersion> {
+    let format: String = conn
+        .query_row("SELECT format FROM package_repositories WHERE id=?1", params![repository_id], |r| r.get(0))
+        .map_err(|_| format!("unknown package repository '{repository_id}'"))?;
+    let mut meta: serde_json::Value = match metadata_json {
+        Some(s) if !s.trim().is_empty() => serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?,
+        _ => serde_json::json!({}),
+    };
+    if !meta.is_object() {
+        return Err("metadata must be a JSON object".into());
+    }
+    if let (Some(filename), Some(content)) = (payload_filename, payload_content) {
+        if filename.trim().is_empty() {
+            return Err("payload filename required when payload content is supplied".into());
+        }
+        let dir = base_dir.join(repository_id).join(package_name).join(version);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let file_path = dir.join(filename);
+        fs::write(&file_path, content).map_err(|e| e.to_string())?;
+        meta["_file_path"] = serde_json::Value::String(file_path.display().to_string());
+        meta["_file_size"] = serde_json::Value::from(content.len());
+    }
+    meta["_format"] = serde_json::Value::String(format);
+    let id = format!("{repository_id}::{package_name}::{version}");
+    conn.execute(
+        "INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json) VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json",
+        params![id, repository_id, package_name, version, meta.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+    let created_at: i64 = conn.query_row("SELECT created_at FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
+    Ok(PackageVersion { id, repository_id: repository_id.into(), package_name: package_name.into(), version: version.into(), metadata_json: Some(meta.to_string()), created_at })
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn publish_package_version(
+    app: AppHandle,
+    repository_id: String,
+    package_name: String,
+    version: String,
+    metadata_json: Option<String>,
+    payload_filename: Option<String>,
+    payload_content: Option<String>,
+) -> Result<PackageVersion> {
+    let c = db::connection(&app)?;
+    let base_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("packages");
+    publish_package_version_tx(&c, &base_dir, &repository_id, &package_name, &version, metadata_json.as_deref(), payload_filename.as_deref(), payload_content.as_deref())
+}
+#[tauri::command]
+pub fn delete_package_version(app: AppHandle, id: String) -> Result<()> {
+    let c = db::connection(&app)?;
+    let meta: Option<String> = c.query_row("SELECT metadata_json FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).ok();
+    if let Some(m) = meta {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
+            if let Some(p) = v.get("_file_path").and_then(|p| p.as_str()) {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+    c.execute("DELETE FROM package_versions WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    static UNIQUE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// pid+nanos alone can collide when cargo runs several tests in parallel threads within
+    /// the same process at near-identical timestamps; an atomic counter makes it exact.
+    fn unique_suffix() -> String {
+        let n = UNIQUE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        format!("{}-{}-{n}", std::process::id(), now_nanos())
+    }
+    fn temp_db() -> PathBuf {
+        std::env::temp_dir().join(format!("gaia-space-pipelines-test-{}.sqlite", unique_suffix()))
+    }
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gaia-space-pipelines-test-{name}-{}", unique_suffix()));
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+    fn sweep(path: &Path) {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    fn script_source(jobs: &[(&str, &[&str])]) -> String {
+        let defs: Vec<ScriptJobDef> = jobs
+            .iter()
+            .map(|(name, steps)| ScriptJobDef { name: name.to_string(), trigger_type: "MANUAL".into(), timeout_secs: None, steps: steps.iter().map(|s| s.to_string()).collect() })
+            .collect();
+        serde_json::to_string(&ScriptDef { jobs: defs }).unwrap()
+    }
+
+    /// A triggered job spawns a real `sh -c` step and its stdout is captured into the run log.
+    #[test]
+    fn job_run_executes_real_step_and_captures_log() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        let src = script_source(&[("build", &["echo hello-marker-42"])]);
+        conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script-a','demo-project',?1)", params![src]).unwrap();
+        sync_jobs_tx(&conn, "script-a", &parse_and_validate_script(&src).unwrap()).unwrap();
+        let workdir = temp_dir("runs-a");
+        let shared = Arc::new(Mutex::new(conn));
+        let (runs, handles) = spawn_script_jobs(shared.clone(), workdir.clone(), "script-a").expect("spawn");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "SCHEDULED");
+        for h in handles {
+            h.join().unwrap();
+        }
+        let c = shared.lock().unwrap();
+        let (status, log): (String, Option<String>) = c.query_row("SELECT status,log FROM job_runs WHERE id=?1", params![runs[0].id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(status, "FINISHED");
+        assert!(log.unwrap().contains("hello-marker-42"));
+        drop(c);
+        sweep(&db_path);
+        sweep(&workdir);
+    }
+
+    /// Two jobs in the same script run concurrently, not serially. Proven load-independently:
+    /// each job stamps a wall-clock timestamp before and after a 0.5s sleep, and true
+    /// parallelism means job-two must begin before job-one finishes (and vice versa) — serial
+    /// execution could never satisfy that regardless of how slow/busy the test machine is.
+    #[test]
+    fn two_jobs_in_a_script_run_in_parallel() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        let ts = "python3 -c \"import time; print('TS:' + repr(time.time()))\"";
+        let src = script_source(&[("job-one", &[ts, "sleep 0.5", ts]), ("job-two", &[ts, "sleep 0.5", ts])]);
+        conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script-b','demo-project',?1)", params![src]).unwrap();
+        sync_jobs_tx(&conn, "script-b", &parse_and_validate_script(&src).unwrap()).unwrap();
+        let workdir = temp_dir("runs-b");
+        let shared = Arc::new(Mutex::new(conn));
+        let (runs, handles) = spawn_script_jobs(shared.clone(), workdir.clone(), "script-b").expect("spawn");
+        assert_eq!(runs.len(), 2);
+        for h in handles {
+            h.join().unwrap();
+        }
+        let c = shared.lock().unwrap();
+        let mut begins = Vec::new();
+        let mut ends = Vec::new();
+        for run in &runs {
+            let (status, log): (String, String) =
+                c.query_row("SELECT status,log FROM job_runs WHERE id=?1", params![run.id], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default()))).unwrap();
+            assert_eq!(status, "FINISHED");
+            let stamps: Vec<f64> = log.lines().filter_map(|l| l.strip_prefix("TS:").and_then(|s| s.parse::<f64>().ok())).collect();
+            assert_eq!(stamps.len(), 2, "expected begin+end timestamps in log: {log}");
+            begins.push(stamps[0]);
+            ends.push(stamps[1]);
+        }
+        drop(c);
+        assert!(begins[1] < ends[0] && begins[0] < ends[1], "jobs did not overlap (ran serially): begins={begins:?} ends={ends:?}");
+        sweep(&db_path);
+        sweep(&workdir);
+    }
+
+    /// Space's real limits: >100 jobs/script and >50 steps/job must be rejected up front.
+    #[test]
+    fn limit_validation_rejects_oversize_scripts() {
+        let too_many_jobs: Vec<(String, Vec<&str>)> = (0..(MAX_JOBS_PER_SCRIPT + 1)).map(|i| (format!("job-{i}"), vec!["echo hi"])).collect();
+        let jobs_ref: Vec<(&str, &[&str])> = too_many_jobs.iter().map(|(n, s)| (n.as_str(), s.as_slice())).collect();
+        let err = parse_and_validate_script(&script_source(&jobs_ref)).unwrap_err();
+        assert!(err.contains("100 jobs"), "unexpected error: {err}");
+
+        let too_many_steps: Vec<&str> = std::iter::repeat("echo hi").take(MAX_STEPS_PER_JOB + 1).collect();
+        let err2 = parse_and_validate_script(&script_source(&[("build", &too_many_steps)])).unwrap_err();
+        assert!(err2.contains("50 steps"), "unexpected error: {err2}");
+
+        // sanity: a script within limits validates fine.
+        assert!(parse_and_validate_script(&script_source(&[("build", &["echo ok"])])).is_ok());
+    }
+
+    /// Deployment state machine: SCHEDULED -> DEPLOYING -> CURRENT is legal and promoting a
+    /// second deployment to CURRENT on the same target auto-supersedes (OBSOLETE) the first;
+    /// skipping straight to CURRENT from SCHEDULED is illegal.
+    #[test]
+    fn deployment_transition_sequence() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO deploy_targets(id,project_id,name,target_key) VALUES('target-1','demo-project','Staging','staging')", []).unwrap();
+        let d1 = schedule_deployment_tx(&conn, &ScheduleDeploymentRequest { id: "deploy-1".into(), target_id: "target-1".into(), version: "1.0.0".into(), description: None }).unwrap();
+        assert_eq!(d1.status, "SCHEDULED");
+
+        assert!(transition_deployment_tx(&conn, "deploy-1", "CURRENT").is_err(), "SCHEDULED -> CURRENT must be illegal");
+
+        let d1 = transition_deployment_tx(&conn, "deploy-1", "DEPLOYING").unwrap();
+        assert_eq!(d1.status, "DEPLOYING");
+        let d1 = transition_deployment_tx(&conn, "deploy-1", "CURRENT").unwrap();
+        assert_eq!(d1.status, "CURRENT");
+
+        let d2 = schedule_deployment_tx(&conn, &ScheduleDeploymentRequest { id: "deploy-2".into(), target_id: "target-1".into(), version: "1.0.1".into(), description: None }).unwrap();
+        transition_deployment_tx(&conn, &d2.id, "DEPLOYING").unwrap();
+        let d2 = transition_deployment_tx(&conn, &d2.id, "CURRENT").unwrap();
+        assert_eq!(d2.status, "CURRENT");
+
+        let d1_after: String = conn.query_row("SELECT status FROM deployments WHERE id='deploy-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(d1_after, "OBSOLETE", "promoting deploy-2 to CURRENT must supersede deploy-1");
+        sweep(&db_path);
+    }
+
+    /// Publishing a version writes metadata + payload file under the parameterized base dir
+    /// and records the file path/size/format in stored metadata.
+    #[test]
+    fn package_version_publish_writes_metadata_and_payload() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-1','demo-npm','npm','HOSTING')", []).unwrap();
+        let base_dir = temp_dir("packages");
+        let pv = publish_package_version_tx(&conn, &base_dir, "repo-1", "left-pad", "1.2.3", Some(r#"{"license":"MIT"}"#), Some("left-pad-1.2.3.tgz"), Some("fake package payload bytes")).unwrap();
+        assert_eq!(pv.package_name, "left-pad");
+        let meta: serde_json::Value = serde_json::from_str(&pv.metadata_json.unwrap()).unwrap();
+        assert_eq!(meta["license"], "MIT");
+        assert_eq!(meta["_format"], "npm");
+        let file_path = meta["_file_path"].as_str().unwrap();
+        assert!(Path::new(file_path).exists(), "payload file should exist at {file_path}");
+        assert_eq!(fs::read_to_string(file_path).unwrap(), "fake package payload bytes");
+
+        // oversized/unsupported format rejected before touching disk.
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-2','demo-x','npm','HOSTING')", []).unwrap();
+        assert!(publish_package_version_tx(&conn, &base_dir, "repo-2", "x", "1.0.0", Some("not json"), None, None).is_err());
+        sweep(&db_path);
+        sweep(&base_dir);
+    }
+}
