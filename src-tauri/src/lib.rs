@@ -1,6 +1,8 @@
+mod debug_server;
 mod git;
 
 use serde::Serialize;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Serialize)]
 pub struct AppInfo {
@@ -40,6 +42,20 @@ pub fn run() {
             git::repo_stage,
             git::repo_commit,
         ])
+        .setup(|app| {
+            // Built manually (instead of via tauri.conf.json's `app.windows`) so we
+            // can attach the debug-server's console-capture init script before the
+            // page ever loads. See src/debug_server.rs + skills/app-tools.
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("GAIA Space")
+                .inner_size(800.0, 600.0)
+                .min_inner_size(480.0, 360.0)
+                .resizable(true)
+                .initialization_script(&debug_server::init_script())
+                .build()?;
+            debug_server::spawn(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

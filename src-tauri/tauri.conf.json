@@ -10,13 +10,8 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "GAIA Space",
-        "width": 800,
-        "height": 600
-      }
-    ],
+    "withGlobalTauri": true,
+    "windows": [],
     "security": {
       "csp": null
     }

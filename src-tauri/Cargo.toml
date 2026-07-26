@@ -18,11 +18,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 dirs = "6.0.0"
 tauri-plugin-dialog = "2.7.2"
+# App-tools debug door (see src/debug_server.rs) — same pattern as gaia-shell.
+tungstenite = "0.24"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = "0.6.4"
+block2 = "0.6"
 
