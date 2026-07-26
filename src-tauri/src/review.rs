@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Code review persistence; discussions deliberately reuse chat channels.
 use crate::db;
 use serde::{Deserialize, Serialize};

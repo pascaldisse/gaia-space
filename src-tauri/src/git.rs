@@ -72,8 +72,11 @@ fn save_store(repos: &[RepoRef]) -> Result<()> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&p, serde_json::to_string_pretty(repos).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    std::fs::write(
+        &p,
+        serde_json::to_string_pretty(repos).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn repo_name(path: &str) -> String {
@@ -194,8 +197,11 @@ pub fn repo_status(path: String) -> Result<Vec<StatusEntry>> {
     for e in statuses.iter() {
         let s = e.status();
         let p = e.path().unwrap_or("").to_string();
-        let staged = s.is_index_new() || s.is_index_modified() || s.is_index_deleted()
-            || s.is_index_renamed() || s.is_index_typechange();
+        let staged = s.is_index_new()
+            || s.is_index_modified()
+            || s.is_index_deleted()
+            || s.is_index_renamed()
+            || s.is_index_typechange();
         let label = if s.is_wt_new() || s.is_index_new() {
             "new"
         } else if s.is_wt_deleted() || s.is_index_deleted() {
@@ -207,7 +213,11 @@ pub fn repo_status(path: String) -> Result<Vec<StatusEntry>> {
         } else {
             "modified"
         };
-        out.push(StatusEntry { path: p, status: label.to_string(), staged });
+        out.push(StatusEntry {
+            path: p,
+            status: label.to_string(),
+            staged,
+        });
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
@@ -267,9 +277,9 @@ pub fn repo_commit(path: String, message: String) -> Result<String> {
         return Err("commit message is empty".into());
     }
     let repo = open(&path)?;
-    let sig = repo.signature().map_err(|e| {
-        format!("no git identity configured (user.name / user.email): {e}")
-    })?;
+    let sig = repo
+        .signature()
+        .map_err(|e| format!("no git identity configured (user.name / user.email): {e}"))?;
     let mut index = repo.index().map_err(|e| e.to_string())?;
     let tree_id = index.write_tree().map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Shared My Documents, project documents and KB containers with version snapshots.
 use crate::db;
 use serde::{Deserialize, Serialize};

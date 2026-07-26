@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Meetings/calendar records; recurrence stays in interoperable RRULE form.
 use crate::db;
 use serde::{Deserialize, Serialize};

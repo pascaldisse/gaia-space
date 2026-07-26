@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Native chat: channels, members, messages, reactions, threads and read state.
 use crate::db;
 use serde::{Deserialize, Serialize};

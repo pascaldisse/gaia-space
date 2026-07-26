@@ -30,6 +30,7 @@ pub fn seed(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn migrate_path(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     migrate(&conn)?;

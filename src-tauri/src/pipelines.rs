@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Automation, deployment and package-registry persistence. Jobs are intentionally independent/parallel.
 use crate::db;
 use serde::{Deserialize, Serialize};

@@ -665,8 +665,8 @@ unsafe fn nsimage_to_png(
 /// Best-effort `NSError.localizedDescription` → String.
 #[cfg(target_os = "macos")]
 unsafe fn ns_error_string(error: *mut objc2::runtime::AnyObject) -> String {
-    use objc2::runtime::AnyObject;
     use objc2::msg_send;
+    use objc2::runtime::AnyObject;
 
     let desc: *mut AnyObject = msg_send![error, localizedDescription];
     if desc.is_null() {

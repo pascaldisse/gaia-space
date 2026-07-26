@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Planning records: independent issues plus statuses, boards, sprints, tags, checklists and time entries.
 use crate::db;
 use serde::{Deserialize, Serialize};

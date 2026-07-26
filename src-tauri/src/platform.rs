@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Platform records: profiles, teams, roles, rights, scoped role assignments, projects.
 use crate::db;
 use serde::{Deserialize, Serialize};
