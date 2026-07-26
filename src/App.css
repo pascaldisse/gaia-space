@@ -1,116 +1,379 @@
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
+* {
+  box-sizing: border-box;
 }
 
-.logo.solid:hover {
-  filter: drop-shadow(0 0 2em #2f5d90);
-}
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e6e6e6;
+  background-color: #1e1f22;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
 }
 
-.container {
+html, body, #root {
+  height: 100%;
   margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
 
 button {
+  font: inherit;
   cursor: pointer;
+  color: inherit;
+  background: #2a2b2e;
+  border: 1px solid #3a3b3e;
+  border-radius: 6px;
+  padding: 0.35em 0.8em;
 }
 
 button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
+  border-color: #5a7dfa;
 }
 
-input,
-button {
-  outline: none;
+button.ghost {
+  background: transparent;
+  border: none;
+  color: #9a9a9a;
+  padding: 0.1em 0.5em;
+  font-size: 1.1em;
 }
 
-#greet-input {
-  margin-right: 5px;
+button.ghost:hover {
+  color: #e6e6e6;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
+button.ghost.small {
+  font-size: 0.9em;
+  opacity: 0;
+}
 
-  a:hover {
-    color: #24c8db;
-  }
+li:hover button.ghost.small,
+li.active button.ghost.small {
+  opacity: 1;
+}
 
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
+button.primary {
+  background: #3f63e0;
+  border-color: #3f63e0;
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #4d70eb;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+textarea {
+  font: inherit;
+  background: #17181a;
+  color: #e6e6e6;
+  border: 1px solid #3a3b3e;
+  border-radius: 6px;
+  padding: 0.5em;
+  resize: vertical;
+  min-height: 4.5em;
+  width: 100%;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 220px 320px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  background: #17181a;
+  border-right: 1px solid #2a2b2e;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0.5em 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6em 0.9em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.section-label {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a7a7a;
+  padding: 0.8em 0.9em 0.3em;
+}
+
+.hint {
+  color: #7a7a7a;
+  padding: 0.4em 0.9em;
+}
+
+.hint.pad {
+  padding: 2em;
+  text-align: center;
+}
+
+.repo-list, .branch-list, .commits, .status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repo-list li, .branch-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35em 0.9em;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.repo-list li:hover, .branch-list li:hover {
+  background: #202124;
+}
+
+.repo-list li.active {
+  background: #26304d;
+  color: #a9c0ff;
+}
+
+.repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-list li.head {
+  color: #7cd68a;
+}
+
+.center {
+  border-right: 1px solid #2a2b2e;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.6em 0.9em;
+  border-bottom: 1px solid #2a2b2e;
+  overflow: hidden;
+}
+
+.topbar .path {
+  color: #7a7a7a;
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-chip {
+  background: #2a2b2e;
+  border-radius: 10px;
+  padding: 0.1em 0.6em;
+  font-size: 0.8em;
+  color: #a9c0ff;
+}
+
+.working-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.9em;
+  cursor: pointer;
+  border-bottom: 1px solid #2a2b2e;
+}
+
+.working-row:hover {
+  background: #202124;
+}
+
+.working-row.active {
+  background: #26304d;
+}
+
+.working-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f0a742;
+}
+
+.working-row .count {
+  margin-left: auto;
+  color: #7a7a7a;
+  font-size: 0.85em;
+}
+
+.commits {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.commits li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.4em 0.9em;
+  cursor: pointer;
+  border-bottom: 1px solid #202124;
+}
+
+.commits li:hover {
+  background: #202124;
+}
+
+.commits li.active {
+  background: #26304d;
+}
+
+.commits .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #7a7a7a;
+  font-size: 0.85em;
+}
+
+.commits .summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.commits .meta {
+  color: #7a7a7a;
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.error-bar {
+  background: #4a1f1f;
+  color: #ffb3b3;
+  padding: 0.5em 0.9em;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.9em;
+  border-bottom: 1px solid #2a2b2e;
+}
+
+.status-list {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.status-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.2em 0;
+}
+
+.status-list .file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 3px;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  background: #2a2b2e;
+}
+
+.badge.new { color: #7cd68a; }
+.badge.modified { color: #f0a742; }
+.badge.deleted { color: #e0605e; }
+.badge.renamed { color: #7ab8f5; }
+.badge.conflicted { color: #e0605e; }
+
+.staged {
+  font-size: 0.75em;
+  color: #7cd68a;
+  border: 1px solid #2f5d3f;
+  border-radius: 8px;
+  padding: 0 0.5em;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.diff-view {
+  flex: 1;
+  overflow: auto;
+}
+
+.diff-pre {
+  margin: 0;
+  padding: 0.6em 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  white-space: pre;
+}
+
+.diff-line {
+  padding: 0 0.9em;
+}
+
+.diff-line.add {
+  background: #10321f;
+  color: #9be8ac;
+}
+
+.diff-line.del {
+  background: #3a1616;
+  color: #f5a3a3;
+}
+
+.diff-line.hunk {
+  color: #7ab8f5;
+}
+
+.diff-line.hdr,
+.diff-line.meta {
+  color: #7a7a7a;
+}
+
+.diff-line.ctx {
+  color: #c8c8c8;
+}
+
+.error {
+  color: #e05252;
 }
