@@ -37,9 +37,12 @@ What *did* survive and became the real source of truth:
 | 03 | [03-packages-cicd.md](03-packages-cicd.md) | Package Registry (Maven/npm/NuGet/PyPI/Dart/Container/Composer) & CI/CD Automation & Deployments |
 | 04 | [04-collaboration.md](04-collaboration.md) | Chat (`m2`), Documents/Knowledge Base, Meetings, Calendar |
 | 05 | [05-platform-auth-permissions.md](05-platform-auth-permissions.md) | Rights/Roles/Permissions, Org/Workspace/Teams, Auth (2FA/tokens/OAuth/invites), on-prem architecture |
+| 06 | [06-personal-org.md](06-personal-org.md) | Personal/Org layer: To-Dos, Absences/Vacations, Org Chart/Locations, Member Profiles, Blogs, Notifications+Subscriptions, Global Search, Dashboards |
 | 07 | [07-devenv-apps-api.md](07-devenv-apps-api.md) | Dev Environments (verdict: no build lane — cloud-VM out of scope; devfile/"open in IDE" transferable) & Applications/Extensibility (HTTP API, webhooks, chatbots, UI extensions, SDKs — build AFTER foundations) |
 
-Total: ~1710 lines / ~160KB of researched material, all citing real decompiled class/field
+**Completeness (audited 07-26): circlet package census (69 dirs) diffed against files — 11 uncovered feature modules found, all captured in 06; 07 covers Dev Environments + Applications; remainder = infra plumbing, deliberately excluded. KB = feature-complete vs decompile.**
+
+Total: ~1710 lines (01-05) + 06/07/08 supplements of researched material, all citing real decompiled class/field
 names or direct doc quotes — no fabricated content (each worker explicitly flagged where a
 path/page didn't exist rather than guessing).
 
