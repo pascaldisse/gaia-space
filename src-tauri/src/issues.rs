@@ -243,10 +243,7 @@ fn list_issues_on(
     tag_id: Option<&str>,
     include_archived: bool,
 ) -> Result<Vec<Issue>> {
-    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issues i");
-    if tag_id.is_some() {
-        sql.push_str(" JOIN issue_tags it ON it.issue_id=i.id");
-    }
+    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
     sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6=1 OR i.archived=0) ORDER BY i.project_id,i.number");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(
