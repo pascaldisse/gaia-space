@@ -15,7 +15,9 @@ pub fn connection(app: &AppHandle) -> Result<Connection, String> {
 
 pub fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version >= SCHEMA_VERSION { return Ok(()); }
+    if version >= SCHEMA_VERSION {
+        return Ok(());
+    }
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(SCHEMA_V1)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -89,17 +91,44 @@ mod tests {
     use super::*;
     #[test]
     fn migration_and_domain_roundtrips() {
-        let path = std::env::temp_dir().join(format!("gaia-space-db-{}.sqlite", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("gaia-space-db-{}.sqlite", std::process::id()));
         let conn = migrate_path(&path).expect("migration");
-        let cases = [("teams", "id", "team"), ("issues", "id", "issue"), ("channels", "id", "channel"), ("reviews", "id", "review"), ("documents", "id", "doc"), ("meetings", "id", "meeting"), ("pipeline_scripts", "id", "script")];
-        conn.execute("INSERT INTO teams(id,name) VALUES('team','Team')", []).unwrap();
+        let cases = [
+            ("teams", "id", "team"),
+            ("issues", "id", "issue"),
+            ("channels", "id", "channel"),
+            ("reviews", "id", "review"),
+            ("documents", "id", "doc"),
+            ("meetings", "id", "meeting"),
+            ("pipeline_scripts", "id", "script"),
+        ];
+        conn.execute("INSERT INTO teams(id,name) VALUES('team','Team')", [])
+            .unwrap();
         conn.execute("INSERT INTO issues(id,project_id,number,title) VALUES('issue','demo-project',1,'Issue')", []).unwrap();
-        conn.execute("INSERT INTO channels(id,content_type,name) VALUES('channel','public','General')", []).unwrap();
+        conn.execute(
+            "INSERT INTO channels(id,content_type,name) VALUES('channel','public','General')",
+            [],
+        )
+        .unwrap();
         conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('review','demo-project',1,'MR','Opened','Review')", []).unwrap();
         conn.execute("INSERT INTO documents(id,container_type,doc_type,title) VALUES('doc','project','text','Doc')", []).unwrap();
-        conn.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('meeting','Meet',1,2)", []).unwrap();
+        conn.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('meeting','Meet',1,2)",
+            [],
+        )
+        .unwrap();
         conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script','demo-project','job')", []).unwrap();
-        for (table, column, id) in cases { let count: i64 = conn.query_row(&format!("SELECT count(*) FROM {table} WHERE {column}='{id}'"), [], |r| r.get(0)).unwrap(); assert_eq!(count, 1, "{table}"); }
+        for (table, column, id) in cases {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {column}='{id}'"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{table}");
+        }
         let _ = std::fs::remove_file(path);
     }
 }

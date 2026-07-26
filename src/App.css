@@ -377,3 +377,26 @@ textarea {
 .error {
   color: #e05252;
 }
+
+.space-shell { display: grid; grid-template-columns: 48px 164px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+.nav-rail { background: #2b2d30; border-right: 1px solid #393b40; display: flex; flex-direction: column; align-items: center; }
+.space-mark { width: 30px; height: 30px; margin: 10px 0 14px; display: grid; place-items: center; border-radius: 6px; background: #5b78e5; color: white; font-weight: 700; }
+.nav-rail nav { width: 100%; display: grid; gap: 2px; }
+.nav-rail button { border: 0; border-radius: 0; background: transparent; color: #9da0a8; padding: 8px 0; display: grid; place-items: center; }
+.nav-rail button em { display: none; }
+.nav-rail button.active, .nav-rail button:hover { color: #dce4ff; background: #383b44; }
+.nav-panel { background: #25272a; border-right: 1px solid #393b40; padding: 10px 7px; }
+.nav-panel header { font-weight: 650; padding: 4px 8px 14px; }
+.nav-section { color: #8b8e96; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 0 8px; }
+.nav-panel button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 4px; padding: 6px 8px; color: #c9cbd1; }
+.nav-panel button.active, .nav-panel button:hover { background: #383b44; color: #fff; }
+.workspace { min-width: 0; overflow: hidden; background: #1e1f22; }
+.workspace .app { height: 100%; }
+.resource-view { height: 100%; overflow: auto; padding: 28px 34px; }
+.resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.resource-view header p { color: #9da0a8; margin: 5px 0 24px; }
+.resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }
+.resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid #34363b; border-radius: 6px; background: #25272a; }
+.resource-list code { float: right; color: #83868f; font-size: 11px; }
+.resource-list pre { margin: 8px 0 0; color: #aeb8d8; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.empty-state { padding: 28px; border: 1px dashed #44464c; color: #92959d; border-radius: 6px; max-width: 850px; }
