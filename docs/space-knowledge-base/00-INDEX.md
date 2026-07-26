@@ -37,6 +37,7 @@ What *did* survive and became the real source of truth:
 | 03 | [03-packages-cicd.md](03-packages-cicd.md) | Package Registry (Maven/npm/NuGet/PyPI/Dart/Container/Composer) & CI/CD Automation & Deployments |
 | 04 | [04-collaboration.md](04-collaboration.md) | Chat (`m2`), Documents/Knowledge Base, Meetings, Calendar |
 | 05 | [05-platform-auth-permissions.md](05-platform-auth-permissions.md) | Rights/Roles/Permissions, Org/Workspace/Teams, Auth (2FA/tokens/OAuth/invites), on-prem architecture |
+| 07 | [07-devenv-apps-api.md](07-devenv-apps-api.md) | Dev Environments (verdict: no build lane — cloud-VM out of scope; devfile/"open in IDE" transferable) & Applications/Extensibility (HTTP API, webhooks, chatbots, UI extensions, SDKs — build AFTER foundations) |
 
 Total: ~1710 lines / ~160KB of researched material, all citing real decompiled class/field
 names or direct doc quotes — no fabricated content (each worker explicitly flagged where a
