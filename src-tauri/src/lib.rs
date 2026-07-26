@@ -5,6 +5,7 @@ mod documents;
 mod git;
 mod issues;
 mod meetings;
+mod calls;
 mod pipelines;
 mod platform;
 mod review;
@@ -156,6 +157,14 @@ pub fn run() {
             meetings::get_meeting,
             meetings::create_meeting,
             meetings::update_meeting,
+            meetings::archive_meeting,
+            meetings::list_meeting_participants,
+            meetings::invite_meeting_participant,
+            meetings::set_meeting_participant_status,
+            meetings::expand_meeting_occurrences,
+            calls::start_livekit_server,
+            calls::livekit_server_status,
+            calls::join_meeting_call,
             pipelines::list_pipeline_scripts,
             pipelines::create_pipeline_script,
             pipelines::update_pipeline_script,
