@@ -70,6 +70,6 @@ export const documentsApi = {
     invoke<void>("move_document_folder", { id, parentId }),
 
   // read-only cross-lane lookups (owned elsewhere, only invoked here)
-  listProfiles: () => invoke<{ id: string; username: string; display_name: string }[]>("list_profiles"),
+  listProfiles: () => invoke<{ id: string; username: string; display_name: string; archived?: boolean }[]>("list_profiles"),
   listProjects: () => invoke<{ id: string; name: string; key: string }[]>("list_projects"),
 };

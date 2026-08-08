@@ -18,6 +18,7 @@ import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
 import Admin from "./views/Admin";
 import Goto from "./components/Goto";
+import { Resizer, paneWidth } from "./components/Resizer";
 
 type View = { name:string; icon:string; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
@@ -26,8 +27,25 @@ const gotoView:Record<string,string>={profile:"Members",project:"Projects",issue
 
 export default function App() {
   const [active,setActive]=createSignal("Dashboard"); const [gotoOpen,setGotoOpen]=createSignal(false); const views=()=>[...personalViews,...workspaceViews]; const current=()=>views().find(view=>view.name===active())!;
-  onMount(()=>{const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};window.addEventListener("keydown",shortcut);onCleanup(()=>window.removeEventListener("keydown",shortcut))});
-  const nav=(view:View)=><button title={view.name} classList={{active:active()===view.name}} onClick={()=>setActive(view.name)}><span>{view.icon}</span><em>{view.name}</em></button>;
-  const panel=(view:View)=><button classList={{active:active()===view.name}} onClick={()=>setActive(view.name)}>{view.name}</button>;
-  return <div class="space-shell"><aside class="nav-rail"><div class="space-mark">S</div><nav>{personalViews.map(nav)}<hr/>{workspaceViews.map(nav)}</nav></aside><aside class="nav-panel"><header>GAIA Space</header><p class="nav-section">Personal</p>{personalViews.map(panel)}<p class="nav-section">Workspace</p>{workspaceViews.map(panel)}</aside><main class="workspace"><Dynamic component={current().component}/></main><Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={kind=>setActive(gotoView[kind])}/></div>;
+  const [navWidth,setNavWidth]=paneWidth("space.nav.width",208);
+  const [pinnedCollapsed,setPinnedCollapsed]=createSignal(localStorage.getItem("space.nav.collapsed")==="1");
+  const [narrow,setNarrow]=createSignal(false); // viewport too small for labels → icons only
+  const collapsed=()=>pinnedCollapsed()||narrow();
+  const toggle=()=>{const next=!pinnedCollapsed();setPinnedCollapsed(next);localStorage.setItem("space.nav.collapsed",next?"1":"0")};
+  onMount(()=>{
+    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
+    window.addEventListener("keydown",shortcut);
+    const mq=window.matchMedia("(max-width: 900px)"); const sync=()=>setNarrow(mq.matches); sync(); mq.addEventListener("change",sync);
+    onCleanup(()=>{window.removeEventListener("keydown",shortcut);mq.removeEventListener("change",sync)});
+  });
+  const nav=(view:View)=><button title={view.name} classList={{active:active()===view.name}} onClick={()=>setActive(view.name)}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></button>;
+  return <div class="space-shell" classList={{collapsed:collapsed()}} style={{"--nav-w":(collapsed()?52:navWidth())+"px"}}>
+    <aside class="nav">
+      <header><div class="space-mark">S</div><em>GAIA Space</em><button class="nav-toggle" title={collapsed()?"Expand sidebar":"Collapse sidebar"} onClick={toggle}>{collapsed()?"»":"«"}</button></header>
+      <nav><p class="nav-section">Personal</p>{personalViews.map(nav)}<p class="nav-section">Workspace</p>{workspaceViews.map(nav)}</nav>
+    </aside>
+    <Resizer width={navWidth} setWidth={setNavWidth} min={160} max={420}/>
+    <main class="workspace"><Dynamic component={current().component}/></main>
+    <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={kind=>setActive(gotoView[kind])}/>
+  </div>;
 }

@@ -2,6 +2,7 @@ import { createResource, createSignal, createEffect, For, Show } from "solid-js"
 import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
+import { Resizer, paneWidth } from "../components/Resizer";
 import {
   documentsApi,
   newId,
@@ -28,6 +29,7 @@ function when(ts: number | null) {
 
 export default function Documents() {
   const [error, setError] = createSignal<string | null>(null);
+  const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
   // acting profile — this app has no auth session; also used as created_by/actor on saves.
@@ -376,7 +378,7 @@ export default function Documents() {
         <label>
           Acting as
           <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
-            <For each={profiles()}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
+            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
           </select>
         </label>
       </header>
@@ -420,7 +422,7 @@ export default function Documents() {
         </label>
       </nav>
 
-      <div class="documents-body">
+      <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
         <aside class="documents-tree">
           <Show
             when={containerId()}
@@ -467,6 +469,8 @@ export default function Documents() {
             </div>
           </Show>
         </aside>
+
+        <Resizer width={treeW} setWidth={setTreeW} min={190} max={480} />
 
         <section class="documents-editor">
           <Show when={selectedDocument()} fallback={<p class="hint pad">Select or create a document.</p>}>

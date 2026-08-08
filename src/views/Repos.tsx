@@ -2,6 +2,7 @@ import { createResource, createSignal, For, Show, createEffect } from "solid-js"
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type Commit, type RepoRef } from "../api";
 import { Diff } from "../Diff";
+import { Resizer, paneWidth } from "../components/Resizer";
 import "../App.css";
 
 function when(ts: number) {
@@ -23,6 +24,8 @@ export default function App() {
   const [selected, setSelected] = createSignal<Commit | "working" | null>(null);
   const [message, setMessage] = createSignal("");
   const [error, setError] = createSignal<string | null>(null);
+  const [sideW, setSideW] = paneWidth("repos.side.width", 220);
+  const [centerW, setCenterW] = paneWidth("repos.center.width", 340);
 
   // auto-select the first repo once the list arrives
   createEffect(() => {
@@ -96,10 +99,13 @@ export default function App() {
   }
 
   return (
-    <div class="app">
+    <div
+      class="app"
+      style={{ "--col-side": sideW() + "px", "--col-center": centerW() + "px" }}
+    >
       <aside class="sidebar">
         <header class="brand">
-          <span>GAIA Space</span>
+          <span>Repositories</span>
           <button class="ghost" title="Open repository…" onClick={addRepo}>
             +
           </button>
@@ -149,6 +155,8 @@ export default function App() {
         </Show>
       </aside>
 
+      <Resizer width={sideW} setWidth={setSideW} min={170} max={460} />
+
       <section class="center">
         <header class="topbar">
           <Show when={info()} fallback={<span class="hint">No repository</span>}>
@@ -192,6 +200,8 @@ export default function App() {
           </ul>
         </Show>
       </section>
+
+      <Resizer width={centerW} setWidth={setCenterW} min={240} max={720} />
 
       <section class="detail">
         <Show when={error()}>

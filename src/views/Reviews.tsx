@@ -222,7 +222,7 @@ export default function Reviews() {
         <label>
           Acting as
           <select value={actingProfileId()} onChange={(e) => setActingProfileId(e.currentTarget.value)}>
-            <For each={profiles()}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
+            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
           </select>
         </label>
       </header>
@@ -264,7 +264,7 @@ export default function Reviews() {
           <input class="grow" placeholder="Title" value={formTitle()} onInput={(e) => setFormTitle(e.currentTarget.value)} />
           <div class="reviewer-picks">
             <span class="hint">Reviewers:</span>
-            <For each={profiles()?.filter((p) => p.id !== actingProfileId())}>
+            <For each={profiles()?.filter((p) => p.id !== actingProfileId() && !p.archived)}>
               {(p) => (
                 <label class="reviewer-pick">
                   <input type="checkbox" checked={formReviewers().includes(p.id)} onChange={() => toggleReviewer(p.id)} />

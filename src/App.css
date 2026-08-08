@@ -83,9 +83,38 @@ textarea {
 
 .app {
   display: grid;
-  grid-template-columns: 220px 320px 1fr;
-  height: 100vh;
+  grid-template-columns:
+    var(--col-side, 220px) 5px var(--col-center, 340px) 5px minmax(0, 1fr);
+  height: 100%;
   overflow: hidden;
+}
+
+/* ── drag handles ──────────────────────────────────────────── */
+.app > .sidebar { grid-column: 1; }
+.app > .resizer:first-of-type { grid-column: 2; }
+.app > .center { grid-column: 3; }
+.app > .resizer:last-of-type { grid-column: 4; }
+.app > .detail { grid-column: 5; }
+
+.resizer {
+  cursor: col-resize;
+  background: #2a2b2e;
+  border: 0;
+  position: relative;
+  touch-action: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.resizer:hover,
+.resizer:focus-visible,
+.resizer.dragging {
+  background: #5b78e5;
+  outline: none;
 }
 
 .sidebar {
@@ -378,18 +407,30 @@ textarea {
   color: #e05252;
 }
 
-.space-shell { display: grid; grid-template-columns: 48px 164px minmax(0, 1fr); height: 100vh; overflow: hidden; }
-.nav-rail { background: #2b2d30; border-right: 1px solid #393b40; display: flex; flex-direction: column; align-items: center; }
-.space-mark { width: 30px; height: 30px; margin: 10px 0 14px; display: grid; place-items: center; border-radius: 6px; background: #5b78e5; color: white; font-weight: 700; }
-.nav-rail nav { width: 100%; display: grid; gap: 2px; }
-.nav-rail button { border: 0; border-radius: 0; background: transparent; color: #9da0a8; padding: 8px 0; display: grid; place-items: center; }
-.nav-rail button em { display: none; }
-.nav-rail button.active, .nav-rail button:hover { color: #dce4ff; background: #383b44; }
-.nav-panel { background: #25272a; border-right: 1px solid #393b40; padding: 10px 7px; }
-.nav-panel header { font-weight: 650; padding: 4px 8px 14px; }
-.nav-section { color: #8b8e96; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 0 8px; }
-.nav-panel button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 4px; padding: 6px 8px; color: #c9cbd1; }
-.nav-panel button.active, .nav-panel button:hover { background: #383b44; color: #fff; }
+/* ── app shell: ONE sidebar (icon + label), resizable, collapsible ── */
+.space-shell { display: grid; grid-template-columns: var(--nav-w, 208px) 5px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+.nav { grid-column: 1; background: #25272a; border-right: 1px solid #393b40; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.nav header { display: flex; align-items: center; gap: 9px; padding: 10px 8px 12px; }
+.nav header em { font-style: normal; font-weight: 650; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.space-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 6px; background: #5b78e5; color: white; font-weight: 700; }
+.nav-toggle { background: transparent; border: 0; color: #8b8e96; padding: 2px 5px; }
+.nav-toggle:hover { color: #fff; }
+.nav nav { display: grid; gap: 1px; align-content: start; overflow-y: auto; padding-bottom: 10px; }
+.nav-section { color: #8b8e96; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 12px 10px 3px; margin: 0; white-space: nowrap; }
+.nav nav button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px; padding: 6px 10px; color: #c9cbd1; }
+.nav nav button em { font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-icon { width: 18px; flex: none; text-align: center; color: #9da0a8; }
+.nav nav button.active, .nav nav button:hover { background: #383b44; color: #fff; }
+.nav nav button.active .nav-icon { color: #dce4ff; }
+/* collapsed: icons only, no handle */
+.space-shell.collapsed { grid-template-columns: var(--nav-w, 52px) 0 minmax(0, 1fr); }
+.space-shell > .resizer { grid-column: 2; }
+.workspace { grid-column: 3; }
+.space-shell.collapsed > .resizer { visibility: hidden; }
+.space-shell.collapsed .nav header { justify-content: center; padding: 10px 0 12px; }
+.space-shell.collapsed .nav header em, .space-shell.collapsed .nav-toggle, .space-shell.collapsed .nav-section { display: none; }
+.space-shell.collapsed .nav nav button { justify-content: center; padding: 8px 0; }
+.space-shell.collapsed .nav nav button em { display: none; }
 .workspace { min-width: 0; overflow: hidden; background: #1e1f22; }
 .workspace .app { height: 100%; }
 .resource-view { height: 100%; overflow: auto; padding: 28px 34px; }
@@ -400,3 +441,27 @@ textarea {
 .resource-list code { float: right; color: #83868f; font-size: 11px; }
 .resource-list pre { margin: 8px 0 0; color: #aeb8d8; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 .empty-state { padding: 28px; border: 1px dashed #44464c; color: #92959d; border-radius: 6px; max-width: 850px; }
+
+/* ── responsive ─────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  /* drop the diff pane onto its own row below the commit list */
+  .app {
+    grid-template-columns: var(--col-side, 220px) 5px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+  .app > .resizer:last-of-type { display: none; }
+  .app > .detail { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid #2a2b2e; }
+  .center { border-right: 0; }
+}
+
+@media (max-width: 700px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); }
+  .app > .resizer { display: none; }
+  .app > .sidebar { grid-column: 1; grid-row: 1; max-height: 26vh; border-right: 0; border-bottom: 1px solid #2a2b2e; }
+  .app > .center { grid-column: 1; grid-row: 2; }
+  .app > .detail { grid-column: 1; grid-row: 3; }
+  .commits .meta { display: none; }
+}
+
+.picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: 210px; }
+.picker select { font: inherit; background: #17181a; color: #e6e6e6; border: 1px solid #3a3b3e; border-radius: 5px; padding: 7px; max-width: 320px; }

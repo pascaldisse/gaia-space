@@ -49,8 +49,7 @@ export type MessageView = Message & {
 export type ProfileLite = {
   id: string;
   username: string;
-  display_name: string;
-};
+  display_name: string; archived?: boolean };
 
 export const chatApi = {
   // profiles (acting-user picker for local, auth-less app)
