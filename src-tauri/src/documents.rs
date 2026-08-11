@@ -69,7 +69,7 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
 const DOC_COLUMNS: &str =
     "id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by";
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_documents() -> Result<Vec<Document>> {
     let c = db::conn()?;
     let mut s = c
@@ -85,12 +85,12 @@ pub fn list_documents() -> Result<Vec<Document>> {
     rows
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_document( id: String) -> Result<Option<Document>> {
     Ok(list_documents()?.into_iter().find(|v| v.id == id))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document( document: Document) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -127,7 +127,7 @@ pub fn create_document( document: Document) -> Result<()> {
 /// Metadata-only update: title, container/folder placement (move), doc_type, archived.
 /// Does NOT touch body/version — content saves go through `save_document` so every
 /// content change is versioned.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document( document: Document) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -147,7 +147,7 @@ pub fn update_document( document: Document) -> Result<()> {
 }
 
 /// Move a document to a different folder (and/or container) without altering content.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_document(
     id: String,
     container_type: String,
@@ -163,7 +163,7 @@ pub fn move_document(
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_document( id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -175,7 +175,7 @@ pub fn archive_document( id: String, archived: bool) -> Result<()> {
 }
 
 /// Save editor content: bumps `version` and appends an immutable `doc_versions` row.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_document(
     id: String,
     title: String,
@@ -212,7 +212,7 @@ pub fn save_document(
     get_document(id)?.ok_or_else(|| "document vanished after save".to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_doc_versions( document_id: String) -> Result<Vec<DocVersion>> {
     let c = db::conn()?;
     let mut s = c
@@ -237,7 +237,7 @@ pub fn list_doc_versions( document_id: String) -> Result<Vec<DocVersion>> {
 
 /// Restore an earlier version: copies its body forward as a brand-new latest version
 /// (history is append-only — nothing is deleted or rewritten).
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn restore_doc_version(
     document_id: String,
     version: i64,
@@ -264,7 +264,7 @@ pub fn restore_doc_version(
     save_document(document_id, title, restored_body, actor)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
     let c = db::conn()?;
     let mut s=c.prepare("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders ORDER BY name").map_err(|e|e.to_string())?;
@@ -286,7 +286,7 @@ pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
     rows
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document_folder( folder: DocumentFolder) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -307,7 +307,7 @@ pub fn create_document_folder( folder: DocumentFolder) -> Result<()> {
 
 /// Full-replace update: rename, edit description, move to a new parent (children follow
 /// automatically since they merely reference this folder's id), toggle archived.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document_folder( folder: DocumentFolder) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -328,7 +328,7 @@ pub fn update_document_folder( folder: DocumentFolder) -> Result<()> {
 
 /// Move a folder under a new parent (or to root with `None`). Subfolders/documents keep
 /// referencing this folder's id, so they move along transparently.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_document_folder( id: String, parent_id: Option<String>) -> Result<()> {
     let c = db::conn()?;
     c.execute(

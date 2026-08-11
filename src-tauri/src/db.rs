@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 #[cfg(test)]
 use std::path::Path;
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
 pub const SCHEMA_VERSION: i64 = 3;
@@ -20,6 +21,7 @@ pub fn conn() -> Result<Connection, String> {
     Ok(conn)
 }
 
+#[cfg(feature = "desktop")]
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

@@ -53,7 +53,7 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_meetings() -> Result<Vec<Meeting>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings ORDER BY starts_at").map_err(|e| e.to_string())?;
@@ -62,14 +62,14 @@ pub fn list_meetings() -> Result<Vec<Meeting>> {
     Ok(meetings)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_meeting( id: String) -> Result<Option<Meeting>> {
     let c = db::conn()?;
     c.query_row("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings WHERE id=?1", [&id], row_to_meeting)
         .optional().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_meeting( meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
@@ -77,7 +77,7 @@ pub fn create_meeting( meeting: Meeting) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_meeting( meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
@@ -86,14 +86,14 @@ pub fn update_meeting( meeting: Meeting) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_meeting( id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     if c.execute("UPDATE meetings SET archived=?2 WHERE id=?1", rusqlite::params![id, archived]).map_err(|e| e.to_string())? == 0 { return Err("Meeting not found".into()); }
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_meeting_participants( meeting_id: String) -> Result<Vec<MeetingParticipant>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT meeting_id,profile_id,status FROM meeting_participants WHERE meeting_id=?1 ORDER BY profile_id").map_err(|e| e.to_string())?;
@@ -102,7 +102,7 @@ pub fn list_meeting_participants( meeting_id: String) -> Result<Vec<MeetingParti
     Ok(participants)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn invite_meeting_participant( meeting_id: String, profile_id: String) -> Result<()> {
     if profile_id.trim().is_empty() { return Err("Participant profile ID is required".into()); }
     let c = db::conn()?;
@@ -110,7 +110,7 @@ pub fn invite_meeting_participant( meeting_id: String, profile_id: String) -> Re
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_meeting_participant_status( meeting_id: String, profile_id: String, status: String) -> Result<()> {
     if !RSVP_STATUSES.contains(&status.as_str()) { return Err("RSVP status must be invited, accepted, or declined".into()); }
     let c = db::conn()?;
@@ -174,7 +174,7 @@ fn expand(meeting: &Meeting, range_start: i64, range_end: i64) -> Result<Vec<Mee
     Ok(result)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn expand_meeting_occurrences( range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
     if range_end <= range_start { return Err("Calendar range end must be after its start".into()); }
     let mut all = Vec::new();

@@ -103,7 +103,7 @@ pub struct QualityGateEvaluation {
     pub matched_rules: i64,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_reviews() -> Result<Vec<Review>> {
     let c = db::conn()?;
     let mut s=c.prepare("SELECT id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id FROM reviews ORDER BY project_id,number").map_err(|e|e.to_string())?;
@@ -127,17 +127,17 @@ pub fn list_reviews() -> Result<Vec<Review>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_review( id: String) -> Result<Option<Review>> {
     Ok(list_reviews()?.into_iter().find(|v| v.id == id))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_review( review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params![review.id,review.project_id,review.number,review.kind,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_review( review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE reviews SET state=?2,source_branch=?3,target_branch=?4,title=?5,turn_based=?6,channel_id=?7 WHERE id=?1",rusqlite::params![review.id,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
@@ -146,7 +146,7 @@ pub fn update_review( review: Review) -> Result<()> {
 
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_review_participants( review_id: String) -> Result<Vec<ReviewParticipant>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT review_id,profile_id,role,state,their_turn FROM review_participants WHERE review_id=?1 ORDER BY role").map_err(|e| e.to_string())?;
@@ -159,7 +159,7 @@ pub fn list_review_participants( review_id: String) -> Result<Vec<ReviewParticip
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_review_participant( participant: ReviewParticipant) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -185,7 +185,7 @@ fn set_participant_state_tx(conn: &Connection, review_id: &str, profile_id: &str
     }
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_participant_state( review_id: String, profile_id: String, state: Option<String>) -> Result<()> {
     let c = db::conn()?;
     set_participant_state_tx(&c, &review_id, &profile_id, state.as_deref())
@@ -242,7 +242,7 @@ fn open_merge_request_tx(conn: &Connection, req: &NewMergeRequest) -> Result<Rev
     Ok(review)
 }
 /// Create a review (kind=MR) from a registered repo's real branches, project-scoped numbering.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn open_merge_request( req: NewMergeRequest) -> Result<Review> {
     if req.source_branch == req.target_branch {
         return Err("source and target branch must differ".into());
@@ -260,7 +260,7 @@ pub fn open_merge_request( req: NewMergeRequest) -> Result<Review> {
 
 /// Unified diff for the review: merge-base(target,source) tree vs. source tip tree —
 /// i.e. exactly the changes the MR would introduce, same git2 plumbing style as git.rs.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn review_diff(repo_path: String, source_branch: String, target_branch: String) -> Result<String> {
     let repo = open(&repo_path)?;
     let source = branch_commit(&repo, &source_branch)?;
@@ -285,7 +285,7 @@ pub fn review_diff(repo_path: String, source_branch: String, target_branch: Stri
 
 // ---------- inline discussions (anchored file/line/revision, backed by a channel) ----------
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_review_discussions( review_id: String) -> Result<Vec<ReviewDiscussion>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
@@ -320,13 +320,13 @@ fn create_review_discussion_tx(conn: &Connection, d: &NewDiscussion, now: i64) -
 }
 /// Anchored inline discussion on the real diff; backing channel row is a direct insert
 /// (chat.rs untouched — chat's own commands remain available for reading/posting later).
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_review_discussion( discussion: NewDiscussion) -> Result<ReviewDiscussion> {
     let c = db::conn()?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     create_review_discussion_tx(&c, &discussion, now)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_discussion_resolved( id: String, resolved: bool) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE review_discussions SET resolved=?2 WHERE id=?1", rusqlite::params![id, resolved]).map_err(|e| e.to_string())?;
@@ -335,7 +335,7 @@ pub fn set_discussion_resolved( id: String, resolved: bool) -> Result<()> {
 
 // ---------- quality gates: rules CRUD + live evaluation ----------
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_quality_gate_rules( project_id: String) -> Result<Vec<QualityGateRule>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
@@ -348,7 +348,7 @@ pub fn list_quality_gate_rules( project_id: String) -> Result<Vec<QualityGateRul
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -358,7 +358,7 @@ pub fn create_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
@@ -368,7 +368,7 @@ pub fn update_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_quality_gate_rule( id: String) -> Result<()> {
     let c = db::conn()?;
     c.execute("DELETE FROM quality_gate_rules WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
@@ -448,7 +448,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
     Ok(QualityGateEvaluation { satisfied: reasons.is_empty(), reasons, approvals, min_approvals, matched_rules: matched.len() as i64 })
 }
 /// Live gate evaluation banner: satisfied/blocking reasons for a review's target branch.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn evaluate_quality_gate( review_id: String) -> Result<QualityGateEvaluation> {
     let c = db::conn()?;
     evaluate_quality_gate_tx(&c, &review_id)
@@ -499,7 +499,7 @@ fn record_merge_run_tx(conn: &Connection, id: &str, review_id: &str, conflicted:
     .map_err(|e| e.to_string())?;
     Ok(SafeMergeRun { id: id.to_string(), review_id: review_id.to_string(), state: state.to_string(), is_dry_run: true, log: Some(log) })
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_safe_merge_runs( review_id: String) -> Result<Vec<SafeMergeRun>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,review_id,state,is_dry_run,log FROM safe_merge_runs WHERE review_id=?1 ORDER BY started_at DESC").map_err(|e| e.to_string())?;
@@ -512,7 +512,7 @@ pub fn list_safe_merge_runs( review_id: String) -> Result<Vec<SafeMergeRun>> {
 }
 /// Explicit Dry Run button: in-memory merge check (see `merge_preview`), recorded to
 /// `safe_merge_runs` with `is_dry_run=1`.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dry_run_merge( id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String) -> Result<SafeMergeRun> {
     let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
@@ -523,7 +523,7 @@ pub fn dry_run_merge( id: String, repo_path: String, review_id: String, source_b
 /// same verdict; it never checks out, writes a ref, or commits. Real merge execution only
 /// exists under `#[cfg(test)]` (see `tests::execute_real_merge_in_test`) against throwaway
 /// repos. The UI must show an "execution disabled (safety)" notice next to this result.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn attempt_merge( id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String) -> Result<SafeMergeRun> {
     let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;

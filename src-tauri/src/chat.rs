@@ -388,19 +388,19 @@ fn mark_channel_read_impl(
 // ---- Tauri command surface (thin wrappers over the _impl functions above, which
 // are exercised directly in tests against an in-memory/temp-file connection). ----
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channels() -> Result<Vec<Channel>> {
     list_channels_impl(&db::conn()?)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel( id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channels_with_meta( profile_id: String) -> Result<Vec<ChannelSummary>> {
     list_channels_with_meta_impl(&db::conn()?, &profile_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_channel(
     channel: Channel,
     member_ids: Vec<String>,
@@ -409,21 +409,21 @@ pub fn create_channel(
     create_channel_impl(&c, &channel, &member_ids)?;
     Ok(channel)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_channel( channel: Channel) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_channel( channel_id: String, profile_id: String) -> Result<()> {
     add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, false)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn leave_channel( channel_id: String, profile_id: String) -> Result<()> {
     remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_channel_member(
     channel_id: String,
     profile_id: String,
@@ -436,15 +436,15 @@ pub fn add_channel_member(
         administrator,
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_channel_member( channel_id: String, profile_id: String) -> Result<()> {
     remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channel_members( channel_id: String) -> Result<Vec<ChannelMember>> {
     list_channel_members_impl(&db::conn()?, &channel_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_entity_channel(
     entity_type: String,
     entity_id: String,
@@ -452,7 +452,7 @@ pub fn create_entity_channel(
 ) -> Result<Channel> {
     create_entity_channel_impl(&db::conn()?, &entity_type, &entity_id, name)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel_by_entity(
     entity_type: String,
     entity_id: String,
@@ -462,7 +462,7 @@ pub fn get_channel_by_entity(
         &entity_channel_id(&entity_type, &entity_id),
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_messages(
     channel_id: String,
     acting_profile_id: Option<String>,
@@ -473,7 +473,7 @@ pub fn list_messages(
         acting_profile_id.as_deref(),
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
     thread_of: String,
     acting_profile_id: Option<String>,
@@ -484,24 +484,24 @@ pub fn list_thread_replies(
         acting_profile_id.as_deref(),
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_message( message: Message) -> Result<MessageView> {
     let c = db::conn()?;
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_message( id: String, text: String) -> Result<MessageView> {
     let c = db::conn()?;
     update_message_impl(&c, &id, &text)?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_message( id: String) -> Result<()> {
     delete_message_impl(&db::conn()?, &id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_reaction(
     message_id: String,
     profile_id: String,
@@ -511,7 +511,7 @@ pub fn add_reaction(
     add_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_reaction(
     message_id: String,
     profile_id: String,
@@ -521,7 +521,7 @@ pub fn remove_reaction(
     remove_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn mark_channel_read(
     channel_id: String,
     profile_id: String,

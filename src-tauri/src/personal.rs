@@ -44,14 +44,14 @@ fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Res
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at"))?;
     let todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(todos)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_todo( input: TodoInput) -> Result<Todo> {
     if input.profile_id.trim().is_empty() || input.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
@@ -60,7 +60,7 @@ pub fn create_todo( input: TodoInput) -> Result<Todo> {
     err(c.execute("INSERT INTO todos(id,profile_id,content,due_date,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.profile_id, input.content.trim(), input.due_date, input.done, input.source_entity_type, input.source_entity_id]))?;
     todo_on(&c, &id)?.ok_or_else(|| "Created todo was not found".into())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_todo( todo: Todo) -> Result<Todo> {
     if todo.profile_id.trim().is_empty() || todo.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
@@ -69,7 +69,7 @@ pub fn update_todo( todo: Todo) -> Result<Todo> {
     if updated == 0 { return Err("Todo not found".into()); }
     todo_on(&c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_todo( id: String) -> Result<()> {
     let c = db::conn()?;
     if err(c.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 { return Err("Todo not found".into()); }
@@ -87,14 +87,14 @@ fn validate_absence(absence: &Absence) -> Result<()> {
     Ok(())
 }
 fn absence_on(c: &Connection, id: &str) -> Result<Option<Absence>> { err(c.query_row("SELECT id,profile_id,reason_type,date_from,date_to,approved FROM absences WHERE id=?1", [id], read_absence).optional()) }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_absences( profile_id: Option<String>) -> Result<Vec<Absence>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved FROM absences WHERE (?1 IS NULL OR profile_id=?1) ORDER BY date_from DESC,date_to DESC"))?;
     let absences = err(statement.query_map([profile_id], read_absence))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(absences)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_absence( input: AbsenceInput) -> Result<Absence> {
     let absence = Absence { id: input.id.unwrap_or_else(|| new_id("absence")), profile_id: input.profile_id, reason_type: input.reason_type, date_from: input.date_from, date_to: input.date_to, approved: input.approved };
     validate_absence(&absence)?;
@@ -102,14 +102,14 @@ pub fn create_absence( input: AbsenceInput) -> Result<Absence> {
     err(c.execute("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES(?1,?2,?3,?4,?5,?6)", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))?;
     absence_on(&c, &absence.id)?.ok_or_else(|| "Created absence was not found".into())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_absence( absence: Absence) -> Result<Absence> {
     validate_absence(&absence)?;
     let c = db::conn()?;
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))? == 0 { return Err("Absence not found".into()); }
     absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_absence( id: String) -> Result<()> {
     let c = db::conn()?;
     if err(c.execute("DELETE FROM absences WHERE id=?1", [id]))? == 0 { return Err("Absence not found".into()); }
@@ -120,7 +120,7 @@ fn current_absences_on(c: &Connection, date: &str) -> Result<Vec<Absence>> {
     let absences = err(statement.query_map([date], read_absence))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(absences)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn current_absences( date: String) -> Result<Vec<Absence>> { current_absences_on(&db::conn()?, &date) }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -141,36 +141,36 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
     Ok(Some(notification))
 }
 /// Emits an event into a personal notification feed unless its subscription is disabled.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn emit_notification( input: NotificationInput) -> Result<Option<Notification>> { emit_notification_on(&db::conn()?, &input) }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_notifications( recipient_id: String, unread_only: Option<bool>) -> Result<Vec<Notification>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT id,recipient_id,event_type,title,body,entity_type,entity_id,created_at,read_at FROM notifications WHERE recipient_id=?1 AND (?2=0 OR read_at IS NULL) ORDER BY created_at DESC"))?;
     let notifications = err(statement.query_map(params![recipient_id, unread_only.unwrap_or(false)], read_notification))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(notifications)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn mark_notification_read( id: String) -> Result<()> {
     let c = db::conn()?;
     if err(c.execute("UPDATE notifications SET read_at=unixepoch() WHERE id=?1", [id]))? == 0 { return Err("Notification not found".into()); }
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_subscription_settings( profile_id: String) -> Result<Vec<SubscriptionSetting>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT profile_id,event_type,enabled FROM subscription_settings WHERE profile_id=?1 ORDER BY event_type"))?;
     let settings = err(statement.query_map([profile_id], |row| Ok(SubscriptionSetting { profile_id: row.get(0)?, event_type: row.get(1)?, enabled: row.get(2)? })))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(settings)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_subscription_setting( setting: SubscriptionSetting) -> Result<SubscriptionSetting> {
     if setting.profile_id.trim().is_empty() || setting.event_type.trim().is_empty() { return Err("Subscription profile and event type are required".into()); }
     let c = db::conn()?;
     err(c.execute("INSERT INTO subscription_settings(profile_id,event_type,enabled) VALUES(?1,?2,?3) ON CONFLICT(profile_id,event_type) DO UPDATE SET enabled=excluded.enabled", params![setting.profile_id, setting.event_type, setting.enabled]))?;
     Ok(setting)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_subscription_setting( profile_id: String, event_type: String) -> Result<()> {
     let c = db::conn()?;
     if err(c.execute("DELETE FROM subscription_settings WHERE profile_id=?1 AND event_type=?2", params![profile_id, event_type]))? == 0 { return Err("Subscription setting not found".into()); }
@@ -196,14 +196,14 @@ fn goto_search_on(c: &Connection, query: &str, limit: i64) -> Result<Vec<GotoRes
     let results = err(statement.query_map(params![pattern, exact, limit.clamp(1, 100)], |row| Ok(GotoResult { id: row.get(0)?, entity_type: row.get(1)?, title: row.get(2)?, details: row.get(3)?, score: row.get(4)? })))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(results)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn goto_search( query: String, limit: Option<i64>) -> Result<Vec<GotoResult>> { goto_search_on(&db::conn()?, &query, limit.unwrap_or(30)) }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AssignedIssue { pub id: String, pub title: String, pub project_id: String, pub number: i64, pub due_date: Option<String> }
 #[derive(Clone, Debug, Serialize)]
 pub struct Dashboard { pub open_todos: Vec<Todo>, pub assigned_issues: Vec<AssignedIssue>, pub meeting_occurrences: Vec<meetings::MeetingOccurrence>, pub unread_notifications: Vec<Notification>, pub current_absences: Vec<Absence> }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dashboard_aggregate( profile_id: String) -> Result<Dashboard> {
     if profile_id.trim().is_empty() { return Err("Dashboard profile is required".into()); }
     let c = db::conn()?;

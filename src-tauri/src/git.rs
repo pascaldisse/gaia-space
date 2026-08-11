@@ -86,13 +86,13 @@ fn repo_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_list() -> Vec<RepoRef> {
     load_store()
 }
 
 /// Register a repository (validates it is a real git repo first).
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_add(path: String) -> Result<Vec<RepoRef>> {
     let repo = open(&path)?;
     let canonical = repo
@@ -114,7 +114,7 @@ pub fn repo_add(path: String) -> Result<Vec<RepoRef>> {
     Ok(repos)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_remove(path: String) -> Result<Vec<RepoRef>> {
     let mut repos = load_store();
     repos.retain(|r| r.path != path);
@@ -124,7 +124,7 @@ pub fn repo_remove(path: String) -> Result<Vec<RepoRef>> {
 
 // ---------- repository inspection ----------
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_info(path: String) -> Result<RepoInfo> {
     let repo = open(&path)?;
     let head = repo.head().ok();
@@ -137,7 +137,7 @@ pub fn repo_info(path: String) -> Result<RepoInfo> {
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_log(path: String, limit: Option<usize>) -> Result<Vec<Commit>> {
     let repo = open(&path)?;
     let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
@@ -165,7 +165,7 @@ pub fn repo_log(path: String, limit: Option<usize>) -> Result<Vec<Commit>> {
     Ok(out)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_branches(path: String) -> Result<Vec<Branch>> {
     let repo = open(&path)?;
     let mut out = Vec::new();
@@ -186,7 +186,7 @@ pub fn repo_branches(path: String) -> Result<Vec<Branch>> {
     Ok(out)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_status(path: String) -> Result<Vec<StatusEntry>> {
     let repo = open(&path)?;
     let mut opts = StatusOptions::new();
@@ -224,7 +224,7 @@ pub fn repo_status(path: String) -> Result<Vec<StatusEntry>> {
 }
 
 /// Unified diff for one commit (vs its first parent), or for the working tree when `id` is None.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_diff(path: String, id: Option<String>) -> Result<String> {
     let repo = open(&path)?;
     let mut opts = DiffOptions::new();
@@ -256,7 +256,7 @@ pub fn repo_diff(path: String, id: Option<String>) -> Result<String> {
     Ok(buf)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_stage(path: String, files: Vec<String>) -> Result<()> {
     let repo = open(&path)?;
     let mut index = repo.index().map_err(|e| e.to_string())?;
@@ -271,7 +271,7 @@ pub fn repo_stage(path: String, files: Vec<String>) -> Result<()> {
     index.write().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_commit(path: String, message: String) -> Result<String> {
     if message.trim().is_empty() {
         return Err("commit message is empty".into());
