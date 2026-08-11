@@ -11,7 +11,6 @@
 use crate::db;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -390,154 +389,145 @@ fn mark_channel_read_impl(
 // are exercised directly in tests against an in-memory/temp-file connection). ----
 
 #[tauri::command]
-pub fn list_channels(app: AppHandle) -> Result<Vec<Channel>> {
-    list_channels_impl(&db::connection(&app)?)
+pub fn list_channels() -> Result<Vec<Channel>> {
+    list_channels_impl(&db::conn()?)
 }
 #[tauri::command]
-pub fn get_channel(app: AppHandle, id: String) -> Result<Option<Channel>> {
-    get_channel_impl(&db::connection(&app)?, &id)
+pub fn get_channel( id: String) -> Result<Option<Channel>> {
+    get_channel_impl(&db::conn()?, &id)
 }
 #[tauri::command]
-pub fn list_channels_with_meta(app: AppHandle, profile_id: String) -> Result<Vec<ChannelSummary>> {
-    list_channels_with_meta_impl(&db::connection(&app)?, &profile_id)
+pub fn list_channels_with_meta( profile_id: String) -> Result<Vec<ChannelSummary>> {
+    list_channels_with_meta_impl(&db::conn()?, &profile_id)
 }
 #[tauri::command]
 pub fn create_channel(
-    app: AppHandle,
     channel: Channel,
     member_ids: Vec<String>,
 ) -> Result<Channel> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     create_channel_impl(&c, &channel, &member_ids)?;
     Ok(channel)
 }
 #[tauri::command]
-pub fn update_channel(app: AppHandle, channel: Channel) -> Result<()> {
-    let c = db::connection(&app)?;
+pub fn update_channel( channel: Channel) -> Result<()> {
+    let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[tauri::command]
-pub fn join_channel(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    add_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id, false)
+pub fn join_channel( channel_id: String, profile_id: String) -> Result<()> {
+    add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, false)
 }
 #[tauri::command]
-pub fn leave_channel(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id)
+pub fn leave_channel( channel_id: String, profile_id: String) -> Result<()> {
+    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
 #[tauri::command]
 pub fn add_channel_member(
-    app: AppHandle,
     channel_id: String,
     profile_id: String,
     administrator: bool,
 ) -> Result<()> {
     add_channel_member_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &channel_id,
         &profile_id,
         administrator,
     )
 }
 #[tauri::command]
-pub fn remove_channel_member(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id)
+pub fn remove_channel_member( channel_id: String, profile_id: String) -> Result<()> {
+    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
 #[tauri::command]
-pub fn list_channel_members(app: AppHandle, channel_id: String) -> Result<Vec<ChannelMember>> {
-    list_channel_members_impl(&db::connection(&app)?, &channel_id)
+pub fn list_channel_members( channel_id: String) -> Result<Vec<ChannelMember>> {
+    list_channel_members_impl(&db::conn()?, &channel_id)
 }
 #[tauri::command]
 pub fn create_entity_channel(
-    app: AppHandle,
     entity_type: String,
     entity_id: String,
     name: Option<String>,
 ) -> Result<Channel> {
-    create_entity_channel_impl(&db::connection(&app)?, &entity_type, &entity_id, name)
+    create_entity_channel_impl(&db::conn()?, &entity_type, &entity_id, name)
 }
 #[tauri::command]
 pub fn get_channel_by_entity(
-    app: AppHandle,
     entity_type: String,
     entity_id: String,
 ) -> Result<Option<Channel>> {
     get_channel_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &entity_channel_id(&entity_type, &entity_id),
     )
 }
 #[tauri::command]
 pub fn list_messages(
-    app: AppHandle,
     channel_id: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
     list_messages_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &channel_id,
         acting_profile_id.as_deref(),
     )
 }
 #[tauri::command]
 pub fn list_thread_replies(
-    app: AppHandle,
     thread_of: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
     list_thread_replies_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &thread_of,
         acting_profile_id.as_deref(),
     )
 }
 #[tauri::command]
-pub fn create_message(app: AppHandle, message: Message) -> Result<MessageView> {
-    let c = db::connection(&app)?;
+pub fn create_message( message: Message) -> Result<MessageView> {
+    let c = db::conn()?;
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
 #[tauri::command]
-pub fn update_message(app: AppHandle, id: String, text: String) -> Result<MessageView> {
-    let c = db::connection(&app)?;
+pub fn update_message( id: String, text: String) -> Result<MessageView> {
+    let c = db::conn()?;
     update_message_impl(&c, &id, &text)?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
 #[tauri::command]
-pub fn delete_message(app: AppHandle, id: String) -> Result<()> {
-    delete_message_impl(&db::connection(&app)?, &id)
+pub fn delete_message( id: String) -> Result<()> {
+    delete_message_impl(&db::conn()?, &id)
 }
 #[tauri::command]
 pub fn add_reaction(
-    app: AppHandle,
     message_id: String,
     profile_id: String,
     emoji: String,
 ) -> Result<Vec<ReactionSummary>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     add_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
 #[tauri::command]
 pub fn remove_reaction(
-    app: AppHandle,
     message_id: String,
     profile_id: String,
     emoji: String,
 ) -> Result<Vec<ReactionSummary>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     remove_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
 #[tauri::command]
 pub fn mark_channel_read(
-    app: AppHandle,
     channel_id: String,
     profile_id: String,
     message_id: Option<String>,
 ) -> Result<()> {
-    mark_channel_read_impl(&db::connection(&app)?, &channel_id, &profile_id, message_id)
+    mark_channel_read_impl(&db::conn()?, &channel_id, &profile_id, message_id)
 }
 // TODO: capability-specific content, scheduled delivery, mentions, pinning and notification policies.
 

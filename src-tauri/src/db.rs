@@ -1,10 +1,24 @@
 //! SQLite persistence: one application-data database, versioned migrations, first-run seed.
 use rusqlite::{Connection, Result};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 #[cfg(test)]
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
+
+static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_db_path(p: PathBuf) { let _ = DB_PATH.set(p); }
+
+pub fn conn() -> Result<Connection, String> {
+    let path = DB_PATH.get().cloned().or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from)).ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    migrate(&conn).map_err(|e| e.to_string())?;
+    Ok(conn)
+}
 
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -26,6 +40,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 2 {
         tx.execute_batch(SCHEMA_V2)?;
     }
+    if version < 3 {
+        tx.execute_batch(SCHEMA_V3)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -43,6 +60,12 @@ pub fn migrate_path(path: &Path) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+pub(crate) const SCHEMA_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL CHECK(role IN ('admin','member')), active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
+"#;
 
 pub(crate) const SCHEMA_V2: &str = r#"
 CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
