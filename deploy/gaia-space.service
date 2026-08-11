@@ -1,0 +1,21 @@
+[Unit]
+Description=GAIA Space web API
+After=network.target
+
+[Service]
+Type=simple
+User=gaia-space
+Group=gaia-space
+EnvironmentFile=/etc/gaia-space.env
+WorkingDirectory=/var/lib/gaia-space
+ExecStart=/opt/gaia-space/bin/space-server
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/gaia-space
+
+[Install]
+WantedBy=multi-user.target
