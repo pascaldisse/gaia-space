@@ -1,15 +1,15 @@
-mod chat;
+pub mod chat;
 pub mod db;
 mod debug_server;
-mod documents;
-mod git;
-mod issues;
-mod meetings;
-mod calls;
-mod pipelines;
+pub mod documents;
+pub mod git;
+pub mod issues;
+pub mod meetings;
+pub mod calls;
+pub mod pipelines;
 pub mod platform;
 pub mod personal;
-mod review;
+pub mod review;
 
 use serde::Serialize;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
