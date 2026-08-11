@@ -73,7 +73,17 @@ async fn delete_user(h: HeaderMap, Path(id): Path<String>) -> impl IntoResponse 
     };
     let active_admins: i64 = c.query_row("SELECT count(*) FROM users WHERE role='admin' AND active=1", [], |r| r.get(0)).unwrap_or(0);
     if target.0 == "admin" && target.1 && active_admins <= 1 { return err(StatusCode::BAD_REQUEST, "cannot delete last active admin").into_response(); }
-    match c.execute("DELETE FROM users WHERE id=?1", [id]) {
+    let tx = match c.unchecked_transaction() {
+        Ok(tx) => tx,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    if let Err(e) = tx.execute("DELETE FROM sessions WHERE user_id=?1", [&id]) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    if let Err(e) = tx.execute("DELETE FROM users WHERE id=?1", [&id]) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    match tx.commit() {
         Ok(_) => Json(json!({"ok":true})).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
     }

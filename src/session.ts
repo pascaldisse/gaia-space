@@ -1,4 +1,4 @@
-import { createEffect, createResource, createRoot, createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { platformApi, type Profile, type Project } from "./api/platform";
 import { authApi, type User } from "./api/auth";
 
@@ -20,12 +20,21 @@ const session = createRoot(() => {
     localStorage.setItem("space.project", value);
   };
 
-  const [profiles, { refetch: reloadProfiles }] = createResource<Profile[]>(() =>
-    platformApi.profiles(),
-  );
-  const [projects, { refetch: reloadProjects }] = createResource<Project[]>(() =>
-    platformApi.projects(),
-  );
+  // Lazy by design: web mode must authenticate before these API calls. Pickers
+  // already reload on mount, so eager resources only poison the accessors with
+  // an initial 401 and prevent Solid from mounting the post-login shell.
+  const [profiles, setProfiles] = createSignal<Profile[]>();
+  const [projects, setProjects] = createSignal<Project[]>();
+  const reloadProfiles = async () => {
+    const value = await platformApi.profiles();
+    setProfiles(value);
+    return value;
+  };
+  const reloadProjects = async () => {
+    const value = await platformApi.projects();
+    setProjects(value);
+    return value;
+  };
 
   // Default to the first available entry so nothing starts in an unusable state.
   const ensureDefaults = () => {
