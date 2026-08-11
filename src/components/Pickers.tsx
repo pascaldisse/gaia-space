@@ -1,6 +1,6 @@
 import { For, Show, createEffect, onMount } from "solid-js";
 import {
-  ensureDefaults, profileId, profiles, projectId, projects,
+  ensureDefaults, profileId, profileLocked, profiles, projectId, projects,
   reloadProfiles, reloadProjects, setProfileId, setProjectId,
 } from "../session";
 
@@ -10,10 +10,11 @@ export function ProfilePicker(props: { label?: string; value?: string; onChange?
   createEffect(() => ensureDefaults());
   const current = () => (props.value !== undefined ? props.value : profileId());
   const set = (id: string) => (props.onChange ? props.onChange(id) : setProfileId(id));
+  const locked = () => profileLocked();
   return (
     <label class="picker">
       {props.label ?? "Acting as"}
-      <select value={current()} onChange={(e) => set(e.currentTarget.value)}>
+      <select value={current()} disabled={locked()} title={locked() ? "Locked to your account's profile" : undefined} onChange={(e) => set(e.currentTarget.value)}>
         <Show when={props.allowAll}>
           <option value="">All profiles</option>
         </Show>

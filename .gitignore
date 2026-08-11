@@ -17,6 +17,7 @@
 # Node / Bun
 node_modules/
 dist/
+dist-web/
 bun.lockb.bak
 
 # Rust / Cargo / Tauri
