@@ -1,4 +1,4 @@
-use axum::{extract::{Path, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::IntoResponse, routing::{get, post, patch, delete}, Json, Router};
+use axum::{extract::Path, http::{header, HeaderMap, HeaderValue, StatusCode}, response::IntoResponse, routing::{get, patch, post}, Json, Router};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
 use gaia_space_lib::{db, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
@@ -22,11 +22,93 @@ fn admin(h:&HeaderMap)->Result<User,(StatusCode,Json<Value>)>{let u=user_by_toke
 async fn login(Json(x):Json<Login>)->impl IntoResponse { let c=match db::conn(){Ok(x)=>x,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()}; let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1",[&x.username],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?))); let Ok((id,username,ph,display_name,profile_id,role))=row else { return err(StatusCode::UNAUTHORIZED,"invalid username or password").into_response() }; let ok=PasswordHash::new(&ph).ok().and_then(|p|Argon2::default().verify_password(x.password.as_bytes(),&p).ok()).is_some(); if !ok{return err(StatusCode::UNAUTHORIZED,"invalid username or password").into_response()} let t=token(); let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]); let mut resp=Json(json!({"user":User{id,username,display_name,profile_id,role}})).into_response(); resp.headers_mut().insert(header::SET_COOKIE,match HeaderValue::from_str(&format!("space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000")){Ok(v)=>v,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response()});resp }
 async fn me(h:HeaderMap)->impl IntoResponse{match user_by_token(&h){Ok(u)=>Json(json!({"user":u})).into_response(),Err(e)=>e.into_response()}}
 async fn logout(h:HeaderMap)->impl IntoResponse{if let Some(t)=h.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))){if let Ok(c)=db::conn(){let _=c.execute("DELETE FROM sessions WHERE token=?1",[t]);}}let mut r=Json(json!({"ok":true})).into_response();r.headers_mut().insert(header::SET_COOKIE,HeaderValue::from_static("space_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"));r}
-async fn change_password(h:HeaderMap,Json(x):Json<Password>)->impl IntoResponse{let u=match user_by_token(&h){Ok(u)=>u,Err(e)=>return e.into_response()};let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let ph:String=match c.query_row("SELECT password_hash FROM users WHERE id=?1",[&u.id],|r|r.get(0)){Ok(v)=>v,Err(_)=>return err(StatusCode::UNAUTHORIZED,"unauthorized").into_response()};if PasswordHash::new(&ph).ok().and_then(|p|Argon2::default().verify_password(x.current.as_bytes(),&p).ok()).is_none(){return err(StatusCode::UNAUTHORIZED,"invalid username or password").into_response()}let p=match hash(&x.next){Ok(v)=>v,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let _=c.execute("UPDATE users SET password_hash=?1 WHERE id=?2",params![p,u.id]);let _=c.execute("DELETE FROM sessions WHERE user_id=?1",[&u.id]);Json(json!({"ok":true})).into_response()}
+async fn change_password(h: HeaderMap, Json(x): Json<Password>) -> impl IntoResponse {
+    let u = match user_by_token(&h) { Ok(u) => u, Err(e) => return e.into_response() };
+    if x.next.len() < 8 { return err(StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response(); }
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let ph: String = match c.query_row("SELECT password_hash FROM users WHERE id=?1", [&u.id], |r| r.get(0)) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
+    };
+    if PasswordHash::new(&ph).ok().and_then(|p| Argon2::default().verify_password(x.current.as_bytes(), &p).ok()).is_none() {
+        return err(StatusCode::UNAUTHORIZED, "invalid username or password").into_response();
+    }
+    let p = match hash(&x.next) { Ok(v) => v, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    if let Err(e) = c.execute("UPDATE users SET password_hash=?1 WHERE id=?2", params![p, u.id]) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    if let Err(e) = c.execute("DELETE FROM sessions WHERE user_id=?1", [&u.id]) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    Json(json!({"ok":true})).into_response()
+}
 async fn users(h:HeaderMap)->impl IntoResponse{if let Err(e)=admin(&h){return e.into_response()}let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let mut q=match c.prepare("SELECT id,username,display_name,profile_id,role,active FROM users ORDER BY username"){Ok(q)=>q,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};let rows=match q.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"username":r.get::<_,String>(1)?,"display_name":r.get::<_,String>(2)?,"profile_id":r.get::<_,String>(3)?,"role":r.get::<_,String>(4)?,"active":r.get::<_,i64>(5)?==1}))){Ok(m)=>m,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};let v:Vec<Value>=rows.filter_map(Result::ok).collect();Json(v).into_response()}
-async fn create_user(h:HeaderMap,Json(x):Json<CreateUser>)->impl IntoResponse{if let Err(e)=admin(&h){return e.into_response()}if !matches!(x.role.as_str(),"admin"|"member"){return err(StatusCode::BAD_REQUEST,"invalid role").into_response()}let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let id=token();let pid=x.profile_id.unwrap_or_else(||format!("profile-{}",&id[..12]));let _=c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())",params![pid,x.username,x.display_name]);match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES(?1,?2,?3,?4,?5,?6,unixepoch())",params![id,x.username,match hash(&x.password){Ok(v)=>v,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()},x.display_name,pid,x.role]){Ok(_)=>Json(json!({"id":id})).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response()}}
-async fn delete_user(h:HeaderMap,Path(id):Path<String>)->impl IntoResponse{let me=match admin(&h){Ok(u)=>u,Err(e)=>return e.into_response()};if id==me.id{return err(StatusCode::BAD_REQUEST,"cannot delete yourself").into_response()}let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let n:i64=c.query_row("SELECT count(*) FROM users WHERE role='admin' AND active=1",[],|r|r.get(0)).unwrap_or(0);let target:String=c.query_row("SELECT role FROM users WHERE id=?1",[&id],|r|r.get(0)).unwrap_or_default();if target=="admin"&&n<=1{return err(StatusCode::BAD_REQUEST,"cannot delete last active admin").into_response()}let _=c.execute("DELETE FROM users WHERE id=?1",[id]);Json(json!({"ok":true})).into_response()}
-async fn patch_user(h:HeaderMap,Path(id):Path<String>,Json(x):Json<PatchUser>)->impl IntoResponse{if let Err(e)=admin(&h){return e.into_response()}let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};if let Some(v)=x.display_name{let _=c.execute("UPDATE users SET display_name=?1 WHERE id=?2",params![v,id]);}if let Some(v)=x.role{let _=c.execute("UPDATE users SET role=?1 WHERE id=?2",params![v,id]);}if let Some(v)=x.active{let _=c.execute("UPDATE users SET active=?1 WHERE id=?2",params![v as i32,id]);}if let Some(v)=x.password{let _=c.execute("UPDATE users SET password_hash=?1 WHERE id=?2",params![match hash(&v){Ok(h)=>h,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()},id]);}Json(json!({"ok":true})).into_response()}
+async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) { return e.into_response(); }
+    let username = x.username.trim();
+    let display_name = x.display_name.trim();
+    if username.is_empty() || display_name.is_empty() { return err(StatusCode::BAD_REQUEST, "username and display name are required").into_response(); }
+    if x.password.len() < 8 { return err(StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response(); }
+    if !matches!(x.role.as_str(), "admin" | "member") { return err(StatusCode::BAD_REQUEST, "invalid role").into_response(); }
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let id = token();
+    let pid = x.profile_id.unwrap_or_else(|| format!("profile-{}", &id[..12]));
+    if let Err(e) = c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())", params![pid, username, display_name]) {
+        return err(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
+    }
+    let password_hash = match hash(&x.password) { Ok(v) => v, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES(?1,?2,?3,?4,?5,?6,unixepoch())", params![id, username, password_hash, display_name, pid, x.role]) {
+        Ok(_) => Json(json!({"id":id})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
+    }
+}
+async fn delete_user(h: HeaderMap, Path(id): Path<String>) -> impl IntoResponse {
+    let me = match admin(&h) { Ok(u) => u, Err(e) => return e.into_response() };
+    if id == me.id { return err(StatusCode::BAD_REQUEST, "cannot delete yourself").into_response(); }
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let target: (String, bool) = match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return err(StatusCode::NOT_FOUND, "user not found").into_response(),
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    let active_admins: i64 = c.query_row("SELECT count(*) FROM users WHERE role='admin' AND active=1", [], |r| r.get(0)).unwrap_or(0);
+    if target.0 == "admin" && target.1 && active_admins <= 1 { return err(StatusCode::BAD_REQUEST, "cannot delete last active admin").into_response(); }
+    match c.execute("DELETE FROM users WHERE id=?1", [id]) {
+        Ok(_) => Json(json!({"ok":true})).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    }
+}
+async fn patch_user(h: HeaderMap, Path(id): Path<String>, Json(x): Json<PatchUser>) -> impl IntoResponse {
+    let me = match admin(&h) { Ok(u) => u, Err(e) => return e.into_response() };
+    if let Some(role) = x.role.as_deref() {
+        if !matches!(role, "admin" | "member") { return err(StatusCode::BAD_REQUEST, "invalid role").into_response(); }
+    }
+    if x.password.as_ref().is_some_and(|p| p.len() < 8) { return err(StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response(); }
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let target: (String, bool) = match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return err(StatusCode::NOT_FOUND, "user not found").into_response(),
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    if id == me.id && x.active == Some(false) { return err(StatusCode::BAD_REQUEST, "cannot deactivate yourself").into_response(); }
+    let removes_active_admin = target.0 == "admin" && target.1 && (x.role.as_deref() == Some("member") || x.active == Some(false));
+    if removes_active_admin {
+        let n: i64 = c.query_row("SELECT count(*) FROM users WHERE role='admin' AND active=1", [], |r| r.get(0)).unwrap_or(0);
+        if n <= 1 { return err(StatusCode::BAD_REQUEST, "cannot remove the last active admin").into_response(); }
+    }
+    if let Some(v) = x.display_name {
+        if v.trim().is_empty() { return err(StatusCode::BAD_REQUEST, "display name is required").into_response(); }
+        if let Err(e) = c.execute("UPDATE users SET display_name=?1 WHERE id=?2", params![v.trim(), id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); }
+    }
+    if let Some(v) = x.role { if let Err(e) = c.execute("UPDATE users SET role=?1 WHERE id=?2", params![v, id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); } }
+    if let Some(v) = x.active { if let Err(e) = c.execute("UPDATE users SET active=?1 WHERE id=?2", params![v as i32, id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); } }
+    if let Some(v) = x.password {
+        let h = match hash(&v) { Ok(h) => h, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+        if let Err(e) = c.execute("UPDATE users SET password_hash=?1 WHERE id=?2", params![h, id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); }
+        if let Err(e) = c.execute("DELETE FROM sessions WHERE user_id=?1", [&id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); }
+    }
+    Json(json!({"ok":true})).into_response()
+}
 fn to_camel(s:&str)->String{let mut out=String::new();let mut up=false;for ch in s.chars(){if ch=='_'{up=true}else if up{out.extend(ch.to_uppercase());up=false}else{out.push(ch)}}out}
 fn arg<T: serde::de::DeserializeOwned>(body:&Value, name:&str)->Result<T,String>{
     let camel=to_camel(name);

@@ -75,7 +75,11 @@ const auth = createRoot(() => {
     try { await authApi.logout(); } finally { setCurrentUser(null); }
   };
 
-  const changePassword = (current: string, next: string) => authApi.changePassword(current, next);
+  const changePassword = async (current: string, next: string) => {
+    await authApi.changePassword(current, next);
+    // The server invalidates every session after a password change.
+    setCurrentUser(null);
+  };
 
   // Acting-as profile is forced to the logged-in user's profile on login
   // (and on every boot while logged in); ProfilePicker locks it for members.
