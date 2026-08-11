@@ -147,6 +147,11 @@ macro_rules! dispatch {
 }
 async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl IntoResponse{
     if let Err(e)=user_by_token(&h){ return e.into_response() }
+    if name.starts_with("repo_") || matches!(name.as_str(),
+        "app_info" | "join_meeting_call" | "start_livekit_server" |
+        "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
+        "attempt_merge" | "open_merge_request"
+    ) { return err(StatusCode::NOT_IMPLEMENTED, "not available in web mode").into_response(); }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
