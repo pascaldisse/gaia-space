@@ -30,6 +30,15 @@ tauri-plugin-dialog = "2.7.2"
 tungstenite = "0.24"
 chrono = "0.4"
 jsonwebtoken = "9"
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+argon2 = "0.5"
+rand = "0.8"
+hex = "0.4"
+
+[[bin]]
+name = "space-server"
+path = "src/bin/space-server.rs"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"

@@ -1,5 +1,5 @@
 mod chat;
-mod db;
+pub mod db;
 mod debug_server;
 mod documents;
 mod git;
@@ -7,8 +7,8 @@ mod issues;
 mod meetings;
 mod calls;
 mod pipelines;
-mod platform;
-mod personal;
+pub mod platform;
+pub mod personal;
 mod review;
 
 use serde::Serialize;
