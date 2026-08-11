@@ -136,8 +136,11 @@ macro_rules! dispatch {
                     Err(e)=>err(StatusCode::BAD_REQUEST,&e).into_response(),
                 }
             })*
-            n if n.starts_with("repo_") || matches!(n,"app_info"|"join_meeting_call"|"start_livekit_server") =>
-                err(StatusCode::NOT_IMPLEMENTED,"not available in web mode").into_response(),
+            n if n.starts_with("repo_") || matches!(n,
+                "app_info" | "join_meeting_call" | "start_livekit_server" |
+                "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
+                "attempt_merge" | "open_merge_request"
+            ) => err(StatusCode::NOT_IMPLEMENTED,"not available in web mode").into_response(),
             _ => err(StatusCode::NOT_FOUND,"unknown command").into_response(),
         }
     };

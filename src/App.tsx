@@ -26,9 +26,9 @@ import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 
 type View = { name:string; icon:string; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
-// Repos / Code Reviews need a local git checkout + native folder dialog — desktop (Tauri) only.
-const localOnlyViews:View[]=[{name:"Repos",icon:"⌘",component:Repos},{name:"Code Reviews",icon:"⇄",component:Reviews}];
-const workspaceViews:View[]=[{name:"Projects",icon:"◈",component:Projects},...localOnlyViews,{name:"Issues",icon:"✓",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"◇",component:Packages},{name:"Pipelines",icon:"▷",component:Pipelines},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
+// Local git and pipeline execution touch the host filesystem/process table — desktop only.
+const localOnlyViews:View[]=[{name:"Repos",icon:"⌘",component:Repos},{name:"Code Reviews",icon:"⇄",component:Reviews},{name:"Pipelines",icon:"▷",component:Pipelines}];
+const workspaceViews:View[]=[{name:"Projects",icon:"◈",component:Projects},...localOnlyViews,{name:"Issues",icon:"✓",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"◇",component:Packages},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
 const usersView:View={name:"Users",icon:"⚉",component:Users};
 const gotoView:Record<string,string>={profile:"Members",project:"Projects",issue:"Issues",channel:"Chat",document:"Documents",review:"Code Reviews",meeting:"Meetings"};
 
