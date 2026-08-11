@@ -131,14 +131,14 @@ CREATE TABLE IF NOT EXISTS package_versions (id TEXT PRIMARY KEY, repository_id 
 mod tests {
     use super::*;
     #[test]
-    fn v1_database_upgrades_to_v2() {
+    fn v1_database_upgrades_to_v3() {
         let path = std::env::temp_dir().join(format!("gaia-space-v1-upgrade-{}.sqlite", std::process::id()));
         let conn = Connection::open(&path).expect("v1 database");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
         conn.pragma_update(None, "user_version", 1).expect("v1 version");
-        migrate(&conn).expect("v2 migration");
+        migrate(&conn).expect("v3 migration");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations"] {
             let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
             assert_eq!(exists, 1, "{table}");
