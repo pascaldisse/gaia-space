@@ -387,7 +387,7 @@ export default function Chat() {
             title={isWeb() ? "Chat identity is fixed to your signed-in account" : undefined}
             onChange={(e) => setActingProfileId(e.currentTarget.value || null)}
           >
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
+            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id} selected={p.id === actingProfileId()}>{p.display_name}</option>}</For>
           </select>
         </div>
 
