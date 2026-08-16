@@ -32,8 +32,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export type DirectoryUser = Pick<User, "username" | "display_name" | "profile_id">;
+
 export const authApi = {
   me: () => req<{ user: User }>("api/auth/me"),
+  directory: () => req<DirectoryUser[]>("api/directory"),
   login: (username: string, password: string) =>
     req<{ user: User }>("api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => req<void>("api/auth/logout", { method: "POST" }),

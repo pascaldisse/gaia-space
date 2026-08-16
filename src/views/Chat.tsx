@@ -1,5 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { currentUser, isWeb } from "../session";
+import { authApi } from "../api/auth";
 import "../App.css";
 import "./Chat.css";
 import {
@@ -43,6 +44,12 @@ export default function Chat() {
 
   // Desktop can act as any profile. Web chat is always bound to the authenticated profile.
   const [profiles] = createResource<ProfileLite[]>(() => chatApi.listProfiles());
+  const [directory] = createResource(() => isWeb() ? authApi.directory() : Promise.resolve([]));
+  const directCandidates = () => (isWeb()
+    ? (directory() ?? []).map((user) => ({ id: user.profile_id, username: user.username, display_name: user.display_name, archived: false }))
+    : (profiles() ?? [])
+  ).filter((profile) => !profile.archived && profile.id !== actingProfileId());
+  const recipientsLoading = () => isWeb() ? directory.loading : profiles.loading;
   const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
   createEffect(() => {
     const authenticated = currentUser()?.profile_id;
@@ -421,7 +428,7 @@ export default function Chat() {
 
         <div class="new-channel-form">
           <div class="section-label" style="padding:0">
-            New channel
+            New conversation
           </div>
           <Show when={newChannelType() !== "dm"}>
             <input
@@ -440,12 +447,17 @@ export default function Chat() {
             <option value="entity-bound">Entity-bound</option>
           </select>
           <Show when={newChannelType() === "dm"}>
-            <select value={directRecipientId()} onChange={(e) => setDirectRecipientId(e.currentTarget.value)}>
-              <option value="">Choose recipient…</option>
-              <For each={profiles()?.filter((p) => !p.archived && p.id !== actingProfileId())}>
-                {(p) => <option value={p.id}>{p.display_name}</option>}
-              </For>
-            </select>
+            <label class="recipient-picker">To
+              <select aria-label="Direct message recipient" value={directRecipientId()} disabled={recipientsLoading() || !directCandidates().length} onChange={(e) => setDirectRecipientId(e.currentTarget.value)}>
+                <option value="">{recipientsLoading() ? "Loading users…" : directCandidates().length ? "Choose user…" : "No other active users"}</option>
+                <For each={directCandidates()}>
+                  {(p) => <option value={p.id}>{p.display_name} (@{p.username})</option>}
+                </For>
+              </select>
+            </label>
+            <Show when={!recipientsLoading() && !directCandidates().length}>
+              <small class="hint">Add an account in Users first.</small>
+            </Show>
           </Show>
           <button class="primary" onClick={createChannel} disabled={newChannelType() === "dm" ? !directRecipientId() : !newChannelName().trim()}>
             {newChannelType() === "dm" ? "Start chat" : "Create"}

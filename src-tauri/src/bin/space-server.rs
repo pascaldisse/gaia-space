@@ -43,6 +43,17 @@ async fn change_password(h: HeaderMap, Json(x): Json<Password>) -> impl IntoResp
     Json(json!({"ok":true})).into_response()
 }
 async fn users(h:HeaderMap)->impl IntoResponse{if let Err(e)=admin(&h){return e.into_response()}let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};let mut q=match c.prepare("SELECT id,username,display_name,profile_id,role,active FROM users ORDER BY username"){Ok(q)=>q,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};let rows=match q.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"username":r.get::<_,String>(1)?,"display_name":r.get::<_,String>(2)?,"profile_id":r.get::<_,String>(3)?,"role":r.get::<_,String>(4)?,"active":r.get::<_,i64>(5)?==1}))){Ok(m)=>m,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};let v:Vec<Value>=rows.filter_map(Result::ok).collect();Json(v).into_response()}
+async fn directory(h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = user_by_token(&h) { return e.into_response(); }
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let mut q = match c.prepare("SELECT username,display_name,profile_id FROM users WHERE active=1 ORDER BY display_name,username") {
+        Ok(q) => q, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    let rows = match q.query_map([], |r| Ok(json!({"username":r.get::<_,String>(0)?,"display_name":r.get::<_,String>(1)?,"profile_id":r.get::<_,String>(2)?}))) {
+        Ok(rows) => rows, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response()
+}
 async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoResponse {
     if let Err(e) = admin(&h) { return e.into_response(); }
     let username = x.username.trim();
@@ -425,4 +436,4 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
     })
 }
 fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','default-org','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
-#[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/cmd/{command}",post(cmd)).with_state(App);let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app).await.unwrap();}
+#[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/directory",get(directory)).route("/api/cmd/{command}",post(cmd)).with_state(App);let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app).await.unwrap();}
