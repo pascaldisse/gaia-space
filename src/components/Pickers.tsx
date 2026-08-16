@@ -18,7 +18,10 @@ export function ProfilePicker(props: { label?: string; value?: string; onChange?
         <Show when={props.allowAll}>
           <option value="">All profiles</option>
         </Show>
-        <Show when={!profiles()?.length}>
+        <Show when={profiles() === undefined}>
+          <option value="">Loading profiles…</option>
+        </Show>
+        <Show when={profiles() !== undefined && !profiles()?.length}>
           <option value="">No profiles — add one in Members</option>
         </Show>
         <For each={profiles()?.filter((p) => !p.archived)}>
@@ -42,7 +45,10 @@ export function ProjectPicker(props: { label?: string; value?: string; onChange?
         <Show when={props.allowAll}>
           <option value="">All projects</option>
         </Show>
-        <Show when={!projects()?.length}>
+        <Show when={projects() === undefined}>
+          <option value="">Loading projects…</option>
+        </Show>
+        <Show when={projects() !== undefined && !projects()?.length}>
           <option value="">No projects yet</option>
         </Show>
         <For each={projects()?.filter((p) => !p.archived)}>

@@ -120,23 +120,42 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     )
     .map_err(|e| e.to_string())
 }
+fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    let content_type: String = c
+        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
+    let count: i64 = c
+        .query_row("SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND profile_id=?2", rusqlite::params![channel_id, profile_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+fn channel_allows_actor(c: &Connection, channel_id: &str, profile_id: Option<&str>) -> Result<bool> {
+    let content_type: String = c
+        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
+    match profile_id { Some(profile_id) => channel_allows_profile(c, channel_id, profile_id), None => Ok(false) }
+}
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
     let channels = list_channels_impl(c)?;
-    channels
+    let visible: Result<Vec<Option<ChannelSummary>>> = channels
         .into_iter()
         .filter(|ch| !ch.archived)
         .map(|ch| {
+            if !channel_allows_profile(c, &ch.id, profile_id)? { return Ok(None); }
             let member_count = member_count_impl(c, &ch.id)?;
             let unread_count = unread_count_impl(c, &ch.id, profile_id)?;
             let last_message_at = last_message_at_impl(c, &ch.id)?;
-            Ok(ChannelSummary {
+            Ok(Some(ChannelSummary {
                 channel: ch,
                 member_count,
                 unread_count,
                 last_message_at,
-            })
+            }))
         })
-        .collect()
+        .collect();
+    Ok(visible?.into_iter().flatten().collect())
 }
 fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String]) -> Result<()> {
     c.execute(
@@ -144,10 +163,10 @@ fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String])
         rusqlite::params![channel.id, channel.content_type, channel.name, channel.description, channel.project_id, channel.archived],
     )
     .map_err(|e| e.to_string())?;
-    for profile_id in member_ids {
+    for (index, profile_id) in member_ids.iter().enumerate() {
         c.execute(
-            "INSERT OR IGNORE INTO channel_members(channel_id,profile_id,administrator) VALUES(?1,?2,0)",
-            rusqlite::params![channel.id, profile_id],
+            "INSERT OR IGNORE INTO channel_members(channel_id,profile_id,administrator) VALUES(?1,?2,?3)",
+            rusqlite::params![channel.id, profile_id, index == 0],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -265,6 +284,8 @@ fn list_messages_impl(
     channel_id: &str,
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
+    let allowed = channel_allows_actor(c, channel_id, acting_profile_id)?;
+    if !allowed { return Err("channel access denied".to_string()); }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -285,6 +306,11 @@ fn list_thread_replies_impl(
     thread_of: &str,
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
+    let channel_id: String = c
+        .query_row("SELECT channel_id FROM messages WHERE id=?1", [thread_of], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let allowed = channel_allows_actor(c, &channel_id, acting_profile_id)?;
+    if !allowed { return Err("channel access denied".to_string()); }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -301,6 +327,11 @@ fn list_thread_replies_impl(
         .collect()
 }
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
+    let allowed = message.author_id.as_deref()
+        .map(|profile_id| channel_allows_profile(c, &message.channel_id, profile_id))
+        .transpose()?
+        .unwrap_or(false);
+    if !allowed { return Err("channel access denied".to_string()); }
     c.execute(
         "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
@@ -677,6 +708,37 @@ mod tests {
             summary.unread_count, 0,
             "read-state clears the unread badge"
         );
+        drop(c);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn direct_channels_are_visible_only_to_members() {
+        let (c, path) = conn();
+        for (id, username) in [("other", "other-user"), ("stranger", "stranger-user")] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
+                rusqlite::params![id, username],
+            ).unwrap();
+        }
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "dm-private".into(), content_type: "dm".into(), name: Some("Direct".into()),
+                description: None, project_id: None, archived: false,
+            },
+            &["default-org".into(), "other".into()],
+        ).unwrap();
+        assert!(list_channels_with_meta_impl(&c, "default-org").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(list_channels_with_meta_impl(&c, "other").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(!list_channels_with_meta_impl(&c, "stranger").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(list_messages_impl(&c, "dm-private", Some("stranger")).is_err());
+        assert!(create_message_impl(&c, &Message {
+            id: "intrusion".into(), channel_id: "dm-private".into(), author_id: Some("stranger".into()),
+            text: "nope".into(), created_at: 1, edited_at: None, thread_of: None, archived: false,
+        }).is_err());
+        let members = list_channel_members_impl(&c, "dm-private").unwrap();
+        assert!(members.iter().any(|m| m.profile_id == "default-org" && m.administrator));
         drop(c);
         let _ = std::fs::remove_file(&path);
     }

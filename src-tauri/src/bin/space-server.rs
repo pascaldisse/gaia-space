@@ -125,6 +125,31 @@ fn arg<T: serde::de::DeserializeOwned>(body:&Value, name:&str)->Result<T,String>
     let v=body.get(name).or_else(||body.get(camel.as_str())).cloned().unwrap_or(Value::Null);
     serde_json::from_value(v).map_err(|e|format!("invalid argument `{name}`: {e}"))
 }
+fn put_arg(body: &mut Value, name: &str, value: Value) {
+    if let Some(object) = body.as_object_mut() { object.insert(name.to_string(), value); }
+}
+fn chat_channel_type(channel_id: &str) -> Option<String> {
+    db::conn().ok()?.query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0)).ok()
+}
+fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
+    let Some(content_type) = chat_channel_type(channel_id) else { return false };
+    if matches!(content_type.as_str(), "public" | "entity-bound") { return true; }
+    let Ok(c) = db::conn() else { return false };
+    c.query_row("SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=?1 AND profile_id=?2)", params![channel_id, profile_id], |r| r.get::<_, bool>(0)).unwrap_or(false)
+}
+fn chat_message_channel(message_id: &str) -> Option<String> {
+    db::conn().ok()?.query_row("SELECT channel_id FROM messages WHERE id=?1", [message_id], |r| r.get(0)).ok()
+}
+fn chat_message_owned(profile_id: &str, message_id: &str) -> bool {
+    let Ok(c) = db::conn() else { return false };
+    c.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE id=?1 AND author_id=?2)", params![message_id, profile_id], |r| r.get::<_, bool>(0)).unwrap_or(false)
+}
+fn chat_can_manage(profile_id: &str, channel_id: &str) -> bool {
+    let Ok(c) = db::conn() else { return false };
+    let member: Option<bool> = c.query_row("SELECT administrator FROM channel_members WHERE channel_id=?1 AND profile_id=?2", params![channel_id, profile_id], |r| r.get(0)).ok();
+    let admins: i64 = c.query_row("SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND administrator=1", [channel_id], |r| r.get(0)).unwrap_or(0);
+    member.is_some_and(|administrator| administrator || admins == 0)
+}
 macro_rules! dispatch {
     ($name:expr, $body:expr, { $($cmd:literal => $m:ident :: $f:ident ( $($a:ident : $t:ty),* $(,)? )),* $(,)? }) => {
         match $name {
@@ -146,12 +171,69 @@ macro_rules! dispatch {
     };
 }
 async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl IntoResponse{
-    if let Err(e)=user_by_token(&h){ return e.into_response() }
+    let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
     if name.starts_with("repo_") || matches!(name.as_str(),
         "app_info" | "join_meeting_call" | "start_livekit_server" |
         "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
-        "attempt_merge" | "open_merge_request"
+        "attempt_merge" | "open_merge_request" | "list_channels"
     ) { return err(StatusCode::NOT_IMPLEMENTED, "not available in web mode").into_response(); }
+    let profile_id = user.profile_id.clone();
+    let mut body = body;
+    match name.as_str() {
+        "list_channels_with_meta" => put_arg(&mut body, "profile_id", json!(profile_id)),
+        "list_messages" | "list_thread_replies" => put_arg(&mut body, "acting_profile_id", json!(profile_id)),
+        "mark_channel_read" | "join_channel" | "leave_channel" | "add_reaction" | "remove_reaction" =>
+            put_arg(&mut body, "profile_id", json!(profile_id)),
+        "create_message" => {
+            if let Some(message) = body.get_mut("message").and_then(Value::as_object_mut) {
+                message.insert("author_id".into(), json!(profile_id));
+            }
+        }
+        "create_channel" => {
+            let supplied: Vec<String> = arg(&body, "member_ids").unwrap_or_default();
+            let mut members = vec![profile_id.clone()];
+            for id in supplied { if id != profile_id && !members.contains(&id) { members.push(id); } }
+            let content_type = body.get("channel").and_then(|v| v.get("content_type")).and_then(Value::as_str).unwrap_or("");
+            if content_type == "dm" && members.len() != 2 {
+                return err(StatusCode::BAD_REQUEST, "a direct message requires exactly one recipient").into_response();
+            }
+            put_arg(&mut body, "member_ids", json!(members));
+        }
+        _ => {}
+    }
+    if matches!(name.as_str(), "list_messages" | "list_channel_members" | "get_channel" | "mark_channel_read" | "join_channel" | "leave_channel") {
+        let key = if name == "get_channel" { "id" } else { "channel_id" };
+        let channel_id: String = match arg(&body, key) { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        if !chat_channel_access(&profile_id, &channel_id) {
+            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
+        }
+    }
+    if name == "list_thread_replies" {
+        let thread_of: String = match arg(&body, "thread_of") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        if !chat_message_channel(&thread_of).is_some_and(|channel_id| chat_channel_access(&profile_id, &channel_id)) {
+            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
+        }
+    }
+    if matches!(name.as_str(), "add_reaction" | "remove_reaction") {
+        let message_id: String = match arg(&body, "message_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        if !chat_message_channel(&message_id).is_some_and(|channel_id| chat_channel_access(&profile_id, &channel_id)) {
+            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
+        }
+    }
+    if matches!(name.as_str(), "update_message" | "delete_message") {
+        let id: String = match arg(&body, "id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        if !chat_message_owned(&profile_id, &id) {
+            return err(StatusCode::FORBIDDEN, "only the author can change this message").into_response();
+        }
+    }
+    if matches!(name.as_str(), "add_channel_member" | "remove_channel_member") {
+        let channel_id: String = match arg(&body, "channel_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        let target: String = match arg(&body, "profile_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+        let removing_self = name == "remove_channel_member" && target == profile_id;
+        if chat_channel_type(&channel_id).as_deref() == Some("dm") || (!removing_self && !chat_can_manage(&profile_id, &channel_id)) {
+            return err(StatusCode::FORBIDDEN, "channel membership is fixed or requires a channel administrator").into_response();
+        }
+    }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
