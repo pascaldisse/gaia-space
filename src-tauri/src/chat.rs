@@ -566,15 +566,22 @@ pub fn mark_channel_read(
 mod tests {
     use super::*;
 
+    static TEST_DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// Nanosecond timestamps collide across threads on coarse clocks: two parallel tests
+    /// then share one file and each deletes the other's database (SQLITE_READONLY_DBMOVED).
+    /// An atomic counter makes the path exact.
     fn conn() -> (Connection, std::path::PathBuf) {
+        let n = TEST_DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path = std::env::temp_dir().join(format!(
-            "gaia-space-chat-test-{}-{}.sqlite",
+            "gaia-space-chat-test-{}-{}-{n}.sqlite",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
+        let _ = std::fs::remove_file(&path);
         let c = db::migrate_path(&path).expect("migration");
         (c, path)
     }

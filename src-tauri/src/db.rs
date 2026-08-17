@@ -13,11 +13,18 @@ static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn set_db_path(p: PathBuf) { let _ = DB_PATH.set(p); }
 
+/// Every connection enforces foreign keys: junction rows (e.g. `todo_assignees`)
+/// must never survive their parent row. SQLite defaults this pragma to OFF.
+pub fn enforce_foreign_keys(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "foreign_keys", "ON")
+}
+
 pub fn conn() -> Result<Connection, String> {
     let path = DB_PATH.get().cloned().or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from)).ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
+    enforce_foreign_keys(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -27,6 +34,7 @@ pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let conn = Connection::open(dir.join("space.db")).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
+    enforce_foreign_keys(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -62,6 +70,7 @@ pub fn seed(conn: &Connection) -> Result<()> {
 pub fn migrate_path(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     migrate(&conn)?;
+    enforce_foreign_keys(&conn)?;
     seed(&conn)?;
     Ok(conn)
 }

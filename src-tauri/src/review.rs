@@ -546,8 +546,14 @@ mod tests {
     fn sweep(dir: &Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
+    static TEST_DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// Counter, not just a timestamp: parallel tests can read identical nanoseconds and
+    /// would then share (and delete) one another's database file.
     fn temp_db() -> PathBuf {
-        std::env::temp_dir().join(format!("gaia-space-review-test-{}-{}.sqlite", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()))
+        let n = TEST_DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("gaia-space-review-test-{}-{}-{n}.sqlite", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let _ = std::fs::remove_file(&path);
+        path
     }
 
     /// Builds a commit via plumbing only (blob + treebuilder) — no working-directory
