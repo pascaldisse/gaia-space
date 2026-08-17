@@ -6,6 +6,7 @@ use jsonwebtoken::{decode, DecodingKey, Validation};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{net::TcpStream, process::{Child, Command}, sync::{LazyLock, Mutex}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+#[cfg(feature = "desktop")]
 use tauri::AppHandle;
 
 type Result<T> = std::result::Result<T, String>;
@@ -71,10 +72,10 @@ fn ensure_server(config: LivekitConfig) -> Result<LivekitStatus> {
     Err(format!("LiveKit did not open {} within 3 seconds", config.url()))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn start_livekit_server(config: Option<LivekitConfig>) -> Result<LivekitStatus> { ensure_server(config.unwrap_or_default()) }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn livekit_server_status(config: Option<LivekitConfig>) -> Result<LivekitStatus> {
     let config = config.unwrap_or_default();
     let mut server = SERVER.lock().map_err(|_| "LiveKit server state lock poisoned".to_string())?;
@@ -124,10 +125,11 @@ fn token_for(config: &LivekitConfig, room: String, identity: String, name: Strin
 #[derive(Debug, Clone, Serialize)]
 pub struct CallJoin { pub url: String, pub room: String, pub token: String }
 
-#[tauri::command]
+#[cfg(feature = "desktop")]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_meeting_call(app: AppHandle, meeting_id: String, participant_id: String, display_name: String, config: Option<LivekitConfig>) -> Result<CallJoin> {
     if participant_id.trim().is_empty() || display_name.trim().is_empty() { return Err("Call participant identity and display name are required".into()); }
-    let meeting = meetings::get_meeting(app.clone(), meeting_id.clone())?.ok_or("Meeting not found")?;
+    let meeting = meetings::get_meeting(meeting_id.clone())?.ok_or("Meeting not found")?;
     if meeting.archived { return Err("Cannot join an archived meeting".into()); }
     let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection.query_row("SELECT status FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2", rusqlite::params![meeting_id, participant_id], |row| row.get(0)).optional().map_err(|e| e.to_string())?;

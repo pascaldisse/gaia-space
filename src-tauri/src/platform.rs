@@ -18,7 +18,6 @@ use crate::db;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::AppHandle;
 
 type Result<T> = std::result::Result<T, String>;
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -50,9 +49,9 @@ pub struct Profile {
     pub archived: bool,
 }
 
-#[tauri::command]
-pub fn list_profiles(app: AppHandle) -> Result<Vec<Profile>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_profiles() -> Result<Vec<Profile>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare(
             "SELECT id,username,display_name,email,archived FROM profiles ORDER BY display_name",
@@ -73,19 +72,19 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<Profile>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn get_profile(app: AppHandle, id: String) -> Result<Option<Profile>> {
-    Ok(list_profiles(app)?.into_iter().find(|x| x.id == id))
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_profile( id: String) -> Result<Option<Profile>> {
+    Ok(list_profiles()?.into_iter().find(|x| x.id == id))
 }
-#[tauri::command]
-pub fn create_profile(app: AppHandle, profile: Profile) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_profile( profile: Profile) -> Result<()> {
+    let c = db::conn()?;
     c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn update_profile(app: AppHandle, profile: Profile) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_profile( profile: Profile) -> Result<()> {
+    let c = db::conn()?;
     c.execute(
         "UPDATE profiles SET username=?2,display_name=?3,email=?4,archived=?5 WHERE id=?1",
         rusqlite::params![
@@ -154,9 +153,9 @@ fn read_team(r: &rusqlite::Row<'_>) -> rusqlite::Result<Team> {
         archived: r.get(4)?,
     })
 }
-#[tauri::command]
-pub fn list_teams(app: AppHandle) -> Result<Vec<Team>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_teams() -> Result<Vec<Team>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare("SELECT id,name,description,parent_id,archived FROM teams ORDER BY name")
         .map_err(|e| e.to_string())?;
@@ -167,23 +166,23 @@ pub fn list_teams(app: AppHandle) -> Result<Vec<Team>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn get_team(app: AppHandle, id: String) -> Result<Option<Team>> {
-    Ok(list_teams(app)?.into_iter().find(|x| x.id == id))
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_team( id: String) -> Result<Option<Team>> {
+    Ok(list_teams()?.into_iter().find(|x| x.id == id))
 }
-#[tauri::command]
-pub fn create_team(app: AppHandle, input: TeamInput) -> Result<Team> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_team( input: TeamInput) -> Result<Team> {
+    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("team"));
     err(c.execute(
         "INSERT INTO teams(id,name,description,parent_id) VALUES(?1,?2,?3,?4)",
         params![id, input.name, input.description, input.parent_id],
     ))?;
-    get_team(app, id)?.ok_or_else(|| "Created team was not found".into())
+    get_team(id)?.ok_or_else(|| "Created team was not found".into())
 }
-#[tauri::command]
-pub fn update_team(app: AppHandle, team: Team) -> Result<Team> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_team( team: Team) -> Result<Team> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE teams SET name=?2,description=?3,parent_id=?4,archived=?5 WHERE id=?1",
         params![
@@ -194,11 +193,11 @@ pub fn update_team(app: AppHandle, team: Team) -> Result<Team> {
             team.archived
         ],
     ))?;
-    get_team(app, team.id)?.ok_or_else(|| "Team not found".into())
+    get_team(team.id)?.ok_or_else(|| "Team not found".into())
 }
-#[tauri::command]
-pub fn archive_team(app: AppHandle, id: String, archived: bool) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_team( id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE teams SET archived=?2 WHERE id=?1",
         params![id, archived],
@@ -221,13 +220,12 @@ fn read_membership(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamMembership> {
     })
 }
 const MEMBERSHIP_COLUMNS: &str = "id,profile_id,team_id,role_id,lead,manager_id,since_date,till_date,requires_approval,archived";
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_team_memberships(
-    app: AppHandle,
     team_id: Option<String>,
     profile_id: Option<String>,
 ) -> Result<Vec<TeamMembership>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     let sql = format!("SELECT {MEMBERSHIP_COLUMNS} FROM team_memberships WHERE (?1 IS NULL OR team_id=?1) AND (?2 IS NULL OR profile_id=?2) ORDER BY team_id, profile_id");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(params![team_id, profile_id], read_membership))?
@@ -235,9 +233,9 @@ pub fn list_team_memberships(
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[tauri::command]
-pub fn add_team_membership(app: AppHandle, input: TeamMembershipInput) -> Result<TeamMembership> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_team_membership( input: TeamMembershipInput) -> Result<TeamMembership> {
+    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("membership"));
     err(c.execute(
         "INSERT INTO team_memberships(id,profile_id,team_id,role_id,lead,manager_id,since_date,till_date,requires_approval) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
@@ -246,18 +244,18 @@ pub fn add_team_membership(app: AppHandle, input: TeamMembershipInput) -> Result
     let sql = format!("SELECT {MEMBERSHIP_COLUMNS} FROM team_memberships WHERE id=?1");
     err(c.query_row(&sql, [&id], read_membership))
 }
-#[tauri::command]
-pub fn update_team_membership(app: AppHandle, membership: TeamMembership) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_team_membership( membership: TeamMembership) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE team_memberships SET role_id=?2,lead=?3,manager_id=?4,since_date=?5,till_date=?6,requires_approval=?7,archived=?8 WHERE id=?1",
         params![membership.id, membership.role_id, membership.lead, membership.manager_id, membership.since_date, membership.till_date, membership.requires_approval, membership.archived],
     ))?;
     Ok(())
 }
-#[tauri::command]
-pub fn remove_team_membership(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_team_membership( id: String) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute("DELETE FROM team_memberships WHERE id=?1", [id]))?;
     Ok(())
 }
@@ -339,9 +337,9 @@ fn read_right(r: &rusqlite::Row<'_>) -> rusqlite::Result<Right> {
         right_group: r.get(5)?,
     })
 }
-#[tauri::command]
-pub fn list_rights(app: AppHandle) -> Result<Vec<Right>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_rights() -> Result<Vec<Right>> {
+    let c = db::conn()?;
     let mut s = err(c.prepare(
         "SELECT id,code,title,description,right_type,right_group FROM rights ORDER BY right_type,right_group,title",
     ))?;
@@ -361,9 +359,9 @@ fn seed_rights_on(c: &Connection) -> Result<usize> {
 }
 /// Idempotent: inserting the catalog twice never duplicates a `code` (UNIQUE),
 /// so the total row count converges after the first call.
-#[tauri::command]
-pub fn seed_rights(app: AppHandle) -> Result<usize> {
-    seed_rights_on(&db::connection(&app)?)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn seed_rights() -> Result<usize> {
+    seed_rights_on(&db::conn()?)
 }
 
 // ---------------------------------------------------------------------------
@@ -397,9 +395,9 @@ fn read_role(r: &rusqlite::Row<'_>) -> rusqlite::Result<Role> {
         archived: r.get(5)?,
     })
 }
-#[tauri::command]
-pub fn list_roles(app: AppHandle) -> Result<Vec<Role>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_roles() -> Result<Vec<Role>> {
+    let c = db::conn()?;
     let mut s = err(c.prepare(
         "SELECT id,name,description,parent_id,role_type,archived FROM roles ORDER BY name",
     ))?;
@@ -408,13 +406,13 @@ pub fn list_roles(app: AppHandle) -> Result<Vec<Role>> {
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[tauri::command]
-pub fn get_role(app: AppHandle, id: String) -> Result<Option<Role>> {
-    Ok(list_roles(app)?.into_iter().find(|x| x.id == id))
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_role( id: String) -> Result<Option<Role>> {
+    Ok(list_roles()?.into_iter().find(|x| x.id == id))
 }
-#[tauri::command]
-pub fn create_role(app: AppHandle, input: RoleInput) -> Result<Role> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_role( input: RoleInput) -> Result<Role> {
+    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("role"));
     err(c.execute(
         "INSERT INTO roles(id,name,description,parent_id,role_type) VALUES(?1,?2,?3,?4,?5)",
@@ -426,11 +424,11 @@ pub fn create_role(app: AppHandle, input: RoleInput) -> Result<Role> {
             input.role_type.unwrap_or_else(|| "CUSTOM".into())
         ],
     ))?;
-    get_role(app, id)?.ok_or_else(|| "Created role was not found".into())
+    get_role(id)?.ok_or_else(|| "Created role was not found".into())
 }
-#[tauri::command]
-pub fn update_role(app: AppHandle, role: Role) -> Result<Role> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_role( role: Role) -> Result<Role> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE roles SET name=?2,description=?3,parent_id=?4,role_type=?5,archived=?6 WHERE id=?1",
         params![
@@ -442,20 +440,20 @@ pub fn update_role(app: AppHandle, role: Role) -> Result<Role> {
             role.archived
         ],
     ))?;
-    get_role(app, role.id)?.ok_or_else(|| "Role not found".into())
+    get_role(role.id)?.ok_or_else(|| "Role not found".into())
 }
-#[tauri::command]
-pub fn archive_role(app: AppHandle, id: String, archived: bool) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_role( id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE roles SET archived=?2 WHERE id=?1",
         params![id, archived],
     ))?;
     Ok(())
 }
-#[tauri::command]
-pub fn list_role_rights(app: AppHandle, role_id: String) -> Result<Vec<String>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_role_rights( role_id: String) -> Result<Vec<String>> {
+    let c = db::conn()?;
     let mut s = err(c.prepare(
         "SELECT r.code FROM role_rights rr JOIN rights r ON r.id=rr.right_id WHERE rr.role_id=?1 ORDER BY r.code",
     ))?;
@@ -466,9 +464,9 @@ pub fn list_role_rights(app: AppHandle, role_id: String) -> Result<Vec<String>> 
 }
 /// Replaces the full set of rights a role grants with `right_codes` (idempotent
 /// full-replace; unknown codes fail the whole call rather than silently no-op).
-#[tauri::command]
-pub fn set_role_rights(app: AppHandle, role_id: String, right_codes: Vec<String>) -> Result<()> {
-    let mut c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_role_rights( role_id: String, right_codes: Vec<String>) -> Result<()> {
+    let mut c = db::conn()?;
     let tx = err(c.transaction())?;
     err(tx.execute("DELETE FROM role_rights WHERE role_id=?1", [&role_id]))?;
     for code in &right_codes {
@@ -522,13 +520,12 @@ fn read_assignment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssignment> {
     })
 }
 const ASSIGNMENT_COLUMNS: &str = "id,role_id,profile_id,team_id,scope_type,scope_id";
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_role_assignments(
-    app: AppHandle,
     profile_id: Option<String>,
     team_id: Option<String>,
 ) -> Result<Vec<RoleAssignment>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     let sql = format!("SELECT {ASSIGNMENT_COLUMNS} FROM role_assignments WHERE (?1 IS NULL OR profile_id=?1) AND (?2 IS NULL OR team_id=?2) ORDER BY scope_type,scope_id");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(params![profile_id, team_id], read_assignment))?
@@ -536,12 +533,12 @@ pub fn list_role_assignments(
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[tauri::command]
-pub fn create_role_assignment(app: AppHandle, input: RoleAssignmentInput) -> Result<RoleAssignment> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_role_assignment( input: RoleAssignmentInput) -> Result<RoleAssignment> {
     if input.profile_id.is_none() == input.team_id.is_none() {
         return Err("Assign the role to exactly one of profile_id or team_id".into());
     }
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("assignment"));
     err(c.execute(
         "INSERT INTO role_assignments(id,role_id,profile_id,team_id,scope_type,scope_id) VALUES(?1,?2,?3,?4,?5,?6)",
@@ -550,9 +547,9 @@ pub fn create_role_assignment(app: AppHandle, input: RoleAssignmentInput) -> Res
     let sql = format!("SELECT {ASSIGNMENT_COLUMNS} FROM role_assignments WHERE id=?1");
     err(c.query_row(&sql, [&id], read_assignment))
 }
-#[tauri::command]
-pub fn delete_role_assignment(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_role_assignment( id: String) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute("DELETE FROM role_assignments WHERE id=?1", [id]))?;
     Ok(())
 }
@@ -598,15 +595,14 @@ fn check_right_on(
     }
     Ok(false)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn check_right(
-    app: AppHandle,
     profile_id: String,
     right_code: String,
     scope_type: String,
     scope_id: Option<String>,
 ) -> Result<bool> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     check_right_on(&c, &profile_id, &right_code, &scope_type, scope_id.as_deref())
 }
 
@@ -623,9 +619,9 @@ pub struct Project {
     pub created_by: Option<String>,
     pub archived: bool,
 }
-#[tauri::command]
-pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_projects() -> Result<Vec<Project>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare("SELECT id,name,key,description,created_by,archived FROM projects ORDER BY name")
         .map_err(|e| e.to_string())?;
@@ -645,19 +641,19 @@ pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn get_project(app: AppHandle, id: String) -> Result<Option<Project>> {
-    Ok(list_projects(app)?.into_iter().find(|x| x.id == id))
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_project( id: String) -> Result<Option<Project>> {
+    Ok(list_projects()?.into_iter().find(|x| x.id == id))
 }
-#[tauri::command]
-pub fn create_project(app: AppHandle, project: Project) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_project( project: Project) -> Result<()> {
+    let c = db::conn()?;
     c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at)VALUES(?1,?2,?3,?4,?5,?6,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn update_project(app: AppHandle, project: Project) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_project( project: Project) -> Result<()> {
+    let c = db::conn()?;
     c.execute(
         "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6 WHERE id=?1",
         rusqlite::params![
@@ -820,9 +816,9 @@ fn validate_cf_value(cf_type: &str, constraints_json: Option<&str>, value_json: 
     Ok(value)
 }
 
-#[tauri::command]
-pub fn list_cf_definitions(app: AppHandle, entity_type: Option<String>) -> Result<Vec<CfDefinition>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_cf_definitions( entity_type: Option<String>) -> Result<Vec<CfDefinition>> {
+    let c = db::conn()?;
     let sql = format!("SELECT {CF_DEF_COLUMNS} FROM cf_definitions WHERE archived=0 AND (?1 IS NULL OR entity_type=?1) ORDER BY entity_type,ordering");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map([entity_type], read_cf_definition))?
@@ -830,10 +826,10 @@ pub fn list_cf_definitions(app: AppHandle, entity_type: Option<String>) -> Resul
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[tauri::command]
-pub fn create_cf_definition(app: AppHandle, input: CfDefinitionInput) -> Result<CfDefinition> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_cf_definition( input: CfDefinitionInput) -> Result<CfDefinition> {
     validate_cf_shape(&input.cf_type, input.constraints_json.as_deref())?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("cfdef"));
     let ordering = match input.ordering {
         Some(o) => o,
@@ -850,10 +846,10 @@ pub fn create_cf_definition(app: AppHandle, input: CfDefinitionInput) -> Result<
     let sql = format!("SELECT {CF_DEF_COLUMNS} FROM cf_definitions WHERE id=?1");
     err(c.query_row(&sql, [&id], read_cf_definition))
 }
-#[tauri::command]
-pub fn update_cf_definition(app: AppHandle, definition: CfDefinition) -> Result<CfDefinition> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_cf_definition( definition: CfDefinition) -> Result<CfDefinition> {
     validate_cf_shape(&definition.cf_type, definition.constraints_json.as_deref())?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE cf_definitions SET entity_type=?2,cf_type=?3,name=?4,constraints_json=?5,default_json=?6,ordering=?7,archived=?8 WHERE id=?1",
         params![definition.id, definition.entity_type, definition.cf_type, definition.name, definition.constraints_json, definition.default_json, definition.ordering, definition.archived],
@@ -861,9 +857,9 @@ pub fn update_cf_definition(app: AppHandle, definition: CfDefinition) -> Result<
     let sql = format!("SELECT {CF_DEF_COLUMNS} FROM cf_definitions WHERE id=?1");
     err(c.query_row(&sql, [&definition.id], read_cf_definition))
 }
-#[tauri::command]
-pub fn archive_cf_definition(app: AppHandle, id: String, archived: bool) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_cf_definition( id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
     err(c.execute(
         "UPDATE cf_definitions SET archived=?2 WHERE id=?1",
         params![id, archived],
@@ -899,19 +895,18 @@ fn cf_set_value_on(c: &Connection, definition_id: &str, entity_id: &str, value_j
     ))?;
     Ok(())
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn cf_set_value(
-    app: AppHandle,
     definition_id: String,
     entity_id: String,
     value_json: String,
 ) -> Result<()> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     cf_set_value_on(&c, &definition_id, &entity_id, &value_json)
 }
-#[tauri::command]
-pub fn cf_get_values(app: AppHandle, entity_type: String, entity_id: String) -> Result<Vec<CfValueEntry>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn cf_get_values( entity_type: String, entity_id: String) -> Result<Vec<CfValueEntry>> {
+    let c = db::conn()?;
     let sql = format!(
         "SELECT {cols}, v.value_json FROM cf_definitions d LEFT JOIN cf_values v ON v.definition_id=d.id AND v.entity_id=?2 WHERE d.entity_type=?1 AND d.archived=0 ORDER BY d.ordering",
         cols = CF_DEF_COLUMNS

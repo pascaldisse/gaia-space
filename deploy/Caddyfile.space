@@ -1,0 +1,10 @@
+redir /space /space/ 308
+handle /space/api/* {
+	uri strip_prefix /space
+	reverse_proxy 127.0.0.1:8090
+}
+handle_path /space/* {
+	root * /var/www/gaia-space
+	try_files {path} /index.html
+	file_server
+}

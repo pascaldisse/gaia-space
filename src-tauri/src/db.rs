@@ -1,11 +1,27 @@
 //! SQLite persistence: one application-data database, versioned migrations, first-run seed.
 use rusqlite::{Connection, Result};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 #[cfg(test)]
 use std::path::Path;
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
+static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_db_path(p: PathBuf) { let _ = DB_PATH.set(p); }
+
+pub fn conn() -> Result<Connection, String> {
+    let path = DB_PATH.get().cloned().or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from)).ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    migrate(&conn).map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+#[cfg(feature = "desktop")]
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -29,6 +45,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 3 {
         tx.execute_batch(SCHEMA_V3)?;
     }
+    if version < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -46,6 +65,12 @@ pub fn migrate_path(path: &Path) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+pub(crate) const SCHEMA_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL CHECK(role IN ('admin','member')), active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
+"#;
 
 pub(crate) const SCHEMA_V2: &str = r#"
 CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
@@ -107,7 +132,7 @@ CREATE TABLE IF NOT EXISTS package_repositories (id TEXT PRIMARY KEY, project_id
 CREATE TABLE IF NOT EXISTS package_versions (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES package_repositories(id), package_name TEXT NOT NULL, version TEXT NOT NULL, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(repository_id, package_name, version));
 "#;
 
-pub(crate) const SCHEMA_V3: &str = r#"
+pub(crate) const SCHEMA_V4: &str = r#"
 CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
 CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
 "#;
@@ -133,14 +158,14 @@ mod tests {
     }
 
     #[test]
-    fn v2_database_upgrades_to_v3_with_todo_assignees() {
+    fn v2_database_upgrades_to_latest_with_todo_assignees() {
         let conn = Connection::open_in_memory().expect("db");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
         conn.execute_batch(SCHEMA_V2).expect("v2 schema");
         conn.pragma_update(None, "user_version", 2).expect("v2 version");
-        migrate(&conn).expect("v3 migration");
+        migrate(&conn).expect("migration");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, SCHEMA_VERSION);
         let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
         assert_eq!(exists, 1);
     }

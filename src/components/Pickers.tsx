@@ -1,6 +1,6 @@
 import { For, Show, createEffect, onMount } from "solid-js";
 import {
-  ensureDefaults, profileId, profiles, projectId, projects,
+  ensureDefaults, profileId, profileLocked, profiles, projectId, projects,
   reloadProfiles, reloadProjects, setProfileId, setProjectId,
 } from "../session";
 
@@ -10,14 +10,18 @@ export function ProfilePicker(props: { label?: string; value?: string; onChange?
   createEffect(() => ensureDefaults());
   const current = () => (props.value !== undefined ? props.value : profileId());
   const set = (id: string) => (props.onChange ? props.onChange(id) : setProfileId(id));
+  const locked = () => profileLocked();
   return (
     <label class="picker">
       {props.label ?? "Acting as"}
-      <select value={current()} onChange={(e) => set(e.currentTarget.value)}>
+      <select value={current()} disabled={locked()} title={locked() ? "Locked to your account's profile" : undefined} onChange={(e) => set(e.currentTarget.value)}>
         <Show when={props.allowAll}>
           <option value="">All profiles</option>
         </Show>
-        <Show when={!profiles()?.length}>
+        <Show when={profiles() === undefined}>
+          <option value="">Loading profiles…</option>
+        </Show>
+        <Show when={profiles() !== undefined && !profiles()?.length}>
           <option value="">No profiles — add one in Members</option>
         </Show>
         <For each={profiles()?.filter((p) => !p.archived)}>
@@ -41,7 +45,10 @@ export function ProjectPicker(props: { label?: string; value?: string; onChange?
         <Show when={props.allowAll}>
           <option value="">All projects</option>
         </Show>
-        <Show when={!projects()?.length}>
+        <Show when={projects() === undefined}>
+          <option value="">Loading projects…</option>
+        </Show>
+        <Show when={projects() !== undefined && !projects()?.length}>
           <option value="">No projects yet</option>
         </Show>
         <For each={projects()?.filter((p) => !p.archived)}>

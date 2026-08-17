@@ -11,7 +11,6 @@
 use crate::db;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -121,23 +120,42 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     )
     .map_err(|e| e.to_string())
 }
+fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    let content_type: String = c
+        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
+    let count: i64 = c
+        .query_row("SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND profile_id=?2", rusqlite::params![channel_id, profile_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+fn channel_allows_actor(c: &Connection, channel_id: &str, profile_id: Option<&str>) -> Result<bool> {
+    let content_type: String = c
+        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
+    match profile_id { Some(profile_id) => channel_allows_profile(c, channel_id, profile_id), None => Ok(false) }
+}
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
     let channels = list_channels_impl(c)?;
-    channels
+    let visible: Result<Vec<Option<ChannelSummary>>> = channels
         .into_iter()
         .filter(|ch| !ch.archived)
         .map(|ch| {
+            if !channel_allows_profile(c, &ch.id, profile_id)? { return Ok(None); }
             let member_count = member_count_impl(c, &ch.id)?;
             let unread_count = unread_count_impl(c, &ch.id, profile_id)?;
             let last_message_at = last_message_at_impl(c, &ch.id)?;
-            Ok(ChannelSummary {
+            Ok(Some(ChannelSummary {
                 channel: ch,
                 member_count,
                 unread_count,
                 last_message_at,
-            })
+            }))
         })
-        .collect()
+        .collect();
+    Ok(visible?.into_iter().flatten().collect())
 }
 fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String]) -> Result<()> {
     c.execute(
@@ -145,10 +163,10 @@ fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String])
         rusqlite::params![channel.id, channel.content_type, channel.name, channel.description, channel.project_id, channel.archived],
     )
     .map_err(|e| e.to_string())?;
-    for profile_id in member_ids {
+    for (index, profile_id) in member_ids.iter().enumerate() {
         c.execute(
-            "INSERT OR IGNORE INTO channel_members(channel_id,profile_id,administrator) VALUES(?1,?2,0)",
-            rusqlite::params![channel.id, profile_id],
+            "INSERT OR IGNORE INTO channel_members(channel_id,profile_id,administrator) VALUES(?1,?2,?3)",
+            rusqlite::params![channel.id, profile_id, index == 0],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -266,6 +284,8 @@ fn list_messages_impl(
     channel_id: &str,
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
+    let allowed = channel_allows_actor(c, channel_id, acting_profile_id)?;
+    if !allowed { return Err("channel access denied".to_string()); }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -286,6 +306,11 @@ fn list_thread_replies_impl(
     thread_of: &str,
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
+    let channel_id: String = c
+        .query_row("SELECT channel_id FROM messages WHERE id=?1", [thread_of], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let allowed = channel_allows_actor(c, &channel_id, acting_profile_id)?;
+    if !allowed { return Err("channel access denied".to_string()); }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -302,6 +327,11 @@ fn list_thread_replies_impl(
         .collect()
 }
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
+    let allowed = message.author_id.as_deref()
+        .map(|profile_id| channel_allows_profile(c, &message.channel_id, profile_id))
+        .transpose()?
+        .unwrap_or(false);
+    if !allowed { return Err("channel access denied".to_string()); }
     c.execute(
         "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
@@ -389,155 +419,146 @@ fn mark_channel_read_impl(
 // ---- Tauri command surface (thin wrappers over the _impl functions above, which
 // are exercised directly in tests against an in-memory/temp-file connection). ----
 
-#[tauri::command]
-pub fn list_channels(app: AppHandle) -> Result<Vec<Channel>> {
-    list_channels_impl(&db::connection(&app)?)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channels() -> Result<Vec<Channel>> {
+    list_channels_impl(&db::conn()?)
 }
-#[tauri::command]
-pub fn get_channel(app: AppHandle, id: String) -> Result<Option<Channel>> {
-    get_channel_impl(&db::connection(&app)?, &id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_channel( id: String) -> Result<Option<Channel>> {
+    get_channel_impl(&db::conn()?, &id)
 }
-#[tauri::command]
-pub fn list_channels_with_meta(app: AppHandle, profile_id: String) -> Result<Vec<ChannelSummary>> {
-    list_channels_with_meta_impl(&db::connection(&app)?, &profile_id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channels_with_meta( profile_id: String) -> Result<Vec<ChannelSummary>> {
+    list_channels_with_meta_impl(&db::conn()?, &profile_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_channel(
-    app: AppHandle,
     channel: Channel,
     member_ids: Vec<String>,
 ) -> Result<Channel> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     create_channel_impl(&c, &channel, &member_ids)?;
     Ok(channel)
 }
-#[tauri::command]
-pub fn update_channel(app: AppHandle, channel: Channel) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_channel( channel: Channel) -> Result<()> {
+    let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn join_channel(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    add_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id, false)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn join_channel( channel_id: String, profile_id: String) -> Result<()> {
+    add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, false)
 }
-#[tauri::command]
-pub fn leave_channel(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn leave_channel( channel_id: String, profile_id: String) -> Result<()> {
+    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_channel_member(
-    app: AppHandle,
     channel_id: String,
     profile_id: String,
     administrator: bool,
 ) -> Result<()> {
     add_channel_member_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &channel_id,
         &profile_id,
         administrator,
     )
 }
-#[tauri::command]
-pub fn remove_channel_member(app: AppHandle, channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::connection(&app)?, &channel_id, &profile_id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_channel_member( channel_id: String, profile_id: String) -> Result<()> {
+    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
-#[tauri::command]
-pub fn list_channel_members(app: AppHandle, channel_id: String) -> Result<Vec<ChannelMember>> {
-    list_channel_members_impl(&db::connection(&app)?, &channel_id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channel_members( channel_id: String) -> Result<Vec<ChannelMember>> {
+    list_channel_members_impl(&db::conn()?, &channel_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_entity_channel(
-    app: AppHandle,
     entity_type: String,
     entity_id: String,
     name: Option<String>,
 ) -> Result<Channel> {
-    create_entity_channel_impl(&db::connection(&app)?, &entity_type, &entity_id, name)
+    create_entity_channel_impl(&db::conn()?, &entity_type, &entity_id, name)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel_by_entity(
-    app: AppHandle,
     entity_type: String,
     entity_id: String,
 ) -> Result<Option<Channel>> {
     get_channel_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &entity_channel_id(&entity_type, &entity_id),
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_messages(
-    app: AppHandle,
     channel_id: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
     list_messages_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &channel_id,
         acting_profile_id.as_deref(),
     )
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
-    app: AppHandle,
     thread_of: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
     list_thread_replies_impl(
-        &db::connection(&app)?,
+        &db::conn()?,
         &thread_of,
         acting_profile_id.as_deref(),
     )
 }
-#[tauri::command]
-pub fn create_message(app: AppHandle, message: Message) -> Result<MessageView> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_message( message: Message) -> Result<MessageView> {
+    let c = db::conn()?;
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
-#[tauri::command]
-pub fn update_message(app: AppHandle, id: String, text: String) -> Result<MessageView> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_message( id: String, text: String) -> Result<MessageView> {
+    let c = db::conn()?;
     update_message_impl(&c, &id, &text)?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
-#[tauri::command]
-pub fn delete_message(app: AppHandle, id: String) -> Result<()> {
-    delete_message_impl(&db::connection(&app)?, &id)
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_message( id: String) -> Result<()> {
+    delete_message_impl(&db::conn()?, &id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_reaction(
-    app: AppHandle,
     message_id: String,
     profile_id: String,
     emoji: String,
 ) -> Result<Vec<ReactionSummary>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     add_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_reaction(
-    app: AppHandle,
     message_id: String,
     profile_id: String,
     emoji: String,
 ) -> Result<Vec<ReactionSummary>> {
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     remove_reaction_impl(&c, &message_id, &profile_id, &emoji)?;
     reactions_for_impl(&c, &message_id, Some(&profile_id))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn mark_channel_read(
-    app: AppHandle,
     channel_id: String,
     profile_id: String,
     message_id: Option<String>,
 ) -> Result<()> {
-    mark_channel_read_impl(&db::connection(&app)?, &channel_id, &profile_id, message_id)
+    mark_channel_read_impl(&db::conn()?, &channel_id, &profile_id, message_id)
 }
 // TODO: capability-specific content, scheduled delivery, mentions, pinning and notification policies.
 
@@ -687,6 +708,37 @@ mod tests {
             summary.unread_count, 0,
             "read-state clears the unread badge"
         );
+        drop(c);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn direct_channels_are_visible_only_to_members() {
+        let (c, path) = conn();
+        for (id, username) in [("other", "other-user"), ("stranger", "stranger-user")] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
+                rusqlite::params![id, username],
+            ).unwrap();
+        }
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "dm-private".into(), content_type: "dm".into(), name: Some("Direct".into()),
+                description: None, project_id: None, archived: false,
+            },
+            &["default-org".into(), "other".into()],
+        ).unwrap();
+        assert!(list_channels_with_meta_impl(&c, "default-org").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(list_channels_with_meta_impl(&c, "other").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(!list_channels_with_meta_impl(&c, "stranger").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        assert!(list_messages_impl(&c, "dm-private", Some("stranger")).is_err());
+        assert!(create_message_impl(&c, &Message {
+            id: "intrusion".into(), channel_id: "dm-private".into(), author_id: Some("stranger".into()),
+            text: "nope".into(), created_at: 1, edited_at: None, thread_of: None, archived: false,
+        }).is_err());
+        let members = list_channel_members_impl(&c, "dm-private").unwrap();
+        assert!(members.iter().any(|m| m.profile_id == "default-org" && m.administrator));
         drop(c);
         let _ = std::fs::remove_file(&path);
     }

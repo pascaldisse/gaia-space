@@ -407,6 +407,9 @@ textarea {
   color: #e05252;
 }
 
+/* ── web-mode boot: auth check in flight ── */
+.space-shell-loading { height: 100vh; background: #1e1f22; }
+
 /* ── app shell: ONE sidebar (icon + label), resizable, collapsible ── */
 .space-shell { display: grid; grid-template-columns: var(--nav-w, 208px) 5px minmax(0, 1fr); height: 100vh; overflow: hidden; }
 .nav { grid-column: 1; background: #25272a; border-right: 1px solid #393b40; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
@@ -431,6 +434,16 @@ textarea {
 .space-shell.collapsed .nav header em, .space-shell.collapsed .nav-toggle, .space-shell.collapsed .nav-section { display: none; }
 .space-shell.collapsed .nav nav button { justify-content: center; padding: 8px 0; }
 .space-shell.collapsed .nav nav button em { display: none; }
+
+/* ── web-mode nav footer: account, logout, change password ── */
+.nav-footer { border-top: 1px solid #393b40; padding: 8px; }
+.nav-footer-row { display: flex; align-items: center; gap: 4px; }
+.nav-footer-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; color: #c9cbd1; }
+.nav-footer-pw { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.nav-footer-pw input { background: #191a1d; border: 1px solid #3b3d43; border-radius: 5px; color: #e7e8ec; padding: 6px 7px; font: inherit; }
+.nav-footer-pw .error { background: #512529; color: #ffc7ca; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
+.nav-footer-pw .ok { background: #1f4a2a; color: #b3ffc0; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
+.space-shell.collapsed .nav-footer { display: none; }
 .workspace { min-width: 0; overflow: hidden; background: #1e1f22; }
 .workspace .app { height: 100%; }
 .resource-view { height: 100%; overflow: auto; padding: 28px 34px; }

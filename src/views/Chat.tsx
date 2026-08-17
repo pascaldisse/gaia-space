@@ -1,4 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import { currentUser, isWeb } from "../session";
+import { authApi } from "../api/auth";
 import "../App.css";
 import "./Chat.css";
 import {
@@ -40,10 +42,18 @@ export default function Chat() {
   const [error, setError] = createSignal<string | null>(null);
   const fail = (e: unknown) => setError(String(e));
 
-  // acting profile (this app has no auth session — the operator picks who they are)
+  // Desktop can act as any profile. Web chat is always bound to the authenticated profile.
   const [profiles] = createResource<ProfileLite[]>(() => chatApi.listProfiles());
+  const [directory] = createResource(() => isWeb() ? authApi.directory() : Promise.resolve([]));
+  const directCandidates = () => (isWeb()
+    ? (directory() ?? []).map((user) => ({ id: user.profile_id, username: user.username, display_name: user.display_name, archived: false }))
+    : (profiles() ?? [])
+  ).filter((profile) => !profile.archived && profile.id !== actingProfileId());
+  const recipientsLoading = () => isWeb() ? directory.loading : profiles.loading;
   const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
   createEffect(() => {
+    const authenticated = currentUser()?.profile_id;
+    if (isWeb() && authenticated) { setActingProfileId(authenticated); return; }
     const list = profiles();
     if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
   });
@@ -222,10 +232,15 @@ export default function Chat() {
   // ---- channel creation ----
   const [newChannelName, setNewChannelName] = createSignal("");
   const [newChannelType, setNewChannelType] = createSignal<ChannelContentType>("public");
+  const [directRecipientId, setDirectRecipientId] = createSignal("");
   async function createChannel() {
-    const name = newChannelName().trim();
     const p = actingProfileId();
-    if (!name || !p) return;
+    const recipient = directRecipientId();
+    const direct = newChannelType() === "dm";
+    const name = direct
+      ? `${profileName(p)} · ${profileName(recipient)}`
+      : newChannelName().trim();
+    if (!name || !p || (direct && !recipient)) return;
     const channel: Channel = {
       id: newId("chan"),
       content_type: newChannelType(),
@@ -235,8 +250,9 @@ export default function Chat() {
       archived: false,
     };
     try {
-      await chatApi.createChannel(channel, [p]);
+      await chatApi.createChannel(channel, direct ? [p, recipient] : [p]);
       setNewChannelName("");
+      setDirectRecipientId("");
       refetchChannels();
       setActiveChannelId(channel.id);
     } catch (e) {
@@ -374,9 +390,11 @@ export default function Chat() {
           </span>
           <select
             value={actingProfileId() ?? ""}
+            disabled={isWeb()}
+            title={isWeb() ? "Chat identity is fixed to your signed-in account" : undefined}
             onChange={(e) => setActingProfileId(e.currentTarget.value || null)}
           >
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
+            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id} selected={p.id === actingProfileId()}>{p.display_name}</option>}</For>
           </select>
         </div>
 
@@ -410,13 +428,15 @@ export default function Chat() {
 
         <div class="new-channel-form">
           <div class="section-label" style="padding:0">
-            New channel
+            New conversation
           </div>
-          <input
-            placeholder="Channel name"
-            value={newChannelName()}
-            onInput={(e) => setNewChannelName(e.currentTarget.value)}
-          />
+          <Show when={newChannelType() !== "dm"}>
+            <input
+              placeholder="Channel name"
+              value={newChannelName()}
+              onInput={(e) => setNewChannelName(e.currentTarget.value)}
+            />
+          </Show>
           <select
             value={newChannelType()}
             onChange={(e) => setNewChannelType(e.currentTarget.value as ChannelContentType)}
@@ -426,8 +446,21 @@ export default function Chat() {
             <option value="dm">Direct message</option>
             <option value="entity-bound">Entity-bound</option>
           </select>
-          <button class="primary" onClick={createChannel} disabled={!newChannelName().trim()}>
-            Create
+          <Show when={newChannelType() === "dm"}>
+            <label class="recipient-picker">To
+              <select aria-label="Direct message recipient" value={directRecipientId()} disabled={recipientsLoading() || !directCandidates().length} onChange={(e) => setDirectRecipientId(e.currentTarget.value)}>
+                <option value="">{recipientsLoading() ? "Loading users…" : directCandidates().length ? "Choose user…" : "No other active users"}</option>
+                <For each={directCandidates()}>
+                  {(p) => <option value={p.id}>{p.display_name} (@{p.username})</option>}
+                </For>
+              </select>
+            </label>
+            <Show when={!recipientsLoading() && !directCandidates().length}>
+              <small class="hint">Add an account in Users first.</small>
+            </Show>
+          </Show>
+          <button class="primary" onClick={createChannel} disabled={newChannelType() === "dm" ? !directRecipientId() : !newChannelName().trim()}>
+            {newChannelType() === "dm" ? "Start chat" : "Create"}
           </button>
         </div>
 

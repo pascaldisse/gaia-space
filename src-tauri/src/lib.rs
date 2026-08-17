@@ -1,19 +1,23 @@
-mod chat;
-mod db;
+pub mod chat;
+pub mod db;
+#[cfg(feature = "desktop")]
 mod debug_server;
-mod documents;
-mod git;
-mod issues;
-mod meetings;
-mod calls;
-mod pipelines;
-mod platform;
-mod personal;
-mod review;
+pub mod documents;
+pub mod git;
+pub mod issues;
+pub mod meetings;
+pub mod calls;
+pub mod pipelines;
+pub mod platform;
+pub mod personal;
+pub mod review;
 
+#[cfg(feature = "desktop")]
 use serde::Serialize;
+#[cfg(feature = "desktop")]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(feature = "desktop")]
 #[derive(Serialize)]
 pub struct AppInfo {
     name: String,
@@ -23,7 +27,8 @@ pub struct AppInfo {
     arch: String,
 }
 
-#[tauri::command]
+#[cfg(feature = "desktop")]
+#[cfg_attr(feature = "desktop", tauri::command)]
 fn app_info() -> AppInfo {
     AppInfo {
         name: env!("CARGO_PKG_NAME").to_string(),
@@ -34,6 +39,7 @@ fn app_info() -> AppInfo {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

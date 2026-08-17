@@ -19,6 +19,7 @@
 }
 
 .chat-profile-picker {
+  order: 0;
   padding: 0.6em 0.9em;
   border-bottom: 1px solid #2a2b2e;
   display: flex;
@@ -36,7 +37,9 @@
 }
 
 .channel-groups {
+  order: 2;
   flex: 1;
+  min-height: 5em;
   overflow-y: auto;
   padding-bottom: 0.4em;
 }
@@ -84,6 +87,7 @@
 }
 
 .new-channel-form {
+  order: 1;
   padding: 0.7em 0.9em;
   border-top: 1px solid #2a2b2e;
   display: flex;
@@ -101,7 +105,15 @@
   padding: 0.35em 0.5em;
 }
 
+.recipient-picker {
+  display: grid;
+  gap: 0.25em;
+  color: #aeb1b8;
+  font-size: 0.82em;
+}
+
 .poll-picker {
+  order: 3;
   display: flex;
   align-items: center;
   gap: 0.35em;

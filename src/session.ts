@@ -1,5 +1,10 @@
-import { createResource, createRoot, createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { platformApi, type Profile, type Project } from "./api/platform";
+import { authApi, type User } from "./api/auth";
+
+/** True when running in a plain browser (web build), false inside the Tauri app. */
+export const isWeb = (): boolean =>
+  typeof window !== "undefined" && window.__TAURI_INTERNALS__ === undefined;
 
 /** App-wide identity/context: who am I acting as, which project am I in. */
 const session = createRoot(() => {
@@ -15,12 +20,21 @@ const session = createRoot(() => {
     localStorage.setItem("space.project", value);
   };
 
-  const [profiles, { refetch: reloadProfiles }] = createResource<Profile[]>(() =>
-    platformApi.profiles(),
-  );
-  const [projects, { refetch: reloadProjects }] = createResource<Project[]>(() =>
-    platformApi.projects(),
-  );
+  // Lazy by design: web mode must authenticate before these API calls. Pickers
+  // already reload on mount, so eager resources only poison the accessors with
+  // an initial 401 and prevent Solid from mounting the post-login shell.
+  const [profiles, setProfiles] = createSignal<Profile[]>();
+  const [projects, setProjects] = createSignal<Project[]>();
+  const reloadProfiles = async () => {
+    const value = await platformApi.profiles();
+    setProfiles(value);
+    return value;
+  };
+  const reloadProjects = async () => {
+    const value = await platformApi.projects();
+    setProjects(value);
+    return value;
+  };
 
   // Default to the first available entry so nothing starts in an unusable state.
   const ensureDefaults = () => {
@@ -42,6 +56,54 @@ export const {
   projectId, setProjectId, projects, reloadProjects,
   ensureDefaults,
 } = session;
+
+/** Web-mode auth session: who is logged in, and gating for the login screen. */
+const auth = createRoot(() => {
+  const [currentUser, setCurrentUser] = createSignal<User | null>(null);
+  const [authChecked, setAuthChecked] = createSignal(!isWeb()); // Tauri: nothing to check.
+
+  const checkAuth = async () => {
+    if (!isWeb()) { setAuthChecked(true); return; }
+    try {
+      const { user } = await authApi.me();
+      setCurrentUser(user);
+    } catch {
+      setCurrentUser(null);
+    } finally {
+      setAuthChecked(true);
+    }
+  };
+
+  const login = async (username: string, password: string) => {
+    const { user } = await authApi.login(username, password);
+    setCurrentUser(user);
+    return user;
+  };
+
+  const logout = async () => {
+    try { await authApi.logout(); } finally { setCurrentUser(null); }
+  };
+
+  const changePassword = async (current: string, next: string) => {
+    await authApi.changePassword(current, next);
+    // The server invalidates every session after a password change.
+    setCurrentUser(null);
+  };
+
+  // Acting-as profile is forced to the logged-in user's profile on login
+  // (and on every boot while logged in); ProfilePicker locks it for members.
+  createEffect(() => {
+    const user = currentUser();
+    if (user) setProfileId(user.profile_id);
+  });
+
+  return { currentUser, authChecked, checkAuth, login, logout, changePassword };
+});
+
+export const { currentUser, authChecked, checkAuth, login, logout, changePassword } = auth;
+
+/** Locked = acting-as profile can't be changed by the user (web member). */
+export const profileLocked = (): boolean => isWeb() && currentUser()?.role === "member";
 
 /** Turn raw backend/SQLite failures into something a human can act on. */
 export function humanError(reason: unknown): string {

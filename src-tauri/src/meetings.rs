@@ -3,7 +3,6 @@ use crate::db;
 use chrono::{DateTime, Duration, Months, TimeZone, Utc};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
 
 type Result<T> = std::result::Result<T, String>;
 const RSVP_STATUSES: [&str; 3] = ["invited", "accepted", "declined"];
@@ -54,67 +53,67 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_meetings(app: AppHandle) -> Result<Vec<Meeting>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_meetings() -> Result<Vec<Meeting>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings ORDER BY starts_at").map_err(|e| e.to_string())?;
     let meetings = s.query_map([], row_to_meeting).map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
     Ok(meetings)
 }
 
-#[tauri::command]
-pub fn get_meeting(app: AppHandle, id: String) -> Result<Option<Meeting>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_meeting( id: String) -> Result<Option<Meeting>> {
+    let c = db::conn()?;
     c.query_row("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings WHERE id=?1", [&id], row_to_meeting)
         .optional().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn create_meeting(app: AppHandle, meeting: Meeting) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_meeting( meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn update_meeting(app: AppHandle, meeting: Meeting) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_meeting( meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,archived=?10 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
     if changed == 0 { return Err("Meeting not found".into()); }
     Ok(())
 }
 
-#[tauri::command]
-pub fn archive_meeting(app: AppHandle, id: String, archived: bool) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_meeting( id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
     if c.execute("UPDATE meetings SET archived=?2 WHERE id=?1", rusqlite::params![id, archived]).map_err(|e| e.to_string())? == 0 { return Err("Meeting not found".into()); }
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_meeting_participants(app: AppHandle, meeting_id: String) -> Result<Vec<MeetingParticipant>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_meeting_participants( meeting_id: String) -> Result<Vec<MeetingParticipant>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT meeting_id,profile_id,status FROM meeting_participants WHERE meeting_id=?1 ORDER BY profile_id").map_err(|e| e.to_string())?;
     let participants = s.query_map([meeting_id], |r| Ok(MeetingParticipant { meeting_id: r.get(0)?, profile_id: r.get(1)?, status: r.get(2)? }))
         .map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
     Ok(participants)
 }
 
-#[tauri::command]
-pub fn invite_meeting_participant(app: AppHandle, meeting_id: String, profile_id: String) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn invite_meeting_participant( meeting_id: String, profile_id: String) -> Result<()> {
     if profile_id.trim().is_empty() { return Err("Participant profile ID is required".into()); }
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     c.execute("INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES(?1,?2,'invited') ON CONFLICT(meeting_id,profile_id) DO UPDATE SET status='invited'", rusqlite::params![meeting_id, profile_id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_meeting_participant_status(app: AppHandle, meeting_id: String, profile_id: String, status: String) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_meeting_participant_status( meeting_id: String, profile_id: String, status: String) -> Result<()> {
     if !RSVP_STATUSES.contains(&status.as_str()) { return Err("RSVP status must be invited, accepted, or declined".into()); }
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     if c.execute("UPDATE meeting_participants SET status=?3 WHERE meeting_id=?1 AND profile_id=?2", rusqlite::params![meeting_id, profile_id, status]).map_err(|e| e.to_string())? == 0 { return Err("Meeting participant not found".into()); }
     Ok(())
 }
@@ -175,11 +174,11 @@ fn expand(meeting: &Meeting, range_start: i64, range_end: i64) -> Result<Vec<Mee
     Ok(result)
 }
 
-#[tauri::command]
-pub fn expand_meeting_occurrences(app: AppHandle, range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn expand_meeting_occurrences( range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
     if range_end <= range_start { return Err("Calendar range end must be after its start".into()); }
     let mut all = Vec::new();
-    for meeting in list_meetings(app)?.into_iter().filter(|meeting| !meeting.archived) { all.extend(expand(&meeting, range_start, range_end)?); }
+    for meeting in list_meetings()?.into_iter().filter(|meeting| !meeting.archived) { all.extend(expand(&meeting, range_start, range_end)?); }
     all.sort_by_key(|occurrence| occurrence.starts_at);
     Ok(all)
 }

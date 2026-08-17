@@ -33,8 +33,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
-
 type Result<T> = std::result::Result<T, String>;
 
 // ---------- Space's real Automation limits (KB §1.2) ----------
@@ -228,9 +226,9 @@ fn update_pipeline_script_tx(conn: &Connection, script: &PipelineScript) -> Resu
     sync_jobs_tx(conn, &script.id, &def)
 }
 
-#[tauri::command]
-pub fn list_pipeline_scripts(app: AppHandle) -> Result<Vec<PipelineScript>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_pipeline_scripts() -> Result<Vec<PipelineScript>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,project_id,repository,path,source,archived FROM pipeline_scripts ORDER BY path").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -241,19 +239,19 @@ pub fn list_pipeline_scripts(app: AppHandle) -> Result<Vec<PipelineScript>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn create_pipeline_script(app: AppHandle, script: PipelineScript) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_pipeline_script( script: PipelineScript) -> Result<()> {
+    let c = db::conn()?;
     create_pipeline_script_tx(&c, &script)
 }
-#[tauri::command]
-pub fn update_pipeline_script(app: AppHandle, script: PipelineScript) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_pipeline_script( script: PipelineScript) -> Result<()> {
+    let c = db::conn()?;
     update_pipeline_script_tx(&c, &script)
 }
-#[tauri::command]
-pub fn delete_pipeline_script(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_pipeline_script( id: String) -> Result<()> {
+    let c = db::conn()?;
     c.execute(
         "DELETE FROM job_runs WHERE job_id IN (SELECT id FROM jobs WHERE script_id=?1)",
         params![id],
@@ -264,9 +262,9 @@ pub fn delete_pipeline_script(app: AppHandle, id: String) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_jobs(app: AppHandle) -> Result<Vec<Job>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_jobs() -> Result<Vec<Job>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| Ok(Job { id: r.get(0)?, script_id: r.get(1)?, name: r.get(2)?, trigger_type: r.get(3)?, archived: r.get(4)? }))
@@ -275,9 +273,9 @@ pub fn list_jobs(app: AppHandle) -> Result<Vec<Job>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn list_jobs_for_script(app: AppHandle, script_id: String) -> Result<Vec<Job>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_jobs_for_script( script_id: String) -> Result<Vec<Job>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs WHERE script_id=?1 ORDER BY name")
         .map_err(|e| e.to_string())?;
@@ -289,9 +287,9 @@ pub fn list_jobs_for_script(app: AppHandle, script_id: String) -> Result<Vec<Job
     rows
 }
 
-#[tauri::command]
-pub fn list_job_runs(app: AppHandle) -> Result<Vec<JobRun>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_job_runs() -> Result<Vec<JobRun>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at FROM job_runs ORDER BY triggered_at DESC").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -302,9 +300,9 @@ pub fn list_job_runs(app: AppHandle) -> Result<Vec<JobRun>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn list_job_runs_for_script(app: AppHandle, script_id: String) -> Result<Vec<JobRun>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_job_runs_for_script( script_id: String) -> Result<Vec<JobRun>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare(
             "SELECT job_runs.id,job_runs.job_id,job_runs.status,job_runs.log,job_runs.triggered_at,job_runs.started_at,job_runs.finished_at
@@ -463,11 +461,11 @@ fn spawn_script_jobs(conn: Arc<Mutex<Connection>>, workdir_root: PathBuf, script
 /// Manual trigger for every job in a script — Space's `.space.kts` scripts default to git-push
 /// triggers, but this desktop build has no daemon watching repos, so triggers are manual-only
 /// (surfaced as such in Pipelines.tsx).
-#[tauri::command]
-pub fn trigger_pipeline_script(app: AppHandle, script_id: String) -> Result<Vec<JobRun>> {
-    let conn = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn trigger_pipeline_script( script_id: String) -> Result<Vec<JobRun>> {
+    let conn = db::conn()?;
     conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
-    let workdir_root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("pipeline-runs");
+    let workdir_root = std::env::temp_dir().join("pipeline-runs");
     let shared = Arc::new(Mutex::new(conn));
     let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id)?;
     Ok(runs)
@@ -475,9 +473,9 @@ pub fn trigger_pipeline_script(app: AppHandle, script_id: String) -> Result<Vec<
 
 // ---------- deploy targets + deployments ----------
 
-#[tauri::command]
-pub fn list_deploy_targets(app: AppHandle) -> Result<Vec<DeployTarget>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_deploy_targets() -> Result<Vec<DeployTarget>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,project_id,name,target_key,description,manual_control,archived FROM deploy_targets ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -488,9 +486,9 @@ pub fn list_deploy_targets(app: AppHandle) -> Result<Vec<DeployTarget>> {
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn create_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_deploy_target( target: DeployTarget) -> Result<()> {
+    let c = db::conn()?;
     c.execute(
         "INSERT INTO deploy_targets(id,project_id,name,target_key,description,manual_control,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
         params![target.id, target.project_id, target.name, target.target_key, target.description, target.manual_control, target.archived],
@@ -498,9 +496,9 @@ pub fn create_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> 
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn update_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_deploy_target( target: DeployTarget) -> Result<()> {
+    let c = db::conn()?;
     c.execute(
         "UPDATE deploy_targets SET name=?2,target_key=?3,description=?4,manual_control=?5,archived=?6 WHERE id=?1",
         params![target.id, target.name, target.target_key, target.description, target.manual_control, target.archived],
@@ -508,9 +506,9 @@ pub fn update_deploy_target(app: AppHandle, target: DeployTarget) -> Result<()> 
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn delete_deploy_target(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_deploy_target( id: String) -> Result<()> {
+    let c = db::conn()?;
     c.execute("DELETE FROM deployments WHERE target_id=?1", params![id]).map_err(|e| e.to_string())?;
     c.execute("DELETE FROM deploy_targets WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
@@ -531,9 +529,9 @@ fn deployment_from_row(r: &rusqlite::Row) -> rusqlite::Result<Deployment> {
 }
 const DEPLOYMENT_COLUMNS: &str = "id,target_id,version,status,description,job_run_id,scheduled_at,started_at,finished_at";
 
-#[tauri::command]
-pub fn list_deployments_for_target(app: AppHandle, target_id: String) -> Result<Vec<Deployment>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_deployments_for_target( target_id: String) -> Result<Vec<Deployment>> {
+    let c = db::conn()?;
     let mut s = c
         .prepare(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE target_id=?1 ORDER BY scheduled_at DESC"))
         .map_err(|e| e.to_string())?;
@@ -554,9 +552,9 @@ fn schedule_deployment_tx(conn: &Connection, req: &ScheduleDeploymentRequest) ->
     .map_err(|e| e.to_string())?;
     Ok(Deployment { id: req.id.clone(), target_id: req.target_id.clone(), version: req.version.clone(), status: "SCHEDULED".into(), description: req.description.clone(), job_run_id: None, scheduled_at: Some(now), started_at: None, finished_at: None })
 }
-#[tauri::command]
-pub fn schedule_deployment(app: AppHandle, req: ScheduleDeploymentRequest) -> Result<Deployment> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn schedule_deployment( req: ScheduleDeploymentRequest) -> Result<Deployment> {
+    let c = db::conn()?;
     schedule_deployment_tx(&c, &req)
 }
 
@@ -605,9 +603,9 @@ fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Dep
     }
     conn.query_row(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE id=?1"), params![id], deployment_from_row).map_err(|e| e.to_string())
 }
-#[tauri::command]
-pub fn transition_deployment(app: AppHandle, id: String, status: String) -> Result<Deployment> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn transition_deployment( id: String, status: String) -> Result<Deployment> {
+    let c = db::conn()?;
     transition_deployment_tx(&c, &id, &status)
 }
 
@@ -628,9 +626,9 @@ fn validate_repo_mode(mode: &str) -> Result<()> {
     }
 }
 
-#[tauri::command]
-pub fn list_package_repositories(app: AppHandle) -> Result<Vec<PackageRepository>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
+    let c = db::conn()?;
     let mut s = c.prepare("SELECT id,project_id,name,format,mode,description,archived FROM package_repositories ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -641,11 +639,11 @@ pub fn list_package_repositories(app: AppHandle) -> Result<Vec<PackageRepository
         .map_err(|e| e.to_string());
     rows
 }
-#[tauri::command]
-pub fn create_package_repository(app: AppHandle, repo: PackageRepository) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_package_repository( repo: PackageRepository) -> Result<()> {
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     c.execute(
         "INSERT INTO package_repositories(id,project_id,name,format,mode,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
         params![repo.id, repo.project_id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
@@ -653,11 +651,11 @@ pub fn create_package_repository(app: AppHandle, repo: PackageRepository) -> Res
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn update_package_repository(app: AppHandle, repo: PackageRepository) -> Result<()> {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_package_repository( repo: PackageRepository) -> Result<()> {
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
-    let c = db::connection(&app)?;
+    let c = db::conn()?;
     c.execute(
         "UPDATE package_repositories SET name=?2,format=?3,mode=?4,description=?5,archived=?6 WHERE id=?1",
         params![repo.id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
@@ -665,17 +663,17 @@ pub fn update_package_repository(app: AppHandle, repo: PackageRepository) -> Res
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
-pub fn delete_package_repository(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_package_repository( id: String) -> Result<()> {
+    let c = db::conn()?;
     c.execute("DELETE FROM package_versions WHERE repository_id=?1", params![id]).map_err(|e| e.to_string())?;
     c.execute("DELETE FROM package_repositories WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_package_versions(app: AppHandle, repository_id: String, query: Option<String>) -> Result<Vec<PackageVersion>> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_package_versions( repository_id: String, query: Option<String>) -> Result<Vec<PackageVersion>> {
+    let c = db::conn()?;
     let like = format!("%{}%", query.unwrap_or_default());
     let mut s = c
         .prepare("SELECT id,repository_id,package_name,version,metadata_json,created_at FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
@@ -738,10 +736,9 @@ fn publish_package_version_tx(
     let created_at: i64 = conn.query_row("SELECT created_at FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
     Ok(PackageVersion { id, repository_id: repository_id.into(), package_name: package_name.into(), version: version.into(), metadata_json: Some(meta.to_string()), created_at })
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 #[allow(clippy::too_many_arguments)]
 pub fn publish_package_version(
-    app: AppHandle,
     repository_id: String,
     package_name: String,
     version: String,
@@ -749,13 +746,13 @@ pub fn publish_package_version(
     payload_filename: Option<String>,
     payload_content: Option<String>,
 ) -> Result<PackageVersion> {
-    let c = db::connection(&app)?;
-    let base_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("packages");
+    let c = db::conn()?;
+    let base_dir = std::env::temp_dir().join("packages");
     publish_package_version_tx(&c, &base_dir, &repository_id, &package_name, &version, metadata_json.as_deref(), payload_filename.as_deref(), payload_content.as_deref())
 }
-#[tauri::command]
-pub fn delete_package_version(app: AppHandle, id: String) -> Result<()> {
-    let c = db::connection(&app)?;
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_package_version( id: String) -> Result<()> {
+    let c = db::conn()?;
     let meta: Option<String> = c.query_row("SELECT metadata_json FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).ok();
     if let Some(m) = meta {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
