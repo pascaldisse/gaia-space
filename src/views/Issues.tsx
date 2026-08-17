@@ -5,7 +5,7 @@ import "./Issues.css";
 import { Resizer, paneWidth } from "../components/Resizer";
 import { ProjectPicker, ProfilePicker } from "../components/Pickers";
 import { projectId as sessionProject, humanError } from "../session";
-import { useDeepLink, linkEntity } from "../router";
+import { useDeepLink, linkEntity, route } from "../router";
 
 const blank = () => ({ project_id:"", title:"", description:"", status_id:"", assignee_id:"", due_date:"" });
 export default function Issues() {
@@ -14,7 +14,8 @@ export default function Issues() {
   const [statuses,{refetch:reloadStatuses}]=createResource(projectId, id=>id?planningApi.statuses(id):Promise.resolve([]));
   const [detail,{refetch:reloadDetail}]=createResource(()=>selected()?.id, id=>id?planningApi.issue(id):Promise.resolve(null));
   const openIssue=(issue:Issue)=>{setSelected(issue);linkEntity("issue",issue.id)};
-  useDeepLink("issue",async id=>{if(selected()?.id===id)return;const found=issues()?.find(i=>i.id===id);if(found){setSelected(found);return}try{const d=await planningApi.issue(id);if(d)setSelected(d.issue)}catch(e){setError(humanError(e))}},()=>{if(selected())setSelected(undefined)});
+  let deepSeq=0; // bumped on every open/clear so a slow fetch that resolves after Back+reselect is discarded
+  useDeepLink("issue",async id=>{if(selected()?.id===id)return;const found=issues()?.find(i=>i.id===id);if(found){setSelected(found);return}const seq=++deepSeq;try{const d=await planningApi.issue(id);if(seq!==deepSeq||route().entityId!==id)return;if(d)setSelected(d.issue)}catch(e){if(seq===deepSeq)setError(humanError(e))}},()=>{deepSeq++;if(selected())setSelected(undefined)});
   const saveIssue=async(e:SubmitEvent)=>{e.preventDefault();try { const f=form(); if(!f.project_id||!f.title.trim()) throw new Error("Project ID and title are required."); const item=await planningApi.createIssue({project_id:f.project_id,title:f.title.trim(),description:f.description||null,status_id:f.status_id||null,assignee_id:f.assignee_id||null,created_by:null,due_date:f.due_date||null,archived:false}); setSelected(item);setForm(blank());reloadIssues(); }catch(e){setError(humanError(e))}};
   const edit=async(e:SubmitEvent)=>{e.preventDefault();const i=selected();if(!i)return;try{await planningApi.updateIssue(i);reloadIssues();reloadDetail()}catch(e){setError(humanError(e))}};
   const saveStatus=async()=>{const name=prompt("Status name");if(!name||!projectId())return;try{await planningApi.createStatus({project_id:projectId(),name,color:"#5b78e5",resolved:false});reloadStatuses()}catch(e){setError(humanError(e))}};
