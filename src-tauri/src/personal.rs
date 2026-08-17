@@ -24,6 +24,8 @@ pub struct Todo {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    #[serde(default)]
+    pub assignee_ids: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -34,22 +36,53 @@ pub struct TodoInput {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    #[serde(default)]
+    pub assignee_ids: Vec<String>,
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
-    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, done: row.get(4)?, source_entity_type: row.get(5)?, source_entity_id: row.get(6)? })
+    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, done: row.get(4)?, source_entity_type: row.get(5)?, source_entity_id: row.get(6)?, assignee_ids: Vec::new() })
 }
 fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
     if entity_type.is_some() != entity_id.is_some() { return Err("Todo and notification anchors require both entity type and entity ID".into()); }
     Ok(())
 }
+/// Distinct, trimmed, non-empty assignee profile ids, order preserved.
+fn clean_assignees(ids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        let id = id.trim();
+        if id.is_empty() || out.iter().any(|existing| existing == id) { continue; }
+        out.push(id.to_string());
+    }
+    out
+}
+fn assignees_on(c: &Connection, todo_id: &str) -> Result<Vec<String>> {
+    let mut statement = err(c.prepare("SELECT profile_id FROM todo_assignees WHERE todo_id=?1 ORDER BY profile_id"))?;
+    let ids = err(statement.query_map([todo_id], |row| row.get::<_, String>(0)))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(ids)
+}
+fn replace_assignees(c: &Connection, todo_id: &str, ids: &[String]) -> Result<()> {
+    err(c.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [todo_id]))?;
+    for pid in clean_assignees(ids) {
+        err(c.execute("INSERT OR IGNORE INTO todo_assignees(todo_id,profile_id) VALUES(?1,?2)", params![todo_id, pid]))?;
+    }
+    Ok(())
+}
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    match todo {
+        Some(mut todo) => { todo.assignee_ids = assignees_on(c, id)?; Ok(Some(todo)) }
+        None => Ok(None),
+    }
 }
 #[tauri::command]
 pub fn list_todos(app: AppHandle, profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::connection(&app)?;
-    let mut statement = err(c.prepare("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at"))?;
-    let todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    // Owned by the profile OR assigned to it.
+    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    drop(statement);
+    for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
     Ok(todos)
 }
 #[tauri::command]
@@ -59,6 +92,7 @@ pub fn create_todo(app: AppHandle, input: TodoInput) -> Result<Todo> {
     let c = db::connection(&app)?;
     let id = input.id.unwrap_or_else(|| new_id("todo"));
     err(c.execute("INSERT INTO todos(id,profile_id,content,due_date,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.profile_id, input.content.trim(), input.due_date, input.done, input.source_entity_type, input.source_entity_id]))?;
+    replace_assignees(&c, &id, &input.assignee_ids)?;
     todo_on(&c, &id)?.ok_or_else(|| "Created todo was not found".into())
 }
 #[tauri::command]
@@ -68,11 +102,13 @@ pub fn update_todo(app: AppHandle, todo: Todo) -> Result<Todo> {
     let c = db::connection(&app)?;
     let updated = err(c.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,done=?5,source_entity_type=?6,source_entity_id=?7,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
     if updated == 0 { return Err("Todo not found".into()); }
+    replace_assignees(&c, &todo.id, &todo.assignee_ids)?;
     todo_on(&c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
 #[tauri::command]
 pub fn delete_todo(app: AppHandle, id: String) -> Result<()> {
     let c = db::connection(&app)?;
+    err(c.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [&id]))?;
     if err(c.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 { return Err("Todo not found".into()); }
     Ok(())
 }
@@ -223,8 +259,42 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(crate::db::SCHEMA_V1).unwrap();
         c.execute_batch(crate::db::SCHEMA_V2).unwrap();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute_batch(crate::db::SCHEMA_V3).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('r','third','Third',1)", []).unwrap();
         c
+    }
+    // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
+    fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
+        let mut statement = c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
+        drop(statement);
+        for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
+        todos
+    }
+    #[test]
+    fn multi_assignee_roundtrip_and_visibility() {
+        let c = conn();
+        // Owner 'p', assigned to 'q' and 'r'.
+        c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t1','p','Shared task')", []).unwrap();
+        replace_assignees(&c, "t1", &["q".into(), "r".into(), "q".into(), " ".into()]).unwrap();
+        // Owner 'q', no assignees.
+        c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t2','q','Q private task')", []).unwrap();
+        // Roundtrip: distinct, blank-stripped.
+        let t1 = todo_on(&c, "t1").unwrap().unwrap();
+        assert_eq!(t1.assignee_ids, vec!["q".to_string(), "r".to_string()]);
+        // Visibility: owner sees own todo.
+        assert!(list_todos_on(&c, "p", true).iter().any(|t| t.id == "t1"));
+        // Visibility: assignee 'r' sees t1 though not the owner, and not t2.
+        let for_r = list_todos_on(&c, "r", true);
+        assert_eq!(for_r.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t1"]);
+        // 'q' sees both owned t2 and assigned t1, deduped.
+        let mut for_q: Vec<String> = list_todos_on(&c, "q", true).iter().map(|t| t.id.clone()).collect();
+        for_q.sort();
+        assert_eq!(for_q, vec!["t1".to_string(), "t2".to_string()]);
+        // Reassign clears prior links.
+        replace_assignees(&c, "t1", &["r".into()]).unwrap();
+        assert_eq!(assignees_on(&c, "t1").unwrap(), vec!["r".to_string()]);
+        assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
     #[test]
     fn todo_anchor_roundtrips() {

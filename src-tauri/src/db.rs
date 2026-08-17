@@ -4,7 +4,7 @@ use rusqlite::{Connection, Result};
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -25,6 +25,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 2 {
         tx.execute_batch(SCHEMA_V2)?;
+    }
+    if version < 3 {
+        tx.execute_batch(SCHEMA_V3)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -104,24 +107,42 @@ CREATE TABLE IF NOT EXISTS package_repositories (id TEXT PRIMARY KEY, project_id
 CREATE TABLE IF NOT EXISTS package_versions (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES package_repositories(id), package_name TEXT NOT NULL, version TEXT NOT NULL, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(repository_id, package_name, version));
 "#;
 
+pub(crate) const SCHEMA_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
+CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn v1_database_upgrades_to_v2() {
+    fn v1_database_upgrades_to_latest() {
         let path = std::env::temp_dir().join(format!("gaia-space-v1-upgrade-{}.sqlite", std::process::id()));
         let conn = Connection::open(&path).expect("v1 database");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
         conn.pragma_update(None, "user_version", 1).expect("v1 version");
-        migrate(&conn).expect("v2 migration");
+        migrate(&conn).expect("migration");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
-        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations"] {
+        assert_eq!(version, SCHEMA_VERSION);
+        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations", "todo_assignees"] {
             let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
             assert_eq!(exists, 1, "{table}");
         }
         drop(conn);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn v2_database_upgrades_to_v3_with_todo_assignees() {
+        let conn = Connection::open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).expect("v1 schema");
+        conn.execute_batch(SCHEMA_V2).expect("v2 schema");
+        conn.pragma_update(None, "user_version", 2).expect("v2 version");
+        migrate(&conn).expect("v3 migration");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 3);
+        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
+        assert_eq!(exists, 1);
     }
 
     #[test]
