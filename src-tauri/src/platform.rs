@@ -932,7 +932,7 @@ mod tests {
     use super::*;
 
     fn conn() -> Connection {
-        let c = Connection::open_in_memory().unwrap();
+        let c = db::open_in_memory().unwrap();
         db::migrate(&c).unwrap();
         c
     }

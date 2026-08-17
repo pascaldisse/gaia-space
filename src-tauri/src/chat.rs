@@ -566,24 +566,13 @@ pub fn mark_channel_read(
 mod tests {
     use super::*;
 
-    static TEST_DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-    /// Nanosecond timestamps collide across threads on coarse clocks: two parallel tests
-    /// then share one file and each deletes the other's database (SQLITE_READONLY_DBMOVED).
-    /// An atomic counter makes the path exact.
-    fn conn() -> (Connection, std::path::PathBuf) {
-        let n = TEST_DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let path = std::env::temp_dir().join(format!(
-            "gaia-space-chat-test-{}-{}-{n}.sqlite",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&path);
-        let c = db::migrate_path(&path).expect("migration");
-        (c, path)
+    /// The path is reserved by an atomic `create_dir` inside `TempDb`, so no other
+    /// process or thread can hold the same database, and cleanup touches only our own
+    /// directory (never another process's live file).
+    fn conn() -> (Connection, db::TempDb) {
+        let temp = db::TempDb::new("gaia-space-chat-test");
+        let c = db::migrate_path(&temp).expect("migration");
+        (c, temp)
     }
 
     fn seed_channel(c: &Connection, id: &str) {
@@ -641,7 +630,7 @@ mod tests {
         assert_eq!(replies[0].message.text, "reply message");
         assert_eq!(replies[0].message.thread_of.as_deref(), Some("msg-root"));
         drop(c);
-        let _ = std::fs::remove_file(&path);
+        drop(path);
     }
 
     #[test]
@@ -673,7 +662,7 @@ mod tests {
         let after_remove = reactions_for_impl(&c, "msg-react", Some("default-org")).unwrap();
         assert!(after_remove.is_empty(), "reaction fully removed");
         drop(c);
-        let _ = std::fs::remove_file(&path);
+        drop(path);
     }
 
     #[test]
@@ -716,7 +705,7 @@ mod tests {
             "read-state clears the unread badge"
         );
         drop(c);
-        let _ = std::fs::remove_file(&path);
+        drop(path);
     }
 
     #[test]
@@ -747,7 +736,7 @@ mod tests {
         let members = list_channel_members_impl(&c, "dm-private").unwrap();
         assert!(members.iter().any(|m| m.profile_id == "default-org" && m.administrator));
         drop(c);
-        let _ = std::fs::remove_file(&path);
+        drop(path);
     }
 
     #[test]
@@ -767,6 +756,6 @@ mod tests {
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().name.as_deref(), Some("Issue #42"));
         drop(c);
-        let _ = std::fs::remove_file(&path);
+        drop(path);
     }
 }

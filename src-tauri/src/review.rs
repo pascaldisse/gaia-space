@@ -546,14 +546,10 @@ mod tests {
     fn sweep(dir: &Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
-    static TEST_DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    /// Counter, not just a timestamp: parallel tests can read identical nanoseconds and
-    /// would then share (and delete) one another's database file.
-    fn temp_db() -> PathBuf {
-        let n = TEST_DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let path = std::env::temp_dir().join(format!("gaia-space-review-test-{}-{}-{n}.sqlite", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        let _ = std::fs::remove_file(&path);
-        path
+    /// `TempDb` reserves its directory with an atomic `create_dir`, which is exclusive
+    /// across processes; nothing here ever deletes a path it did not create.
+    fn temp_db() -> db::TempDb {
+        db::TempDb::new("gaia-space-review-test")
     }
 
     /// Builds a commit via plumbing only (blob + treebuilder) — no working-directory
@@ -631,7 +627,7 @@ mod tests {
         let channels: i64 = conn.query_row("SELECT COUNT(*) FROM channels WHERE id='mr-1-channel'", [], |r| r.get(0)).unwrap();
         assert_eq!(channels, 1);
 
-        let _ = std::fs::remove_file(&db_path);
+        drop(db_path);
         sweep(&dir);
     }
 
@@ -647,7 +643,7 @@ mod tests {
         assert!(!eval.reasons.is_empty());
         assert_eq!(eval.min_approvals, 2);
 
-        let _ = std::fs::remove_file(&db_path);
+        drop(db_path);
     }
 
     #[test]
@@ -663,7 +659,7 @@ mod tests {
         assert!(eval.satisfied, "reasons: {:?}", eval.reasons);
         assert_eq!(eval.approvals, 1);
 
-        let _ = std::fs::remove_file(&db_path);
+        drop(db_path);
     }
 
     #[test]
@@ -682,7 +678,7 @@ mod tests {
         assert_eq!(run.state, "FAILING");
         assert!(run.log.unwrap().contains("conflict.txt"));
 
-        let _ = std::fs::remove_file(&db_path);
+        drop(db_path);
         sweep(&dir);
     }
 

@@ -298,7 +298,7 @@ pub fn dashboard_aggregate( profile_id: String) -> Result<Dashboard> {
 mod tests {
     use super::*;
     fn conn() -> Connection {
-        let c = Connection::open_in_memory().unwrap();
+        let c = db::open_in_memory().unwrap();
         c.execute_batch(crate::db::SCHEMA_V1).unwrap();
         c.execute_batch(crate::db::SCHEMA_V2).unwrap();
         c.execute_batch(crate::db::SCHEMA_V3).unwrap();
