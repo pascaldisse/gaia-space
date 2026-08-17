@@ -1,22 +1,83 @@
 //! SQLite persistence: one application-data database, versioned migrations, first-run seed.
 use rusqlite::{Connection, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-#[cfg(test)]
-use std::path::Path;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn set_db_path(p: PathBuf) { let _ = DB_PATH.set(p); }
 
+/// Every connection enforces foreign keys: junction rows (e.g. `todo_assignees`)
+/// must never survive their parent row. SQLite defaults this pragma to OFF.
+pub fn enforce_foreign_keys(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "foreign_keys", "ON")
+}
+
+/// The only sanctioned file-backed connection constructor: every caller (production or
+/// test) gets `foreign_keys=ON`. Direct `Connection::open` outside this module would
+/// silently reintroduce orphan junction rows.
+pub fn open_at(path: impl AsRef<Path>) -> Result<Connection> {
+    let conn = Connection::open(path.as_ref())?;
+    enforce_foreign_keys(&conn)?;
+    Ok(conn)
+}
+
+/// In-memory counterpart of [`open_at`], likewise foreign-key enforced.
+pub fn open_in_memory() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    enforce_foreign_keys(&conn)?;
+    Ok(conn)
+}
+
+/// Test databases live in a directory reserved with `create_dir`, which is atomic and
+/// fails when the name is taken. PID+clock names are not exclusive across processes
+/// (PIDs are recycled, clocks are coarse), and deleting a "stale" file would destroy a
+/// live database owned by another process. Dropping the guard removes only our own dir.
+#[cfg(test)]
+pub struct TempDb {
+    dir: PathBuf,
+    path: PathBuf,
+}
+
+#[cfg(test)]
+impl TempDb {
+    pub fn new(prefix: &str) -> TempDb {
+        let base = std::env::temp_dir();
+        let mut attempt: u64 = 0;
+        loop {
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let dir = base.join(format!("{prefix}-{}-{nanos}-{attempt}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => {
+                    let path = dir.join("test.sqlite");
+                    return TempDb { dir, path };
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
+                Err(e) => panic!("temp database directory: {e}"),
+            }
+        }
+    }
+    pub fn path(&self) -> &Path { &self.path }
+}
+
+#[cfg(test)]
+impl AsRef<Path> for TempDb {
+    fn as_ref(&self) -> &Path { &self.path }
+}
+
+#[cfg(test)]
+impl Drop for TempDb {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); }
+}
+
 pub fn conn() -> Result<Connection, String> {
     let path = DB_PATH.get().cloned().or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from)).ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    let conn = open_at(path).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
@@ -25,7 +86,7 @@ pub fn conn() -> Result<Connection, String> {
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let conn = Connection::open(dir.join("space.db")).map_err(|e| e.to_string())?;
+    let conn = open_at(dir.join("space.db")).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
@@ -45,6 +106,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 3 {
         tx.execute_batch(SCHEMA_V3)?;
     }
+    if version < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -56,8 +120,8 @@ pub fn seed(conn: &Connection) -> Result<()> {
 }
 
 #[cfg(test)]
-pub fn migrate_path(path: &Path) -> Result<Connection> {
-    let conn = Connection::open(path)?;
+pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
+    let conn = open_at(path)?;
     migrate(&conn)?;
     seed(&conn)?;
     Ok(conn)
@@ -129,31 +193,48 @@ CREATE TABLE IF NOT EXISTS package_repositories (id TEXT PRIMARY KEY, project_id
 CREATE TABLE IF NOT EXISTS package_versions (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES package_repositories(id), package_name TEXT NOT NULL, version TEXT NOT NULL, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(repository_id, package_name, version));
 "#;
 
+pub(crate) const SCHEMA_V4: &str = r#"
+CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
+CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn v1_database_upgrades_to_v3() {
-        let path = std::env::temp_dir().join(format!("gaia-space-v1-upgrade-{}.sqlite", std::process::id()));
-        let conn = Connection::open(&path).expect("v1 database");
+    fn v1_database_upgrades_to_latest() {
+        let temp = TempDb::new("gaia-space-v1-upgrade");
+        let conn = open_at(&temp).expect("v1 database");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
         conn.pragma_update(None, "user_version", 1).expect("v1 version");
-        migrate(&conn).expect("v3 migration");
+        migrate(&conn).expect("migration");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 3);
-        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations"] {
+        assert_eq!(version, SCHEMA_VERSION);
+        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations", "todo_assignees"] {
             let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
             assert_eq!(exists, 1, "{table}");
         }
         drop(conn);
-        let _ = std::fs::remove_file(path);
+        drop(temp);
+    }
+
+    #[test]
+    fn v2_database_upgrades_to_latest_with_todo_assignees() {
+        let conn = open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).expect("v1 schema");
+        conn.execute_batch(SCHEMA_V2).expect("v2 schema");
+        conn.pragma_update(None, "user_version", 2).expect("v2 version");
+        migrate(&conn).expect("migration");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
+        assert_eq!(exists, 1);
     }
 
     #[test]
     fn migration_and_domain_roundtrips() {
-        let path =
-            std::env::temp_dir().join(format!("gaia-space-db-{}.sqlite", std::process::id()));
-        let conn = migrate_path(&path).expect("migration");
+        let temp = TempDb::new("gaia-space-db");
+        let conn = migrate_path(&temp).expect("migration");
         let cases = [
             ("teams", "id", "team"),
             ("issues", "id", "issue"),
@@ -189,6 +270,6 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "{table}");
         }
-        let _ = std::fs::remove_file(path);
+        drop(temp);
     }
 }
