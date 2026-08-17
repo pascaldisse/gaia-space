@@ -7,6 +7,7 @@ import {
   type ReviewDiscussion,
 } from "../api/review";
 import { Diff } from "../Diff";
+import { useDeepLink, linkEntity } from "../router";
 import "./Reviews.css";
 
 export default function Reviews() {
@@ -45,6 +46,8 @@ export default function Reviews() {
     if (!selectedId() && reviews()?.length) setSelectedId(reviews()![0].id);
   });
   const selected = (): Review | null => reviews()?.find((r) => r.id === selectedId()) ?? null;
+  const openReview = (id:string) => { setSelectedId(id); linkEntity("review", id); };
+  useDeepLink("review", (id) => setSelectedId(id));
 
   async function createMR(e: SubmitEvent) {
     e.preventDefault();
@@ -283,7 +286,7 @@ export default function Reviews() {
             <ul>
               <For each={reviews()}>
                 {(r) => (
-                  <li classList={{ active: r.id === selectedId() }} onClick={() => setSelectedId(r.id)}>
+                  <li classList={{ active: r.id === selectedId() }} onClick={() => openReview(r.id)}>
                     <span class="num">#{r.number}</span>
                     <strong>{r.title}</strong>
                     <span class={`state state-${r.state.toLowerCase()}`}>{r.state}</span>

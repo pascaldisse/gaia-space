@@ -23,6 +23,7 @@ import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import { Resizer, paneWidth } from "./components/Resizer";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
+import { activeView, navigate, registerViews } from "./router";
 
 type View = { name:string; icon:string; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
@@ -33,7 +34,7 @@ const usersView:View={name:"Users",icon:"⚉",component:Users};
 const gotoView:Record<string,string>={profile:"Members",project:"Projects",issue:"Issues",channel:"Chat",document:"Documents",review:"Code Reviews",meeting:"Meetings"};
 
 export default function App() {
-  const [active,setActive]=createSignal("Dashboard"); const [gotoOpen,setGotoOpen]=createSignal(false);
+  const active=()=>activeView()||"Dashboard"; const setActive=(name:string)=>navigate(name); const [gotoOpen,setGotoOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
@@ -47,6 +48,7 @@ export default function App() {
   const collapsed=()=>pinnedCollapsed()||narrow();
   const toggle=()=>{const next=!pinnedCollapsed();setPinnedCollapsed(next);localStorage.setItem("space.nav.collapsed",next?"1":"0")};
   onMount(()=>{
+    registerViews([...personalViews,...workspaceViews,usersView].map(v=>v.name));
     void checkAuth();
     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
     window.addEventListener("keydown",shortcut);
@@ -69,7 +71,7 @@ export default function App() {
         </aside>
         <Resizer width={navWidth} setWidth={setNavWidth} min={160} max={420}/>
         <main class="workspace"><Dynamic component={current().component}/></main>
-        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={kind=>setActive(gotoView[kind])}/>
+        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>navigate(gotoView[kind]??"Dashboard",kind,id)}/>
       </div>
     </Match>
   </Switch>;

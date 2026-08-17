@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import { useDeepLink, linkEntity } from "../router";
 import { currentUser, isWeb } from "../session";
 import { authApi } from "../api/auth";
 import "../App.css";
@@ -77,6 +78,8 @@ export default function Chat() {
     if (list && list.length && !activeChannelId()) setActiveChannelId(list[0].id);
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  const openChannel = (id:string) => { setActiveChannelId(id); linkEntity("channel", id); };
+  useDeepLink("channel", (id) => setActiveChannelId(id));
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {
@@ -408,7 +411,7 @@ export default function Chat() {
                     {(c) => (
                       <li
                         classList={{ active: c.id === activeChannelId() }}
-                        onClick={() => setActiveChannelId(c.id)}
+                        onClick={() => openChannel(c.id)}
                       >
                         <span class="channel-name">{c.name ?? c.content_type}</span>
                         <Show when={c.unread_count > 0}>

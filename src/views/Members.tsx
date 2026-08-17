@@ -1,6 +1,7 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type Profile, type Team, type TeamMembership, type Role } from "../api/platform";
 import "./Members.css";
+import { useDeepLink, linkEntity } from "../router";
 
 const blankProfile = () => ({ id: "", username: "", display_name: "", email: "" });
 const blankTeam = () => ({ name: "", description: "" });
@@ -38,7 +39,8 @@ export default function Members() {
       reloadProfiles();
     } catch (e) { setError(String(e)); }
   };
-  const editProfile = (p: Profile) => { setEditingProfile(p); setProfileForm({ id: p.id, username: p.username, display_name: p.display_name, email: p.email ?? "" }); };
+  const editProfile = (p: Profile) => { setEditingProfile(p); setProfileForm({ id: p.id, username: p.username, display_name: p.display_name, email: p.email ?? "" }); linkEntity("profile", p.id); };
+  useDeepLink("profile", (id) => { if (editingProfile()?.id === id) return; const found = profiles()?.find(p => p.id === id); if (found) { setEditingProfile(found); setProfileForm({ id: found.id, username: found.username, display_name: found.display_name, email: found.email ?? "" }); } });
   const toggleArchiveProfile = async (p: Profile) => { try { await platformApi.updateProfile({ ...p, archived: !p.archived }); reloadProfiles(); } catch (e) { setError(String(e)); } };
 
   const saveTeam = async (e: SubmitEvent) => {

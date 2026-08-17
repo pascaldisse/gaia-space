@@ -3,6 +3,7 @@ import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import { useDeepLink, linkEntity } from "../router";
 import {
   documentsApi,
   newId,
@@ -208,6 +209,8 @@ export default function Documents() {
   }
 
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
+  const openDocument = (id:string) => { setSelectedDocumentId(id); linkEntity("document", id); };
+  useDeepLink("document", (id) => setSelectedDocumentId(id));
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
@@ -348,7 +351,7 @@ export default function Documents() {
                 class="doc-row"
                 style={{ "padding-left": `${(props.depth + 1) * 1.1 + 0.4}em` }}
                 classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                onClick={() => setSelectedDocumentId(d.id)}
+                onClick={() => openDocument(d.id)}
               >
                 <span class="doc-icon">📄</span>
                 <span class="doc-title">{d.title}</span>
@@ -438,7 +441,7 @@ export default function Documents() {
                     class="doc-row"
                     style={{ "padding-left": "0.4em" }}
                     classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                    onClick={() => setSelectedDocumentId(d.id)}
+                    onClick={() => openDocument(d.id)}
                   >
                     <span class="doc-icon">📄</span>
                     <span class="doc-title">{d.title}</span>
