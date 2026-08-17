@@ -148,6 +148,17 @@ fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
     let Ok(c) = db::conn() else { return false };
     c.query_row("SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=?1 AND profile_id=?2)", params![channel_id, profile_id], |r| r.get::<_, bool>(0)).unwrap_or(false)
 }
+/// Todo authorization policy (web mode), enforced entirely from the session:
+/// * identity — `profile_id` on the request body is always overwritten with the session profile,
+///   so a client can neither read as, nor create todos for, somebody else.
+/// * read (`list_todos`, `dashboard_aggregate`) — owner **or** assignee, via the query itself.
+/// * write/delete (`update_todo`, `delete_todo`) — owner only; assignees may not edit or delete.
+///
+/// A todo that exists but belongs to somebody else is answered with 403, exactly like a
+/// missing one, so ownership is never disclosed.
+fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
+    personal::todo_owner(todo_id).ok().flatten().is_some_and(|owner| owner == profile_id)
+}
 fn chat_message_channel(message_id: &str) -> Option<String> {
     db::conn().ok()?.query_row("SELECT channel_id FROM messages WHERE id=?1", [message_id], |r| r.get(0)).ok()
 }
@@ -200,6 +211,17 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
                 message.insert("author_id".into(), json!(profile_id));
             }
         }
+        "list_todos" | "dashboard_aggregate" => put_arg(&mut body, "profile_id", json!(profile_id)),
+        "create_todo" => {
+            if let Some(input) = body.get_mut("input").and_then(Value::as_object_mut) {
+                input.insert("profile_id".into(), json!(profile_id));
+            }
+        }
+        "update_todo" => {
+            if let Some(todo) = body.get_mut("todo").and_then(Value::as_object_mut) {
+                todo.insert("profile_id".into(), json!(profile_id));
+            }
+        }
         "create_channel" => {
             let supplied: Vec<String> = arg(&body, "member_ids").unwrap_or_default();
             let mut members = vec![profile_id.clone()];
@@ -235,6 +257,17 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
         let id: String = match arg(&body, "id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
         if !chat_message_owned(&profile_id, &id) {
             return err(StatusCode::FORBIDDEN, "only the author can change this message").into_response();
+        }
+    }
+    if matches!(name.as_str(), "update_todo" | "delete_todo") {
+        let todo_id: Option<String> = if name == "update_todo" {
+            body.get("todo").and_then(|todo| todo.get("id")).and_then(Value::as_str).map(str::to_string)
+        } else {
+            arg(&body, "id").ok()
+        };
+        let Some(todo_id) = todo_id else { return err(StatusCode::BAD_REQUEST, "invalid argument `id`").into_response() };
+        if !todo_owned_by(&profile_id, &todo_id) {
+            return err(StatusCode::FORBIDDEN, "only the owner can change this todo").into_response();
         }
     }
     if matches!(name.as_str(), "add_channel_member" | "remove_channel_member") {
@@ -437,3 +470,86 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
 }
 fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','default-org','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
 #[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/directory",get(directory)).route("/api/cmd/{command}",post(cmd)).with_state(App);let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app).await.unwrap();}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    fn cookie(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_str(&format!("space_session={token}")).unwrap());
+        headers
+    }
+    async fn status_and_body(response: axum::response::Response) -> (StatusCode, Value) {
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+    async fn call(headers: HeaderMap, command: &str, body: Value) -> (StatusCode, Value) {
+        status_and_body(cmd(headers, Path(command.to_string()), Json(body)).await.into_response()).await
+    }
+    /// One database for the whole binary's test run: `db::set_db_path` is process-global,
+    /// so the HTTP cases below run as a single sequential scenario.
+    fn setup() {
+        let path = env::temp_dir().join(format!("gaia-space-server-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        db::set_db_path(path);
+        let c = db::conn().expect("database");
+        db::seed(&c).expect("seed");
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1)", []).unwrap();
+        c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600)", []).unwrap();
+    }
+
+    #[tokio::test]
+    async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
+        setup();
+        // Unauthenticated access is rejected before any command runs.
+        let (status, _) = call(HeaderMap::new(), "list_todos", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // Spoofed owner and spoofed assignee-owner are both replaced by the session profile.
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pb","content":"Alice task","done":false,"assignee_ids":["pb"]}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let todo = value["value"].clone();
+        assert_eq!(todo["profile_id"], json!("pa"), "client-supplied owner must be ignored");
+        let todo_id = todo["id"].as_str().unwrap().to_string();
+
+        // Reads are scoped to the caller: Bob asking for Alice's list gets his own view.
+        let (status, value) = call(cookie("tb"), "list_todos", json!({"profile_id":"pa","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        // Bob is an assignee of that todo, so he may read it — but owns nothing else.
+        let ids: Vec<String> = value["value"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, vec![todo_id.clone()]);
+
+        // Assignee is not an owner: no write, no delete.
+        let mut foreign = todo.clone();
+        foreign["content"] = json!("Hijacked");
+        let (status, _) = call(cookie("tb"), "update_todo", json!({"todo":foreign})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("tb"), "delete_todo", json!({"id":todo_id})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Unknown ids are answered identically, disclosing nothing.
+        let (status, _) = call(cookie("tb"), "delete_todo", json!({"id":"no-such-todo"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Independent check: the row is untouched on disk.
+        let c = db::conn().unwrap();
+        let content: String = c.query_row("SELECT content FROM todos WHERE id=?1", [&todo_id], |r| r.get(0)).unwrap();
+        assert_eq!(content, "Alice task");
+
+        // The owner may edit, but cannot hand ownership to somebody else.
+        let mut mine = todo.clone();
+        mine["content"] = json!("Alice task v2");
+        mine["profile_id"] = json!("pb");
+        let (status, value) = call(cookie("ta"), "update_todo", json!({"todo":mine})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["profile_id"], json!("pa"));
+
+        // Owner delete succeeds and leaves no junction rows behind.
+        let (status, _) = call(cookie("ta"), "delete_todo", json!({"id":todo_id})).await;
+        assert_eq!(status, StatusCode::OK);
+        let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphans, 0);
+    }
+}
