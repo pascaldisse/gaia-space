@@ -1,5 +1,5 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
-import { useDeepLink, linkEntity } from "../router";
+import { useDeepLink, linkEntity, route } from "../router";
 import { currentUser, isWeb } from "../session";
 import { authApi } from "../api/auth";
 import "../App.css";
@@ -73,13 +73,18 @@ export default function Chat() {
   };
 
   const [activeChannelId, setActiveChannelId] = createSignal<string | null>(null);
+  // Default to the first channel once, on load only. Afterwards the URL owns the selection,
+  // so back-navigating to the view-only URL (which clears the channel below) must not
+  // immediately re-select the first channel.
+  let didAutoSelect = false;
   createEffect(() => {
+    if (didAutoSelect) return;
     const list = channels();
-    if (list && list.length && !activeChannelId()) setActiveChannelId(list[0].id);
+    if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
   const openChannel = (id:string) => { setActiveChannelId(id); linkEntity("channel", id); };
-  useDeepLink("channel", (id) => setActiveChannelId(id));
+  useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {

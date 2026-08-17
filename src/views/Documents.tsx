@@ -210,7 +210,7 @@ export default function Documents() {
 
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
   const openDocument = (id:string) => { setSelectedDocumentId(id); linkEntity("document", id); };
-  useDeepLink("document", (id) => setSelectedDocumentId(id));
+  useDeepLink("document", (id) => setSelectedDocumentId(id), () => setSelectedDocumentId(null));
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");

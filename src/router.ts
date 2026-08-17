@@ -11,10 +11,12 @@ const toSlug = (name:string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").r
 let slugToView:Record<string,string> = {};
 let viewToSlug:Record<string,string> = {};
 
+// entityId is percent-encoded in build(); decode it here so consumers see the raw id.
+const decode = (s:string) => { try { return decodeURIComponent(s); } catch { return s; } };
 const parse = ():Route => {
   const raw = (typeof location !== "undefined" ? location.hash : "").replace(/^#\/?/, "");
   const [slug, entityType, ...rest] = raw.split("/");
-  return { view: slugToView[slug] ?? "", entityType: entityType || undefined, entityId: rest.length ? rest.join("/") : undefined };
+  return { view: slugToView[slug] ?? "", entityType: entityType || undefined, entityId: rest.length ? decode(rest.join("/")) : undefined };
 };
 
 const build = (r:Route) => {
@@ -47,9 +49,15 @@ export function navigate(view:string, entityType?:string, entityId?:string, repl
 }
 
 // Deep-link consumer for views that can render a selected entity: fires open(id) whenever
-// the route targets this entityType. Idempotent — re-opening the same id is a no-op.
-export function useDeepLink(entityType:string, open:(id:string)=>void) {
-  createEffect(() => { const r = route(); if (r.entityType === entityType && r.entityId) open(r.entityId); });
+// the route targets this entityType, and fires clear() when the route drops the entity
+// (e.g. browser back from an entity URL to the view-only URL). Idempotent — re-opening the
+// same id is a no-op; clearing an already-empty selection should be a no-op in the caller.
+export function useDeepLink(entityType:string, open:(id:string)=>void, clear?:()=>void) {
+  createEffect(() => {
+    const r = route();
+    if (r.entityType === entityType && r.entityId) open(r.entityId);
+    else clear?.();
+  });
 }
 
 // linkEntity records the currently-open entity in the URL so it is shareable and back/forward-navigable.
