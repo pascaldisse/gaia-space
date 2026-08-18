@@ -31,6 +31,16 @@
   font-family: var(--font-head, inherit); font-weight: 700; font-size: 15px;
   box-shadow: 0 2px 10px rgba(0,194,168,0.28);
 }
+/* Org-wide variant: renders a glyph instead of project initials. */
+.dk-mark-global { color: var(--brand-navy, #08131a); }
+
+/* Per-container context caption under the global tabs (owner-friendly hierarchy). */
+.container-caption {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #8f93a0;
+}
 
 /* Guided empty states (no project chosen / project has no documents yet). */
 .dk-empty { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto; }
@@ -47,6 +57,14 @@
 .dk-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
 .dk-empty-card p strong { color: #c7cad2; font-weight: 600; }
 .dk-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
+.dk-empty-inline { margin-top: 10px; display: flex; gap: 8px; width: 100%; max-width: 380px; }
+.dk-empty-inline .dk-empty-cta { margin-top: 0; flex: 0 0 auto; }
+.dk-empty-input {
+  flex: 1; min-width: 0;
+  background: #0e1626; color: inherit;
+  border: 1px solid #33405e; border-radius: 6px;
+  padding: 0.4em 0.6em; font: inherit;
+}
 
 .documents-body.hidden { display: none; }
 

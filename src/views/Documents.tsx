@@ -264,14 +264,24 @@ export default function Documents(props: { scope?: DocScope }) {
     }
   }
 
-  // Project space with a chosen project but nothing filed yet → show the guided
-  // empty state instead of the full folder/editor chrome.
-  const projectEmpty = () =>
-    scope() === "project" &&
+  // A space (project, personal, or a KB book) that has a container chosen but
+  // nothing filed yet → show a guided empty state instead of the full
+  // folder/editor chrome. Archived-only spaces still count as "in use".
+  const spaceEmpty = () =>
     !!containerId() &&
     !showArchived() &&
     scopedFolders().length === 0 &&
     scopedDocuments().length === 0;
+
+  const noProject = () => scope() === "project" && !containerId();
+  const projectEmpty = () => scope() === "project" && spaceEmpty();
+  const myDocsEmpty = () => scope() === "global" && activeContainer() === "my-docs" && spaceEmpty();
+  const kbNoBooks = () => scope() === "global" && activeContainer() === "kb" && books().length === 0;
+  const kbBookEmpty = () =>
+    scope() === "global" && activeContainer() === "kb" && !!selectedBookId() && spaceEmpty();
+  // Any guided empty/onboarding state replaces the working chrome.
+  const guided = () =>
+    noProject() || projectEmpty() || myDocsEmpty() || kbNoBooks() || kbBookEmpty();
 
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
 
@@ -418,7 +428,6 @@ export default function Documents(props: { scope?: DocScope }) {
               >
                 <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                 <span class="doc-title">{d.title}</span>
-                <Show when={scope() !== "project"}><span class="doc-version">v{d.version}</span></Show>
               </li>
             )}
           </For>
@@ -441,12 +450,16 @@ export default function Documents(props: { scope?: DocScope }) {
           when={scope() === "project"}
           fallback={
             <div class="dk-head-main">
-              <h1>Knowledge</h1>
-              <p>
-                Organization-wide knowledge — your personal documents and the shared
-                Knowledge Base. Docs tied to one project live in that project’s
-                <strong> Knowledge</strong> tab.
-              </p>
+              <div class="dk-mark dk-mark-global" aria-hidden="true"><Icon name="org" size={22} /></div>
+              <div>
+                <h1>Knowledge</h1>
+                <p>
+                  Your organization’s knowledge home. Keep private drafts in{" "}
+                  <strong>My Documents</strong> and publish shared references to the{" "}
+                  <strong>Knowledge Base</strong>. Docs tied to a single project live in
+                  that project’s <strong>Knowledge</strong> tab.
+                </p>
+              </div>
             </div>
           }
         >
@@ -483,7 +496,7 @@ export default function Documents(props: { scope?: DocScope }) {
           </For>
         </Show>
 
-        <Show when={activeContainer() === "kb"}>
+        <Show when={activeContainer() === "kb" && books().length > 0}>
           <select value={selectedBookId() ?? ""} onChange={(e) => setSelectedBookId(e.currentTarget.value || null)}>
             <option value="">select a book…</option>
             <For each={books()}>{(b) => <option value={b.id}>{b.name}</option>}</For>
@@ -498,9 +511,16 @@ export default function Documents(props: { scope?: DocScope }) {
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
           show archived
         </label>
+        <Show when={scope() === "global"}>
+          <p class="container-caption">
+            {activeContainer() === "my-docs"
+              ? "Private to you — personal drafts and notes only you can see."
+              : "Shared org-wide — books everyone in the organization can read."}
+          </p>
+        </Show>
       </nav>
 
-      <Show when={scope() === "project" && !containerId()}>
+      <Show when={noProject()}>
         <div class="dk-empty">
           <div class="dk-empty-card">
             <div class="dk-empty-icon" aria-hidden="true"><Icon name="book" size={26} /></div>
@@ -527,7 +547,66 @@ export default function Documents(props: { scope?: DocScope }) {
         </div>
       </Show>
 
-      <div class="documents-body" classList={{ hidden: (scope() === "project" && !containerId()) || projectEmpty() }} style={{ "--col-tree": treeW() + "px" }}>
+      <Show when={myDocsEmpty()}>
+        <div class="dk-empty">
+          <div class="dk-empty-card">
+            <div class="dk-empty-icon" aria-hidden="true"><Icon name="user" size={26} /></div>
+            <h2>Start your personal documents</h2>
+            <p>
+              <strong>My Documents</strong> is your private space — drafts, notes, and
+              work-in-progress only you can see. Ready to share? Move a doc into the
+              <strong> Knowledge Base</strong> anytime.
+            </p>
+            <button class="primary dk-empty-cta" onClick={createFirstDocument}>
+              <Icon name="plus" size={15} /> New document
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={kbNoBooks()}>
+        <div class="dk-empty">
+          <div class="dk-empty-card">
+            <div class="dk-empty-icon" aria-hidden="true"><Icon name="book" size={26} /></div>
+            <h2>Build your Knowledge Base</h2>
+            <p>
+              The <strong>Knowledge Base</strong> holds org-wide references — playbooks,
+              policies, and shared docs — grouped into books everyone can find. Create the
+              first book to begin.
+            </p>
+            <div class="dk-empty-inline">
+              <input
+                class="dk-empty-input"
+                placeholder="Book name (e.g. Company Handbook)"
+                value={newBookName()}
+                onInput={(e) => setNewBookName(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === "Enter" && createBook()}
+              />
+              <button class="primary dk-empty-cta" onClick={createBook} disabled={!newBookName().trim()}>
+                <Icon name="plus" size={15} /> Create book
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={kbBookEmpty()}>
+        <div class="dk-empty">
+          <div class="dk-empty-card">
+            <div class="dk-empty-icon" aria-hidden="true"><Icon name="book" size={26} /></div>
+            <h2>Add to {books().find((b) => b.id === selectedBookId())?.name ?? "this book"}</h2>
+            <p>
+              This book is part of your org-wide <strong>Knowledge Base</strong>. Add the
+              first document to start filling it.
+            </p>
+            <button class="primary dk-empty-cta" onClick={createFirstDocument}>
+              <Icon name="plus" size={15} /> New document
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <div class="documents-body" classList={{ hidden: guided() }} style={{ "--col-tree": treeW() + "px" }}>
         <aside class="documents-tree">
           <Show
             when={containerId()}
@@ -555,7 +634,6 @@ export default function Documents(props: { scope?: DocScope }) {
                   >
                     <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                     <span class="doc-title">{d.title}</span>
-                    <Show when={scope() !== "project"}><span class="doc-version">v{d.version}</span></Show>
                   </li>
                 )}
               </For>
