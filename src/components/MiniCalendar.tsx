@@ -19,6 +19,12 @@ export default function MiniCalendar(props: {
 }) {
   const todayKey = dayKeyOf(startOfDay(new Date()));
   const grid = createMemo(() => monthGrid(props.cursor));
+  // Solid's <For> mapper is untracked: derive item data in a memo so asynchronously
+  // loaded calendar entries re-render in their actual day cells, not only the agenda.
+  const days = createMemo(() => grid().map((day) => {
+    const key = dayKeyOf(day);
+    return { day, key, kinds: kindsOnDay(props.items, key), items: itemsOnDay(props.items, key) };
+  }));
   const inMonth = (d: Date) => d.getMonth() === props.cursor.getMonth();
   return (
     <div class="mini-cal">
@@ -32,25 +38,20 @@ export default function MiniCalendar(props: {
       </div>
       <div class="mini-grid">
         <For each={["S", "M", "T", "W", "T", "F", "S"]}>{(d) => <span class="mini-wd">{d}</span>}</For>
-        <For each={grid()}>{(day) => {
-          const key = dayKeyOf(day);
-          const kinds = kindsOnDay(props.items, key);
-          const dayItems = itemsOnDay(props.items, key);
-          return (
-            <button
-              class="mini-day"
-              classList={{ muted: !inMonth(day), today: key === todayKey, selected: key === props.selected, has: kinds.length > 0 }}
-              onClick={() => props.onPick(key)}
-              title={kinds.length ? `${kinds.length} item kind${kinds.length > 1 ? "s" : ""}` : undefined}
-            >
-              <span class="mini-num">{day.getDate()}</span>
-              <Show when={dayItems.length}>
-                <span class="mini-event" classList={{ [dayItems[0].kind]: true }}>{dayItems[0].title}</span>
-                <Show when={dayItems.length > 1}><span class="mini-more">+{dayItems.length - 1}</span></Show>
-              </Show>
-            </button>
-          );
-        }}</For>
+        <For each={days()}>{({ day, key, kinds, items }) =>
+          <button
+            class="mini-day"
+            classList={{ muted: !inMonth(day), today: key === todayKey, selected: key === props.selected, has: kinds.length > 0 }}
+            onClick={() => props.onPick(key)}
+            title={kinds.length ? `${kinds.length} item kind${kinds.length > 1 ? "s" : ""}` : undefined}
+          >
+            <span class="mini-num">{day.getDate()}</span>
+            <Show when={items.length}>
+              <span class="mini-event" classList={{ [items[0].kind]: true }}>{items[0].title}</span>
+              <Show when={items.length > 1}><span class="mini-more">+{items.length - 1}</span></Show>
+            </Show>
+          </button>
+        }</For>
       </div>
     </div>
   );
