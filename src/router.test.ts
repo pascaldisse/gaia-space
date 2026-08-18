@@ -23,6 +23,7 @@ function stackAdapter(initial: string) {
     back: () => { if (index > 0) { index--; listener(); } },
     forward: () => { if (index < stack.length - 1) { index++; listener(); } },
     reload: () => initRouter(adapter),
+    replace: (path: string) => { stack[index] = path; }, // inject a historical entry without firing popstate
   };
 }
 
@@ -175,7 +176,33 @@ describe("normalization", () => {
 });
 
 describe("history", () => {
-  test("back/forward restore prior routes (popstate)", () => {
+  test("popstate replaces a now-hidden historical entry with its canonical fallback", () => {
+    const env = stackAdapter("dashboard");
+    initRouter(env.adapter);
+    navigate({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
+    navigate({ view: "Chat", entityType: "channel", entityId: "c-9" });
+    setAvailableViews(VIEWS.filter((view) => view !== "Code Reviews"));
+
+    env.back();
+    expect(route()).toEqual({ view: "Dashboard" });
+    expect(env.url()).toBe("dashboard");
+  });
+
+  test("popstate replaces unknown and malformed historical entries with the fallback", () => {
+    for (const historicalPath of ["not-a-view", "documents/not-a-container/id"]) {
+      const env = stackAdapter("dashboard");
+      initRouter(env.adapter);
+      navigate({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
+      env.replace(historicalPath);
+      navigate({ view: "Chat", entityType: "channel", entityId: "c-9" });
+
+      env.back();
+      expect(route()).toEqual({ view: "Dashboard" });
+      expect(env.url()).toBe("dashboard");
+    }
+  });
+
+  test("back/forward restore valid prior routes without rewriting their URLs (popstate)", () => {
     const env = stackAdapter("dashboard");
     initRouter(env.adapter);
     navigate({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
@@ -184,11 +211,14 @@ describe("history", () => {
 
     env.back();
     expect(route()).toMatchObject({ view: "Issues", entityId: "i-1", projectId: "p-1" });
+    expect(env.url()).toBe("projects/p-1/issues/i-1");
     env.back();
     expect(route().view).toBe("Dashboard");
     expect(route().entityId).toBeUndefined();
+    expect(env.url()).toBe("dashboard");
     env.forward();
     expect(route()).toMatchObject({ view: "Issues", entityId: "i-1" });
+    expect(env.url()).toBe("projects/p-1/issues/i-1");
   });
 
   test("back from an entity URL to the view URL clears the entity", () => {

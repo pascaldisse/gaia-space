@@ -214,7 +214,9 @@ function resync() {
 
 export function initRouter(next: RouterAdapter) {
   adapter = next;
-  adapter.subscribe(() => setRoute(parsePath(adapter.read())));
+  // Back/forward can land on a route that became unavailable since its entry was created.
+  // Reuse resync so the rendered route and address bar are canonical together.
+  adapter.subscribe(resync);
   resync();
 }
 
