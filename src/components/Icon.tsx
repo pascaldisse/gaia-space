@@ -75,6 +75,9 @@ const PATHS: Record<string, JSX.Element> = {
   columns: <path d="M4 4h4v16H4zM10 4h4v16h-4zM16 4h4v16h-4z" />,
   layers: <path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5M3 8v0" />,
   calendar: <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />,
+  // Separate nav key avoids a stale Solid dynamic-registry render observed for
+  // the primary Calendar destination while retaining the shared calendar glyph.
+  "calendar-nav": <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />,
   book: <path d="M5 4h9a2 2 0 0 1 2 2v14H7a2 2 0 0 0-2 2zM5 4v18M16 6h3v14M9 8h4M9 11h4" />,
   target: (
     <>
