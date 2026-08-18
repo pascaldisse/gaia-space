@@ -33,7 +33,7 @@
 }
 /* Knowledge view has no container padding of its own — restore the header inset
    the old .documents-head provided when using the shared WorkspaceHeader. */
-.dk-workspace-head { padding: 20px 24px 0; }
+.dk-workspace-head { width:100%; max-width:var(--view-canvas); box-sizing:border-box; padding:var(--view-pad-y) var(--view-pad-x) 0; }
 
 /* Per-container context caption under the global tabs (owner-friendly hierarchy). */
 .container-caption {

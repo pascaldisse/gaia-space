@@ -73,7 +73,6 @@ export default function Absences() {
     <section class="timeoff-view">
       <WorkspaceHeader icon="clock-nav" title="Time off" actions={<>
         <ProfilePicker label="Show time off for" value={profileId()} onChange={setProfileId} allowAll />
-        <button class="primary timeoff-new" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
       </>}>
         Plan and track leave across your organization — who’s <strong>away now</strong>,
         what’s <strong>coming up</strong>, and which requests still need approval.
@@ -132,7 +131,7 @@ export default function Absences() {
             </div>
             <aside class="view-rail timeoff-rail">
               <div class="rail-card"><h3><Icon name="clock-nav" size={13}/> Overview</h3><div class="rail-metrics"><div class="rail-metric accent"><span class="rail-num">0</span><span class="rail-lbl">Away now</span></div><div class="rail-metric warn"><span class="rail-num">0</span><span class="rail-lbl">Pending</span></div><div class="rail-metric"><span class="rail-num">0</span><span class="rail-lbl">Upcoming</span></div></div></div>
-              <div class="rail-card"><h3>Next step</h3><p class="rail-empty">Record time off to keep availability visible to your team.</p><div class="rail-actions"><button class="primary" onClick={openForm}>Record time off</button></div></div>
+              <div class="rail-card"><h3>Next step</h3><p class="rail-empty">Use the main action to record time off and keep availability visible to your team.</p></div>
             </aside>
           </div>
         }
