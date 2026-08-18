@@ -11,7 +11,13 @@ import {
   type Document,
   type DocumentFolder,
 } from "../api/documents";
-import { projectId as sessionProjectId, projects as sessionProjects } from "../session";
+import {
+  projectId as sessionProjectId,
+  projects as sessionProjects,
+  profiles as sessionProfiles,
+  profileId,
+} from "../session";
+import { ProfilePicker } from "../components/Pickers";
 
 // Scope splits the same folder/document/version model into two IA destinations:
 //   "global"  → project-independent: personal docs + org Knowledge Base books
@@ -41,13 +47,14 @@ export default function Documents(props: { scope?: DocScope }) {
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
-  // acting profile — this app has no auth session; also used as created_by/actor on saves.
-  const [profiles] = createResource(() => documentsApi.listProfiles());
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
-  createEffect(() => {
-    const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
-  });
+  // Acting person is the app-wide identity chosen in the Overview "Acting as"
+  // control — the single source of truth (session.profileId). Knowledge must
+  // never keep its own copy or default to the first/Organization profile, or it
+  // would silently diverge from the global selection. Used both as the personal
+  // "My Documents" container owner and as created_by/actor on saves. This is a
+  // PERSON, distinct from document *scope* (My Documents vs org-wide Knowledge
+  // Base vs project) which the container tabs express separately.
+  const actingProfileId = () => profileId() || null;
 
   const [projects] = createResource(() => documentsApi.listProjects());
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
@@ -74,6 +81,8 @@ export default function Documents(props: { scope?: DocScope }) {
 
   const containerId = () => {
     if (activeContainer() === "my-docs") return actingProfileId();
+    // NOTE: kb/project containers are scope-based (org-wide / project), NOT the
+    // acting person — the acting profile only owns the personal "my-docs" space.
     if (activeContainer() === "project") return selectedProjectId();
     return selectedBookId();
   };
@@ -453,12 +462,7 @@ export default function Documents(props: { scope?: DocScope }) {
             </div>
           </div>
         </Show>
-        <label class="acting-as">
-          Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
-          </select>
-        </label>
+        <ProfilePicker />
       </header>
 
       <nav class="container-tabs">
@@ -631,7 +635,7 @@ export default function Documents(props: { scope?: DocScope }) {
                         <strong>v{v.version}</strong>
                         <span class="version-time">{when(v.created_at)}</span>
                       </div>
-                      <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
+                      <div class="version-author">{sessionProfiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
                       <div class="version-snippet">{(v.body ?? "").slice(0, 80) || "(empty)"}</div>
                       <Show when={v.version !== selectedDocument()?.version}>
                         <button class="ghost small" onClick={() => restoreVersion(v.version)}>

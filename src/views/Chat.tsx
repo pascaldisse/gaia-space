@@ -1,5 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
-import { currentUser, isWeb } from "../session";
+import { isWeb, profileId } from "../session";
+import { ProfilePicker } from "../components/Pickers";
 import { authApi } from "../api/auth";
 import "../App.css";
 import "./Chat.css";
@@ -50,13 +51,11 @@ export default function Chat() {
     : (profiles() ?? [])
   ).filter((profile) => !profile.archived && profile.id !== actingProfileId());
   const recipientsLoading = () => isWeb() ? directory.loading : profiles.loading;
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
-  createEffect(() => {
-    const authenticated = currentUser()?.profile_id;
-    if (isWeb() && authenticated) { setActingProfileId(authenticated); return; }
-    const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
-  });
+  // Acting person = app-wide identity (Overview "Acting as" → session.profileId).
+  // Web login already pins profileId to the authenticated profile and the shared
+  // ProfilePicker locks it for members, so chat inherits one consistent identity
+  // instead of keeping a divergent per-view default.
+  const actingProfileId = () => profileId() || null;
 
   // polling
   const [pollMs, setPollMs] = createSignal(5000);
@@ -385,17 +384,7 @@ export default function Chat() {
 
       <aside class="chat-sidebar">
         <div class="chat-profile-picker">
-          <span class="section-label" style="padding:0">
-            Acting as
-          </span>
-          <select
-            value={actingProfileId() ?? ""}
-            disabled={isWeb()}
-            title={isWeb() ? "Chat identity is fixed to your signed-in account" : undefined}
-            onChange={(e) => setActingProfileId(e.currentTarget.value || null)}
-          >
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id} selected={p.id === actingProfileId()}>{p.display_name}</option>}</For>
-          </select>
+          <ProfilePicker />
         </div>
 
         <div class="channel-groups">

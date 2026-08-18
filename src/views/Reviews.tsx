@@ -7,6 +7,8 @@ import {
   type ReviewDiscussion,
 } from "../api/review";
 import { Diff } from "../Diff";
+import { profileId } from "../session";
+import { ProfilePicker } from "../components/Pickers";
 import "./Reviews.css";
 
 export default function Reviews() {
@@ -16,10 +18,10 @@ export default function Reviews() {
   const [projects] = createResource(() => api.listProjects());
   const [repos] = createResource(() => api.repoList());
 
-  const [actingProfileId, setActingProfileId] = createSignal("");
-  createEffect(() => {
-    if (!actingProfileId() && profiles()?.length) setActingProfileId(profiles()![0].id);
-  });
+  // Acting person = app-wide identity chosen in the Overview "Acting as" control
+  // (session.profileId). No per-view default that could silently diverge from
+  // the global selection.
+  const actingProfileId = () => profileId();
 
   // ---------- create merge request ----------
   const [formProjectId, setFormProjectId] = createSignal("");
@@ -219,12 +221,7 @@ export default function Reviews() {
           <h1>Code Reviews</h1>
           <p>Merge requests on registered repos' real branches — quality gates, turn-based review, dry-run safe merge.</p>
         </div>
-        <label>
-          Acting as
-          <select value={actingProfileId()} onChange={(e) => setActingProfileId(e.currentTarget.value)}>
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
-          </select>
-        </label>
+        <ProfilePicker />
       </header>
 
       <Show when={error()}>
