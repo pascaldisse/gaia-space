@@ -29,8 +29,8 @@ export default function Todo() {
     <form class="task-composer" onSubmit={save}>
       <input class="composer-title" autofocus placeholder="What needs doing?" aria-label="Task title" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
       <div class="composer-meta">
-        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">▦</span><select aria-label="Project" value={form().project_id} onChange={e=>setForm({...form(),project_id:e.currentTarget.value})}><option value="">No project</option><For each={openProjects()}>{p=><option value={p.id}>{p.name}</option>}</For></select></label>
-        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">◷</span><input type="date" aria-label="Due date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/></label>
+        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">▦</span><span class="meta-label">Project</span><select aria-label="Project" value={form().project_id} onChange={e=>setForm({...form(),project_id:e.currentTarget.value})}><option value="">No project — personal</option><For each={openProjects()}>{p=><option value={p.id}>{p.name}</option>}</For></select></label>
+        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">◷</span><span class="meta-label">Due</span><input type="date" aria-label="Due date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/></label>
         <label class="meta-chip"><span class="meta-icon" aria-hidden="true">＋</span><select aria-label="Add assignee" value="" onChange={e=>{addAssignee(e.currentTarget.value);e.currentTarget.value="";}}><option value="">Assignee</option><For each={active().filter(p=>!form().assignee_ids.includes(p.id))}>{p=><option value={p.id}>{p.display_name||p.username}</option>}</For></select></label>
         <button class="primary composer-submit" disabled={!canSubmit()}>Add task</button>
       </div>
