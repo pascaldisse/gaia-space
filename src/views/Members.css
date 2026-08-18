@@ -3,7 +3,7 @@
 .members-head p{margin:4px 0 18px;color:#999da7}
 .members-error{background:#512529;color:#ffc7ca;padding:8px;border-radius:5px;margin-bottom:12px}
 .members-layout{display:grid;grid-template-columns:minmax(240px,1.1fr) minmax(200px,0.8fr) minmax(260px,1.1fr);gap:14px;align-items:start}
-.members-panel{background:#101d38;border:1px solid #23324f;border-radius:12px;padding:15px;min-height:200px}
+.members-panel{background:var(--surface);border:1px solid var(--surface-border);border-radius:12px;padding:15px;min-height:200px}
 .panel-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .panel-title h2{font-size:14px;margin:0}
 .members-view input,.members-view select{min-width:0;width:100%}
@@ -14,7 +14,7 @@
 .entity-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .entity-list li{display:flex;justify-content:space-between;align-items:center;padding:9px 8px;border-bottom:1px solid #23324f;gap:8px}
 .entity-list.compact li{cursor:pointer;padding:8px;border-bottom:0;border-radius:8px;transition:background .12s ease}
-.entity-list.compact li:hover{background:#16233d}
+.entity-list.compact li:hover{background:var(--surface-hover)}
 .entity-list.compact li.active{background:var(--accent-soft);color:var(--accent-text)}
 .entity-list li.archived{opacity:.55}
 .entity-list li>div{display:grid;gap:2px}

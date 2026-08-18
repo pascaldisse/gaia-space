@@ -5,16 +5,16 @@
 .ph-title h1 { margin: 0; font-size: 23px; }
 .ph-title p { margin: 4px 0 0; color: #9da0a8; max-width: 60ch; }
 .ph-muted { color: #7f8aa3; }
-.ph-empty { padding: 24px; border: 1px dashed #3d4a68; color: #92959d; border-radius: 8px; max-width: 640px; }
+.ph-empty { padding: 24px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #a3a9b5; border-radius: 8px; max-width: 640px; }
 
 .ph-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 22px; max-width: 1000px; }
-.ph-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; text-align: left; }
+.ph-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; text-align: left; }
 .ph-stat:hover { border-color: var(--accent); }
 .ph-stat-num { font-family: var(--font-head); font-size: 24px; font-weight: 650; color: var(--text-strong); }
 .ph-stat-label { font-size: 12px; color: #9da0a8; }
 
 .ph-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; max-width: 1000px; }
-.ph-card { background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 16px 18px; }
+.ph-card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 16px 18px; }
 .ph-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .ph-card-head h2 { margin: 0; font-size: 15px; }
 .ph-link { background: transparent; border: 0; color: var(--accent-text); padding: 0; font-size: 12px; font-weight: 600; }
@@ -28,8 +28,8 @@
 .ph-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); font-size: 12px; flex: none; }
 
 /* Project deadline banner on the overview — tone by urgency, opens the calendar. */
-.ph-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 16px; padding: 10px 14px; border: 1px solid #2b3550; border-left-width: 3px; border-radius: 10px; background: #141d30; color: var(--text); cursor: pointer; text-align: left; }
-.ph-deadline:hover { border-color: #3d4a68; }
+.ph-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--surface-border); border-left-width: 3px; border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
+.ph-deadline:hover { border-color: var(--surface-border-hover); }
 .ph-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: #5b78e5; flex: none; }
 .ph-deadline-label { font-weight: 600; color: var(--text-strong); }
 .ph-deadline time { color: #8b96ad; font-size: .86rem; }

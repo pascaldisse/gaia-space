@@ -17,6 +17,12 @@ export default function ProjectTasks() {
   const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(projectId,id=>id?personalApi.projectTodos(id,true):Promise.resolve([]));
   const [draft,setDraft]=createSignal(blankDraft());
+  // The composer is a disclosure, not a permanent slab: an inviting CTA opens
+  // it. It stays fixed to the active project whenever it is open.
+  const [composerOpen,setComposerOpen]=createSignal(false);
+  const hasTasks=()=>Boolean(todos()?.length);
+  const openComposer=()=>setComposerOpen(true);
+  const closeComposer=()=>{ setComposerOpen(false); setDraft(blankDraft()); };
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const ownerOf=(id:string)=>nameOf(id);
@@ -58,8 +64,12 @@ export default function ProjectTasks() {
 
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
 
-    <Show when={projectId()}>
+    <Show when={projectId() && composerOpen()}>
       <form class="task-composer" onSubmit={add}>
+        <div class="composer-head">
+          <span class="composer-head-label">New task</span>
+          <button type="button" class="ghost composer-close" aria-label="Close task composer" onClick={closeComposer}>Cancel</button>
+        </div>
         <input class="composer-title" placeholder="What needs doing for this project?" aria-label="Task title" value={draft().content} onInput={e=>setDraft({...draft(),content:e.currentTarget.value})}/>
         <div class="composer-meta">
           <div class="tm"><div class="tm-trigger tm-fixed" aria-label={`Project: ${projectName()??"active project"} (fixed)`}>
@@ -84,12 +94,21 @@ export default function ProjectTasks() {
 
     <Show when={projectId()}>
       <Show when={todos.loading}><p class="wk-muted">Loading tasks…</p></Show>
-      <Show when={!todos.loading && !todos()?.length}>
+
+      <Show when={!todos.loading && !hasTasks() && !composerOpen()}>
         <div class="wk-empty">
           <div class="wk-empty-mark">✓</div>
           <h2>No tasks here yet</h2>
-          <p>Nothing is filed under {projectName()??"this project"} yet. Add your first one above — it lands straight on this project.</p>
+          <p>Nothing is filed under {projectName()??"this project"} yet. Add your first one — it lands straight on this project.</p>
+          <button class="primary" onClick={openComposer}>+ Add task</button>
         </div>
+      </Show>
+
+      <Show when={!todos.loading && hasTasks() && !composerOpen()}>
+        <button class="task-add-trigger" onClick={openComposer} aria-label={`Add a task to ${projectName()??"this project"}`}>
+          <span class="task-add-plus" aria-hidden="true">+</span>
+          <span>Add task to {projectName()??"project"}</span>
+        </button>
       </Show>
 
       <Show when={open().length}>

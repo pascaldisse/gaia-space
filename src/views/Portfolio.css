@@ -13,7 +13,7 @@
 .pf-empty button { margin-top: 8px; }
 
 /* ── create-project form ── */
-.pf-create { display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 8px 0 24px; padding: 22px; background: #0f1b33; border: 1px solid #2b3550; border-radius: 12px; }
+.pf-create { display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 8px 0 24px; padding: 22px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; }
 .pf-create h2 { margin: 0; font-family: var(--font-head); font-size: 17px; color: var(--text-strong); }
 .pf-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #aeb1b8; }
 .pf-field span em { font-style: normal; color: #6f7890; }
@@ -23,12 +23,12 @@
 .pf-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-.pf-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 14px 15px 12px; transition: border-color .12s ease, transform .12s ease; }
-.pf-card:hover { background: #12203c; border-color: var(--accent); transform: translateY(-1px); }
+.pf-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px 15px 12px; transition: border-color .12s ease, transform .12s ease; }
+.pf-card:hover { background: var(--surface-hover); border-color: var(--accent); transform: translateY(-1px); }
 .pf-card.current { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .pf-card-top { display: flex; align-items: center; justify-content: space-between; }
 .pf-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 14px; }
-.pf-open { font-size: 11px; color: #8b93a6; background: #16233d; border: 1px solid #2b3550; border-radius: 999px; padding: 2px 9px; }
+.pf-open { font-size: 11px; color: #8b93a6; background: var(--surface-hover); border: 1px solid var(--surface-border); border-radius: 999px; padding: 2px 9px; }
 .pf-card strong { font-family: var(--font-head); font-size: 15px; color: var(--text-strong); font-weight: 600; }
 .pf-card p { margin: 0; color: #9da0a8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.4em; }
 .pf-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #7f8aa3; }

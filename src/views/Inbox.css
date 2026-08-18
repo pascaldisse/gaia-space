@@ -9,8 +9,8 @@
 .inbox-groups h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #7f8aa3; margin: 0 0 10px; }
 .inbox-groups h2 span { color: var(--accent); margin-left: 4px; }
 .inbox-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.inbox-list li { display: flex; align-items: flex-start; gap: 12px; padding: 13px 15px; border: 1px solid #23324f; border-left: 3px solid #2b3550; border-radius: 10px; background: #101d38; transition: border-color .14s ease, background .14s ease; }
-.inbox-list li:hover { border-color: #33456d; background: #122240; }
+.inbox-list li { display: flex; align-items: flex-start; gap: 12px; padding: 13px 15px; border: 1px solid var(--surface-border); border-left: 3px solid #3a4f80; border-radius: 10px; background: var(--surface); transition: border-color .14s ease, background .14s ease; }
+.inbox-list li:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
 .inbox-list li.unread { background: #10233a; border-color: #24507a; border-left-color: var(--accent); }
 .inbox-list li.unread:hover { background: #13294a; }
 .inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex: none; }

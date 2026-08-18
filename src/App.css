@@ -50,12 +50,12 @@
      ONE control family for buttons, fields, selects & action
      links: same height, padding, radius, filled surface and a
      stronger, readable weight. No thin outlined boxes. */
-  --ctl-bg: #17253f;            /* filled resting field surface */
-  --ctl-bg-hover: #1d2e4d;      /* lift on hover */
-  --ctl-bg-raised: #1f3050;     /* buttons / segmented track (reads pressable) */
-  --ctl-bg-raised-hover: #274069;
-  --ctl-border: #3d4d70;        /* resting border — visible, not hairline */
-  --ctl-border-hover: #546892;  /* border on hover */
+  --ctl-bg: #1c2e50;            /* filled resting field surface (lifted above canvas) */
+  --ctl-bg-hover: #24375e;      /* lift on hover */
+  --ctl-bg-raised: #26385c;     /* buttons / segmented track (reads pressable) */
+  --ctl-bg-raised-hover: #2f4a75;
+  --ctl-border: #46587e;        /* resting border — visible, not hairline */
+  --ctl-border-hover: #5f74a0;  /* border on hover */
   --ctl-radius: 9px;            /* standard control radius */
   --ctl-radius-sm: 7px;         /* dense / inline controls */
   --ctl-pad-y: 0.55em;          /* shared vertical padding → matched heights */
@@ -65,6 +65,21 @@
   --ctl-line: 1.3;
   --ctl-placeholder: #7182a1;
   --ctl-focus-ring: 0 0 0 3px rgba(0,194,168,0.18);
+
+  /* ── surface / elevation ladder ───────────────────────────
+     Content cards must read as lifted ABOVE the workspace canvas
+     (#12213d), never sunk below it. One shared ladder so cards,
+     panels and list rows lighten together instead of per-view hacks.
+       chrome (topbar/sidebar/dropdowns) : #0f1b33 (stays deep)
+       workspace canvas                  : #12213d
+       surface (resting card)            : --surface
+       surface-hover / raised            : lifted card states
+       surface-border                    : visible card hairline */
+  --surface: #182a4d;
+  --surface-hover: #1e315a;
+  --surface-raised: #203458;
+  --surface-border: #33456d;
+  --surface-border-hover: #435780;
 
   --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -595,7 +610,7 @@ textarea:focus {
 
 /* right cluster: search, manage menu, account */
 .topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
-.topbar-search { display: flex; align-items: center; gap: 7px; background: #16233d; border: 1px solid #2b3550; border-radius: 8px; padding: 7px 12px; color: #9aa4bb; font-family: var(--font-body); }
+.topbar-search { display: flex; align-items: center; gap: 7px; background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 8px; padding: 7px 12px; color: #9aa4bb; font-family: var(--font-body); }
 .topbar-search:hover { border-color: var(--accent); color: var(--text-strong); }
 .topbar-search .nav-icon { width: auto; }
 .topbar-search-hint { font-size: 12px; }
@@ -644,7 +659,7 @@ textarea:focus {
 .pc-tab-icon { color: #7f8aa3; }
 .pc-tabs button.active .pc-tab-icon { color: var(--accent); }
 .pc-sub { display: flex; gap: 6px; padding: 8px 0 10px; }
-.pc-sub button { background: #16233d; border: 1px solid #2b3550; border-radius: 999px; padding: 4px 12px; color: #b9c2d4; font-size: 12px; }
+.pc-sub button { background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 999px; padding: 4px 12px; color: #b9c2d4; font-size: 12px; }
 .pc-sub button:hover { border-color: var(--accent); }
 .pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .pc-sub-hint { margin: -2px 0 8px; color: #8b93a6; font-size: 12px; }
@@ -652,10 +667,10 @@ textarea:focus {
 .resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .resource-view header p { color: #9da0a8; margin: 5px 0 24px; }
 .resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }
-.resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid #2b3550; border-radius: 6px; background: #0f1b33; }
+.resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface); }
 .resource-list code { float: right; color: #83868f; font-size: 11px; }
 .resource-list pre { margin: 8px 0 0; color: #7fb8b0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-.empty-state { padding: 28px; border: 1px dashed #3d4a68; color: #92959d; border-radius: 6px; max-width: 850px; }
+.empty-state { padding: 28px; border: 1px dashed var(--surface-border); color: #92959d; border-radius: 6px; max-width: 850px; }
 
 /* ── responsive ─────────────────────────────────────────────── */
 @media (max-width: 1100px) {

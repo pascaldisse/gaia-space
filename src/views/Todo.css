@@ -9,9 +9,18 @@
 .todo-view{display:block}
 .task-composer,.task-list{max-width:720px}
 
+/* ── compact add-task disclosure trigger (shown when tasks exist) ── */
+.task-add-trigger{display:inline-flex;align-items:center;gap:9px;margin:0 0 18px;padding:10px 16px;border:1px dashed var(--surface-border);border-radius:12px;background:var(--surface);color:#c2ccdf;font-family:var(--font-head);font-weight:600;font-size:13px;transition:border-color .14s ease,background .14s ease,color .14s ease}
+.task-add-trigger:hover{border-style:solid;border-color:var(--accent);background:var(--surface-hover);color:var(--text-strong)}
+.task-add-plus{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent-text);font-size:15px;line-height:1}
+
 /* ── task composer — one calm surface, not fragmented boxes ── */
-.task-composer{margin:0 0 26px;padding:18px 20px;border:1px solid #223052;border-radius:14px;background:linear-gradient(160deg,#132244,#0f1b33 70%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:14px}
-.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 12px!important;font-family:var(--font-head);font-size:21px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid #2a3a5c!important;box-shadow:none!important}
+.task-composer{margin:0 0 26px;padding:18px 20px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:14px}
+.composer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 -4px}
+.composer-head-label{font-family:var(--font-head);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#93a0bb}
+.composer-close{font-size:12px!important;color:#93a0bb!important}
+.composer-close:hover{color:var(--text-strong)!important}
+.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 12px!important;font-family:var(--font-head);font-size:21px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid var(--surface-border)!important;box-shadow:none!important}
 .composer-title::placeholder{color:#6d7c99;font-weight:500}
 .composer-title:focus{outline:none;border-bottom-color:var(--accent)!important;box-shadow:0 1px 0 0 var(--accent)!important}
 
@@ -30,16 +39,16 @@
 
 /* composer assignee chips */
 .assignee-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
-.assignee-chip{display:inline-flex;align-items:center;gap:6px;background:#16233d;color:#c9d6f0;border:1px solid #2f4677;border-radius:12px;padding:3px 8px 3px 11px;font-size:12px}
+.assignee-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-hover);color:#c9d6f0;border:1px solid #3a4f80;border-radius:12px;padding:3px 8px 3px 11px;font-size:12px}
 .assignee-chip button{background:none;border:none;color:#7f8aa3;cursor:pointer;font-size:14px;line-height:1;padding:0;width:auto}
 .assignee-chip button:hover{color:#fff}
 
 /* ── task list — clear work cards with visual hierarchy ────── */
 .task-list{display:grid;align-content:start;gap:10px}
 .personal-empty{padding:24px;border:1px dashed #3d4a68;border-radius:8px}
-.task-card{display:flex;align-items:start;gap:14px;padding:15px 16px;border:1px solid #23324f;border-left:3px solid #2f4677;background:#101d38;border-radius:10px;transition:border-color .14s ease,background .14s ease,transform .06s ease}
-.task-card:hover{border-color:#33456d;border-left-color:var(--accent);background:#122240}
-.task-card.focused{border-color:var(--accent);border-left-color:var(--accent);background:#132a44;animation:task-focus-pulse 2.4s ease}
+.task-card{display:flex;align-items:start;gap:14px;padding:15px 16px;border:1px solid var(--surface-border);border-left:3px solid #3a4f80;background:var(--surface);border-radius:10px;transition:border-color .14s ease,background .14s ease,transform .06s ease}
+.task-card:hover{border-color:var(--surface-border-hover);border-left-color:var(--accent);background:var(--surface-hover)}
+.task-card.focused{border-color:var(--accent);border-left-color:var(--accent);background:#1c3352;animation:task-focus-pulse 2.4s ease}
 @keyframes task-focus-pulse{0%{box-shadow:0 0 0 0 rgba(127,184,176,.45)}30%{box-shadow:0 0 0 4px rgba(127,184,176,.22)}100%{box-shadow:0 0 0 0 rgba(127,184,176,0)}}
 .task-check{width:18px!important;height:18px!important;margin-top:2px;flex:none}
 .task-body{display:grid;gap:8px;flex:1;min-width:0}
@@ -50,8 +59,8 @@
 .task-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .task-tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 9px;border-radius:12px;border:1px solid transparent;line-height:1.5}
 .task-tag.due{background:#1a2b1f;color:#8fd6a2;border-color:#295139}
-.task-tag.project{background:#1c2b4d;color:#9db4e6;border-color:#2f4677}
-.task-tag.assignee{background:#16233d;color:#c9d6f0;border-color:#2f4677}
+.task-tag.project{background:#243766;color:#a9bdea;border-color:#3a4f80}
+.task-tag.assignee{background:var(--surface-hover);color:#c9d6f0;border-color:#3a4f80}
 .task-tag.source{background:#241d33;color:#c4a9e6;border-color:#402f5c;font-family:var(--font-body)}
 
 .task-project-edit{display:grid;gap:4px;margin-top:2px}

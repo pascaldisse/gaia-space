@@ -6,15 +6,15 @@
 .st-title h1 { margin: 0; font-size: 22px; }
 .st-title p { margin: 3px 0 0; color: #9da0a8; }
 
-.st-empty { padding: 26px; border: 1px dashed #3d4a68; border-radius: 8px; color: #92959d; }
+.st-empty { padding: 26px; border: 1px dashed var(--surface-border-hover); border-radius: 8px; background: var(--surface); color: #a3a9b5; }
 .st-muted { color: #7f8aa3; padding: 6px 0; }
 
 /* ── action-needed band ── */
-.st-band { background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 14px 16px 16px; margin-bottom: 20px; }
+.st-band { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px 16px 16px; margin-bottom: 20px; }
 .st-band-label { display: inline-block; font-family: var(--font-head); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: #f0a742; margin-bottom: 12px; }
 .st-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 
-.st-action { background: #12213d; border: 1px solid #2b3550; border-radius: 8px; padding: 12px 12px 8px; border-top: 2px solid #3d4a68; }
+.st-action { background: var(--surface-raised); border: 1px solid var(--surface-border); border-radius: 8px; padding: 12px 12px 8px; border-top: 2px solid var(--surface-border-hover); }
 .st-action.empty { opacity: 0.72; }
 .st-action header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .st-action header h3 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; }
@@ -47,7 +47,7 @@
 
 /* ── secondary grid ── */
 .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
-.st-card { background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 14px 16px 12px; }
+.st-card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px 16px 12px; }
 .st-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .st-card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .st-card-head small { color: #7f8aa3; font-weight: 400; margin-left: 6px; }
@@ -58,8 +58,8 @@
 .st-cal { border: 1px solid var(--accent); border-radius: 999px; padding: var(--ctl-pad-y) 1em; font-size: var(--ctl-font-size); font-weight: 600; color: var(--accent-text); background: var(--accent-soft); font-family: var(--font-head); }
 .st-cal:hover { background: var(--accent); color: var(--brand-navy); border-color: var(--accent); }
 .st-inline { background: none; border: 0; padding: 0; color: var(--accent-text); text-decoration: underline; font-size: inherit; }
-.st-list.agenda li { display: grid; grid-template-columns: 1fr; gap: 2px; align-items: start; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: #111f3a; margin-bottom: 4px; }
-.st-list.agenda li:hover { background: #16264a; }
+.st-list.agenda li { display: grid; grid-template-columns: 1fr; gap: 2px; align-items: start; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface); margin-bottom: 4px; }
+.st-list.agenda li:hover { background: var(--surface-hover); }
 .st-list.agenda time { color: var(--accent-text); font-size: 11px; font-variant-numeric: tabular-nums; }
 .st-list.agenda strong { white-space: normal; }
 .st-list.agenda small { color: #8b93a6; font-size: 11px; }
@@ -69,8 +69,8 @@
 }
 
 /* Project deadline banner — sits above the action band, tone matches urgency. */
-.st-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: 1px solid #2b3550; border-left-width: 3px; border-radius: 10px; background: #141d30; color: var(--text); cursor: pointer; text-align: left; }
-.st-deadline:hover { border-color: #3d4a68; }
+.st-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--surface-border); border-left-width: 3px; border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
+.st-deadline:hover { border-color: var(--surface-border-hover); }
 .st-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: #5b78e5; flex: none; }
 .st-deadline-label { font-weight: 600; color: var(--text-strong); }
 .st-deadline time { color: #8b96ad; font-size: .86rem; }
