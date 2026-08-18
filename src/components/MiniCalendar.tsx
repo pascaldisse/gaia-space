@@ -1,5 +1,5 @@
 import { For, Show, createMemo } from "solid-js";
-import { dayKeyOf, kindsOnDay, monthGrid, startOfDay, type CalendarItem } from "../calendar";
+import { dayKeyOf, kindsOnDay, itemsOnDay, monthGrid, startOfDay, type CalendarItem } from "../calendar";
 import { Icon } from "./Icon";
 import "./MiniCalendar.css";
 
@@ -35,6 +35,7 @@ export default function MiniCalendar(props: {
         <For each={grid()}>{(day) => {
           const key = dayKeyOf(day);
           const kinds = kindsOnDay(props.items, key);
+          const dayItems = itemsOnDay(props.items, key);
           return (
             <button
               class="mini-day"
@@ -43,8 +44,9 @@ export default function MiniCalendar(props: {
               title={kinds.length ? `${kinds.length} item kind${kinds.length > 1 ? "s" : ""}` : undefined}
             >
               <span class="mini-num">{day.getDate()}</span>
-              <Show when={kinds.length}>
-                <span class="mini-dots"><For each={kinds}>{(k) => <span class={`mini-dot ${k}`} />}</For></span>
+              <Show when={dayItems.length}>
+                <span class="mini-event" classList={{ [dayItems[0].kind]: true }}>{dayItems[0].title}</span>
+                <Show when={dayItems.length > 1}><span class="mini-more">+{dayItems.length - 1}</span></Show>
               </Show>
             </button>
           );
