@@ -61,8 +61,10 @@ export default function Documents(props: { scope?: DocScope }) {
     const list = projects();
     if (list && list.length && !selectedProjectId()) setSelectedProjectId(list[0].id);
   });
-  const activeProjectName = () =>
-    (sessionProjects() ?? projects())?.find((p) => p.id === selectedProjectId())?.name ?? null;
+  const activeProject = () =>
+    (sessionProjects() ?? projects())?.find((p) => p.id === selectedProjectId()) ?? null;
+  const activeProjectName = () => activeProject()?.name ?? null;
+  const activeProjectMark = () => (activeProject()?.key ?? activeProject()?.name ?? "··").slice(0, 2).toUpperCase();
 
   const [activeContainer, setActiveContainer] = createSignal<ContainerType>(
     props.scope === "project" ? "project" : "my-docs",
@@ -226,6 +228,42 @@ export default function Documents(props: { scope?: DocScope }) {
     }
   }
 
+  // Single clear CTA for an empty project space: creates one document at the
+  // root and opens it so the owner can rename inline — no folder/root ceremony.
+  async function createFirstDocument() {
+    const cid = containerId();
+    if (!cid) return;
+    const id = newId("doc");
+    const document: Document = {
+      id,
+      container_type: activeContainer(),
+      container_id: cid,
+      folder_id: null,
+      doc_type: "text",
+      title: "Untitled document",
+      body: "",
+      version: 1,
+      archived: false,
+      created_by: actingProfileId(),
+    };
+    try {
+      await documentsApi.createDocument(document);
+      await refetchDocuments();
+      setSelectedDocumentId(id);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  // Project space with a chosen project but nothing filed yet → show the guided
+  // empty state instead of the full folder/editor chrome.
+  const projectEmpty = () =>
+    scope() === "project" &&
+    !!containerId() &&
+    !showArchived() &&
+    scopedFolders().length === 0 &&
+    scopedDocuments().length === 0;
+
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
 
   const [editTitle, setEditTitle] = createSignal("");
@@ -371,7 +409,7 @@ export default function Documents(props: { scope?: DocScope }) {
               >
                 <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                 <span class="doc-title">{d.title}</span>
-                <span class="doc-version">v{d.version}</span>
+                <Show when={scope() !== "project"}><span class="doc-version">v{d.version}</span></Show>
               </li>
             )}
           </For>
@@ -389,29 +427,33 @@ export default function Documents(props: { scope?: DocScope }) {
         </div>
       </Show>
 
-      <header class="documents-head">
+      <header class="documents-head" classList={{ "is-project": scope() === "project" }}>
         <Show
           when={scope() === "project"}
           fallback={
-            <div>
+            <div class="dk-head-main">
               <h1>Knowledge</h1>
               <p>
-                Project-independent knowledge — your personal documents and the organization’s
-                Knowledge Base. For docs tied to a specific project, open that project’s
+                Organization-wide knowledge — your personal documents and the shared
+                Knowledge Base. Docs tied to one project live in that project’s
                 <strong> Knowledge</strong> tab.
               </p>
             </div>
           }
         >
-          <div>
-            <h1>Project Knowledge{activeProjectName() ? <> · <span class="scope-project">{activeProjectName()}</span></> : null}</h1>
-            <p>
-              Documentation specific to this project. For personal docs or the org-wide
-              Knowledge Base, open <strong>Knowledge</strong> in the top navigation.
-            </p>
+          <div class="dk-head-main">
+            <div class="dk-mark" aria-hidden="true">{activeProjectMark()}</div>
+            <div>
+              <h1>Knowledge</h1>
+              <p>
+                Documents that live only in{" "}
+                <strong>{activeProjectName() ?? "this project"}</strong>. Anything meant for the
+                whole organization belongs in the top-level <strong>Knowledge</strong>.
+              </p>
+            </div>
           </div>
         </Show>
-        <label>
+        <label class="acting-as">
           Acting as
           <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
             <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
@@ -454,7 +496,34 @@ export default function Documents(props: { scope?: DocScope }) {
         </label>
       </nav>
 
-      <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
+      <Show when={scope() === "project" && !containerId()}>
+        <div class="dk-empty">
+          <div class="dk-empty-card">
+            <div class="dk-empty-icon" aria-hidden="true"><Icon name="book" size={26} /></div>
+            <h2>No project selected</h2>
+            <p>Choose a project from the context header to see and manage its documents.</p>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={projectEmpty()}>
+        <div class="dk-empty">
+          <div class="dk-empty-card">
+            <div class="dk-empty-icon" aria-hidden="true"><Icon name="book" size={26} /></div>
+            <h2>Start this project’s knowledge</h2>
+            <p>
+              Keep decisions, specs, and reference notes for{" "}
+              <strong>{activeProjectName() ?? "this project"}</strong> here — visible only within the
+              project. Organization-wide docs belong in the top-level Knowledge.
+            </p>
+            <button class="primary dk-empty-cta" onClick={createFirstDocument}>
+              <Icon name="plus" size={15} /> New document
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <div class="documents-body" classList={{ hidden: (scope() === "project" && !containerId()) || projectEmpty() }} style={{ "--col-tree": treeW() + "px" }}>
         <aside class="documents-tree">
           <Show
             when={containerId()}
@@ -482,7 +551,7 @@ export default function Documents(props: { scope?: DocScope }) {
                   >
                     <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                     <span class="doc-title">{d.title}</span>
-                    <span class="doc-version">v{d.version}</span>
+                    <Show when={scope() !== "project"}><span class="doc-version">v{d.version}</span></Show>
                   </li>
                 )}
               </For>
