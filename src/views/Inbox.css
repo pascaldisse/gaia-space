@@ -4,13 +4,15 @@
 .inbox-head p { color: #9da0a8; margin: 5px 0 0; max-width: 46ch; }
 .inbox-head-actions { display: flex; align-items: flex-end; gap: 10px; }
 .inbox-muted { color: #7f8aa3; }
-.inbox-empty { padding: 24px; border: 1px dashed #3d4a68; color: #92959d; border-radius: 8px; max-width: 640px; }
+.inbox-empty { padding: 24px; border: 1px dashed #3d4a68; color: #92959d; border-radius: 10px; max-width: 640px; }
 .inbox-groups { display: grid; gap: 24px; max-width: 760px; }
 .inbox-groups h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #7f8aa3; margin: 0 0 10px; }
 .inbox-groups h2 span { color: var(--accent); margin-left: 4px; }
 .inbox-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.inbox-list li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid #2b3550; border-radius: 8px; background: #0f1b33; }
-.inbox-list li.unread { background: #10233a; border-color: #24507a; }
+.inbox-list li { display: flex; align-items: flex-start; gap: 12px; padding: 13px 15px; border: 1px solid #23324f; border-left: 3px solid #2b3550; border-radius: 10px; background: #101d38; transition: border-color .14s ease, background .14s ease; }
+.inbox-list li:hover { border-color: #33456d; background: #122240; }
+.inbox-list li.unread { background: #10233a; border-color: #24507a; border-left-color: var(--accent); }
+.inbox-list li.unread:hover { background: #13294a; }
 .inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex: none; }
 .inbox-body { flex: 1; min-width: 0; }
 .inbox-body strong { color: var(--text-strong); }
