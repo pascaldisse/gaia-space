@@ -1,1 +1,108 @@
-.absence-view{height:100%;overflow:auto;padding:28px 34px}.absence-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}.absence-view h1{margin:0;font-size:22px}.absence-view h2{margin:0 0 12px;font-size:15px}.absence-view p{color:#9da0a8;margin:5px 0}.absence-view input{width:100%}.absence-view label{display:grid;gap:5px;color:#aeb1b8;font-size:12px}.absence-view header label{width:210px}.absence-error{background:#4a1f1f!important;color:#ffb3b3!important;padding:8px 10px;border-radius:5px}.absence-layout{display:grid;grid-template-columns:minmax(220px,300px) minmax(300px,650px);gap:18px}.absence-card{display:grid;gap:10px;align-content:start;padding:18px;border:1px solid #223052;border-radius:14px;background:linear-gradient(160deg,#132244,#0f1b33 70%);box-shadow:0 8px 26px rgba(0,0,0,.24)}.absence-approved{display:flex!important;align-items:center}.absence-approved input,.absence-row label input{width:auto}.absence-list{display:grid;align-content:start;gap:7px}.absence-row{display:grid;grid-template-columns:1fr auto auto;gap:15px;align-items:center;padding:13px 15px;border:1px solid #23324f;border-left:3px solid #2b3550;background:#101d38;border-radius:10px;transition:border-color .14s ease,background .14s ease}.absence-row:hover{border-color:#33456d;border-left-color:var(--accent);background:#122240}.absence-row>div{display:grid;gap:3px}.absence-row span,.absence-row time{font-size:11px;color:#93969e}.absence-row label{display:flex;align-items:center}@media(max-width:760px){.absence-layout{grid-template-columns:1fr}.absence-view>header{display:grid}.absence-view header label{width:auto}}
+/* Time off (Absences) — premium paloptic system, layered over App.css control
+   primitives (button, input, .primary, .ghost, .pill). Scoped to .timeoff-view. */
+
+.timeoff-view { height: 100%; overflow: auto; padding: 24px 30px 40px; color: var(--text); }
+
+/* ── header: mark + owner-friendly purpose, filter + primary CTA ── */
+.timeoff-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+.timeoff-head-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.timeoff-mark {
+  width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-teal), #0f9e8b);
+  color: var(--brand-navy); box-shadow: 0 2px 12px rgba(0,194,168,0.28);
+}
+.timeoff-head h1 { margin: 0; font-size: 22px; font-weight: 650; color: var(--text-strong); }
+.timeoff-head p { margin: 4px 0 0; color: #9da0a8; max-width: 560px; line-height: 1.5; }
+.timeoff-head p strong { color: #c7cad2; font-weight: 600; }
+.timeoff-head-side { display: flex; align-items: flex-end; gap: 12px; flex: none; }
+.timeoff-new { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.timeoff-error {
+  background: var(--status-danger-bg); color: var(--status-danger-ink);
+  padding: 9px 12px; border-radius: 8px; margin: 0 0 14px; cursor: pointer; font-size: 13px;
+}
+.timeoff-loading { color: #8a8d96; font-size: 12px; margin: 8px 2px; }
+
+/* ── at-a-glance stats ── */
+.timeoff-stats { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat {
+  flex: 1 1 120px; min-width: 110px; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 14px; border: 1px solid var(--surface-border); border-radius: 12px;
+  background: var(--surface);
+}
+.stat-num { font-size: 22px; font-weight: 700; color: var(--text-strong); line-height: 1; font-family: var(--font-head); }
+.stat-label { font-size: 11.5px; color: #9297a3; }
+
+/* ── record-time-off form ── */
+.timeoff-form {
+  margin-bottom: 18px; padding: 16px 18px; border: 1px solid var(--surface-border); border-radius: 14px;
+  background: var(--surface); box-shadow: 0 8px 26px rgba(0,0,0,0.22);
+}
+.timeoff-form-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.timeoff-form-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-strong); }
+.timeoff-form-head .ghost { padding: 0.1em 0.55em; font-size: 18px; line-height: 1; }
+.timeoff-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fld { display: grid; gap: 5px; font-size: 11.5px; color: #aeb1b8; }
+.fld input { width: 100%; }
+.fld-picker { margin-top: 1px; }
+.timeoff-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.fld-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: #c2c5cc; }
+.fld-check input { width: auto; }
+.timeoff-form-actions { display: flex; gap: 8px; }
+
+/* ── empty state ── */
+.timeoff-empty { display: grid; place-items: center; padding: 40px 24px; }
+.timeoff-empty-card { max-width: 440px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.timeoff-empty-icon {
+  width: 58px; height: 58px; display: grid; place-items: center; border-radius: 16px; margin-bottom: 2px;
+  background: rgba(0,194,168,0.10); border: 1px solid rgba(0,194,168,0.28); color: #5fe6d4;
+}
+.timeoff-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
+.timeoff-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
+.timeoff-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── list of time-off records ── */
+.timeoff-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.timeoff-row {
+  display: grid; grid-template-columns: 4px 1fr auto; align-items: center; gap: 14px;
+  padding: 12px 15px 12px 0; overflow: hidden;
+  border: 1px solid var(--surface-border); border-radius: 12px; background: var(--surface);
+  transition: border-color .14s ease, background .14s ease, transform .14s ease;
+}
+.timeoff-row:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+.timeoff-row.past { opacity: 0.72; }
+.timeoff-phase-rail { align-self: stretch; width: 4px; border-radius: 0 3px 3px 0; background: var(--status-neutral-ink); }
+.timeoff-phase-rail[data-phase="current"] { background: var(--brand-teal); }
+.timeoff-phase-rail[data-phase="upcoming"] { background: var(--status-warning-ink); }
+.timeoff-phase-rail[data-phase="past"] { background: #3a445c; }
+
+.timeoff-row-main { min-width: 0; display: grid; gap: 4px; }
+.timeoff-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.timeoff-reason { font-size: 14px; color: var(--text-strong); font-weight: 600; }
+.timeoff-row-meta { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #9297a3; }
+.timeoff-person { color: #b4b7bf; }
+.timeoff-row-meta .dot { opacity: 0.5; }
+
+.timeoff-row-actions { display: flex; align-items: center; gap: 6px; }
+.timeoff-row-actions .ghost.active { color: var(--accent-text); border-color: var(--accent); }
+.timeoff-row-actions .danger:hover { color: var(--status-danger-ink); border-color: var(--status-danger-ink); }
+
+/* ── status pills (shared .pill primitive tinted per state) ── */
+.pill {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .02em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; line-height: 1.5; white-space: nowrap;
+}
+.pill-current { background: var(--status-info-bg); color: var(--status-info-ink); }
+.pill-upcoming { background: var(--status-warning-bg); color: var(--status-warning-ink); }
+.pill-past { background: var(--status-neutral-bg); color: var(--status-neutral-ink); }
+.pill-approved { background: var(--status-success-bg); color: var(--status-success-ink); }
+.pill-pending { background: var(--status-warning-bg); color: var(--status-warning-ink); }
+
+@media (max-width: 760px) {
+  .timeoff-view { padding: 20px 16px 32px; }
+  .timeoff-head { flex-direction: column; }
+  .timeoff-head-side { width: 100%; justify-content: space-between; }
+  .timeoff-form-grid { grid-template-columns: 1fr; }
+  .timeoff-row { grid-template-columns: 4px 1fr; }
+  .timeoff-row-actions { grid-column: 2; justify-content: flex-start; }
+}

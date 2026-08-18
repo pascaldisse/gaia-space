@@ -1,0 +1,5 @@
+[test]
+# Preload sets up a real browser DOM (happy-dom) and compiles .tsx with
+# babel-preset-solid so component tests (e.g. src/icon.test.tsx) can assert
+# against actually-rendered DOM, not just source/config.
+preload = ["./test/solid-dom-preload.ts"]
