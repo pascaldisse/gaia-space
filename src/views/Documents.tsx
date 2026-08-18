@@ -10,11 +10,17 @@ import {
   type Document,
   type DocumentFolder,
 } from "../api/documents";
+import { projectId as sessionProjectId, projects as sessionProjects } from "../session";
 
-const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
-  { key: "my-docs", label: "My Documents" },
-  { key: "project", label: "Project Docs" },
-  { key: "kb", label: "Knowledge Base" },
+// Scope splits the same folder/document/version model into two IA destinations:
+//   "global"  → project-independent: personal docs + org Knowledge Base books
+//   "project" → project-specific: docs filed under the active project
+export type DocScope = "global" | "project";
+
+const CONTAINER_TABS: { key: ContainerType; label: string; scope: DocScope }[] = [
+  { key: "my-docs", label: "My Documents", scope: "global" },
+  { key: "kb", label: "Knowledge Base", scope: "global" },
+  { key: "project", label: "Project Docs", scope: "project" },
 ];
 
 function when(ts: number | null) {
@@ -27,7 +33,9 @@ function when(ts: number | null) {
   });
 }
 
-export default function Documents() {
+export default function Documents(props: { scope?: DocScope }) {
+  const scope = (): DocScope => props.scope ?? "global";
+  const containerTabs = () => CONTAINER_TABS.filter((t) => t.scope === scope());
   const [error, setError] = createSignal<string | null>(null);
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
@@ -43,11 +51,21 @@ export default function Documents() {
   const [projects] = createResource(() => documentsApi.listProjects());
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   createEffect(() => {
+    // Project scope follows the app-wide active project (chosen in the project
+    // context header); global scope never touches the project container.
+    if (scope() === "project") {
+      const pid = sessionProjectId();
+      if (pid) { setSelectedProjectId(pid); return; }
+    }
     const list = projects();
     if (list && list.length && !selectedProjectId()) setSelectedProjectId(list[0].id);
   });
+  const activeProjectName = () =>
+    (sessionProjects() ?? projects())?.find((p) => p.id === selectedProjectId())?.name ?? null;
 
-  const [activeContainer, setActiveContainer] = createSignal<ContainerType>("my-docs");
+  const [activeContainer, setActiveContainer] = createSignal<ContainerType>(
+    props.scope === "project" ? "project" : "my-docs",
+  );
   const [selectedBookId, setSelectedBookId] = createSignal<string | null>(null);
   const [newBookName, setNewBookName] = createSignal("");
 
@@ -371,10 +389,27 @@ export default function Documents() {
       </Show>
 
       <header class="documents-head">
-        <div>
-          <h1>Documents</h1>
-          <p>My Documents, project docs, and the Knowledge Base share one folder/document/version model.</p>
-        </div>
+        <Show
+          when={scope() === "project"}
+          fallback={
+            <div>
+              <h1>Knowledge</h1>
+              <p>
+                Project-independent knowledge — your personal documents and the organization’s
+                Knowledge Base. For docs tied to a specific project, open that project’s
+                <strong> Knowledge</strong> tab.
+              </p>
+            </div>
+          }
+        >
+          <div>
+            <h1>Project Knowledge{activeProjectName() ? <> · <span class="scope-project">{activeProjectName()}</span></> : null}</h1>
+            <p>
+              Documentation specific to this project. For personal docs or the org-wide
+              Knowledge Base, open <strong>Knowledge</strong> in the top navigation.
+            </p>
+          </div>
+        </Show>
         <label>
           Acting as
           <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
@@ -384,25 +419,21 @@ export default function Documents() {
       </header>
 
       <nav class="container-tabs">
-        <For each={CONTAINER_TABS}>
-          {(t) => (
-            <button
-              classList={{ active: activeContainer() === t.key }}
-              onClick={() => {
-                setActiveContainer(t.key);
-                setSelectedFolderId(null);
-                setSelectedDocumentId(null);
-              }}
-            >
-              {t.label}
-            </button>
-          )}
-        </For>
-
-        <Show when={activeContainer() === "project"}>
-          <select value={selectedProjectId() ?? ""} onChange={(e) => setSelectedProjectId(e.currentTarget.value || null)}>
-            <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-          </select>
+        <Show when={containerTabs().length > 1}>
+          <For each={containerTabs()}>
+            {(t) => (
+              <button
+                classList={{ active: activeContainer() === t.key }}
+                onClick={() => {
+                  setActiveContainer(t.key);
+                  setSelectedFolderId(null);
+                  setSelectedDocumentId(null);
+                }}
+              >
+                {t.label}
+              </button>
+            )}
+          </For>
         </Show>
 
         <Show when={activeContainer() === "kb"}>
@@ -426,7 +457,15 @@ export default function Documents() {
         <aside class="documents-tree">
           <Show
             when={containerId()}
-            fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "Loading…"}</p>}
+            fallback={
+              <p class="hint pad">
+                {activeContainer() === "kb"
+                  ? "Pick or create a book above."
+                  : activeContainer() === "project"
+                    ? "Select a project in the header to see its documents."
+                    : "Loading…"}
+              </p>
+            }
           >
             <div class="tree-root" classList={{ active: selectedFolderId() === null }} onClick={() => setSelectedFolderId(null)}>
               (root)
