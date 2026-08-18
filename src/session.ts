@@ -128,5 +128,7 @@ export function humanError(reason: unknown): string {
     return "A record with that identifier already exists.";
   if (/NOT NULL constraint failed: ([^\s]+)/i.test(text))
     return `Missing required field: ${text.match(/NOT NULL constraint failed: ([^\s]+)/i)![1]}`;
+  if (/no such table: (\w+)/i.test(text))
+    return `The local database is missing the "${text.match(/no such table: (\w+)/i)![1]}" table — its schema is out of date. Restart the app to run migrations; if it persists, the database needs repair.`;
   return text.replace(/^Error:\s*/, "");
 }

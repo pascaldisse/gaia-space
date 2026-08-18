@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -107,6 +107,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V3)?;
     }
     if version < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
+    }
+    if version < 5 {
+        // Heal a historical version collision: two merged branches both defined
+        // "schema v3" (one as `todo_assignees`, the other as `users`/`sessions`).
+        // A database that migrated through the pre-merge `todo_assignees` v3 was
+        // stamped >=3 and so NEVER ran the merged v3 — it reached v4 with
+        // `todo_assignees` present but `users`/`sessions` missing, which broke any
+        // todo carrying an assignee (`assignee_is_active` reads `users`). These
+        // batches are all `CREATE ... IF NOT EXISTS`, so re-running them is a
+        // no-op on healthy databases and backfills the gap on drifted ones.
+        tx.execute_batch(SCHEMA_V3)?;
         tx.execute_batch(SCHEMA_V4)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -229,6 +241,28 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
         assert_eq!(exists, 1);
+    }
+
+    /// Regression: a database that migrated through the pre-merge branch where
+    /// schema-v3 meant `todo_assignees` reached v4 with `todo_assignees` present
+    /// but `users`/`sessions` missing. `migrate` must self-heal so a todo with an
+    /// assignee no longer fails with `no such table: users`.
+    #[test]
+    fn drifted_v4_without_auth_tables_is_healed() {
+        let conn = open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).expect("v1 schema");
+        conn.execute_batch(SCHEMA_V2).expect("v2 schema");
+        conn.execute_batch(SCHEMA_V4).expect("v4 schema"); // todo_assignees, but NOT users/sessions
+        conn.pragma_update(None, "user_version", 4).expect("v4 version");
+        let before: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'", [], |row| row.get(0)).unwrap();
+        assert_eq!(before, 0, "precondition: users table absent");
+        migrate(&conn).expect("migration");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        for table in ["users", "sessions", "todo_assignees"] {
+            let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
+            assert_eq!(exists, 1, "{table} must exist after heal");
+        }
     }
 
     #[test]
