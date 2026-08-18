@@ -32,6 +32,11 @@
 .st-clear { color: #6f9f78; font-size: 12px; margin: 2px 0 6px; }
 .st-more { background: transparent; border: 0; color: var(--accent-text); padding: 4px 2px; font-size: 12px; }
 
+/* ── type badge: keep Task vs Issue unmistakable at a glance ── */
+.st-kind { flex: none; font-family: var(--font-head); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 5px; border-radius: 4px; border: 1px solid transparent; line-height: 1; }
+.st-kind.issue { color: #9dcbf8; background: rgba(122,184,245,0.12); border-color: rgba(122,184,245,0.35); }
+.st-kind.task { color: #8fd6b6; background: rgba(79,174,106,0.12); border-color: rgba(79,174,106,0.35); }
+
 /* ── lists ── */
 .st-list { list-style: none; margin: 0; padding: 0; }
 .st-list li { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border-radius: 6px; cursor: pointer; }
