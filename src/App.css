@@ -98,16 +98,32 @@ button:disabled {
   cursor: default;
 }
 
-textarea {
-  font: inherit;
+textarea,
+input[type="text"], input[type="search"], input[type="email"], input[type="password"],
+input[type="date"], input[type="number"], input:not([type]) {
+  font-family: var(--font-body);
+  font-size: inherit;
   background: #0e1626;
-  color: var(--text);
+  color: var(--text-strong);
   border: 1px solid #33405e;
-  border-radius: 6px;
-  padding: 0.5em;
-  resize: vertical;
-  min-height: 4.5em;
-  width: 100%;
+  border-radius: 7px;
+  padding: 0.55em 0.7em;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+textarea { resize: vertical; min-height: 4.5em; width: 100%; padding: 0.5em; }
+input::placeholder, textarea::placeholder { color: #64708c; }
+textarea:hover,
+input[type="text"]:hover, input[type="search"]:hover, input[type="email"]:hover, input[type="password"]:hover,
+input[type="date"]:hover, input[type="number"]:hover, input:not([type]):hover { border-color: #48577a; }
+
+/* stronger, quieter micro-labels — Poppins, uppercase, tracked */
+.field-label, .form-label {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #93a0bb;
 }
 
 /* accessible teal focus ring across interactive elements */
@@ -123,6 +139,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,194,168,0.16);
 }
 
 .app {
@@ -473,6 +490,12 @@ textarea:focus {
 .topnav-item:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
 .topnav-item.active { background: var(--accent-soft); color: var(--text-strong); }
 .topnav-item.active .nav-icon { color: var(--accent); }
+/* secondary cluster: still reachable, but visually recessive vs the primary four */
+.topnav-item.secondary { font-weight: 450; padding: 8px 10px; color: #8b95ab; }
+.topnav-item.secondary .nav-icon { color: #6f7a92; font-size: 0.95em; }
+.topnav-item.secondary .topnav-label { font-size: 12px; }
+.topnav-item.secondary:hover { color: var(--text-strong); }
+.topnav-item.secondary.active { color: var(--text-strong); }
 
 /* right cluster: search, manage menu, account */
 .topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }

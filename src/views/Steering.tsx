@@ -102,12 +102,12 @@ export default function Steering() {
               </Show>
             </section>
 
-            <section class="st-card">
-              <div class="st-card-head"><h2>Next meetings</h2><button class="st-link" onClick={() => requestView("Meetings")}>Open Planning →</button></div>
-              <Show when={d().meetingsNext.length} fallback={<p class="st-muted">Nothing scheduled.</p>}>
-                <ul class="st-list plain">
+            <section class="st-card st-agenda">
+              <div class="st-card-head"><h2>Upcoming agenda <small>{d().meetingsNext.length} scheduled</small></h2><button class="st-link st-cal" onClick={() => requestView("Calendar")}>Open calendar →</button></div>
+              <Show when={d().meetingsNext.length} fallback={<p class="st-muted">Nothing scheduled — <button class="st-inline" onClick={() => requestView("Calendar")}>open the calendar →</button></p>}>
+                <ul class="st-list agenda">
                   <For each={d().meetingsNext}>{(m) =>
-                    <li onClick={() => requestView("Meetings")}><strong>{m.title}</strong><small>{new Date(m.starts_at * 1000).toLocaleString()}{m.location ? ` · ${m.location}` : ""}</small></li>}</For>
+                    <li onClick={() => requestView("Calendar")}><time>{new Date(m.starts_at * 1000).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} · {new Date(m.starts_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><strong>{m.title}</strong><Show when={m.location}><small>{m.location}</small></Show></li>}</For>
                 </ul>
               </Show>
             </section>

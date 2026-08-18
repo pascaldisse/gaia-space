@@ -55,10 +55,11 @@ const registry: Record<string, Dest> = {
   ProjectSettings: { name: "ProjectSettings", label: "Project settings", icon: "⚙", component: ProjectSettings },
 };
 
-// primary top-navigation: broad, always-visible destinations. Grouped only by a
-// subtle divider (personal | workspace); admin/secondary lives in a compact menu.
-const primaryPersonal = ["MyWork", "To-Do", "Absences", "Inbox"];
-const primaryWorkspace = ["Projects", "Organization"];
+// primary top-navigation: the four destinations the workspace centers on.
+// A subtle divider separates a visually secondary cluster (Time off, Organization)
+// that stays accessible but never competes with the primary four. Admin lives in a menu.
+const primaryNav = ["MyWork", "To-Do", "Projects", "Inbox"];
+const secondaryNav = ["Absences", "Organization"];
 // nav buttons that highlight for a whole section rather than a single destination
 const sectionNav = new Set(["Projects", "Organization"]);
 
@@ -114,10 +115,10 @@ export default function App() {
   // cross-view navigation requests (Project Home quick links, etc.)
   createEffect(() => { const v = requestedView(); if (v && registry[v] && allowed(v)) { setActive(v); requestView(undefined); } });
 
-  const navButton = (name: string) => {
+  const navButton = (name: string, secondary = false) => {
     const d = registry[name];
     const isActive = () => (sectionNav.has(name) ? section() === name : active() === name);
-    return <button class="topnav-item" title={d.label} classList={{ active: isActive() }} onClick={() => go(name)}>
+    return <button class="topnav-item" title={d.label} classList={{ active: isActive(), secondary }} onClick={() => go(name)}>
       <span class="nav-icon">{d.icon}</span><span class="topnav-label">{d.label}</span>
     </button>;
   };
@@ -130,9 +131,9 @@ export default function App() {
         <header class="topbar">
           <div class="topbar-brand"><div class="space-mark">S</div><em>GAIA Space</em></div>
           <nav class="topnav">
-            <For each={primaryPersonal}>{navButton}</For>
+            <For each={primaryNav}>{(name) => navButton(name)}</For>
             <span class="topnav-divider" aria-hidden="true" />
-            <For each={primaryWorkspace}>{navButton}</For>
+            <For each={secondaryNav}>{(name) => navButton(name, true)}</For>
           </nav>
           <div class="topbar-right">
             <button class="topbar-search" title="Search (⌘K)" onClick={() => setGotoOpen(true)}><span class="nav-icon">⌕</span><span class="topbar-search-hint">Search</span></button>
