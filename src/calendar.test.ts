@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import {
-  buildCalendarItems, dateKey, deadlineItem, itemsOnDay, localDateKey, taskItem,
+  buildCalendarItems, dateKey, deadlineItem, itemsOnDay, localDateKey, projectMeetingIds, taskItem,
   type ProjectLike, type TodoLike,
 } from "./calendar";
 
@@ -71,4 +71,24 @@ test("itemsOnDay puts all-day items first, then timed by start, and filters by d
   });
   const day = itemsOnDay(items, "2026-09-01");
   expect(day.map((i) => i.title)).toEqual(["Due", "Early", "Late"]);
+});
+
+describe("projectMeetingIds — meeting→channel→project association", () => {
+  const channels = [
+    { id: "c1", project_id: "p1", archived: false },
+    { id: "c2", project_id: "p2", archived: false },
+    { id: "c3", project_id: "p1", archived: true },   // archived channel of p1: excluded
+  ];
+  const meetings = [
+    { id: "m1", channel_id: "c1" },   // p1 → in
+    { id: "m2", channel_id: "c2" },   // p2 → out
+    { id: "m3", channel_id: null },   // unlinked/personal → out
+    { id: "m4", channel_id: "c3" },   // archived p1 channel → out
+    { id: "m5", channel_id: "cX" },   // unknown channel → out
+  ];
+  test("keeps only meetings bound to a live channel of the target project", () => {
+    expect([...projectMeetingIds(meetings, channels, "p1")]).toEqual(["m1"]);
+    expect([...projectMeetingIds(meetings, channels, "p2")]).toEqual(["m2"]);
+    expect([...projectMeetingIds(meetings, channels, "nope")]).toEqual([]);
+  });
 });

@@ -2,9 +2,10 @@ import { createResource, createSignal, createEffect, For, Show, onMount, onClean
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
+import { chatApi } from "../api/chat";
 import { profileId, projectId, projects, reloadProfiles, reloadProjects } from "../session";
 import { requestedDate, requestDate } from "../nav";
-import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
+import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, projectMeetingIds, type CalendarItem } from "../calendar";
 import CalendarQuickCreate, { type QuickKind } from "../components/CalendarQuickCreate";
 import { Icon } from "../components/Icon";
 import "./Calendar.css";
@@ -44,13 +45,21 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   // Fan out to the three calendar sources for the range, then merge into one
   // typed list. Any single source failing must not blank the calendar.
   const [items,{refetch:refetchItems}] = createResource(() => [range()[0].getTime()/1000, range()[1].getTime()/1000, scope(), projectId()] as const, async ([range_start,range_end,sc,pid]) => {
-    const [occurrences,todos,allProjects] = await Promise.all([
+    const scoped = sc==="project" && !!pid;
+    const [occurrences,todos,allProjects,meetings,channels] = await Promise.all([
       meetingsApi.occurrences(range_start,range_end).catch(()=>[]),
-      (sc==="project" && pid ? personalApi.projectTodos(pid, true) : personalApi.todos(profileId(), true)).catch(()=>[]),
+      (scoped ? personalApi.projectTodos(pid!, true) : personalApi.todos(profileId(), true)).catch(()=>[]),
       platformApi.projects().catch(()=>[]),
+      // Meetings carry no project id; the project link is meeting.channel_id →
+      // channel.project_id. Load both only when scoping, to filter occurrences.
+      scoped ? meetingsApi.list().catch(()=>[]) : Promise.resolve([]),
+      scoped ? chatApi.listChannels().catch(()=>[]) : Promise.resolve([]),
     ]);
-    const projectsForScope = sc==="project" && pid ? allProjects.filter(p => p.id===pid) : allProjects;
-    return buildCalendarItems({ occurrences, todos, projects: projectsForScope });
+    const scopedOccurrences = scoped
+      ? (() => { const ids = projectMeetingIds(meetings, channels, pid!); return occurrences.filter(o => ids.has(o.meeting_id)); })()
+      : occurrences;
+    const projectsForScope = scoped ? allProjects.filter(p => p.id===pid) : allProjects;
+    return buildCalendarItems({ occurrences: scopedOccurrences, todos, projects: projectsForScope });
   });
 
   // Deep-link: Overview mini-calendar sets a target day → jump the cursor there,
@@ -86,7 +95,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
       <div>
         <h1>{scope()==="project" ? "Planning calendar" : "Calendar"}</h1>
         <p>{scope()==="project"
-          ? <>Meetings, tasks, and the deadline for <strong>{projectName() ?? "this project"}</strong>. Your whole workspace lives in the top-nav Calendar.</>
+          ? <>Scoped to <strong>{projectName() ?? "this project"}</strong>: only its meetings, its tasks, and its deadline — not personal or other-project items. Your full schedule lives in the top-nav Calendar.</>
           : "Every meeting, task due date, and project deadline across your workspace."}</p>
       </div>
       <div class="calendar-controls">

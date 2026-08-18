@@ -1,7 +1,8 @@
-import { createSignal, createMemo, For, Show, onMount, onCleanup } from "solid-js";
+import { createSignal, createMemo, createResource, For, Show, onMount, onCleanup } from "solid-js";
 import { meetingsApi, type Meeting } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
+import { chatApi } from "../api/chat";
 import { profileId, profiles, projects, humanError } from "../session";
 import { ProfilePicker } from "./Pickers";
 import "./CalendarQuickCreate.css";
@@ -33,6 +34,19 @@ export default function CalendarQuickCreate(props: {
   const [mEnd, setMEnd] = createSignal("10:00");
   const [mLocation, setMLocation] = createSignal("");
   const [mOrganizer, setMOrganizer] = createSignal(profileId());
+  // Meetings link to a project only through a channel (meeting.channel_id →
+  // channel.project_id). In project scope we bind the new meeting to one of the
+  // active project's channels so it shows up on the project's Planning calendar.
+  const [mChannel, setMChannel] = createSignal("");
+  const [projectChannels] = createResource(
+    () => (props.kind === "meeting" && props.scope === "project" ? (props.activeProjectId ?? null) : null),
+    async (pid) => {
+      const channels = await chatApi.listChannels().catch(() => []);
+      const mine = channels.filter((c) => c.project_id === pid && !c.archived);
+      if (mine.length && !mChannel()) setMChannel(mine[0].id);
+      return mine;
+    },
+  );
 
   // ── Task form ─────────────────────────────────────────────────────────
   const [tContent, setTContent] = createSignal("");
@@ -74,7 +88,11 @@ export default function CalendarQuickCreate(props: {
           id: crypto.randomUUID(), title: mTitle().trim(), description: null,
           starts_at: epochFromDayTime(mStart()), ends_at: epochFromDayTime(mEnd()),
           rrule: null, location: mLocation().trim() || null,
-          organizer_id: mOrganizer().trim() || null, channel_id: null, archived: false,
+          organizer_id: mOrganizer().trim() || null,
+          // Project scope: bind to a project channel so the meeting is linked to
+          // the active project; global scope stays unlinked.
+          channel_id: props.scope === "project" ? (mChannel() || null) : null,
+          archived: false,
         };
         await meetingsApi.create(meeting);
       } else if (props.kind === "task") {
@@ -130,6 +148,16 @@ export default function CalendarQuickCreate(props: {
             <Show when={mStart() >= mEnd()}><p class="qc-hint warn">End time must be after the start time.</p></Show>
             <label class="qc-field"><span class="qc-label">Location <small>optional</small></span><input placeholder="Room name or meeting link (https://…)" value={mLocation()} onInput={(e) => setMLocation(e.currentTarget.value)} /></label>
             <div class="qc-field"><ProfilePicker label="Organizer" value={mOrganizer()} onChange={setMOrganizer} /></div>
+            <Show when={props.scope === "project"}>
+              <label class="qc-field">
+                <span class="qc-label">Project channel <small>links this meeting to the project</small></span>
+                <Show when={(projectChannels() ?? []).length} fallback={<p class="qc-hint warn">This project has no channel yet — create one in Chat to link meetings to the project calendar. Saved now, it stays personal/unlinked.</p>}>
+                  <select value={mChannel()} onChange={(e) => setMChannel(e.currentTarget.value)}>
+                    <For each={projectChannels()}>{(c) => <option value={c.id}>{c.name || "Untitled channel"}</option>}</For>
+                  </select>
+                </Show>
+              </label>
+            </Show>
           </Show>
 
           <Show when={props.kind === "task"}>

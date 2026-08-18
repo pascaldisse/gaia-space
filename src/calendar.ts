@@ -73,6 +73,26 @@ export function deadlineItem(project: ProjectLike): CalendarItem | null {
   };
 }
 
+/**
+ * Meeting → project association is indirect: a meeting is bound to a channel
+ * (`meeting.channel_id`) and a channel belongs to a project (`channel.project_id`).
+ * A meeting with no channel, or a channel in another project, is NOT part of the
+ * project (e.g. a personal/unlinked meeting). Returns the set of meeting ids that
+ * belong to `projectId`, so occurrences can be filtered by `occurrence.meeting_id`.
+ */
+export function projectMeetingIds(
+  meetings: { id: string; channel_id: string | null }[],
+  channels: { id: string; project_id: string | null; archived: boolean }[],
+  projectId: string,
+): Set<string> {
+  const projectChannels = new Set(
+    channels.filter((c) => c.project_id === projectId && !c.archived).map((c) => c.id),
+  );
+  return new Set(
+    meetings.filter((m) => m.channel_id && projectChannels.has(m.channel_id)).map((m) => m.id),
+  );
+}
+
 /** Merge all three sources into one typed, day-bucketable list. */
 export function buildCalendarItems(sources: {
   occurrences?: MeetingOccurrenceLike[];
