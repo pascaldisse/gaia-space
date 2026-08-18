@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show, onMount } from "solid-js";
 import { planningApi } from "../api/issues";
 import { createProject, humanError, projectId, projects, reloadProjects, setProjectId } from "../session";
 import { requestView } from "../nav";
@@ -10,7 +10,7 @@ import "./Portfolio.css";
 // issue data, grouped client-side. A visible create-project flow lets a fresh
 // workspace get its first project and open it immediately.
 export default function Portfolio() {
-  void reloadProjects();
+  onMount(() => { void reloadProjects(); });
   const list = createMemo(() => (projects() ?? []).filter((p) => !p.archived));
 
   const [counts] = createResource(async () => {

@@ -212,6 +212,8 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
             }
         }
         "list_todos" | "dashboard_aggregate" => put_arg(&mut body, "profile_id", json!(profile_id)),
+        // Desktop has no reader context; authenticated web requests always do.
+        "list_project_todos" => put_arg(&mut body, "readable_by", json!(profile_id)),
         "create_todo" => {
             if let Some(input) = body.get_mut("input").and_then(Value::as_object_mut) {
                 input.insert("profile_id".into(), json!(profile_id));
@@ -410,7 +412,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
     "list_teams" => platform::list_teams(),
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
-    "list_project_todos" => personal::list_project_todos(project_id: String, include_done: Option<bool>),
+    "list_project_todos" => personal::list_project_todos(project_id: String, include_done: Option<bool>, readable_by: Option<String>),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
@@ -524,6 +526,21 @@ mod tests {
         let ids: Vec<String> = value["value"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec![todo_id.clone()]);
 
+        // A known project id cannot enumerate coworkers' private work or assignees.
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_at) VALUES('project-a','Project A','PA',1)", []).unwrap();
+        c.execute("UPDATE todos SET project_id='project-a' WHERE id=?1", [&todo_id]).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pc','secret','Secret assignee',1)", []).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,content,done,project_id,created_at) VALUES('private-todo','pa','Alice private task',0,'project-a',1)", []).unwrap();
+        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('private-todo','pc')", []).unwrap();
+        let (status, value) = call(cookie("tb"), "list_project_todos", json!({"project_id":"project-a","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let project_todos = value["value"].as_array().unwrap();
+        assert_eq!(project_todos.len(), 1);
+        assert_eq!(project_todos[0]["id"], json!(todo_id));
+        assert!(!value.to_string().contains("Alice private task"));
+        assert!(!value.to_string().contains("pc"), "foreign assignees must not be enumerated");
+
         // Assignee is not an owner: no write, no delete.
         let mut foreign = todo.clone();
         foreign["content"] = json!("Hijacked");
@@ -550,7 +567,7 @@ mod tests {
         // Owner delete succeeds and leaves no junction rows behind.
         let (status, _) = call(cookie("ta"), "delete_todo", json!({"id":todo_id})).await;
         assert_eq!(status, StatusCode::OK);
-        let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
+        let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees WHERE todo_id=?1", [&todo_id], |r| r.get(0)).unwrap();
         assert_eq!(orphans, 0);
     }
 }

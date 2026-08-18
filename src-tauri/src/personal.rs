@@ -119,16 +119,18 @@ pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
     Ok(todos)
 }
-/// Every todo filed under a project (owner or assignee irrelevant) — the Project → Work feed.
+/// Every todo filed under a project — the Project → Work feed. Desktop's trusted
+/// local command supplies no reader; web supplies the authenticated profile and is
+/// restricted to tasks it owns or is assigned.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_project_todos( project_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+pub fn list_project_todos(project_id: String, include_done: Option<bool>, readable_by: Option<String>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    list_project_todos_on(&c, &project_id, include_done.unwrap_or(false))
+    list_project_todos_on(&c, &project_id, include_done.unwrap_or(false), readable_by.as_deref())
 }
-fn list_project_todos_on(c: &Connection, project_id: &str, include_done: bool) -> Result<Vec<Todo>> {
+fn list_project_todos_on(c: &Connection, project_id: &str, include_done: bool, readable_by: Option<&str>) -> Result<Vec<Todo>> {
     if project_id.trim().is_empty() { return Ok(Vec::new()); }
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id,t.project_id FROM todos t WHERE t.project_id=?1 AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
-    let mut todos = err(statement.query_map(params![project_id, include_done], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id,t.project_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.project_id=?1 AND (?2=1 OR t.done=0) AND (?3 IS NULL OR t.profile_id=?3 OR a.profile_id=?3) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut todos = err(statement.query_map(params![project_id, include_done, readable_by], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id)?; }
     Ok(todos)
@@ -359,9 +361,9 @@ mod tests {
         // Assignees preserved alongside the project association.
         assert_eq!(created.assignee_ids, vec!["q".to_string()]);
         // Project → Work sees only the project-filed task, both owner and assignee still see it in My tasks.
-        let work: Vec<String> = list_project_todos_on(&c, "proj", true).unwrap().iter().map(|t| t.id.clone()).collect();
+        let work: Vec<String> = list_project_todos_on(&c, "proj", true, None).unwrap().iter().map(|t| t.id.clone()).collect();
         assert_eq!(work, vec!["tp".to_string()]);
-        assert!(list_project_todos_on(&c, "proj2", true).unwrap().is_empty());
+        assert!(list_project_todos_on(&c, "proj2", true, None).unwrap().is_empty());
         assert!(list_todos_on(&c, "p", true).iter().any(|t| t.id == "tp" && t.id != "only"));
         assert!(list_todos_on(&c, "q", true).iter().any(|t| t.id == "tp"), "assignee retains the task in My tasks");
         // Change the project, then remove it — personal again, still owned, no data loss.
@@ -371,7 +373,7 @@ mod tests {
         let mut cleared = todo_on(&c, "tp").unwrap().unwrap();
         cleared.project_id = None;
         assert_eq!(update_todo_on(&mut c, cleared).unwrap().project_id, None);
-        assert!(list_project_todos_on(&c, "proj2", true).unwrap().is_empty(), "removing project clears it from Work");
+        assert!(list_project_todos_on(&c, "proj2", true, None).unwrap().is_empty(), "removing project clears it from Work");
         assert!(list_todos_on(&c, "p", true).iter().any(|t| t.id == "tp"), "still a personal task after removal");
         // A dangling project id is refused by the foreign key.
         let mut bad = todo_input("tb", "p", &[]);

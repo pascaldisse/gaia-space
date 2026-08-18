@@ -28,6 +28,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   const [selected,setSelected] = createSignal<CalendarItem>();
   const [selectedDay,setSelectedDay] = createSignal(dayKeyOf(startOfDay(new Date())));
   const range = () => view()==="month" ? monthRange(cursor()) : weekRange(cursor());
+  const hasActiveProject = () => scope() !== "project" || Boolean(projectId());
   // Quick-create: which type of item the day "Add" flow is creating, and whether
   // the kind-picker menu is open. Profiles/projects are needed for its pickers.
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
@@ -45,7 +46,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
 
   // Fan out to the three calendar sources for the range, then merge into one
   // typed list. Any single source failing must not blank the calendar.
-  const [items,{refetch:refetchItems}] = createResource(() => [range()[0].getTime()/1000, range()[1].getTime()/1000, scope(), projectId()] as const, async ([range_start,range_end,sc,pid]) => {
+  const [items,{refetch:refetchItems}] = createResource(() => hasActiveProject() ? [range()[0].getTime()/1000, range()[1].getTime()/1000, scope(), projectId()] as const : null, async ([range_start,range_end,sc,pid]) => {
     const scoped = sc==="project" && !!pid;
     const [occurrences,todos,allProjects,meetings,channels] = await Promise.all([
       meetingsApi.occurrences(range_start,range_end).catch(()=>[]),
@@ -119,6 +120,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
         {calendarControls()}
       </header>
     </Show>
+    <Show when={hasActiveProject()} fallback={<p class="cal-side-empty" role="status">Select a project to view its planning calendar.</p>}>
     <div class="calendar-legend"><span class="cal-key meeting">Meeting</span><span class="cal-key task">Task due</span><span class="cal-key deadline">Project deadline</span></div>
     <Show when={items.loading}><p class="cal-loading">Loading calendar…</p></Show>
     <div class="calendar-main">
@@ -179,6 +181,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
         </div>
         <button onClick={()=>setSelected(undefined)}>Close</button>
       </aside>}
+    </Show>
     </Show>
   </section>;
 }
