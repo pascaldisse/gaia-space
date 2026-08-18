@@ -79,6 +79,7 @@ const PATHS: Record<string, JSX.Element> = {
   // the primary Calendar destination while retaining the shared calendar glyph.
   "calendar-nav": <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />,
   book: <path d="M5 4h9a2 2 0 0 1 2 2v14H7a2 2 0 0 0-2 2zM5 4v18M16 6h3v14M9 8h4M9 11h4" />,
+  "book-nav": <path d="M5 4h9a2 2 0 0 1 2 2v14H7a2 2 0 0 0-2 2zM5 4v18M16 6h3v14M9 8h4M9 11h4" />,
   target: (
     <>
       <circle cx="12" cy="12" r="8" />
@@ -89,6 +90,12 @@ const PATHS: Record<string, JSX.Element> = {
   pipeline: <path d="M4 8h9a3 3 0 0 1 3 3v2a3 3 0 0 0 3 3h1M9 8 6 5M9 8l-3 3M20 16l-2.5-2.5M20 16l-2.5 2.5" />,
   package: <path d="M12 3 4 7v10l8 4 8-4V7zM4 7l8 4 8-4M12 11v10" />,
   clock: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  "clock-nav": (
     <>
       <circle cx="12" cy="12" r="8" />
       <path d="M12 7.5V12l3 2" />

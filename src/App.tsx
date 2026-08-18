@@ -45,11 +45,11 @@ const registry: Record<string, Dest> = {
   // primary / personal
   MyWork:       { name: "MyWork",       label: "Overview",       icon: "home", component: Dashboard },
   "To-Do":      { name: "To-Do",        label: "My tasks",       icon: "check", component: Todo },
-  Absences:     { name: "Absences",     label: "Time off",       icon: "clock", component: Absences },
+  Absences:     { name: "Absences",     label: "Time off",       icon: "clock-nav", component: Absences },
   Inbox:        { name: "Inbox",        label: "Inbox",          icon: "inbox", component: Inbox },
   Projects:     { name: "Projects",     label: "Projects",       icon: "layers", component: Portfolio },
   Calendar:     { name: "Calendar",     label: "Calendar",       icon: "calendar-nav", component: GlobalCalendar },
-  Knowledge:    { name: "Knowledge",    label: "Knowledge",      icon: "book", component: GlobalKnowledge },
+  Knowledge:    { name: "Knowledge",    label: "Knowledge",      icon: "book-nav", component: GlobalKnowledge },
   Organization: { name: "Organization", label: "Organization",   icon: "org", component: Members },
   Admin:        { name: "Admin",        label: "Admin",          icon: "settings", component: Admin },
   Users:        { name: "Users",        label: "User accounts",  icon: "users", component: Users },
