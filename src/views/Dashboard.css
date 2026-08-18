@@ -27,9 +27,15 @@
 .tn-icon{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:18px}
 .tn-title h2{font-family:var(--font-head);font-size:16px;margin:0;color:var(--text-strong)}
 .tn-title p{margin:2px 0 0;font-size:12px;color:#8b96ad}
-.tn-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#1c2942}
-.tn-col{background:var(--surface);padding:14px 16px;min-height:150px;display:flex;flex-direction:column;gap:10px}
-.tn-col>header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tn-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:18px 20px}
+.tn-col{background:var(--surface);border:1px solid var(--surface-border);border-radius:11px;padding:12px 14px 14px;min-height:150px;display:flex;flex-direction:column;gap:10px;transition:border-color .14s ease,box-shadow .14s ease}
+.tn-col:hover{border-color:var(--surface-border-hover);box-shadow:0 4px 16px rgba(0,0,0,.22)}
+/* full-bleed, subtly tinted header strip sets each card apart at a glance */
+.tn-col>header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-12px -14px 4px;padding:11px 14px;background:color-mix(in srgb,var(--surface-hover) 55%,transparent);border-bottom:1px solid var(--surface-border);border-radius:11px 11px 0 0}
+/* a hair of per-column accent on the header edge keeps them distinguishable, not uniform */
+.tn-tasks>header{box-shadow:inset 3px 0 0 color-mix(in srgb,var(--accent) 60%,transparent)}
+.tn-risk>header{box-shadow:inset 3px 0 0 color-mix(in srgb,var(--status-risk-high) 60%,transparent)}
+.tn-agenda>header{box-shadow:inset 3px 0 0 color-mix(in srgb,var(--accent-text) 55%,transparent)}
 .tn-col h3{font-family:var(--font-head);font-size:13px;margin:0;color:var(--text-strong);display:flex;align-items:center;gap:7px}
 .tn-col h3 span{font-size:11px;color:#7fb8b0;background:#1f2740;padding:1px 6px;border-radius:10px}
 .tn-link{background:none;border:0;padding:0;color:var(--accent-text);font-family:var(--font-head);font-weight:600;font-size:12px;white-space:nowrap}
@@ -87,9 +93,9 @@
 .co-icon{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:18px}
 .co-title h2{font-family:var(--font-head);font-size:16px;margin:0;color:var(--text-strong)}
 .co-title p{margin:2px 0 0;font-size:12px;color:#8b96ad}
-.co-body{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:1px;background:#1c2942}
-.co-body>.mini-cal{background:var(--surface);padding:16px 18px}
-.co-agenda{min-width:0;background:var(--surface);padding:16px 18px;display:flex;flex-direction:column;gap:10px;min-height:180px}
+.co-body{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+.co-body>.mini-cal{background:var(--surface);padding:16px 20px;border-right:1px solid var(--surface-border);box-shadow:1px 0 0 rgba(0,0,0,.25)}
+.co-agenda{min-width:0;background:color-mix(in srgb,var(--surface-hover) 32%,var(--surface));padding:16px 18px 16px 20px;display:flex;flex-direction:column;gap:10px;min-height:180px}
 .co-agenda>header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:9px;border-bottom:1px solid #223052}
 .co-agenda h3{font-family:var(--font-head);font-size:13px;margin:0;color:var(--text-strong)}
 .co-agenda>header span{font-size:11px;color:#7fb8b0;background:#1f2740;padding:1px 7px;border-radius:10px;white-space:nowrap}
@@ -109,4 +115,4 @@
 .co-agenda li>button strong{font-size:13px;color:var(--text-strong);font-weight:550;line-height:1.3}
 .co-agenda li>button small{font-size:11px;color:#8b96ad}
 .co-label{color:#f0a3b3!important}
-@media(max-width:760px){.co-body{grid-template-columns:1fr}}
+@media(max-width:760px){.co-body{grid-template-columns:1fr}.co-body>.mini-cal{border-right:0;border-bottom:1px solid var(--surface-border);box-shadow:0 1px 0 rgba(0,0,0,.25)}}
