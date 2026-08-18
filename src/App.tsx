@@ -23,7 +23,7 @@ import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import { Resizer, paneWidth } from "./components/Resizer";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
-import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews } from "./router";
+import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews, setRoutePending } from "./router";
 
 type View = { name:string; icon:string; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
@@ -51,6 +51,7 @@ export default function App() {
     registerViews([...personalViews,...workspaceViews,usersView].map(v=>({name:v.name})));
     // Web keeps real paths (History API); the Tauri webview has no server behind it, so it — and
     // only it — uses the hash adapter.
+    setRoutePending(isWeb()&&!authChecked()); // hold the boot URL before the first resync
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
@@ -60,7 +61,12 @@ export default function App() {
   });
   // Reachable views drive route normalization: a hidden/unauthorized URL resolves to the
   // fallback view AND the address bar is rewritten to match it.
-  createEffect(()=>setAvailableViews([...personalViews,...visibleWorkspaceViews()].map(v=>v.name)));
+  // Until the session resolves, an admin-only URL (/users) is indistinguishable from an
+  // unauthorized one — so the route is held, not rewritten, and settled once auth is known.
+  createEffect(()=>{
+    setRoutePending(isWeb()&&!authChecked());
+    setAvailableViews([...personalViews,...visibleWorkspaceViews()].map(v=>v.name));
+  });
   const nav=(view:View)=><a class="nav-link" title={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></a>;
   // NB: plain `if` returns here would only run once at mount (Solid components
   // don't re-run on signal changes) — Switch/Match keeps this reactive so the

@@ -1,10 +1,10 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkEntity, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Projects", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members"];
+const VIEWS = ["Dashboard", "To-Do", "Projects", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -26,7 +26,66 @@ function stackAdapter(initial: string) {
   };
 }
 
-beforeEach(() => { registerViews(VIEWS); setAvailableViews(VIEWS); initRouter(createMemoryAdapter()); });
+beforeEach(() => { setRoutePending(false); registerViews(VIEWS); setAvailableViews(VIEWS); initRouter(createMemoryAdapter()); });
+
+describe("context-free entity links", () => {
+  test("an issue link without project context is a real route, not a bare view", () => {
+    expect(buildPath({ view: "Issues", entityType: "issue", entityId: "i-1" })).toBe("issues/i-1");
+    expect(parsePath("issues/i-1")).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1" });
+    expect(parsePath("issues/i-1").projectId).toBeUndefined();
+    expect(parsePath("issues").entityId).toBeUndefined(); // the plain view URL stays a view URL
+  });
+
+  test("Goto's context-free URL survives new tab / reload", () => {
+    const env = stackAdapter("issues/i-1"); // pasted or opened in a new tab
+    initRouter(env.adapter);
+    expect(route()).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1" });
+    expect(env.url()).toBe("issues/i-1"); // not normalized away
+    env.reload();
+    expect(route()).toMatchObject({ entityType: "issue", entityId: "i-1" });
+  });
+
+  test("resolving the owner canonicalizes in place, leaving no history trap", () => {
+    const env = stackAdapter("dashboard");
+    initRouter(env.adapter);
+    navigate({ view: "Issues", entityType: "issue", entityId: "i-1" }); // Goto: project unknown
+    linkEntity("issue", "i-1", { projectId: "p-1" }, true);             // view resolved the project
+    expect(env.url()).toBe("projects/p-1/issues/i-1");
+    env.back();
+    expect(route().view).toBe("Dashboard"); // back skips the pre-canonical twin
+  });
+});
+
+describe("auth-pending policy", () => {
+  test("an admin-only URL is retained while the session is unresolved", () => {
+    setRoutePending(true);
+    setAvailableViews(VIEWS.filter((v) => v !== "Users")); // pre-auth: role unknown
+    const env = stackAdapter("users");
+    initRouter(env.adapter);
+    expect(env.url()).toBe("users"); // held, not rewritten
+    expect(route().view).toBe("Users");
+  });
+
+  test("admin keeps the route once auth settles", () => {
+    setRoutePending(true);
+    const env = stackAdapter("users");
+    initRouter(env.adapter);
+    setAvailableViews(VIEWS); // admin
+    setRoutePending(false);
+    expect(route().view).toBe("Users");
+    expect(env.url()).toBe("users");
+  });
+
+  test("a member is normalized away from it once auth settles", () => {
+    setRoutePending(true);
+    const env = stackAdapter("users");
+    initRouter(env.adapter);
+    setAvailableViews(VIEWS.filter((v) => v !== "Users")); // member
+    setRoutePending(false);
+    expect(route().view).toBe("Dashboard");
+    expect(env.url()).toBe("dashboard");
+  });
+});
 
 describe("grammar", () => {
   test("view routes are canonical slugs, never hash", () => {

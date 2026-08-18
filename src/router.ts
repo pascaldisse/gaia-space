@@ -39,6 +39,9 @@ export const toSlug = (name: string) =>
 
 export const FALLBACK_VIEW = "Dashboard";
 const NO_CONTAINER = "-"; // placeholder for a document container with a null container_id
+export const documentContainers = ["my-docs", "project", "kb"] as const;
+const isDocumentContainer = (value: string): value is typeof documentContainers[number] =>
+  documentContainers.includes(value as typeof documentContainers[number]);
 
 // --- registry ---------------------------------------------------------------
 // App owns the view list; the router only knows slugs. `available` is the subset the current
@@ -47,6 +50,7 @@ const NO_CONTAINER = "-"; // placeholder for a document container with a null co
 let slugToView: Record<string, string> = {};
 let viewToSlug: Record<string, string> = {};
 let available: Set<string> | null = null;
+let pending = false; // auth/identity not resolved yet -> availability is unknown, not "denied"
 
 export function registerViews(views: (string | ViewSpec)[]) {
   slugToView = {}; viewToSlug = {};
@@ -67,7 +71,19 @@ export function setAvailableViews(names: string[] | null) {
   resync();
 }
 
-const known = (view: string) => !!view && view in viewToSlug && (!available || available.has(view));
+/**
+ * While auth is pending the availability set is a lie (an admin-only view looks unauthorized
+ * simply because the session has not loaded). Retain the URL untouched in that window: no
+ * normalization, no rewrite. When it clears, resync() applies the real policy — admin keeps
+ * /users, a member is normalized away from it.
+ */
+export function setRoutePending(next: boolean) {
+  if (pending === next) return;
+  pending = next;
+  resync();
+}
+
+const known = (view: string) => !!view && view in viewToSlug && (pending || !available || available.has(view));
 
 // --- pure grammar -----------------------------------------------------------
 const enc = (s: string) => encodeURIComponent(s);
@@ -92,13 +108,15 @@ export function parsePath(path: string): Route {
   if (head === "documents" && rest.length) {
     if (rest.length === 1) return norm({ view: "Documents", entityType: "document", entityId: rest[0] });
     const containerType = rest[0];
+    if (!isDocumentContainer(containerType) || !rest[1]) return { view: FALLBACK_VIEW };
     const containerId = rest[1] === NO_CONTAINER ? undefined : rest[1];
     const entityId = rest.length > 2 ? rest.slice(2).join("/") : undefined;
     return norm({ view: "Documents", containerType, containerId, ...(entityId ? { entityType: "document", entityId } : {}) });
   }
 
-  // /<entity-segment>/<id>
-  const desc = Object.entries(entityRoutes).find(([, d]) => d.segment === head && !d.parent && !d.container);
+  // /<entity-segment>/<id> — incl. context-free entity links (e.g. /issues/<id> from Goto, where
+  // the project is not known yet); the view resolves the owner and canonicalizes the URL after.
+  const desc = Object.entries(entityRoutes).find(([, d]) => d.segment === head && !d.container);
   if (desc && rest.length) return norm({ view: desc[1].view, entityType: desc[0], entityId: rest.join("/") });
 
   return norm({ view: slugToView[head] ?? "" });
@@ -137,7 +155,9 @@ export function createPathAdapter(base: string): RouterAdapter {
   const prefix = ("/" + base + "/").replace(/\/+/g, "/");
   const strip = (p: string) => (p.startsWith(prefix) ? p.slice(prefix.length) : p.replace(/^\/+/, ""));
   return {
-    read: () => strip(location.pathname) + location.search.replace(/^\?$/, ""),
+    // Query parameters belong to the current page's data concerns, not route grammar.
+    // Reading them here made `issues?q=x` look like an unknown view and rewrote the URL.
+    read: () => strip(location.pathname),
     write: (path, replace) => {
       const url = prefix + path;
       if (location.pathname.replace(/\/+$/, "") === url.replace(/\/+$/, "")) return;
@@ -178,12 +198,14 @@ let adapter: RouterAdapter = createMemoryAdapter();
 const [route, setRoute] = createSignal<Route>({ view: FALLBACK_VIEW });
 export { route };
 export const activeView = () => route().view;
+export const isViewAvailable = (view: string) => known(view);
 
 /** Read the environment, normalize, and rewrite the URL when it disagrees with the resolved route. */
 function resync() {
   const raw = adapter.read();
   const resolved = parsePath(raw);
   setRoute(resolved);
+  if (pending) return; // URL retained verbatim until policy is knowable
   const canonical = buildPath(resolved);
   if (canonical !== raw.replace(/^\/+|\/+$/g, "")) adapter.write(canonical, true); // hidden/unknown route -> visible normalize
 }
@@ -235,9 +257,10 @@ export function linkEntity(
   entityType: string,
   entityId: string,
   context: Pick<Route, "projectId" | "containerType" | "containerId"> = {},
+  replace = false,
 ) {
   const view = entityView(entityType) ?? activeView();
-  if (view) navigate({ view, entityType, entityId, ...context });
+  if (view) navigate({ view, entityType, entityId, ...context }, undefined, undefined, replace);
 }
 
 /** Record the document container (container switch) without an open document. */
