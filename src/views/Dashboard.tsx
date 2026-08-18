@@ -187,7 +187,7 @@ export default function Dashboard() {
             {/* Calendar agenda — meeting links / open calendar */}
             <article class="tn-col tn-agenda">
               <header><h3>Agenda <span>{data().meeting_occurrences.length}</span></h3><button class="tn-link" onClick={() => requestView("Calendar")}>Open calendar →</button></header>
-              <Show when={nextMeetings().length} fallback={<p class="tn-empty">Nothing scheduled this week. <button class="agenda-inline" onClick={() => requestView("Calendar")}>Browse →</button></p>}>
+              <Show when={nextMeetings().length} fallback={<p class="tn-empty">Nothing scheduled this week.</p>}>
                 <ul class="tn-agendalist">
                   <For each={nextMeetings()}>{m =>
                     <li>
