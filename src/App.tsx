@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Match, Show, Switch, type Component } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Match, Show, Switch, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import "./App.css";
 import Dashboard from "./views/Dashboard";
@@ -23,7 +23,7 @@ import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import { Resizer, paneWidth } from "./components/Resizer";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
-import { activeView, navigate, registerViews } from "./router";
+import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews } from "./router";
 
 type View = { name:string; icon:string; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
@@ -31,10 +31,10 @@ const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{n
 const localOnlyViews:View[]=[{name:"Repos",icon:"⌘",component:Repos},{name:"Code Reviews",icon:"⇄",component:Reviews},{name:"Pipelines",icon:"▷",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"◈",component:Projects},...localOnlyViews,{name:"Issues",icon:"✓",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"◇",component:Packages},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
 const usersView:View={name:"Users",icon:"⚉",component:Users};
-const gotoView:Record<string,string>={profile:"Members",project:"Projects",issue:"Issues",channel:"Chat",document:"Documents",review:"Code Reviews",meeting:"Meetings"};
+
 
 export default function App() {
-  const active=()=>activeView()||"Dashboard"; const setActive=(name:string)=>navigate(name); const [gotoOpen,setGotoOpen]=createSignal(false);
+  const active=()=>activeView()||"Dashboard"; const [gotoOpen,setGotoOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
@@ -48,14 +48,20 @@ export default function App() {
   const collapsed=()=>pinnedCollapsed()||narrow();
   const toggle=()=>{const next=!pinnedCollapsed();setPinnedCollapsed(next);localStorage.setItem("space.nav.collapsed",next?"1":"0")};
   onMount(()=>{
-    registerViews([...personalViews,...workspaceViews,usersView].map(v=>v.name));
+    registerViews([...personalViews,...workspaceViews,usersView].map(v=>({name:v.name})));
+    // Web keeps real paths (History API); the Tauri webview has no server behind it, so it — and
+    // only it — uses the hash adapter.
+    initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
     window.addEventListener("keydown",shortcut);
     const mq=window.matchMedia("(max-width: 900px)"); const sync=()=>setNarrow(mq.matches); sync(); mq.addEventListener("change",sync);
     onCleanup(()=>{window.removeEventListener("keydown",shortcut);mq.removeEventListener("change",sync)});
   });
-  const nav=(view:View)=><button title={view.name} classList={{active:active()===view.name}} onClick={()=>setActive(view.name)}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></button>;
+  // Reachable views drive route normalization: a hidden/unauthorized URL resolves to the
+  // fallback view AND the address bar is rewritten to match it.
+  createEffect(()=>setAvailableViews([...personalViews,...visibleWorkspaceViews()].map(v=>v.name)));
+  const nav=(view:View)=><a class="nav-link" title={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></a>;
   // NB: plain `if` returns here would only run once at mount (Solid components
   // don't re-run on signal changes) — Switch/Match keeps this reactive so the
   // shell swaps in the instant authChecked()/currentUser() resolve post-boot.
@@ -71,7 +77,7 @@ export default function App() {
         </aside>
         <Resizer width={navWidth} setWidth={setNavWidth} min={160} max={420}/>
         <main class="workspace"><Dynamic component={current().component}/></main>
-        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>navigate(gotoView[kind]??"Dashboard",kind,id)}/>
+        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
     </Match>
   </Switch>;

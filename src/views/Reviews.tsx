@@ -7,7 +7,7 @@ import {
   type ReviewDiscussion,
 } from "../api/review";
 import { Diff } from "../Diff";
-import { useDeepLink, linkEntity, route } from "../router";
+import { useDeepLink, linkProps, route } from "../router";
 import "./Reviews.css";
 
 export default function Reviews() {
@@ -51,7 +51,6 @@ export default function Reviews() {
     if (reviews()?.length) { didAutoSelect = true; if (!selectedId() && !route().entityId) setSelectedId(reviews()![0].id); }
   });
   const selected = (): Review | null => reviews()?.find((r) => r.id === selectedId()) ?? null;
-  const openReview = (id:string) => { setSelectedId(id); linkEntity("review", id); };
   useDeepLink("review", (id) => setSelectedId(id), () => setSelectedId(null));
 
   async function createMR(e: SubmitEvent) {
@@ -291,11 +290,13 @@ export default function Reviews() {
             <ul>
               <For each={reviews()}>
                 {(r) => (
-                  <li classList={{ active: r.id === selectedId() }} onClick={() => openReview(r.id)}>
-                    <span class="num">#{r.number}</span>
-                    <strong>{r.title}</strong>
-                    <span class={`state state-${r.state.toLowerCase()}`}>{r.state}</span>
-                    <span class="branches">{r.source_branch} → {r.target_branch}</span>
+                  <li classList={{ active: r.id === selectedId() }}>
+                    <a class="row-link" {...linkProps({ view: "Code Reviews", entityType: "review", entityId: r.id })}>
+                      <span class="num">#{r.number}</span>
+                      <strong>{r.title}</strong>
+                      <span class={`state state-${r.state.toLowerCase()}`}>{r.state}</span>
+                      <span class="branches">{r.source_branch} → {r.target_branch}</span>
+                    </a>
                   </li>
                 )}
               </For>
