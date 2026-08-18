@@ -127,6 +127,28 @@ export default function Absences() {
       >
         <Show when={absences.loading}><p class="timeoff-loading">Loading…</p></Show>
         <div class="view-cols timeoff-cols"><div class="view-main">
+        <section class="availability-board" aria-label="Availability at a glance">
+          <div class="availability-panel now">
+            <div class="availability-panel-head"><h2>Away now</h2><span>{awayNow()}</span></div>
+            <Show when={awayList().length} fallback={<p>Everyone is currently available.</p>}>
+              <ul><For each={awayList().slice(0, 4)}>{(a) => <li><strong>{personName(a.profile_id)}</strong><span>{a.reason_type} · until {fmtRange(a.date_from, a.date_to).split(" → ").slice(-1)[0]}</span></li>}</For></ul>
+            </Show>
+          </div>
+          <div class="availability-panel upcoming">
+            <div class="availability-panel-head"><h2>Coming up</h2><span>{upcomingList().length}</span></div>
+            <Show when={upcomingList().length} fallback={<p>No upcoming time off recorded.</p>}>
+              <ul><For each={upcomingList().slice(0, 4)}>{(a) => <li><strong>{personName(a.profile_id)}</strong><span>{a.reason_type} · {fmtRange(a.date_from, a.date_to)}</span></li>}</For></ul>
+            </Show>
+          </div>
+          <div class="availability-panel pending">
+            <div class="availability-panel-head"><h2>Needs approval</h2><span>{pending()}</span></div>
+            <Show when={pendingList().length} fallback={<p>Everything is approved.</p>}>
+              <ul><For each={pendingList().slice(0, 4)}>{(a) => <li><div><strong>{personName(a.profile_id)}</strong><span>{a.reason_type} · {fmtRange(a.date_from, a.date_to)}</span></div><button class="ghost small" onClick={() => update(a, { approved: true })}>Approve</button></li>}</For></ul>
+            </Show>
+          </div>
+        </section>
+        <section class="timeoff-records">
+          <div class="timeoff-records-head"><h2>All time off</h2><span>{sorted().length} records</span></div>
         <ul class="timeoff-list">
           <For each={sorted()}>{(a) => {
             const phase = phaseOf(a);
@@ -155,6 +177,7 @@ export default function Absences() {
             );
           }}</For>
         </ul>
+        </section>
         </div>
 
         <Show when={sorted().length > 0}>

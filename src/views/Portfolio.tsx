@@ -140,13 +140,16 @@ export default function Portfolio() {
       <div class="pf-grid">
         <For each={list()}>{(p) =>
           <button class="pf-card" classList={{ current: p.id === projectId() }} onClick={() => open(p.id)}>
-            <div class="pf-card-top">
-              <span class="pf-mark">{(p.key ?? "··").slice(0, 2).toUpperCase()}</span>
-              <span class="pf-open">{counts()?.get(p.id) ?? 0} open</span>
+            <span class="pf-mark">{(p.key ?? "··").slice(0, 2).toUpperCase()}</span>
+            <div class="pf-card-copy">
+              <div class="pf-card-title"><strong>{p.name}</strong><span class="pf-key">{p.key}</span></div>
+              <p>{p.description || "No description yet — open this project to add its work, knowledge, and delivery context."}</p>
             </div>
-            <strong>{p.name}</strong>
-            <p>{p.description || "No description."}</p>
-            <span class="pf-key">{p.key}</span>
+            <div class="pf-card-facts">
+              <span class="pf-open"><b>{counts()?.get(p.id) ?? 0}</b> open issues</span>
+              <span class="pf-deadline">{p.deadline ? `Deadline ${p.deadline}` : "No deadline"}</span>
+            </div>
+            <span class="pf-card-open">Open project →</span>
           </button>}</For>
       </div>
     </Show>
