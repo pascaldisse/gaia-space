@@ -2,12 +2,9 @@
 .packages-head h1 { margin: 0; font-size: 21px; font-weight: 600; }
 .packages-head p { color: #9da0a8; margin: 5px 0 0; max-width: 680px; }
 
-.packages-view select, .packages-view input[type="text"], .packages-view input:not([type]), .packages-view input[type="number"], .packages-view textarea {
-  background: #141d30; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 8px; font: inherit;
-}
 .packages-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.packages-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-.packages-view button.primary { background: #00c2a8; border-color: #00c2a8; color: #fff; }
+.packages-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+.packages-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .packages-view button.ghost { background: transparent; }
 .packages-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
 .packages-view button.danger { color: #ff9a9a; border-color: #7a3336; }

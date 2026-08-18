@@ -4,11 +4,8 @@
 .reviews-head p { color: #9da0a8; margin: 5px 0 0; max-width: 620px; }
 .reviews-head label { font-size: 11px; color: #9da0a8; display: flex; flex-direction: column; gap: 4px; }
 
-.reviews-view select, .reviews-view input[type="text"], .reviews-view input:not([type]), .reviews-view input[type="number"] {
-  background: #141d30; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 8px; font: inherit;
-}
-.reviews-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-.reviews-view button.primary { background: #00c2a8; border-color: #00c2a8; color: #fff; }
+.reviews-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+.reviews-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .reviews-view button.ghost { background: transparent; }
 .reviews-view button.ghost.small, .reviews-view button.small { padding: 2px 7px; font-size: 11px; }
 

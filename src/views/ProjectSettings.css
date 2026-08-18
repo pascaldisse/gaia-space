@@ -17,15 +17,15 @@
 .ps-meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #7fb8b0; }
 
 .ps-status-add { display: flex; gap: 8px; margin-bottom: 12px; }
-.ps-status-add input { flex: 1; background: #0e1626; border: 1px solid #33405e; border-radius: 6px; color: var(--text); padding: 7px 9px; font: inherit; }
+.ps-status-add input { flex: 1; }
 .ps-status-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .ps-status-list li { display: flex; align-items: center; gap: 10px; }
 .ps-status-list input[type="color"] { width: 30px; height: 28px; padding: 0; border: 1px solid #33405e; border-radius: 6px; background: #0e1626; }
-.ps-status-name { flex: 1; background: #0e1626; border: 1px solid #33405e; border-radius: 6px; color: var(--text); padding: 6px 9px; font: inherit; }
+.ps-status-name { flex: 1; }
 .ps-status-done { display: flex; align-items: center; gap: 5px; color: #9da0a8; font-size: 12px; white-space: nowrap; }
 
 .ps-deadline { margin-top: 14px; padding-top: 14px; border-top: 1px solid #202a44; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .ps-deadline label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #9da0a8; }
 .ps-deadline label em { color: #6b7488; font-style: normal; }
-.ps-deadline input[type="date"] { background: #0e1626; border: 1px solid #33405e; border-radius: 6px; color: var(--text); padding: 6px 9px; font: inherit; color-scheme: dark; }
+
 .ps-deadline-actions { display: flex; gap: 8px; }

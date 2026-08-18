@@ -17,7 +17,7 @@
 .pf-create h2 { margin: 0; font-family: var(--font-head); font-size: 17px; color: var(--text-strong); }
 .pf-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #aeb1b8; }
 .pf-field span em { font-style: normal; color: #6f7890; }
-.pf-field input, .pf-field textarea { font: inherit; background: #0e1626; color: #d9dee3; border: 1px solid #33405e; border-radius: 6px; padding: 8px 10px; }
+.pf-field input, .pf-field textarea { padding: 8px 10px; }
 .pf-field textarea { min-height: 3.5em; resize: vertical; }
 .pf-error { background: #512529; color: #ffc7ca; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
 .pf-create-actions { display: flex; justify-content: flex-end; gap: 8px; }

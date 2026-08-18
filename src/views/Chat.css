@@ -29,11 +29,6 @@
 
 .chat-profile-picker select {
   width: 100%;
-  background: #243050;
-  color: inherit;
-  border: 1px solid #33405e;
-  border-radius: 6px;
-  padding: 0.3em 0.4em;
 }
 
 .channel-groups {
@@ -98,11 +93,6 @@
 .new-channel-form input,
 .new-channel-form select {
   width: 100%;
-  background: #0e1626;
-  color: inherit;
-  border: 1px solid #33405e;
-  border-radius: 6px;
-  padding: 0.35em 0.5em;
 }
 
 .recipient-picker {
@@ -299,10 +289,5 @@
 
 .members-panel select {
   width: 100%;
-  background: #0e1626;
-  color: inherit;
-  border: 1px solid #33405e;
-  border-radius: 6px;
-  padding: 0.3em 0.4em;
   margin-bottom: 0.4em;
 }

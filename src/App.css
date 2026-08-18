@@ -18,6 +18,19 @@
   --text: var(--brand-cool-gray);
   --text-strong: var(--brand-ice);
 
+  /* ── form-control system tokens ── */
+  --ctl-bg: #0e1626;            /* resting field surface */
+  --ctl-bg-hover: #111d33;      /* subtle lift on hover */
+  --ctl-bg-raised: #16233d;     /* buttons / segmented track */
+  --ctl-border: #33405e;        /* resting border */
+  --ctl-border-hover: #4a5a80;  /* border on hover */
+  --ctl-radius: 8px;            /* standard control radius */
+  --ctl-radius-sm: 6px;         /* dense / inline controls */
+  --ctl-pad-y: 0.5em;
+  --ctl-pad-x: 0.7em;
+  --ctl-placeholder: #64708c;
+  --ctl-focus-ring: 0 0 0 3px rgba(0,194,168,0.16);
+
   --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
@@ -98,23 +111,59 @@ button:disabled {
   cursor: default;
 }
 
+/* ── unified premium control surface ─────────────────────────
+   one coherent look for every text field, select, and textarea.
+   view-level CSS should only adjust layout (width/flex/min-width),
+   never re-skin these — the tokens above are the single source. */
 textarea,
+select,
 input[type="text"], input[type="search"], input[type="email"], input[type="password"],
-input[type="date"], input[type="number"], input:not([type]) {
+input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"],
+input[type="number"], input[type="url"], input[type="tel"], input:not([type]) {
   font-family: var(--font-body);
   font-size: inherit;
-  background: #0e1626;
+  line-height: 1.35;
+  background: var(--ctl-bg);
   color: var(--text-strong);
-  border: 1px solid #33405e;
-  border-radius: 7px;
-  padding: 0.55em 0.7em;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--ctl-radius);
+  padding: var(--ctl-pad-y) var(--ctl-pad-x);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+  color-scheme: dark;
 }
-textarea { resize: vertical; min-height: 4.5em; width: 100%; padding: 0.5em; }
-input::placeholder, textarea::placeholder { color: #64708c; }
-textarea:hover,
+textarea { resize: vertical; min-height: 4.5em; width: 100%; }
+input::placeholder, textarea::placeholder { color: var(--ctl-placeholder); }
+
+/* selects: drop the cheap native chrome, add a crisp custom chevron */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.2em;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%238b96ad' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7em center;
+  background-size: 12px;
+  cursor: pointer;
+}
+select:hover { background-color: var(--ctl-bg-hover); }
+select option { background: #0f1b33; color: var(--text-strong); }
+
+/* themed checkboxes & radios — teal accent instead of OS blue */
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+input[type="color"] { cursor: pointer; padding: 2px; }
+
+textarea:hover, select:hover,
 input[type="text"]:hover, input[type="search"]:hover, input[type="email"]:hover, input[type="password"]:hover,
-input[type="date"]:hover, input[type="number"]:hover, input:not([type]):hover { border-color: #48577a; }
+input[type="date"]:hover, input[type="time"]:hover, input[type="datetime-local"]:hover, input[type="month"]:hover,
+input[type="number"]:hover, input[type="url"]:hover, input[type="tel"]:hover, input:not([type]):hover { border-color: var(--ctl-border-hover); }
+
+textarea:disabled, select:disabled,
+input:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* stronger, quieter micro-labels — Poppins, uppercase, tracked */
 .field-label, .form-label {
@@ -139,8 +188,18 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0,194,168,0.16);
+  box-shadow: var(--ctl-focus-ring);
 }
+
+/* ── segmented control — coherent premium toggle group ──────── */
+.segmented { display: inline-flex; align-items: stretch; gap: 2px; padding: 3px; background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 9px; }
+.segmented button {
+  background: transparent; border: 1px solid transparent; border-radius: var(--ctl-radius-sm);
+  padding: 5px 12px; color: #9aa4bb; font-family: var(--font-head); font-weight: 500; font-size: 12px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.segmented button:hover { color: var(--text-strong); background: rgba(255,255,255,0.05); border-color: transparent; }
+.segmented button.active { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
 
 .app {
   display: grid;
@@ -523,7 +582,7 @@ textarea:focus {
 .nav-footer-row { display: flex; align-items: center; gap: 4px; }
 .nav-footer-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; color: #c9cbd1; padding: 2px 4px; }
 .nav-footer-pw { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.nav-footer-pw input { background: #0e1626; border: 1px solid #33405e; border-radius: 5px; color: #e7e8ec; padding: 6px 7px; font: inherit; }
+.nav-footer-pw input { padding: 6px 8px; }
 .nav-footer-pw .error { background: #512529; color: #ffc7ca; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
 .nav-footer-pw .ok { background: #1f4a2a; color: #b3ffc0; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
 .workspace { min-width: 0; flex: 1; overflow: hidden; background: #12213d; display: flex; flex-direction: column; }
@@ -582,4 +641,4 @@ textarea:focus {
 }
 
 .picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: 210px; }
-.picker select { font: inherit; background: #0e1626; color: #d9dee3; border: 1px solid #33405e; border-radius: 5px; padding: 7px; max-width: 320px; }
+.picker select { width: 100%; max-width: 320px; }

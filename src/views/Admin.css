@@ -6,7 +6,7 @@
 .admin-panel{background:#141d30;border:1px solid #33405e;border-radius:7px;padding:13px;min-height:200px}
 .panel-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}
 .panel-title h2{font-size:14px;margin:0}
-.admin-view input,.admin-view select{min-width:0;background:#0e1626;border:1px solid #33405e;border-radius:5px;color:#e7e8ec;padding:7px 8px;font:inherit;width:100%}
+.admin-view input,.admin-view select{min-width:0;width:100%}
 .inline-form-col{display:grid;gap:6px;margin-bottom:12px}
 .entity-list{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}
 .entity-list li{display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid #2b3550;gap:8px}

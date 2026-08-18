@@ -5,12 +5,9 @@
 .tab-switch button { background: #141d30; border: 1px solid #33405e; color: #9da0a8; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
 .tab-switch button.active { background: #0d2733; border-color: #00c2a8; color: #d4d6db; }
 
-.pipelines-view select, .pipelines-view input[type="text"], .pipelines-view input:not([type]), .pipelines-view input[type="number"], .pipelines-view textarea {
-  background: #141d30; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 8px; font: inherit;
-}
 .pipelines-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.pipelines-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-.pipelines-view button.primary { background: #00c2a8; border-color: #00c2a8; color: #fff; }
+.pipelines-view button { background: #243050; border: 1px solid #33405e; color: #d4d6db; border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+.pipelines-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .pipelines-view button.ghost { background: transparent; }
 .pipelines-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
 .pipelines-view button.danger { color: #ff9a9a; border-color: #7a3336; }
