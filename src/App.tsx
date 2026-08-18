@@ -21,6 +21,10 @@ const GlobalKnowledge: Component = () => <Documents scope="global" />;
 const ProjectDocs: Component = () => <Documents scope="project" />;
 import Meetings from "./views/Meetings";
 import Calendar from "./views/Calendar";
+// Same Calendar module, two IA destinations: a primary workspace-wide Calendar in
+// the top nav vs. the project-filtered Planning calendar inside a project.
+const GlobalCalendar: Component = () => <Calendar scope="global" />;
+const ProjectCalendar: Component = () => <Calendar scope="project" />;
 import Packages from "./views/Packages";
 import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
@@ -42,6 +46,7 @@ const registry: Record<string, Dest> = {
   Absences:     { name: "Absences",     label: "Time off",       icon: "◷", component: Absences },
   Inbox:        { name: "Inbox",        label: "Inbox",          icon: "✉", component: Inbox },
   Projects:     { name: "Projects",     label: "Projects",       icon: "◈", component: Portfolio },
+  Calendar:     { name: "Calendar",     label: "Calendar",       icon: "▦", component: GlobalCalendar },
   Knowledge:    { name: "Knowledge",    label: "Knowledge",      icon: "▤", component: GlobalKnowledge },
   Organization: { name: "Organization", label: "Organization",   icon: "♟", component: Members },
   Admin:        { name: "Admin",        label: "Admin",          icon: "⚙", component: Admin },
@@ -53,7 +58,7 @@ const registry: Record<string, Dest> = {
   ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "✓", component: ProjectTasks },
   Docs:            { name: "Docs",            label: "Docs",             icon: "▤", component: ProjectDocs },
   Chat:            { name: "Chat",            label: "Chat",             icon: "◌", component: Chat },
-  Calendar:        { name: "Calendar",        label: "Calendar",         icon: "▦", component: Calendar },
+  ProjectCalendar: { name: "ProjectCalendar", label: "Calendar",         icon: "▦", component: ProjectCalendar },
   Meetings:        { name: "Meetings",        label: "Meetings",         icon: "◷", component: Meetings },
   Repos:           { name: "Repos",           label: "Repositories",     icon: "⌘", component: Repos, desktopOnly: true },
   Reviews:         { name: "Reviews",         label: "Code reviews",     icon: "⇄", component: Reviews, desktopOnly: true },
@@ -65,7 +70,7 @@ const registry: Record<string, Dest> = {
 // primary top-navigation: the four destinations the workspace centers on.
 // A subtle divider separates a visually secondary cluster (Time off, Organization)
 // that stays accessible but never competes with the primary four. Admin lives in a menu.
-const primaryNav = ["MyWork", "To-Do", "Projects", "Knowledge", "Inbox"];
+const primaryNav = ["MyWork", "To-Do", "Projects", "Calendar", "Knowledge", "Inbox"];
 const secondaryNav = ["Absences", "Organization"];
 // nav buttons that highlight for a whole section rather than a single destination
 const sectionNav = new Set(["Projects", "Organization"]);
@@ -75,7 +80,7 @@ type Tab = { tab: string; icon: string; views: string[] };
 const projectTabs: Tab[] = [
   { tab: "Steering",      icon: "◎", views: ["Steering"] },
   { tab: "Work",          icon: "▦", views: ["Issues", "Boards", "ProjectTasks"] },
-  { tab: "Planning",      icon: "▦", views: ["Calendar", "Meetings"] },
+  { tab: "Planning",      icon: "▦", views: ["ProjectCalendar", "Meetings"] },
   { tab: "Knowledge",     icon: "▤", views: ["Docs"] },
   { tab: "Communication", icon: "◌", views: ["Chat"] },
   { tab: "Delivery",      icon: "⌘", views: ["Repos", "Reviews", "Pipelines", "Packages"] },

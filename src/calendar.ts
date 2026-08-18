@@ -86,6 +86,34 @@ export function buildCalendarItems(sources: {
   return items;
 }
 
+/** Local YYYY-MM-DD key for a Date (calendar grid days are local). */
+export function dayKeyOf(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Midnight of a date, dependency-free. */
+export function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** The 42-day (6×7) grid covering the month `cursor` falls in, Sunday-first. */
+export function monthGrid(cursor: Date): Date[] {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(1 - first.getDay());
+  const days: Date[] = [];
+  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); days.push(d); }
+  return days;
+}
+
+/** Distinct kinds present on a given day, in a stable order (for dot rendering). */
+export function kindsOnDay(items: CalendarItem[], dayKey: string): CalendarKind[] {
+  const order: CalendarKind[] = ["meeting", "task", "deadline"];
+  const present = new Set(items.filter((i) => i.date === dayKey).map((i) => i.kind));
+  return order.filter((k) => present.has(k));
+}
+
 /** Every item bucketed on a given local day, all-day first, then timed by start. */
 export function itemsOnDay(items: CalendarItem[], dayKey: string): CalendarItem[] {
   return items

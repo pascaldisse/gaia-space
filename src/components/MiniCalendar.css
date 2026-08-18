@@ -1,0 +1,27 @@
+/* Compact Overview month calendar — paloptic dark surfaces + kind-colored dots. */
+.mini-cal{display:flex;flex-direction:column;gap:10px}
+.mini-cal-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mini-cal-head strong{font-family:var(--font-head);font-size:13px;color:var(--text-strong)}
+.mini-cal-headbtns{display:flex;align-items:center;gap:6px}
+.mini-nav{width:26px;height:26px;padding:0;display:grid;place-items:center;border:1px solid #2b3550;background:#101d38;color:var(--text);border-radius:7px;font-size:15px;line-height:1;cursor:pointer}
+.mini-nav:hover{border-color:var(--accent);color:var(--text-strong)}
+.mini-today{font-family:var(--font-head);font-weight:600;font-size:11px;padding:4px 9px;border:1px solid #2b3550;background:#101d38;color:var(--accent-text);border-radius:7px;cursor:pointer}
+.mini-today:hover{border-color:var(--accent)}
+.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.mini-wd{text-align:center;font-size:10px;font-weight:600;color:#8b96ad;padding-bottom:2px;text-transform:uppercase;letter-spacing:.04em}
+.mini-day{position:relative;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:1px solid transparent;background:#0f1c34;border-radius:8px;color:var(--text);cursor:pointer;padding:0;transition:border-color .12s ease,background .12s ease}
+.mini-day:hover{border-color:#33456d;background:#122240}
+.mini-day .mini-num{font-size:12px;font-variant-numeric:tabular-nums;line-height:1}
+.mini-day.muted{color:#4f5a74;background:#0c1730}
+.mini-day.muted .mini-num{opacity:.7}
+.mini-day.has{background:#111f3a}
+.mini-day.today{border-color:var(--accent)}
+.mini-day.today .mini-num{color:var(--accent-text);font-weight:700}
+.mini-day.selected{border-color:var(--accent);background:var(--accent-soft)}
+.mini-day.selected .mini-num{color:var(--text-strong);font-weight:700}
+.mini-dots{position:absolute;bottom:5px;display:flex;gap:2px;height:5px;align-items:center}
+.mini-dot{width:5px;height:5px;border-radius:50%}
+.mini-dot.meeting{background:var(--accent)}
+.mini-dot.task{background:#e0a83a}
+.mini-dot.deadline{background:#e0607a}
+@media(max-width:760px){.mini-day .mini-num{font-size:11px}}

@@ -2,9 +2,12 @@ import { createResource, createSignal, For, Show } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { personalApi, type Todo } from "../api/personal";
 import { platformApi, type Project } from "../api/platform";
+import { meetingsApi } from "../api/meetings";
 import { ProfilePicker } from "../components/Pickers";
+import MiniCalendar from "../components/MiniCalendar";
 import { profileId } from "../session";
-import { requestView, requestTodo } from "../nav";
+import { requestView, requestTodo, requestDate } from "../nav";
+import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
 import "./Dashboard.css";
 
 // agenda helpers — group the next meetings into human day-buckets so the
@@ -104,6 +107,29 @@ export default function Dashboard() {
   // agenda for the compact "Today & next" column — soonest meetings first.
   const nextMeetings = () => [...(dashboard()?.meeting_occurrences ?? [])].sort((a, b) => a.starts_at - b.starts_at).slice(0, 5);
 
+  // ── Embedded Calendar overview ── a compact month grid unifying meetings, task
+  // due dates, and project deadlines for the visible month, with an adjacent
+  // agenda for the picked day. Clicking through deep-links into the full Calendar
+  // workspace focused on that day. Sources mirror the Calendar view exactly.
+  const [calCursor, setCalCursor] = createSignal(startOfDay(new Date()));
+  const [calDay, setCalDay] = createSignal(dayKeyOf(startOfDay(new Date())));
+  const [calItems] = createResource(() => [calCursor().getTime(), profileId()] as const, async () => {
+    const g = monthGrid(calCursor());
+    const rangeStart = g[0].getTime() / 1000;
+    const rangeEnd = new Date(g[41].getFullYear(), g[41].getMonth(), g[41].getDate() + 1).getTime() / 1000;
+    const [occurrences, todos, projectsList] = await Promise.all([
+      meetingsApi.occurrences(rangeStart, rangeEnd).catch(() => []),
+      personalApi.todos(profileId(), true).catch(() => []),
+      platformApi.projects().catch(() => []),
+    ]);
+    return buildCalendarItems({ occurrences, todos, projects: projectsList });
+  });
+  const calAgenda = () => itemsOnDay(calItems() ?? [], calDay());
+  const shiftCal = (amount: number) => { const next = new Date(calCursor()); next.setMonth(next.getMonth() + amount); setCalCursor(startOfDay(next)); };
+  const openCalendarAt = (dayKey: string) => { requestDate(dayKey); requestView("Calendar"); };
+  const readableDay = (key: string) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }); };
+  const calTime = (e: CalendarItem) => e.allDay ? (e.kind === "deadline" ? "Deadline" : "All day") : new Date(e.starts_at! * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
   return <section class="dashboard-view">
     <header>
       <div><h1>Overview</h1><p>Your work, calendar, notification feed, and organization availability.</p></div>
@@ -177,6 +203,41 @@ export default function Dashboard() {
                 </ul>
               </Show>
             </article>
+          </div>
+        </section>
+
+        {/* ── Calendar overview ── embedded compact month + day agenda; clicks open the full Calendar workspace ── */}
+        <section class="cal-overview">
+          <div class="co-head">
+            <div class="co-title"><span class="co-icon">▦</span><div><h2>Calendar</h2><p>Meetings, task due dates, and project deadlines at a glance</p></div></div>
+            <button class="tn-link" onClick={() => openCalendarAt(calDay())}>Open calendar →</button>
+          </div>
+          <div class="co-body">
+            <MiniCalendar
+              cursor={calCursor()}
+              items={calItems() ?? []}
+              selected={calDay()}
+              onPrev={() => shiftCal(-1)}
+              onNext={() => shiftCal(1)}
+              onToday={() => { const t = startOfDay(new Date()); setCalCursor(t); setCalDay(dayKeyOf(t)); }}
+              onPick={setCalDay}
+            />
+            <div class="co-agenda">
+              <header><h3>{readableDay(calDay())}</h3><span>{calAgenda().length} item{calAgenda().length === 1 ? "" : "s"}</span></header>
+              <Show when={calAgenda().length} fallback={<p class="co-empty">Nothing scheduled. <button class="agenda-inline" onClick={() => openCalendarAt(calDay())}>Open calendar →</button></p>}>
+                <ul>
+                  <For each={calAgenda()}>{event =>
+                    <li classList={{ [event.kind]: true, done: event.done }}>
+                      <button onClick={() => openCalendarAt(event.date)}>
+                        <span class="co-time">{calTime(event)}</span>
+                        <strong>{event.title}</strong>
+                        <Show when={event.label}><small class="co-label">{event.label}</small></Show>
+                        <Show when={event.location}><small>{event.location}</small></Show>
+                      </button>
+                    </li>}</For>
+                </ul>
+              </Show>
+            </div>
           </div>
         </section>
 

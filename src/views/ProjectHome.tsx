@@ -66,7 +66,7 @@ export default function ProjectHome() {
     <Show when={projectId()}>
       <Show when={data.loading}><p class="ph-muted">Loading project overview…</p></Show>
       <Show when={deadline()}>{info =>
-        <button class="ph-deadline" classList={{ [info().tone]: true }} onClick={() => requestView("Calendar")}>
+        <button class="ph-deadline" classList={{ [info().tone]: true }} onClick={() => requestView("ProjectCalendar")}>
           <span class="ph-deadline-dot"/><span class="ph-deadline-label">Project deadline</span><time>{info().date}</time><em>{info().note}</em>
         </button>}
       </Show>
@@ -93,11 +93,11 @@ export default function ProjectHome() {
             </section>
 
             <section class="ph-card">
-              <div class="ph-card-head"><h2>Upcoming meetings</h2><button class="ph-link" onClick={() => requestView("Calendar")}>Open Calendar →</button></div>
+              <div class="ph-card-head"><h2>Upcoming meetings</h2><button class="ph-link" onClick={() => requestView("ProjectCalendar")}>Open Calendar →</button></div>
               <Show when={d().meetings.length} fallback={<p class="ph-muted">Nothing scheduled.</p>}>
                 <ul class="ph-list">
                   <For each={d().meetings.slice(0, 5)}>{m =>
-                    <li onClick={() => requestView("Calendar")}><strong>{m.title}</strong><small>{new Date(m.starts_at * 1000).toLocaleString()}{m.location ? ` · ${m.location}` : ""}</small></li>}</For>
+                    <li onClick={() => requestView("ProjectCalendar")}><strong>{m.title}</strong><small>{new Date(m.starts_at * 1000).toLocaleString()}{m.location ? ` · ${m.location}` : ""}</small></li>}</For>
                 </ul>
               </Show>
             </section>
