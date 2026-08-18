@@ -5,6 +5,7 @@ import { platformApi, type Project } from "../api/platform";
 import { meetingsApi } from "../api/meetings";
 import { ProfilePicker } from "../components/Pickers";
 import MiniCalendar from "../components/MiniCalendar";
+import { Icon } from "../components/Icon";
 import { profileId } from "../session";
 import { requestView, requestTodo, requestDate } from "../nav";
 import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
@@ -142,13 +143,13 @@ export default function Dashboard() {
         {/* ── Today & next ── prominent action area: what to do, what's at risk, what's scheduled ── */}
         <section class="today-next">
           <div class="tn-head">
-            <div class="tn-title"><span class="tn-icon">◎</span><div><h2>Today &amp; next</h2><p>Your actionable items across tasks, project deadlines, and the calendar</p></div></div>
+            <div class="tn-title"><span class="tn-icon"><Icon name="target" size={20}/></span><div><h2>Today &amp; next</h2><p>Your actionable items across tasks, project deadlines, and the calendar</p></div></div>
           </div>
           <div class="tn-grid">
             {/* Actionable tasks — completable inline */}
             <article class="tn-col tn-tasks">
               <header><h3>Tasks to action <span>{actionTaskCount()}</span></h3><button class="tn-link" onClick={() => openMyTask()}>Open My tasks →</button></header>
-              <Show when={actionTaskCount()} fallback={<p class="tn-empty">Nothing due in the next {SOON_DAYS} days. You're clear. ✓</p>}>
+              <Show when={actionTaskCount()} fallback={<p class="tn-empty">Nothing due in the next {SOON_DAYS} days. You're clear.</p>}>
                 <For each={actionTasks()}>{sec =>
                   <div class="tn-tasksec">
                     <span class="tn-seclabel" classList={{ [sec.key]: true }}>{sec.label} <em>{sec.items.length}</em></span>
@@ -209,7 +210,7 @@ export default function Dashboard() {
         {/* ── Calendar overview ── embedded compact month + day agenda; clicks open the full Calendar workspace ── */}
         <section class="cal-overview">
           <div class="co-head">
-            <div class="co-title"><span class="co-icon">▦</span><div><h2>Calendar</h2><p>Meetings, task due dates, and project deadlines at a glance</p></div></div>
+            <div class="co-title"><span class="co-icon"><Icon name="calendar" size={20}/></span><div><h2>Calendar</h2><p>Meetings, task due dates, and project deadlines at a glance</p></div></div>
             <button class="tn-link" onClick={() => openCalendarAt(calDay())}>Open calendar →</button>
           </div>
           <div class="co-body">
