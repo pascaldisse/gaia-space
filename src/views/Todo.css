@@ -1,5 +1,5 @@
-.personal-view{height:100%;overflow:auto;padding:28px 34px}
-.personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}
+.personal-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max)}
+.personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:var(--view-head-gap)}
 .personal-view h1{margin:0;font-size:22px}
 .personal-view p{color:var(--text-muted);margin:5px 0}
 .personal-view header label{width:210px}

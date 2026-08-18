@@ -1,4 +1,4 @@
-.pf-view { height: 100%; overflow: auto; padding: 28px 34px 40px; }
+.pf-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
 /* Header identity now comes from the shared WorkspaceHeader component. */
 .pf-new { flex: none; }
 .pf-muted { color: var(--text-dim); }

@@ -1,4 +1,4 @@
-.dashboard-view{height:100%;overflow:auto;padding:28px 34px}.dashboard-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}.dashboard-view h1{margin:0;font-size:22px}.dashboard-view h2{font-size:14px;margin:0 0 10px;display:flex;justify-content:space-between}.dashboard-view h2 span{font-size:11px;color:#7fb8b0;background:#1f2740;padding:1px 6px;border-radius:10px}.dashboard-view p{color:var(--text-muted);margin:5px 0}.dashboard-view label{display:grid;gap:5px;color:#aeb1b8;font-size:12px;width:210px}
+.dashboard-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max)}.dashboard-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:var(--view-head-gap)}.dashboard-view h1{margin:0;font-size:22px}.dashboard-view h2{font-size:14px;margin:0 0 10px;display:flex;justify-content:space-between}.dashboard-view h2 span{font-size:11px;color:#7fb8b0;background:#1f2740;padding:1px 6px;border-radius:10px}.dashboard-view p{color:var(--text-muted);margin:5px 0}.dashboard-view label{display:grid;gap:5px;color:#aeb1b8;font-size:12px;width:210px}
 
 /* ── Secondary surfaces ── cards adopt the paloptic task composer/card language (work cards, tags, left accent) ── */
 .dashboard-grid{display:grid;grid-template-columns:repeat(3,minmax(260px,1fr));gap:14px;max-width:1000px}
@@ -18,7 +18,7 @@
 .ov-tag.event,.ov-tag.reason{background:var(--surface-hover);color:#c9d6f0;border-color:#3a4f80}
 .ov-tag.body{background:#241d33;color:#c4a9e6;border-color:#402f5c}
 .ov-empty{margin:0;padding:14px;border:1px dashed #3d4a68;border-radius:8px;color:var(--text-faint);font-size:12px}
-.dashboard-empty{padding:24px;border:1px dashed #3d4a68;border-radius:10px;max-width:700px}.dashboard-muted{color:var(--text-faint)!important}.dashboard-refresh{margin-top:16px}@media(max-width:920px){.dashboard-grid{grid-template-columns:repeat(2,minmax(240px,1fr))}}@media(max-width:760px){.dashboard-view>header{display:grid}.dashboard-view label{width:auto}.dashboard-grid{grid-template-columns:1fr}}
+.dashboard-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:36px 28px;border:1px dashed var(--surface-border-hover);background:var(--surface);border-radius:12px;max-width:520px;margin:24px auto}.dashboard-muted{color:var(--text-faint)!important}.dashboard-refresh{margin-top:16px}@media(max-width:920px){.dashboard-grid{grid-template-columns:repeat(2,minmax(240px,1fr))}}@media(max-width:760px){.dashboard-view>header{display:grid}.dashboard-view label{width:auto}.dashboard-grid{grid-template-columns:1fr}}
 
 /* ── Today & next ── action-centered top area (paloptic surfaces + accents) ── */
 .today-next{max-width:1000px;margin:0 0 20px;border:1px solid #2b3550;border-radius:12px;background:linear-gradient(150deg,#122240,#0e1a31 60%);box-shadow:0 8px 26px rgba(0,0,0,.28);overflow:hidden}

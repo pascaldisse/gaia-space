@@ -94,6 +94,22 @@
   --surface-border: #33456d;
   --surface-border-hover: #435780;
 
+  /* ── workspace content shell ───────────────────────────────
+     ONE rhythm for every destination body so switching tabs no
+     longer jumps the content origin or padding around. Views set
+     ONLY their internal grids; the outer column geometry (start
+     padding, left-aligned readable cap) comes from these tokens.
+       view-pad-*   : shared top/side/bottom padding of a view body
+       view-max     : standard readable content cap (left-aligned)
+       view-max-wide: wide layouts (calendar / meetings grids)
+       view-head-gap: header → body vertical rhythm */
+  --view-pad-y: 26px;
+  --view-pad-x: 34px;
+  --view-pad-bottom: 44px;
+  --view-max: 1160px;
+  --view-max-wide: 1280px;
+  --view-head-gap: 22px;
+
   --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
@@ -682,14 +698,15 @@ textarea:focus {
 .pc-sub button:hover { border-color: var(--accent); }
 .pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .pc-sub-hint { margin: -2px 0 8px; color: var(--text-faint); font-size: 12px; }
-.resource-view { height: 100%; overflow: auto; padding: 28px 34px; }
+.resource-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
 .resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .resource-view header p { color: var(--text-muted); margin: 5px 0 24px; }
 .resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }
 .resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface); }
 .resource-list code { float: right; color: #83868f; font-size: 11px; }
 .resource-list pre { margin: 8px 0 0; color: #7fb8b0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-.empty-state { padding: 28px; border: 1px dashed var(--surface-border); color: #92959d; border-radius: 6px; max-width: 850px; }
+/* shared compact empty surface — centered card, never a huge dead block */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 28px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #92959d; border-radius: 12px; max-width: 520px; margin: 24px auto; }
 
 /* ── responsive ─────────────────────────────────────────────── */
 @media (max-width: 1100px) {

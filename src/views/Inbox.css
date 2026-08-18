@@ -1,7 +1,7 @@
 /* ── Inbox ── the human notification feed, brought to the paloptic premium
    standard: an owner-friendly header, global Acting-as, a clear read/unread
    hierarchy, data-driven filters, and lightened surfaces throughout. ── */
-.inbox-view { height: 100%; overflow: auto; padding: 28px 34px; }
+.inbox-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
 
 /* Header identity now comes from the shared WorkspaceHeader component. */
 .inbox-muted { color: var(--text-faint); }
