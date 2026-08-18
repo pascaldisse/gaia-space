@@ -11,8 +11,8 @@
   flex: 0 0 210px;
   width: 210px;
   min-width: 160px;
-  background: #17181a;
-  border-right: 1px solid #2a2b2e;
+  background: #0e1626;
+  border-right: 1px solid #243050;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -21,7 +21,7 @@
 .chat-profile-picker {
   order: 0;
   padding: 0.6em 0.9em;
-  border-bottom: 1px solid #2a2b2e;
+  border-bottom: 1px solid #243050;
   display: flex;
   flex-direction: column;
   gap: 0.35em;
@@ -29,9 +29,9 @@
 
 .chat-profile-picker select {
   width: 100%;
-  background: #2a2b2e;
+  background: #243050;
   color: inherit;
-  border: 1px solid #3a3b3e;
+  border: 1px solid #33405e;
   border-radius: 6px;
   padding: 0.3em 0.4em;
 }
@@ -60,12 +60,12 @@
 }
 
 .channel-list li:hover {
-  background: #202124;
+  background: #141d30;
 }
 
 .channel-list li.active {
-  background: #26304d;
-  color: #a9c0ff;
+  background: #0d2f35;
+  color: #5fe6d4;
 }
 
 .channel-name {
@@ -76,7 +76,7 @@
 }
 
 .unread-badge {
-  background: #3f63e0;
+  background: #00c2a8;
   color: #fff;
   border-radius: 10px;
   padding: 0 0.45em;
@@ -89,7 +89,7 @@
 .new-channel-form {
   order: 1;
   padding: 0.7em 0.9em;
-  border-top: 1px solid #2a2b2e;
+  border-top: 1px solid #243050;
   display: flex;
   flex-direction: column;
   gap: 0.4em;
@@ -98,9 +98,9 @@
 .new-channel-form input,
 .new-channel-form select {
   width: 100%;
-  background: #17181a;
+  background: #0e1626;
   color: inherit;
-  border: 1px solid #3a3b3e;
+  border: 1px solid #33405e;
   border-radius: 6px;
   padding: 0.35em 0.5em;
 }
@@ -120,12 +120,12 @@
   padding: 0.4em 0.9em;
   font-size: 0.78em;
   color: #7a7a7a;
-  border-top: 1px solid #2a2b2e;
+  border-top: 1px solid #243050;
 }
 
 .poll-picker button.active {
-  color: #a9c0ff;
-  border-color: #3f63e0;
+  color: #5fe6d4;
+  border-color: #00c2a8;
 }
 
 .chat-center {
@@ -134,7 +134,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid #2a2b2e;
+  border-right: 1px solid #243050;
 }
 
 .chat-topbar {
@@ -143,7 +143,7 @@
   justify-content: space-between;
   gap: 0.6em;
   padding: 0.6em 0.9em;
-  border-bottom: 1px solid #2a2b2e;
+  border-bottom: 1px solid #243050;
 }
 
 .message-pane {
@@ -161,7 +161,7 @@
 }
 
 .message-row:hover {
-  background: #202124;
+  background: #141d30;
 }
 
 .message-head {
@@ -209,18 +209,18 @@
 }
 
 .reaction-chip {
-  border: 1px solid #3a3b3e;
+  border: 1px solid #33405e;
   border-radius: 10px;
   padding: 0 0.45em;
   font-size: 0.78em;
   cursor: pointer;
-  background: #2a2b2e;
+  background: #243050;
 }
 
 .reaction-chip.mine {
-  background: #26304d;
-  border-color: #3f63e0;
-  color: #a9c0ff;
+  background: #0d2f35;
+  border-color: #00c2a8;
+  color: #5fe6d4;
 }
 
 .reaction-chip.ghost {
@@ -254,7 +254,7 @@
   display: flex;
   gap: 0.5em;
   padding: 0.6em 0.9em;
-  border-top: 1px solid #2a2b2e;
+  border-top: 1px solid #243050;
 }
 
 .composer textarea {
@@ -273,7 +273,7 @@
 
 .thread-header {
   padding: 0.6em 0.9em;
-  border-bottom: 1px solid #2a2b2e;
+  border-bottom: 1px solid #243050;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -281,7 +281,7 @@
 
 .members-panel {
   padding: 0.6em 0.9em;
-  border-bottom: 1px solid #2a2b2e;
+  border-bottom: 1px solid #243050;
 }
 
 .members-panel ul {
@@ -299,9 +299,9 @@
 
 .members-panel select {
   width: 100%;
-  background: #17181a;
+  background: #0e1626;
   color: inherit;
-  border: 1px solid #3a3b3e;
+  border: 1px solid #33405e;
   border-radius: 6px;
   padding: 0.3em 0.4em;
   margin-bottom: 0.4em;
