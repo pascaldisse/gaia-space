@@ -451,6 +451,8 @@ textarea {
 .resource-view header p { color: #9da0a8; margin: 5px 0 24px; }
 .resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }
 .resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid #34363b; border-radius: 6px; background: #25272a; }
+.resource-list li.active { border-color: #6384ea; background: #29314a; }
+.resource-list .row-link { display: block; color: inherit; text-decoration: none; }
 .resource-list code { float: right; color: #83868f; font-size: 11px; }
 .resource-list pre { margin: 8px 0 0; color: #aeb8d8; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 .empty-state { padding: 28px; border: 1px dashed #44464c; color: #92959d; border-radius: 6px; max-width: 850px; }

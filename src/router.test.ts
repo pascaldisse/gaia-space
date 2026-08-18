@@ -101,7 +101,7 @@ describe("grammar", () => {
     expect(parsePath(path)).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
-  test("document routes carry container type + id, incl. the null container", () => {
+  test("document routes carry a valid container type + id, incl. the null container", () => {
     expect(buildPath({ view: "Documents", entityType: "document", entityId: "d-1", containerType: "kb", containerId: "book-9" }))
       .toBe("documents/kb/book-9/d-1");
     expect(parsePath("documents/kb/book-9/d-1")).toMatchObject({ containerType: "kb", containerId: "book-9", entityId: "d-1" });
@@ -109,6 +109,8 @@ describe("grammar", () => {
     expect(parsePath("documents/project/-/d-2").containerId).toBeUndefined();
     expect(parsePath("documents/my-docs/prof-1")).toMatchObject({ view: "Documents", containerType: "my-docs", containerId: "prof-1" });
     expect(parsePath("documents/my-docs/prof-1").entityId).toBeUndefined();
+    expect(parsePath("documents/not-a-container/id")).toEqual({ view: "Dashboard" });
+    expect(parsePath("documents/kb")).toMatchObject({ view: "Documents", entityType: "document", entityId: "kb" });
   });
 
   test("channels/meetings/profiles/projects/reviews resolve", () => {
