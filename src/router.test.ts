@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkEntity, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
 } from "./router";
 
 const VIEWS = ["Dashboard", "To-Do", "Projects", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
@@ -111,6 +111,16 @@ describe("grammar", () => {
     expect(parsePath("documents/my-docs/prof-1").entityId).toBeUndefined();
     expect(parsePath("documents/not-a-container/id")).toEqual({ view: "Dashboard" });
     expect(parsePath("documents/kb")).toMatchObject({ view: "Documents", entityType: "document", entityId: "kb" });
+  });
+
+  test("container selection writes its active context URL", () => {
+    const env = stackAdapter("documents/my-docs/profile-1");
+    initRouter(env.adapter);
+    linkContainer("project", "project-2");
+    expect(env.url()).toBe("documents/project/project-2");
+    expect(route()).toMatchObject({ view: "Documents", containerType: "project", containerId: "project-2" });
+    linkContainer("kb", "book-3");
+    expect(env.url()).toBe("documents/kb/book-3");
   });
 
   test("channels/meetings/profiles/projects/reviews resolve", () => {

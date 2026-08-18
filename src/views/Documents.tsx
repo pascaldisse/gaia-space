@@ -3,7 +3,7 @@ import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
-import { useDeepLink, linkEntity, linkProps, route } from "../router";
+import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
 import {
   documentsApi,
   newId,
@@ -213,6 +213,10 @@ export default function Documents() {
   // in-app click would have opened (tab + project/book selection), not just the id.
   const docRoute = (id:string, container:ContainerType = activeContainer(), cid:string|null = containerId()) =>
     ({ view:"Documents", entityType:"document", entityId:id, containerType:container, containerId:cid ?? undefined });
+  const containerRoute = (container:ContainerType) => ({
+    view: "Documents", containerType: container,
+    containerId: (container === "my-docs" ? actingProfileId() : container === "project" ? selectedProjectId() : selectedBookId()) ?? undefined,
+  });
   const applyContainer = (container:string, cid?:string) => {
     if (container !== activeContainer()) setActiveContainer(container as ContainerType);
     if (!cid) return;
@@ -406,7 +410,11 @@ export default function Documents() {
         </div>
         <label>
           Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
+          <select value={actingProfileId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setActingProfileId(id);
+            if (activeContainer() === "my-docs") linkContainer("my-docs", id ?? undefined);
+          }}>
             <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
           </select>
         </label>
@@ -418,9 +426,9 @@ export default function Documents() {
             <a
               class="container-tab"
               classList={{ active: activeContainer() === t.key }}
-              {...linkProps({ view: "Documents", containerType: t.key })}
+              {...linkProps(containerRoute(t.key))}
               onClick={(event) => {
-                linkProps({ view: "Documents", containerType: t.key }).onClick(event);
+                linkProps(containerRoute(t.key)).onClick(event);
                 if (event.defaultPrevented) {
                   setSelectedFolderId(null);
                   setSelectedDocumentId(null);
@@ -433,13 +441,21 @@ export default function Documents() {
         </For>
 
         <Show when={activeContainer() === "project"}>
-          <select value={selectedProjectId() ?? ""} onChange={(e) => setSelectedProjectId(e.currentTarget.value || null)}>
+          <select value={selectedProjectId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setSelectedProjectId(id);
+            linkContainer("project", id ?? undefined);
+          }}>
             <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
           </select>
         </Show>
 
         <Show when={activeContainer() === "kb"}>
-          <select value={selectedBookId() ?? ""} onChange={(e) => setSelectedBookId(e.currentTarget.value || null)}>
+          <select value={selectedBookId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setSelectedBookId(id);
+            linkContainer("kb", id ?? undefined);
+          }}>
             <option value="">select a book…</option>
             <For each={books()}>{(b) => <option value={b.id}>{b.name}</option>}</For>
           </select>
