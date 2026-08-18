@@ -43,9 +43,10 @@
 .tn-seclabel em{font-style:normal;font-size:10px;color:#7fb8b0;background:#1f2740;padding:0 5px;border-radius:8px}
 .tn-seclabel.overdue{color:#f2a2a2}
 .tn-seclabel.today{color:var(--accent-text)}
-.tn-check{display:flex;align-items:flex-start;gap:9px;cursor:pointer;padding:4px 0}
-.tn-check input{margin-top:2px;flex:none}
-.tn-task-body{display:grid;gap:1px}
+.tn-tasksec li{display:flex;align-items:flex-start;gap:9px;padding:4px 0}
+.tn-check-box{margin-top:2px;flex:none;cursor:pointer}
+.tn-task-body{flex:1;min-width:0;display:grid;gap:1px;text-align:left;background:none;border:0;padding:0;margin:0;cursor:pointer;font:inherit}
+.tn-task-body:hover strong{color:var(--accent-text)}
 .tn-task-body strong{font-size:13px;color:var(--text-strong);font-weight:550;line-height:1.25}
 .tn-task-body small{font-size:11px;color:#8b96ad}
 .tn-task-body small.overdue{color:#f2a2a2}

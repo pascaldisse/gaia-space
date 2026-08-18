@@ -4,7 +4,7 @@ import { personalApi, type Todo } from "../api/personal";
 import { platformApi, type Project } from "../api/platform";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId } from "../session";
-import { requestView } from "../nav";
+import { requestView, requestTodo } from "../nav";
 import "./Dashboard.css";
 
 // agenda helpers — group the next meetings into human day-buckets so the
@@ -64,6 +64,9 @@ const deadlineLabel = (deadline: string) => {
   return `${n} day${n === 1 ? "" : "s"} left`;
 };
 
+// Deep-link into "My tasks", asking that view to focus/highlight the exact row.
+const openMyTask = (id?: string) => { requestTodo(id); requestView("To-Do"); };
+
 const isUrl = (s: string | null): s is string => !!s && /^https?:\/\//i.test(s.trim());
 const openMeetingLink = (url: string) => { openUrl(url).catch(() => window.open(url, "_blank")); };
 
@@ -118,7 +121,7 @@ export default function Dashboard() {
           <div class="tn-grid">
             {/* Actionable tasks — completable inline */}
             <article class="tn-col tn-tasks">
-              <header><h3>Tasks to action <span>{actionTaskCount()}</span></h3><button class="tn-link" onClick={() => requestView("Calendar")}>Calendar →</button></header>
+              <header><h3>Tasks to action <span>{actionTaskCount()}</span></h3><button class="tn-link" onClick={() => openMyTask()}>Open My tasks →</button></header>
               <Show when={actionTaskCount()} fallback={<p class="tn-empty">Nothing due in the next {SOON_DAYS} days. You're clear. ✓</p>}>
                 <For each={actionTasks()}>{sec =>
                   <div class="tn-tasksec">
@@ -126,13 +129,11 @@ export default function Dashboard() {
                     <ul>
                       <For each={sec.items}>{todo =>
                         <li>
-                          <label class="tn-check">
-                            <input type="checkbox" onChange={() => completeTask(todo)} aria-label={`Complete ${todo.content}`} />
-                            <span class="tn-task-body">
-                              <strong>{todo.content}</strong>
-                              <small classList={{ overdue: sec.key === "overdue" }}>{dueLabel(todo.due_date!)}</small>
-                            </span>
-                          </label>
+                          <input class="tn-check-box" type="checkbox" onChange={() => completeTask(todo)} aria-label={`Complete ${todo.content}`} />
+                          <button class="tn-task-body" onClick={() => openMyTask(todo.id)} title="Open in My tasks">
+                            <strong>{todo.content}</strong>
+                            <small classList={{ overdue: sec.key === "overdue" }}>{dueLabel(todo.due_date!)}</small>
+                          </button>
                         </li>}</For>
                     </ul>
                   </div>}</For>

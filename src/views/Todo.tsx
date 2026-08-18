@@ -1,15 +1,20 @@
-import { createResource, createSignal, For, Show, onMount } from "solid-js";
+import { createResource, createSignal, createEffect, For, Show, onMount } from "solid-js";
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
+import { requestedTodo, requestTodo } from "../nav";
 
 const blank = () => ({ content:"", due_date:"", source_entity_type:"", source_entity_id:"", project_id:"", assignee_ids:[] as string[] });
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
+  // Deep-link focus: when Overview asks for a specific task, scroll it into view
+  // and flag it briefly once the list has rendered. Clear the request after use.
+  const [focused,setFocused]=createSignal<string|undefined>();
+  createEffect(()=>{ const id=requestedTodo(); const list=todos(); if(!id||!list) return; if(!list.some(t=>t.id===id)){ requestTodo(undefined); return; } requestTodo(undefined); setFocused(id); requestAnimationFrame(()=>{ const el=document.querySelector(`[data-todo-id="${id}"]`); el?.scrollIntoView({behavior:"smooth",block:"center"}); }); setTimeout(()=>setFocused(f=>f===id?undefined:f),2400); });
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const openProjects=()=>projects()?.filter(p=>!p.archived)??[];
@@ -34,7 +39,7 @@ export default function Todo() {
     </form>
 
     <div class="task-list"><Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-      <For each={todos()}>{todo=><article classList={{"task-card":true,done:todo.done}}>
+      <For each={todos()}>{todo=><article data-todo-id={todo.id} classList={{"task-card":true,done:todo.done,focused:focused()===todo.id}}>
         <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>update(todo,{done:e.currentTarget.checked})}/>
         <div class="task-body">
           <strong class="task-title">{todo.content}</strong>
