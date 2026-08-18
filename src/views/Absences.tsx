@@ -112,16 +112,28 @@ export default function Absences() {
       <Show
         when={absences.loading || sorted().length > 0}
         fallback={
-          <div class="timeoff-empty">
-            <div class="timeoff-empty-card">
-              <div class="timeoff-empty-icon" aria-hidden="true"><Icon name="clock-nav" size={26} /></div>
-              <h2>No time off recorded yet</h2>
-              <p>
-                Keep a clear picture of availability by logging vacations, sick days, and other
-                leave{profileId() ? ` for ${personName(profileId())}` : " across the organization"}.
-              </p>
-              <button class="primary timeoff-empty-cta" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
+          <div class="view-cols timeoff-cols timeoff-onboarding">
+            <div class="view-main">
+              <section class="availability-board" aria-label="Availability at a glance">
+                <div class="availability-panel now"><div class="availability-panel-head"><h2>Away now</h2><span>0</span></div><p>Everyone is currently available.</p></div>
+                <div class="availability-panel upcoming"><div class="availability-panel-head"><h2>Coming up</h2><span>0</span></div><p>No upcoming time off is recorded.</p></div>
+                <div class="availability-panel pending"><div class="availability-panel-head"><h2>Needs approval</h2><span>0</span></div><p>Everything is approved.</p></div>
+              </section>
+              <section class="timeoff-empty">
+                <div class="timeoff-empty-card">
+                  <div class="timeoff-empty-icon" aria-hidden="true"><Icon name="clock-nav" size={26} /></div>
+                  <h2>Start your availability record</h2>
+                  <p>
+                    Log vacations, sick days, and other leave{profileId() ? ` for ${personName(profileId())}` : " across the organization"}.
+                  </p>
+                  <button class="primary timeoff-empty-cta" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
+                </div>
+              </section>
             </div>
+            <aside class="view-rail timeoff-rail">
+              <div class="rail-card"><h3><Icon name="clock-nav" size={13}/> Overview</h3><div class="rail-metrics"><div class="rail-metric accent"><span class="rail-num">0</span><span class="rail-lbl">Away now</span></div><div class="rail-metric warn"><span class="rail-num">0</span><span class="rail-lbl">Pending</span></div><div class="rail-metric"><span class="rail-num">0</span><span class="rail-lbl">Upcoming</span></div></div></div>
+              <div class="rail-card"><h3>Next step</h3><p class="rail-empty">Record time off to keep availability visible to your team.</p><div class="rail-actions"><button class="primary" onClick={openForm}>Record time off</button></div></div>
+            </aside>
           </div>
         }
       >

@@ -150,11 +150,18 @@ export default function Inbox() {
       <Show when={!items.loading}>
         {/* ── Fully empty ── no notifications at all ── */}
         <Show when={!all().length}>
-          <div class="inbox-blank">
-            <span class="inbox-blank-ic"><Icon name="inbox" size={22} /></span>
-            <h2>You're all caught up</h2>
-            <p>Mentions, assignments, review requests, and updates addressed to you will land here.</p>
-            <button class="ghost" onClick={() => requestView("MyWork")}>Go to Overview</button>
+          <div class="view-cols inbox-cols inbox-onboarding">
+            <div class="view-main">
+              <section class="inbox-blank">
+                <span class="inbox-blank-ic"><Icon name="inbox" size={22} /></span>
+                <div><h2>You're all caught up</h2><p>Mentions, assignments, review requests, and updates addressed to you will land in this feed.</p></div>
+                <button class="ghost" onClick={() => requestView("MyWork")}>Go to Overview</button>
+              </section>
+            </div>
+            <aside class="view-rail inbox-rail">
+              <div class="rail-card"><h3><Icon name="inbox" size={13}/> Inbox summary</h3><div class="rail-metrics"><div class="rail-metric accent"><span class="rail-num">0</span><span class="rail-lbl">Unread</span></div><div class="rail-metric"><span class="rail-num">0</span><span class="rail-lbl">Total</span></div></div></div>
+              <div class="rail-card"><h3>How it works</h3><p class="rail-empty">Updates from your work arrive here, with the related item one click away.</p></div>
+            </aside>
           </div>
         </Show>
 

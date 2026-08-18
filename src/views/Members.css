@@ -94,7 +94,7 @@
   padding: 18px 14px; margin: 4px 0 10px;
   border: 1px dashed var(--surface-border-hover); border-radius: 12px;
 }
-.org-empty-inline.tall { padding: 34px 16px; }
+.org-empty-inline.tall { min-height: 120px; padding: 24px 18px; align-items: flex-start; text-align: left; }
 .org-empty-inline p { margin: 0; color: #9297a3; font-size: 12.5px; line-height: 1.5; }
 .org-empty-icon {
   width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px;
