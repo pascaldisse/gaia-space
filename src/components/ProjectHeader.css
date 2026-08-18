@@ -1,0 +1,38 @@
+/* Shared project-scoped header for Delivery (and any project view). */
+.proj-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #243050;
+}
+.proj-head-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.proj-mark { flex: none; }
+.proj-mark.placeholder {
+  width: 44px; height: 44px; display: grid; place-items: center;
+  border-radius: 11px; background: #141d30; border: 1px solid #243050;
+  color: #5b6478; font-weight: 700; font-size: 15px;
+}
+.proj-head-text { min-width: 0; }
+.proj-head-text h1 { margin: 0; font-size: 21px; font-weight: 600; }
+.proj-head-text p { color: #9da0a8; margin: 4px 0 0; max-width: 640px; line-height: 1.45; }
+.proj-head-text p strong { color: #c7cad2; font-weight: 600; }
+.proj-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.proj-head-acting { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #9da0a8; }
+
+/* Guided empty / onboarding states shared by project-scoped views. */
+.proj-empty { flex: 1; display: grid; place-items: center; padding: 40px 24px; overflow: auto; }
+.proj-empty-card {
+  max-width: 460px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.proj-empty-icon {
+  width: 58px; height: 58px; display: grid; place-items: center; border-radius: 16px;
+  background: rgba(0,194,168,0.10); border: 1px solid rgba(0,194,168,0.28);
+  color: #5fe6d4; margin-bottom: 2px;
+}
+.proj-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
+.proj-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
+.proj-empty-card p strong { color: #c7cad2; font-weight: 600; }
+.proj-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }

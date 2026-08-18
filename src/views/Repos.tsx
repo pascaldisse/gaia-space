@@ -106,15 +106,19 @@ export default function App() {
       <aside class="sidebar">
         <header class="brand">
           <span>Repositories</span>
-          <button class="ghost" title="Open repository…" onClick={addRepo}>
+          <button class="ghost" title="Connect a repository…" onClick={addRepo}>
             +
           </button>
         </header>
 
-        <div class="section-label">Repositories</div>
+        <p class="hint repos-purpose">
+          Git repositories connected to your workspace — they power Code reviews and Pipelines.
+        </p>
+
+        <div class="section-label">Connected</div>
         <Show
           when={repos()?.length}
-          fallback={<p class="hint">No repositories yet — press “+”.</p>}
+          fallback={<p class="hint">No repositories connected yet — press “+” to add one from your computer.</p>}
         >
           <ul class="repo-list">
             <For each={repos()}>
@@ -159,12 +163,20 @@ export default function App() {
 
       <section class="center">
         <header class="topbar">
-          <Show when={info()} fallback={<span class="hint">No repository</span>}>
+          <Show when={info()} fallback={<span class="hint">No repository selected</span>}>
             <strong>{info()!.name}</strong>
             <span class="branch-chip">{info()!.head ?? "unborn"}</span>
             <span class="path">{info()!.path}</span>
           </Show>
         </header>
+
+        <Show when={!active()}>
+          <div class="repos-onboard">
+            <h2>Connect your first repository</h2>
+            <p>Add a Git repository from your computer to browse its history and use it for code reviews and pipelines.</p>
+            <button class="primary" onClick={addRepo}>Connect a repository</button>
+          </div>
+        </Show>
 
         <Show when={active()}>
           <div

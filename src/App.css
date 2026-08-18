@@ -307,6 +307,12 @@ textarea:focus {
   letter-spacing: 0.02em;
 }
 
+.repos-purpose { padding: 0 0.9em 0.4em; margin: 0; line-height: 1.4; max-width: none; }
+.repos-onboard { max-width: 420px; margin: 48px auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 24px; }
+.repos-onboard h2 { margin: 0; font-size: 17px; font-weight: 650; color: var(--text-strong); }
+.repos-onboard p { margin: 0; color: #9da0a8; line-height: 1.5; }
+.repos-onboard .primary { margin-top: 6px; }
+
 .section-label {
   font-size: 0.72em;
   text-transform: uppercase;

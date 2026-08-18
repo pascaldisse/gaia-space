@@ -1,40 +1,67 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
-import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type PackageRepository, type PackageVersion } from "../api/pipelines";
+import { projectId, projects } from "../session";
+import { ProjectHeader } from "../components/ProjectHeader";
+import { Icon } from "../components/Icon";
 import "./Packages.css";
+
+// Friendly, non-technical labels so the primary surface reads for owners, not
+// just package tooling experts. The raw format/mode keys are preserved on save.
+const FORMAT_LABEL: Record<string, string> = {
+  maven: "Maven", npm: "npm", nuget: "NuGet", pypi: "PyPI",
+  dart: "Dart", container: "Container", composer: "Composer", file: "Generic files",
+};
+const MODE_LABEL: Record<string, string> = { HOSTING: "Hosted here", PROXY: "Proxy upstream" };
+const fmt = (f: string) => FORMAT_LABEL[f] ?? f;
+const mode = (m: string) => MODE_LABEL[m] ?? m;
 
 export default function Packages() {
   const [error, setError] = createSignal<string | null>(null);
-  const [projects] = createResource(() => api.listProjects());
 
-  const [repos, { refetch: refetchRepos }] = createResource(() => pipelinesApi.listPackageRepositories());
+  // Active project context — Packages only shows this project's repositories.
+  const activeProject = () => projects()?.find((p) => p.id === projectId()) ?? null;
+  const activeProjectName = () => activeProject()?.name ?? null;
+
+  const [allRepos, { refetch: refetchRepos }] = createResource(() => pipelinesApi.listPackageRepositories());
+  // Scope to the active project (client-side by project_id); nothing leaks in
+  // from other projects or the org-wide space.
+  const repos = () => {
+    const pid = projectId();
+    if (!pid) return [] as PackageRepository[];
+    return (allRepos() ?? []).filter((r) => r.project_id === pid);
+  };
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  // Keep the selection valid for the current project.
   createEffect(() => {
-    if (!selectedId() && repos()?.length) setSelectedId(repos()![0].id);
+    const list = repos();
+    const current = selectedId();
+    if (current && list.some((r) => r.id === current)) return;
+    setSelectedId(list.length ? list[0].id : null);
   });
-  const selected = (): PackageRepository | null => repos()?.find((r) => r.id === selectedId()) ?? null;
+  const selected = (): PackageRepository | null => repos().find((r) => r.id === selectedId()) ?? null;
 
   // ---------- new repository ----------
+  const [showNewRepo, setShowNewRepo] = createSignal(false);
   const [formName, setFormName] = createSignal("");
-  const [formProjectId, setFormProjectId] = createSignal("");
   const [formFormat, setFormFormat] = createSignal<string>(PACKAGE_FORMATS[0]);
   const [formMode, setFormMode] = createSignal<string>(REPO_MODES[0]);
   const [formDescription, setFormDescription] = createSignal("");
-  createEffect(() => {
-    if (!formProjectId() && projects()?.length) setFormProjectId(projects()![0].id);
-  });
 
   async function createRepo(e: SubmitEvent) {
     e.preventDefault();
     setError(null);
+    if (!projectId()) {
+      setError("Select a project first.");
+      return;
+    }
     if (!formName().trim()) {
-      setError("repository name is required");
+      setError("Give the repository a name.");
       return;
     }
     try {
       const repo: PackageRepository = {
         id: newId("pkgrepo"),
-        project_id: formProjectId() || null,
+        project_id: projectId(),
         name: formName().trim(),
         format: formFormat(),
         mode: formMode(),
@@ -44,6 +71,7 @@ export default function Packages() {
       await pipelinesApi.createPackageRepository(repo);
       setFormName("");
       setFormDescription("");
+      setShowNewRepo(false);
       await refetchRepos();
       setSelectedId(repo.id);
     } catch (err) {
@@ -78,6 +106,7 @@ export default function Packages() {
   const [viewingMeta, setViewingMeta] = createSignal<PackageVersion | null>(null);
 
   // ---------- publish ----------
+  const [showPublish, setShowPublish] = createSignal(false);
   const [pubName, setPubName] = createSignal("");
   const [pubVersion, setPubVersion] = createSignal("");
   const [pubMetadata, setPubMetadata] = createSignal("{}");
@@ -89,7 +118,7 @@ export default function Packages() {
     setError(null);
     const repo = selected();
     if (!repo || !pubName().trim() || !pubVersion().trim()) {
-      setError("package name and version are required");
+      setError("Package name and version are required.");
       return;
     }
     try {
@@ -106,6 +135,7 @@ export default function Packages() {
       setPubMetadata("{}");
       setPubFilename("");
       setPubContent("");
+      setShowPublish(false);
       refetchVersions();
     } catch (err) {
       setError(String(err));
@@ -121,120 +151,190 @@ export default function Packages() {
     }
   }
 
+  const noProject = () => !projectId();
+  const projectEmpty = () => !noProject() && !allRepos.loading && repos().length === 0;
+
   return (
     <section class="packages-view">
-      <header class="packages-head">
-        <h1>Packages</h1>
-        <p>Package repositories across Space-supported formats — publish and browse versions, no upstream proxying.</p>
-      </header>
+      <ProjectHeader title="Packages" project={activeProject()}>
+        Publish and browse the packages that ship from{" "}
+        <strong>{activeProjectName() ?? "this project"}</strong> — libraries, containers, and
+        release artifacts, all in one place.
+      </ProjectHeader>
 
       <Show when={error()}>
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>
       </Show>
 
-      <form class="new-repo-form" onSubmit={createRepo}>
-        <input placeholder="repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
-        <select value={formProjectId()} onChange={(e) => setFormProjectId(e.currentTarget.value)}>
-          <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
-        <select value={formFormat()} onChange={(e) => setFormFormat(e.currentTarget.value)}>
-          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{f}</option>}</For>
-        </select>
-        <select value={formMode()} onChange={(e) => setFormMode(e.currentTarget.value)}>
-          <For each={REPO_MODES}>{(m) => <option value={m}>{m}</option>}</For>
-        </select>
-        <input class="grow" placeholder="description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
-        <button class="primary">Create repository</button>
-      </form>
+      <Show when={noProject()}>
+        <div class="proj-empty">
+          <div class="proj-empty-card">
+            <div class="proj-empty-icon" aria-hidden="true"><Icon name="package" size={26} /></div>
+            <h2>No project selected</h2>
+            <p>Choose a project from the context header to see its package repositories.</p>
+          </div>
+        </div>
+      </Show>
 
-      <div class="packages-body">
-        <aside class="repos-list">
-          <Show when={repos()?.length} fallback={<p class="hint pad">No repositories yet — create one above.</p>}>
+      <Show when={projectEmpty()}>
+        <div class="proj-empty">
+          <div class="proj-empty-card">
+            <div class="proj-empty-icon" aria-hidden="true"><Icon name="package" size={26} /></div>
+            <h2>Set up a package repository</h2>
+            <p>
+              Keep the releases for <strong>{activeProjectName() ?? "this project"}</strong> in one
+              trusted place — pick a format like npm, Maven, or containers and start publishing.
+            </p>
+            <button class="primary proj-empty-cta" onClick={() => setShowNewRepo(true)}>
+              <Icon name="plus" size={15} /> New repository
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={!noProject() && !projectEmpty()}>
+        <div class="packages-toolbar">
+          <Show
+            when={showNewRepo()}
+            fallback={
+              <button class="ghost new-repo-open" onClick={() => setShowNewRepo(true)}>
+                <Icon name="plus" size={14} /> New repository
+              </button>
+            }
+          >
+            <form class="new-repo-form" onSubmit={createRepo}>
+              <input placeholder="Repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
+              <label class="field">Format
+                <select value={formFormat()} onChange={(e) => setFormFormat(e.currentTarget.value)}>
+                  <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{fmt(f)}</option>}</For>
+                </select>
+              </label>
+              <label class="field">Mode
+                <select value={formMode()} onChange={(e) => setFormMode(e.currentTarget.value)}>
+                  <For each={REPO_MODES}>{(m) => <option value={m}>{mode(m)}</option>}</For>
+                </select>
+              </label>
+              <input class="grow" placeholder="Description (optional)" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
+              <div class="row-actions">
+                <button type="button" class="ghost small" onClick={() => setShowNewRepo(false)}>Cancel</button>
+                <button class="primary">Create repository</button>
+              </div>
+            </form>
+          </Show>
+        </div>
+
+        <div class="packages-body">
+          <aside class="repos-list">
+            <div class="section-label">Repositories</div>
             <ul>
               <For each={repos()}>
                 {(r) => (
                   <li classList={{ active: r.id === selectedId(), archived: r.archived }} onClick={() => setSelectedId(r.id)}>
                     <strong>{r.name}</strong>
-                    <span class="fmt">{r.format}</span>
-                    <span class="mode">{r.mode}</span>
+                    <span class="repo-meta">{fmt(r.format)} · {mode(r.mode)}</span>
                   </li>
                 )}
               </For>
             </ul>
-          </Show>
-        </aside>
+          </aside>
 
-        <Show when={selected()} fallback={<p class="hint pad">Select or create a repository.</p>}>
-          {(repo) => (
-            <section class="repo-detail">
-              <header class="repo-detail-head">
-                <h2>{repo().name}</h2>
-                <span class="fmt">{repo().format}</span>
-                <span class="mode">{repo().mode}</span>
-                <div class="repo-actions">
-                  <button class="ghost small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</button>
-                  <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete</button>
-                </div>
-              </header>
-              <p class="hint">{repo().description ?? "no description"}</p>
-
-              <section class="publish-section">
-                <h3>Publish version</h3>
-                <form class="publish-form" onSubmit={publish}>
-                  <div class="publish-row">
-                    <input placeholder="package name" value={pubName()} onInput={(e) => setPubName(e.currentTarget.value)} />
-                    <input placeholder="version" value={pubVersion()} onInput={(e) => setPubVersion(e.currentTarget.value)} />
-                    <input placeholder="payload filename (optional)" value={pubFilename()} onInput={(e) => setPubFilename(e.currentTarget.value)} />
+          <Show when={selected()} fallback={<p class="hint pad">Select a repository to publish and browse versions.</p>}>
+            {(repo) => (
+              <section class="repo-detail">
+                <header class="repo-detail-head">
+                  <div class="repo-detail-title">
+                    <h2>{repo().name}</h2>
+                    <span class="repo-meta">{fmt(repo().format)} · {mode(repo().mode)}</span>
+                    <Show when={repo().archived}><span class="tag">archived</span></Show>
                   </div>
-                  <textarea class="meta-input" placeholder="metadata JSON" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
-                  <Show when={pubFilename().trim()}>
-                    <textarea class="payload-input" placeholder="payload content (stored as text under app-data/packages/…)" rows="3" value={pubContent()} onInput={(e) => setPubContent(e.currentTarget.value)} />
-                  </Show>
-                  <button class="primary">Publish</button>
-                </form>
-              </section>
-
-              <section class="versions-section">
-                <header class="versions-head">
-                  <h3>Versions</h3>
-                  <input class="search" placeholder="search by package name…" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+                  <div class="repo-actions">
+                    <button class="primary small" onClick={() => setShowPublish((v) => !v)}>
+                      <Icon name="plus" size={13} /> Publish version
+                    </button>
+                    <details class="repo-more">
+                      <summary class="ghost small">More</summary>
+                      <div class="repo-more-menu">
+                        <button class="ghost small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</button>
+                        <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete repository</button>
+                      </div>
+                    </details>
+                  </div>
                 </header>
-                <Show when={versions()?.length} fallback={<p class="hint pad">No versions published yet.</p>}>
-                  <table class="versions-table">
-                    <thead><tr><th>Package</th><th>Version</th><th>Published</th><th></th></tr></thead>
-                    <tbody>
-                      <For each={versions()}>
-                        {(v) => (
-                          <tr>
-                            <td>{v.package_name}</td>
-                            <td><code>{v.version}</code></td>
-                            <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
-                            <td class="row-actions">
-                              <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
-                              <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
-                            </td>
-                          </tr>
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
+                <Show when={repo().description}><p class="repo-desc">{repo().description}</p></Show>
+
+                <Show when={showPublish()}>
+                  <section class="publish-section">
+                    <h3>Publish a version</h3>
+                    <form class="publish-form" onSubmit={publish}>
+                      <div class="publish-row">
+                        <input placeholder="Package name" value={pubName()} onInput={(e) => setPubName(e.currentTarget.value)} />
+                        <input placeholder="Version (e.g. 1.2.0)" value={pubVersion()} onInput={(e) => setPubVersion(e.currentTarget.value)} />
+                      </div>
+                      <details class="publish-advanced">
+                        <summary>Advanced: metadata &amp; attached file</summary>
+                        <textarea class="meta-input" placeholder="Metadata JSON" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
+                        <input placeholder="Attached file name (optional)" value={pubFilename()} onInput={(e) => setPubFilename(e.currentTarget.value)} />
+                        <Show when={pubFilename().trim()}>
+                          <textarea class="payload-input" placeholder="File content" rows="3" value={pubContent()} onInput={(e) => setPubContent(e.currentTarget.value)} />
+                        </Show>
+                      </details>
+                      <div class="row-actions">
+                        <button type="button" class="ghost small" onClick={() => setShowPublish(false)}>Cancel</button>
+                        <button class="primary">Publish</button>
+                      </div>
+                    </form>
+                  </section>
                 </Show>
-                <Show when={viewingMeta()}>
-                  {(v) => (
-                    <div class="metadata-view">
-                      <header>
-                        <strong>{v().package_name}@{v().version}</strong>
-                        <button class="ghost small" onClick={() => setViewingMeta(null)}>×</button>
-                      </header>
-                      <pre>{JSON.stringify(JSON.parse(v().metadata_json || "{}"), null, 2)}</pre>
-                    </div>
-                  )}
-                </Show>
+
+                <section class="versions-section">
+                  <header class="versions-head">
+                    <h3>Versions</h3>
+                    <input class="search" placeholder="Search by package name…" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+                  </header>
+                  <Show
+                    when={versions()?.length}
+                    fallback={
+                      <p class="hint pad">
+                        {search().trim() ? "No packages match your search." : "No versions published yet — use “Publish version” above."}
+                      </p>
+                    }
+                  >
+                    <table class="versions-table">
+                      <thead><tr><th>Package</th><th>Version</th><th>Published</th><th></th></tr></thead>
+                      <tbody>
+                        <For each={versions()}>
+                          {(v) => (
+                            <tr>
+                              <td>{v.package_name}</td>
+                              <td><code>{v.version}</code></td>
+                              <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
+                              <td class="row-actions">
+                                <button class="ghost small" onClick={() => setViewingMeta(v)}>Details</button>
+                                <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
+                              </td>
+                            </tr>
+                          )}
+                        </For>
+                      </tbody>
+                    </table>
+                  </Show>
+                  <Show when={viewingMeta()}>
+                    {(v) => (
+                      <div class="metadata-view">
+                        <header>
+                          <strong>{v().package_name}@{v().version}</strong>
+                          <button class="ghost small" onClick={() => setViewingMeta(null)}>×</button>
+                        </header>
+                        <pre>{JSON.stringify(JSON.parse(v().metadata_json || "{}"), null, 2)}</pre>
+                      </div>
+                    )}
+                  </Show>
+                </section>
               </section>
-            </section>
-          )}
-        </Show>
-      </div>
+            )}
+          </Show>
+        </div>
+      </Show>
     </section>
   );
 }
