@@ -489,8 +489,29 @@ textarea:focus {
 .nav-footer-pw .error { background: #512529; color: #ffc7ca; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
 .nav-footer-pw .ok { background: #1f4a2a; color: #b3ffc0; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
 .space-shell.collapsed .nav-footer { display: none; }
-.workspace { min-width: 0; overflow: hidden; background: #12213d; }
+.workspace { min-width: 0; overflow: hidden; background: #12213d; display: flex; flex-direction: column; }
 .workspace .app { height: 100%; }
+.workspace-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.workspace-body > * { flex: 1; min-height: 0; }
+
+/* ── project context surface: crumb + horizontal tabs + optional sub-nav ── */
+.project-context { background: #0f1b33; border-bottom: 1px solid #2b3550; padding: 12px 20px 0; flex: none; }
+.pc-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.pc-crumb { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pc-scope { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #7f8aa3; }
+.pc-crumb strong { font-family: var(--font-head); font-size: 15px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-head .picker { min-width: 0; }
+.pc-head .picker select { max-width: 240px; }
+.pc-tabs { display: flex; gap: 2px; }
+.pc-tabs button { display: flex; align-items: center; gap: 6px; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; color: #9da0a8; font-family: var(--font-head); font-weight: 500; }
+.pc-tabs button:hover { color: var(--text-strong); }
+.pc-tabs button.active { color: var(--text-strong); border-bottom-color: var(--accent); }
+.pc-tab-icon { color: #7f8aa3; }
+.pc-tabs button.active .pc-tab-icon { color: var(--accent); }
+.pc-sub { display: flex; gap: 6px; padding: 8px 0 10px; }
+.pc-sub button { background: #16233d; border: 1px solid #2b3550; border-radius: 999px; padding: 4px 12px; color: #b9c2d4; font-size: 12px; }
+.pc-sub button:hover { border-color: var(--accent); }
+.pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .resource-view { height: 100%; overflow: auto; padding: 28px 34px; }
 .resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .resource-view header p { color: #9da0a8; margin: 5px 0 24px; }
