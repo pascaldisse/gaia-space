@@ -73,3 +73,9 @@
   font-family: var(--font-head); font-size: 12px; font-weight: 550; cursor: pointer; transition: background 0.12s ease;
 }
 .tm-clear:hover { background: rgba(214, 141, 154, 0.1); }
+
+/* fixed project chip — same shell as a trigger but locked: not a choice. */
+.tm-trigger.tm-fixed { cursor: default; }
+.tm-trigger.tm-fixed:hover { border-color: var(--ctl-border); background: var(--ctl-bg); }
+.tm-fixed-badge { flex: none; }
+.tm-fixed-badge .tm-opt-badge { --avatar-size: 26px; }

@@ -2,16 +2,21 @@ import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import "./work.css";
-import { profiles, projectId, projects, reloadProfiles, reloadProjects, humanError } from "../session";
+import { DueDateControl, AssigneeControl } from "../components/TaskMeta";
+import { Avatar } from "../components/Avatar";
+import { Icon } from "../components/Icon";
+import { profileId, profiles, projectId, projects, reloadProfiles, reloadProjects, humanError } from "../session";
 
 // Project → Work → Tasks: the everyday action surface. Personal tasks filed
-// under the active project — the things an owner does next. This is a
-// read-and-triage feed; it never touches Issues or the Board. Ownership/assignees
-// stay intact — you can only tick a task done or unfile it from the project here.
+// under the active project — the things an owner does next. You create tasks
+// straight onto this project (the project is fixed, never a free choice), then
+// triage: tick done or unfile. It never touches Issues or the Board.
+const blankDraft = () => ({ content:"", due_date:"", assignee_ids:[] as string[] });
 export default function ProjectTasks() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(projectId,id=>id?personalApi.projectTodos(id,true):Promise.resolve([]));
+  const [draft,setDraft]=createSignal(blankDraft());
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const ownerOf=(id:string)=>nameOf(id);
@@ -21,6 +26,11 @@ export default function ProjectTasks() {
   const open=()=>todos()?.filter(t=>!t.done)??[];
   const done=()=>todos()?.filter(t=>t.done)??[];
   const update=async(todo:TodoItem, patch:Partial<TodoItem>)=>{ try { await personalApi.updateTodo({...todo,...patch}); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const toggleAssignee=(id:string)=>{ const d=draft(); setDraft({...d,assignee_ids:d.assignee_ids.includes(id)?d.assignee_ids.filter(x=>x!==id):[...d.assignee_ids,id]}); };
+  // The project is always the active project — it is never part of the form and
+  // cannot be changed here, so a task can't slip onto the wrong project.
+  const canAdd=()=>Boolean(projectId()&&profileId().trim()&&draft().content.trim());
+  const add=async(e:SubmitEvent)=>{ e.preventDefault(); const pid=projectId(); if(!pid||!profileId().trim()||!draft().content.trim()) return; const d=draft(); try { await personalApi.createTodo({profile_id:profileId().trim(),content:d.content.trim(),due_date:d.due_date||null,done:false,source_entity_type:null,source_entity_id:null,project_id:pid,assignee_ids:d.assignee_ids}); setDraft(blankDraft()); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
   const taskCard=(todo:TodoItem)=><article classList={{"task-card":true,done:todo.done}}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>update(todo,{done:e.currentTarget.checked})}/>
@@ -48,6 +58,22 @@ export default function ProjectTasks() {
 
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
 
+    <Show when={projectId()}>
+      <form class="task-composer" onSubmit={add}>
+        <input class="composer-title" placeholder="What needs doing for this project?" aria-label="Task title" value={draft().content} onInput={e=>setDraft({...draft(),content:e.currentTarget.value})}/>
+        <div class="composer-meta">
+          <div class="tm"><div class="tm-trigger tm-fixed" aria-label={`Project: ${projectName()??"active project"} (fixed)`}>
+            <span class="tm-icon" aria-hidden="true"><Icon name="grid" size={16}/></span>
+            <span class="tm-text"><span class="tm-label">Project</span><span class="tm-value">{projectName()??"Active project"}</span></span>
+            <span class="tm-fixed-badge" aria-hidden="true"><Avatar class="tm-opt-badge" variant="project" name={projectName()??""}/></span>
+          </div></div>
+          <DueDateControl value={draft().due_date} onChange={iso=>setDraft({...draft(),due_date:iso})}/>
+          <AssigneeControl value={draft().assignee_ids} people={active().map(p=>({id:p.id,label:p.display_name||p.username,sub:`@${p.username}`}))} onToggle={toggleAssignee}/>
+        </div>
+        <div class="composer-actions"><button class="primary composer-submit" disabled={!canAdd()}>Add to {projectName()??"project"}</button></div>
+      </form>
+    </Show>
+
     <Show when={!projectId()}>
       <div class="wk-empty">
         <div class="wk-empty-mark">✓</div>
@@ -62,7 +88,7 @@ export default function ProjectTasks() {
         <div class="wk-empty">
           <div class="wk-empty-mark">✓</div>
           <h2>No tasks here yet</h2>
-          <p>Nothing is filed under {projectName()??"this project"}. Add a task from My tasks and pick this project to make it show up here.</p>
+          <p>Nothing is filed under {projectName()??"this project"} yet. Add your first one above — it lands straight on this project.</p>
         </div>
       </Show>
 
