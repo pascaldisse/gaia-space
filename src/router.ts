@@ -91,7 +91,9 @@ const dec = (s: string) => { try { return decodeURIComponent(s); } catch { retur
 
 /** path (no base, no leading slash) -> Route. Unknown/unavailable routes fall back. */
 export function parsePath(path: string): Route {
-  const segs = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean).map(dec);
+  // Search/hash state is owned by a view, never by the route grammar or entity id.
+  const pathname = path.split(/[?#]/, 1)[0];
+  const segs = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean).map(dec);
   if (!segs.length) return { view: FALLBACK_VIEW };
   const [head, ...rest] = segs;
 
@@ -171,7 +173,7 @@ export function createPathAdapter(base: string): RouterAdapter {
 /** Tauri: no server behind the webview, so hash URLs are used — and only here. */
 export function createHashAdapter(): RouterAdapter {
   return {
-    read: () => location.hash.replace(/^#\/?/, ""),
+    read: () => location.hash.replace(/^#\/?/, "").split("?", 1)[0],
     write: (path, replace) => {
       const hash = "#/" + path;
       if (location.hash === hash) return;

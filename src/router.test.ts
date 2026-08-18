@@ -137,6 +137,15 @@ describe("grammar", () => {
     const path = buildPath({ view: "Meetings", entityType: "meeting", entityId: id });
     expect(parsePath(path).entityId).toBe(id);
   });
+
+  test("query strings are outside route grammar", () => {
+    expect(parsePath("projects/p-1/issues/i-1?tab=activity")).toMatchObject({
+      view: "Issues", projectId: "p-1", entityId: "i-1",
+    });
+    expect(parsePath("documents/kb/book-1/d-1?preview=1")).toMatchObject({
+      view: "Documents", containerType: "kb", containerId: "book-1", entityId: "d-1",
+    });
+  });
 });
 
 describe("normalization", () => {
