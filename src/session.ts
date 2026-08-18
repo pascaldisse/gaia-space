@@ -36,6 +36,20 @@ const session = createRoot(() => {
     return value;
   };
 
+  // Create a project via the existing platform API, refresh the cache, and make
+  // it the active project so the caller can open it immediately.
+  const createProject = async (input: { name: string; key: string; description?: string }) => {
+    const id = (crypto.randomUUID?.() ?? `proj-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const project: Project = {
+      id, name: input.name.trim(), key: input.key.trim(),
+      description: input.description?.trim() || null, created_by: null, archived: false,
+    };
+    await platformApi.createProject(project);
+    await reloadProjects();
+    setProjectId(id);
+    return project;
+  };
+
   // Default to the first available entry so nothing starts in an unusable state.
   const ensureDefaults = () => {
     const p = profiles()?.filter((x) => !x.archived);
@@ -46,14 +60,14 @@ const session = createRoot(() => {
 
   return {
     profileId, setProfileId, profiles, reloadProfiles,
-    projectId, setProjectId, projects, reloadProjects,
+    projectId, setProjectId, projects, reloadProjects, createProject,
     ensureDefaults,
   };
 });
 
 export const {
   profileId, setProfileId, profiles, reloadProfiles,
-  projectId, setProjectId, projects, reloadProjects,
+  projectId, setProjectId, projects, reloadProjects, createProject,
   ensureDefaults,
 } = session;
 

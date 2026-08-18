@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, Match, Show, Switch, type Component } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Match, Show, Switch, For, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import "./App.css";
 import Dashboard from "./views/Dashboard";
@@ -25,7 +25,6 @@ import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import { ProjectPicker } from "./components/Pickers";
-import { Resizer, paneWidth } from "./components/Resizer";
 import { authChecked, checkAuth, currentUser, isWeb, projectId, projects } from "./session";
 import { requestedView, requestView } from "./nav";
 
@@ -56,9 +55,10 @@ const registry: Record<string, Dest> = {
   ProjectSettings: { name: "ProjectSettings", label: "Project settings", icon: "⚙", component: ProjectSettings },
 };
 
-// primary sidebar groups
-const myWorkNav = ["MyWork", "To-Do", "Absences"];
-const workspaceNav = ["Inbox", "Projects", "Organization"];
+// primary top-navigation: broad, always-visible destinations. Grouped only by a
+// subtle divider (personal | workspace); admin/secondary lives in a compact menu.
+const primaryPersonal = ["MyWork", "To-Do", "Absences", "Inbox"];
+const primaryWorkspace = ["Projects", "Organization"];
 // nav buttons that highlight for a whole section rather than a single destination
 const sectionNav = new Set(["Projects", "Organization"]);
 
@@ -81,18 +81,17 @@ const gotoView: Record<string, string> = { profile: "Organization", project: "Pr
 export default function App() {
   const [active, setActive] = createSignal("MyWork");
   const [gotoOpen, setGotoOpen] = createSignal(false);
+  // only one top-right menu open at a time ("manage" | "account" | null)
+  const [menu, setMenu] = createSignal<"manage" | "account" | null>(null);
+  const toggleMenu = (which: "manage" | "account") => setMenu((m) => (m === which ? null : which));
   const allowed = (name: string) => !(isWeb() && registry[name].desktopOnly);
   const current = () => registry[active()] ?? registry.MyWork;
-
-  const [navWidth, setNavWidth] = paneWidth("space.nav.width", 208);
-  const [pinnedCollapsed, setPinnedCollapsed] = createSignal(localStorage.getItem("space.nav.collapsed") === "1");
-  const [narrow, setNarrow] = createSignal(false);
-  const collapsed = () => pinnedCollapsed() || narrow();
-  const toggle = () => { const next = !pinnedCollapsed(); setPinnedCollapsed(next); localStorage.setItem("space.nav.collapsed", next ? "1" : "0"); };
+  const go = (name: string) => { setMenu(null); setActive(name); };
 
   // primary highlight: which top-level section owns the current destination
   const inProject = () => projectDestinations.has(active());
   const section = () => (inProject() || active() === "Projects") ? "Projects" : (active() === "Organization" || active() === "Users") ? "Organization" : active();
+  const inManageMenu = () => active() === "Admin" || active() === "Users";
 
   // active project tab + its sibling destinations (for the secondary segmented control)
   const activeTab = () => projectTabs.find((t) => t.views.includes(active())) ?? projectTabs[0];
@@ -106,8 +105,10 @@ export default function App() {
     void checkAuth();
     const shortcut = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setGotoOpen((open) => !open); } };
     window.addEventListener("keydown", shortcut);
-    const mq = window.matchMedia("(max-width: 900px)"); const sync = () => setNarrow(mq.matches); sync(); mq.addEventListener("change", sync);
-    onCleanup(() => { window.removeEventListener("keydown", shortcut); mq.removeEventListener("change", sync); });
+    // close top-right menus when clicking outside the header
+    const away = (event: MouseEvent) => { if (!(event.target as HTMLElement)?.closest(".topbar-menu")) setMenu(null); };
+    window.addEventListener("mousedown", away);
+    onCleanup(() => { window.removeEventListener("keydown", shortcut); window.removeEventListener("mousedown", away); });
   });
 
   // cross-view navigation requests (Project Home quick links, etc.)
@@ -116,25 +117,53 @@ export default function App() {
   const navButton = (name: string) => {
     const d = registry[name];
     const isActive = () => (sectionNav.has(name) ? section() === name : active() === name);
-    return <button title={d.label} classList={{ active: isActive() }} onClick={() => setActive(name)}><span class="nav-icon">{d.icon}</span><em>{d.label}</em></button>;
+    return <button class="topnav-item" title={d.label} classList={{ active: isActive() }} onClick={() => go(name)}>
+      <span class="nav-icon">{d.icon}</span><span class="topnav-label">{d.label}</span>
+    </button>;
   };
 
   return <Switch>
     <Match when={isWeb() && !authChecked()}><div class="space-shell-loading"/></Match>
     <Match when={isWeb() && !currentUser()}><Login/></Match>
     <Match when={true}>
-      <div class="space-shell" classList={{ collapsed: collapsed() }} style={{ "--nav-w": (collapsed() ? 52 : navWidth()) + "px" }}>
-        <aside class="nav">
-          <header><div class="space-mark">S</div><em>GAIA Space</em><button class="nav-toggle" title={collapsed() ? "Expand sidebar" : "Collapse sidebar"} onClick={toggle}>{collapsed() ? "»" : "«"}</button></header>
-          <nav>
-            <p class="nav-section">My Work</p>{myWorkNav.map(navButton)}
-            <p class="nav-section">Workspace</p>{workspaceNav.map(navButton)}
-            <p class="nav-section">Manage</p>{navButton("Admin")}
-            <Show when={isWeb() && currentUser()?.role === "admin"}>{navButton("Users")}</Show>
+      <div class="space-shell">
+        <header class="topbar">
+          <div class="topbar-brand"><div class="space-mark">S</div><em>GAIA Space</em></div>
+          <nav class="topnav">
+            <For each={primaryPersonal}>{navButton}</For>
+            <span class="topnav-divider" aria-hidden="true" />
+            <For each={primaryWorkspace}>{navButton}</For>
           </nav>
-          <Show when={isWeb()}><AccountFooter/></Show>
-        </aside>
-        <Resizer width={navWidth} setWidth={setNavWidth} min={160} max={420}/>
+          <div class="topbar-right">
+            <button class="topbar-search" title="Search (⌘K)" onClick={() => setGotoOpen(true)}><span class="nav-icon">⌕</span><span class="topbar-search-hint">Search</span></button>
+
+            {/* secondary / admin controls: compact menu, not primary nav */}
+            <div class="topbar-menu">
+              <button class="topbar-icon" classList={{ active: menu() === "manage" || inManageMenu() }} title="Manage" onClick={() => toggleMenu("manage")}>⚙</button>
+              <Show when={menu() === "manage"}>
+                <div class="topbar-dropdown">
+                  <p class="dropdown-label">Manage</p>
+                  <button classList={{ active: active() === "Admin" }} onClick={() => go("Admin")}><span class="nav-icon">⚙</span>Admin</button>
+                  <Show when={isWeb() && currentUser()?.role === "admin"}>
+                    <button classList={{ active: active() === "Users" }} onClick={() => go("Users")}><span class="nav-icon">⚉</span>User accounts</button>
+                  </Show>
+                </div>
+              </Show>
+            </div>
+
+            <Show when={isWeb()}>
+              <div class="topbar-menu">
+                <button class="topbar-account" classList={{ active: menu() === "account" }} title="Account" onClick={() => toggleMenu("account")}>
+                  <span class="account-avatar">{(currentUser()?.display_name ?? currentUser()?.username ?? "?").slice(0, 1).toUpperCase()}</span>
+                </button>
+                <Show when={menu() === "account"}>
+                  <div class="topbar-dropdown account-dropdown"><AccountFooter/></div>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </header>
+
         <main class="workspace">
           <Show when={inProject()}>
             <div class="project-context">

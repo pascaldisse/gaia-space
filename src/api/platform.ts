@@ -63,8 +63,10 @@ export const platformApi = {
   checkRight: (profile_id: string, right_code: string, scope_type: ScopeType, scope_id: string | null) =>
     call<boolean>("check_right", { profileId: profile_id, rightCode: right_code, scopeType: scope_type, scopeId: scope_id }),
 
-  // Projects (read-mostly here; Projects.tsx owns its own view)
+  // Projects
   projects: () => call<Project[]>("list_projects"),
+  createProject: (project: Project) => call<void>("create_project", { project }),
+  updateProject: (project: Project) => call<void>("update_project", { project }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

@@ -1,9 +1,26 @@
 .pf-view { height: 100%; overflow: auto; padding: 28px 34px 40px; }
-.pf-head { margin-bottom: 20px; }
+.pf-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .pf-head h1 { margin: 0; font-size: 22px; }
 .pf-head p { margin: 5px 0 0; color: #9da0a8; }
+.pf-new { flex: none; }
 .pf-muted { color: #7f8aa3; }
-.pf-empty { padding: 26px; border: 1px dashed #3d4a68; border-radius: 8px; color: #92959d; max-width: 720px; }
+
+/* ── empty workspace: lead into first-project creation ── */
+.pf-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 48px 26px; border: 1px dashed #3d4a68; border-radius: 12px; color: #92959d; max-width: 560px; margin: 20px auto; }
+.pf-empty-mark { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-size: 24px; box-shadow: 0 4px 16px rgba(0,194,168,0.28); }
+.pf-empty h2 { margin: 6px 0 0; font-family: var(--font-head); font-size: 18px; color: var(--text-strong); }
+.pf-empty p { margin: 0; max-width: 400px; }
+.pf-empty button { margin-top: 8px; }
+
+/* ── create-project form ── */
+.pf-create { display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 8px 0 24px; padding: 22px; background: #0f1b33; border: 1px solid #2b3550; border-radius: 12px; }
+.pf-create h2 { margin: 0; font-family: var(--font-head); font-size: 17px; color: var(--text-strong); }
+.pf-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #aeb1b8; }
+.pf-field span em { font-style: normal; color: #6f7890; }
+.pf-field input, .pf-field textarea { font: inherit; background: #0e1626; color: #d9dee3; border: 1px solid #33405e; border-radius: 6px; padding: 8px 10px; }
+.pf-field textarea { min-height: 3.5em; resize: vertical; }
+.pf-error { background: #512529; color: #ffc7ca; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+.pf-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .pf-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 14px 15px 12px; transition: border-color .12s ease, transform .12s ease; }
