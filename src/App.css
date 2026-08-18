@@ -18,18 +18,25 @@
   --text: var(--brand-cool-gray);
   --text-strong: var(--brand-ice);
 
-  /* ── form-control system tokens ── */
-  --ctl-bg: #0e1626;            /* resting field surface */
-  --ctl-bg-hover: #111d33;      /* subtle lift on hover */
-  --ctl-bg-raised: #16233d;     /* buttons / segmented track */
-  --ctl-border: #33405e;        /* resting border */
-  --ctl-border-hover: #4a5a80;  /* border on hover */
-  --ctl-radius: 8px;            /* standard control radius */
-  --ctl-radius-sm: 6px;         /* dense / inline controls */
-  --ctl-pad-y: 0.5em;
-  --ctl-pad-x: 0.7em;
-  --ctl-placeholder: #64708c;
-  --ctl-focus-ring: 0 0 0 3px rgba(0,194,168,0.16);
+  /* ── unified bold control system ──────────────────────────
+     ONE control family for buttons, fields, selects & action
+     links: same height, padding, radius, filled surface and a
+     stronger, readable weight. No thin outlined boxes. */
+  --ctl-bg: #17253f;            /* filled resting field surface */
+  --ctl-bg-hover: #1d2e4d;      /* lift on hover */
+  --ctl-bg-raised: #1f3050;     /* buttons / segmented track (reads pressable) */
+  --ctl-bg-raised-hover: #274069;
+  --ctl-border: #3d4d70;        /* resting border — visible, not hairline */
+  --ctl-border-hover: #546892;  /* border on hover */
+  --ctl-radius: 9px;            /* standard control radius */
+  --ctl-radius-sm: 7px;         /* dense / inline controls */
+  --ctl-pad-y: 0.55em;          /* shared vertical padding → matched heights */
+  --ctl-pad-x: 0.9em;
+  --ctl-font-size: 13.5px;      /* larger, more legible than 13px body */
+  --ctl-font-weight: 550;       /* fields read solid, not light */
+  --ctl-line: 1.3;
+  --ctl-placeholder: #7182a1;
+  --ctl-focus-ring: 0 0 0 3px rgba(0,194,168,0.18);
 
   --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -57,14 +64,15 @@ html, body, #root {
 
 button {
   font-family: var(--font-head);
-  font-size: inherit;
-  font-weight: 500;
+  font-size: var(--ctl-font-size);
+  font-weight: 600;
+  line-height: var(--ctl-line);
   cursor: pointer;
-  color: inherit;
-  background: #243050;
-  border: 1px solid #33405e;
-  border-radius: 6px;
-  padding: 0.35em 0.8em;
+  color: var(--text-strong);
+  background: var(--ctl-bg-raised);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--ctl-radius);
+  padding: var(--ctl-pad-y) var(--ctl-pad-x);
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
@@ -121,8 +129,9 @@ input[type="text"], input[type="search"], input[type="email"], input[type="passw
 input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"],
 input[type="number"], input[type="url"], input[type="tel"], input:not([type]) {
   font-family: var(--font-body);
-  font-size: inherit;
-  line-height: 1.35;
+  font-size: var(--ctl-font-size);
+  font-weight: var(--ctl-font-weight);
+  line-height: var(--ctl-line);
   background: var(--ctl-bg);
   color: var(--text-strong);
   border: 1px solid var(--ctl-border);

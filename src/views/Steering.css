@@ -51,11 +51,11 @@
 .st-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .st-card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .st-card-head small { color: #7f8aa3; font-weight: 400; margin-left: 6px; }
-.st-link { background: transparent; border: 0; color: var(--accent-text); font-size: 12px; padding: 2px 4px; }
+.st-link { background: transparent; border: 0; color: var(--accent-text); font-size: 12px; font-weight: 600; padding: 2px 4px; }
 .st-link:hover { color: var(--accent-hover); }
 /* upcoming-agenda card: give the calendar path a real button + roomy rows */
 .st-agenda { border-color: #2f4a5f; }
-.st-cal { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 12px; color: var(--accent-text); background: var(--accent-soft); font-family: var(--font-head); }
+.st-cal { border: 1px solid var(--accent); border-radius: 999px; padding: var(--ctl-pad-y) 1em; font-size: var(--ctl-font-size); font-weight: 600; color: var(--accent-text); background: var(--accent-soft); font-family: var(--font-head); }
 .st-cal:hover { background: var(--accent); color: var(--brand-navy); border-color: var(--accent); }
 .st-inline { background: none; border: 0; padding: 0; color: var(--accent-text); text-decoration: underline; font-size: inherit; }
 .st-list.agenda li { display: grid; grid-template-columns: 1fr; gap: 2px; align-items: start; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: #111f3a; margin-bottom: 4px; }

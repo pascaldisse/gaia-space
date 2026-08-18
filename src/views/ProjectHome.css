@@ -17,7 +17,7 @@
 .ph-card { background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 16px 18px; }
 .ph-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .ph-card-head h2 { margin: 0; font-size: 15px; }
-.ph-link { background: transparent; border: 0; color: var(--accent-text); padding: 0; font-size: 12px; }
+.ph-link { background: transparent; border: 0; color: var(--accent-text); padding: 0; font-size: 12px; font-weight: 600; }
 .ph-link:hover { color: var(--accent-hover); }
 .ph-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ph-list li { display: flex; align-items: baseline; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
