@@ -3,6 +3,7 @@ import { personalApi, type Absence } from "../api/personal";
 import "./Absences.css";
 import { ProfilePicker } from "../components/Pickers";
 import { Icon } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { humanError, profileId as sessionProfile, profiles as sessionProfiles } from "../session";
 
 // Common leave categories offered as quick suggestions. reason_type stays a
@@ -70,22 +71,13 @@ export default function Absences() {
 
   return (
     <section class="timeoff-view">
-      <header class="timeoff-head">
-        <div class="timeoff-head-main">
-          <div class="timeoff-mark" aria-hidden="true"><Icon name="clock-nav" size={22} /></div>
-          <div>
-            <h1>Time off</h1>
-            <p>
-              Plan and track leave across your organization — who’s <strong>away now</strong>,
-              what’s <strong>coming up</strong>, and which requests still need approval.
-            </p>
-          </div>
-        </div>
-        <div class="timeoff-head-side">
-          <ProfilePicker label="Show time off for" value={profileId()} onChange={setProfileId} allowAll />
-          <button class="primary timeoff-new" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
-        </div>
-      </header>
+      <WorkspaceHeader icon="clock-nav" title="Time off" actions={<>
+        <ProfilePicker label="Show time off for" value={profileId()} onChange={setProfileId} allowAll />
+        <button class="primary timeoff-new" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
+      </>}>
+        Plan and track leave across your organization — who’s <strong>away now</strong>,
+        what’s <strong>coming up</strong>, and which requests still need approval.
+      </WorkspaceHeader>
 
       <Show when={error()}><p class="timeoff-error" onClick={() => setError("")}>{error()}</p></Show>
 

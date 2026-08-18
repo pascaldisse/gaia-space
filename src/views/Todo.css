@@ -1,4 +1,4 @@
-.personal-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max-canvas)}
+.personal-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-canvas)}
 .personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:var(--view-head-gap)}
 .personal-view h1{margin:0;font-size:22px}
 .personal-view p{color:var(--text-muted);margin:5px 0}
@@ -70,4 +70,4 @@
 .task-delete{flex:none;margin-top:-2px}
 
 @media(max-width:1040px){.todo-rail{max-width:none}}
-@media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}.personal-view>header{display:grid}.personal-view header label{width:auto}}
+@media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}.personal-view header label{width:auto}}

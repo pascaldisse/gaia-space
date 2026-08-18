@@ -1,4 +1,4 @@
-.admin-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max);color:var(--text)}
+.admin-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-canvas);color:var(--text)}
 .admin-head h1{margin:0;font-size:23px}
 .admin-head p{margin:4px 0 18px;color:var(--text-muted)}
 .admin-error{background:var(--status-danger-bg);color:var(--status-danger-ink);padding:8px 12px;border-radius:8px;margin-bottom:12px;cursor:pointer}

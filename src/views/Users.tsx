@@ -3,6 +3,7 @@ import { usersApi, type CreateUserInput, type Role, type User } from "../api/aut
 import { platformApi } from "../api/platform";
 import { humanError } from "../session";
 import "./Admin.css";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 
 const blankForm = (): CreateUserInput & { profile_id: string } => ({
   username: "", display_name: "", password: "", role: "member", profile_id: "",
@@ -99,12 +100,7 @@ export default function Users() {
 
   return (
     <section class="admin-view">
-      <header class="admin-head">
-        <div>
-          <h1>Users</h1>
-          <p>Login accounts for the web app. Separate from profiles (who someone is) — a user account is how they sign in.</p>
-        </div>
-      </header>
+      <WorkspaceHeader icon="users" title="Users">Login accounts for the web app. Separate from profiles (who someone is) — a user account is how they sign in.</WorkspaceHeader>
       <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
       <div class="admin-grid">

@@ -110,6 +110,12 @@
   --view-max: 1160px;
   --view-max-wide: 1280px;
   --view-max-canvas: 1560px;
+  /* SHARED WORKSPACE CANVAS — every top-nav destination (Overview, My tasks,
+     Time off, Inbox, Projects, Calendar, Knowledge, Organization, Admin…)
+     shares this one width so the WorkspaceHeader's right-aligned actions land
+     on the exact same baseline in every view. Do not cap top-level views with
+     a bespoke width. */
+  --view-canvas: 1560px;
   --view-head-gap: 22px;
   --rail-w: 312px;
 
@@ -701,7 +707,15 @@ textarea:focus {
 .pc-sub button:hover { border-color: var(--accent); }
 .pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .pc-sub-hint { margin: -2px 0 8px; color: var(--text-faint); font-size: 12px; }
-.resource-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
+/* ── shared workspace layout contract ──────────────────────────────────────
+   One canvas geometry for every top-level workspace destination: identical
+   scroll region, identical padding, identical max-width. This is what makes
+   the WorkspaceHeader banner (title left / actions right) align on the same
+   baseline across Overview, My tasks, Projects, Calendar, Time off, etc.
+   Views only own their INNER grid — never the outer canvas width or padding. */
+.workspace-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); color: var(--text); }
+
+.resource-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); }
 .resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .resource-view header p { color: var(--text-muted); margin: 5px 0 24px; }
 .resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }

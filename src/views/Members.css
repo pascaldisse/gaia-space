@@ -1,7 +1,7 @@
 /* Organization (People + Teams + Membership) — premium paloptic system,
    layered over App.css control primitives. Scoped to .org-view. */
 
-.org-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max-wide); color: var(--text); }
+.org-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); color: var(--text); }
 
 /* ── header: org mark + owner-friendly purpose ── */
 /* Header identity now comes from the shared WorkspaceHeader component. */
