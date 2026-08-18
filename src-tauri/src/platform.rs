@@ -618,12 +618,15 @@ pub struct Project {
     pub description: Option<String>,
     pub created_by: Option<String>,
     pub archived: bool,
+    /// Optional local-only project deadline, an ISO `YYYY-MM-DD` date. NULL = no deadline.
+    #[serde(default)]
+    pub deadline: Option<String>,
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_projects() -> Result<Vec<Project>> {
     let c = db::conn()?;
     let mut s = c
-        .prepare("SELECT id,name,key,description,created_by,archived FROM projects ORDER BY name")
+        .prepare("SELECT id,name,key,description,created_by,archived,deadline FROM projects ORDER BY name")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -634,6 +637,7 @@ pub fn list_projects() -> Result<Vec<Project>> {
                 description: r.get(3)?,
                 created_by: r.get(4)?,
                 archived: r.get(5)?,
+                deadline: r.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -648,25 +652,33 @@ pub fn get_project( id: String) -> Result<Option<Project>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_project( project: Project) -> Result<()> {
     let c = db::conn()?;
-    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at)VALUES(?1,?2,?3,?4,?5,?6,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived]).map_err(|e|e.to_string())?;
+    let deadline = normalize_deadline(&project.deadline);
+    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,deadline]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_project( project: Project) -> Result<()> {
     let c = db::conn()?;
+    let deadline = normalize_deadline(&project.deadline);
     c.execute(
-        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6 WHERE id=?1",
+        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7 WHERE id=?1",
         rusqlite::params![
             project.id,
             project.name,
             project.key,
             project.description,
             project.created_by,
-            project.archived
+            project.archived,
+            deadline
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Empty or whitespace-only deadlines collapse to NULL (no deadline).
+fn normalize_deadline(deadline: &Option<String>) -> Option<String> {
+    deadline.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,5 +1101,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// A project deadline is an optional ISO date: blank/whitespace collapses to NULL,
+    /// a real value persists through the same columns `list_projects` reads, and it
+    /// survives an update (including being cleared back to NULL).
+    #[test]
+    fn project_deadline_normalizes_and_persists() {
+        // Pure normalization: blank/whitespace → None, real value trimmed & kept.
+        assert_eq!(normalize_deadline(&None), None);
+        assert_eq!(normalize_deadline(&Some("   ".into())), None);
+        assert_eq!(normalize_deadline(&Some("  2026-09-01 ".into())).as_deref(), Some("2026-09-01"));
+
+        // Roundtrip through the exact columns create/list use, on a migrated schema.
+        let c = conn();
+        let deadline = normalize_deadline(&Some("2026-09-01".into()));
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES('p','Proj','P',NULL,NULL,0,?1,unixepoch())", params![deadline]).unwrap();
+        let read: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(read.as_deref(), Some("2026-09-01"));
+        // Clearing it back to NULL (via normalized blank) leaves no deadline.
+        let cleared = normalize_deadline(&Some("".into()));
+        c.execute("UPDATE projects SET deadline=?1 WHERE id='p'", params![cleared]).unwrap();
+        assert_eq!(c.query_row::<Option<String>, _, _>("SELECT deadline FROM projects WHERE id='p'", [], |r| r.get(0)).unwrap(), None);
     }
 }

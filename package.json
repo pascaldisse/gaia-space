@@ -8,6 +8,9 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
+    "build:web": "vite build --mode web",
+    "test": "bun test src",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "tauri": "tauri"
   },
   "license": "MIT",

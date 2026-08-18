@@ -54,7 +54,7 @@ export const api = {
 };
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean };
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null };
 export type Issue = { id: string; project_id: string; number: number; title: string; description: string | null; status_id: string | null; assignee_id: string | null; created_by: string | null; due_date: string | null; archived: boolean };
 export type Board = { id: string; project_id: string; name: string; backlog_type: string; archived: boolean };
 export type Channel = { id: string; content_type: string; name: string | null; description: string | null; project_id: string | null; archived: boolean };

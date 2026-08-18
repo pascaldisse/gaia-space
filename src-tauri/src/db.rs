@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -128,6 +128,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         // populated table and its foreign key only binds non-NULL values to a live project.
         migrate_v6(&tx)?;
     }
+    if version < 7 {
+        // Optional project deadline (a plain YYYY-MM-DD date). Existing rows get NULL
+        // (no deadline) — no data loss. Same idempotent ADD COLUMN pattern as v6.
+        migrate_v7(&tx)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -232,6 +237,20 @@ pub(crate) fn migrate_v6(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v7 adds `projects.deadline` (nullable TEXT, an ISO `YYYY-MM-DD` date) so a project
+/// can carry a single optional deadline that surfaces in the calendar. Like v6 this
+/// probes the column first, so re-running it on a database that already has it is a
+/// no-op (idempotent for re-runs / drifted schemas).
+pub(crate) fn migrate_v7(conn: &Connection) -> Result<()> {
+    let has_column: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('projects') WHERE name='deadline'")?
+        .exists([])?;
+    if !has_column {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN deadline TEXT;")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +330,31 @@ mod tests {
         assert!(conn.execute("UPDATE todos SET project_id='ghost' WHERE id='t'", []).is_err(), "FK must reject unknown project");
         // Re-running the step is a harmless no-op (idempotent).
         migrate_v6(&conn).expect("re-run");
+    }
+
+    /// v7 backfills `projects.deadline` onto a populated database without touching
+    /// existing rows: they survive with a NULL (no deadline). Re-running is a no-op.
+    #[test]
+    fn v7_adds_project_deadline_without_data_loss() {
+        let conn = open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch(SCHEMA_V3).unwrap();
+        conn.execute_batch(SCHEMA_V4).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','u','U',1)", []).unwrap();
+        conn.execute("INSERT INTO projects(id,name,key,created_at) VALUES('proj','Proj','P',1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        migrate(&conn).expect("migration");
+        assert_eq!(conn.query_row::<i64, _, _>("PRAGMA user_version", [], |r| r.get(0)).unwrap(), SCHEMA_VERSION);
+        // Legacy row preserved, defaulted to no deadline.
+        let (name, deadline): (String, Option<String>) = conn.query_row("SELECT name,deadline FROM projects WHERE id='proj'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(name, "Proj");
+        assert_eq!(deadline, None);
+        // The new column accepts an ISO date.
+        conn.execute("UPDATE projects SET deadline='2026-09-01' WHERE id='proj'", []).unwrap();
+        assert_eq!(conn.query_row::<Option<String>, _, _>("SELECT deadline FROM projects WHERE id='proj'", [], |r| r.get(0)).unwrap().as_deref(), Some("2026-09-01"));
+        // Re-running the step is a harmless no-op (idempotent).
+        migrate_v7(&conn).expect("re-run");
     }
 
     #[test]

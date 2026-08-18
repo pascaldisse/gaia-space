@@ -1,6 +1,7 @@
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Status } from "../api/issues";
-import { projectId, projects, humanError } from "../session";
+import { platformApi } from "../api/platform";
+import { projectId, projects, reloadProjects, humanError } from "../session";
 import "./ProjectSettings.css";
 
 // Project Settings — the home for project workflow configuration. Issue
@@ -11,6 +12,24 @@ export default function ProjectSettings() {
   const project = createMemo(() => projects()?.find((p) => p.id === projectId()));
   const [error, setError] = createSignal("");
   const [newStatus, setNewStatus] = createSignal("");
+
+  // Editable project deadline (optional ISO date). Mirrors the canonical project
+  // record; saving persists via the platform API and refreshes the shared cache so
+  // the calendar, steering and overview all reflect the change immediately.
+  const [deadline, setDeadline] = createSignal("");
+  const [savingDeadline, setSavingDeadline] = createSignal(false);
+  createEffect(() => setDeadline(project()?.deadline ?? ""));
+  const deadlineDirty = () => (deadline() || "") !== (project()?.deadline ?? "");
+  const saveDeadline = async () => {
+    const current = project();
+    if (!current) return;
+    setSavingDeadline(true); setError("");
+    try {
+      await platformApi.updateProject({ ...current, deadline: deadline().trim() || null });
+      await reloadProjects();
+    } catch (e) { setError(humanError(e)); }
+    finally { setSavingDeadline(false); }
+  };
   const [statuses, { refetch }] = createResource(projectId, (id) => (id ? planningApi.statuses(id) : Promise.resolve([] as Status[])));
 
   const addStatus = async () => {
@@ -43,7 +62,17 @@ export default function ProjectSettings() {
             <div><dt>Description</dt><dd>{project()?.description || "—"}</dd></div>
             <div><dt>Project ID</dt><dd><code>{project()?.id ?? "—"}</code></dd></div>
           </dl>
-          <p class="ps-hint">Project name, key and description are managed as the Space container record.</p>
+          <div class="ps-deadline">
+            <label>
+              <span>Deadline <em>optional</em></span>
+              <input type="date" value={deadline()} onInput={(e) => setDeadline(e.currentTarget.value)} />
+            </label>
+            <div class="ps-deadline-actions">
+              <Show when={deadline()}><button class="ghost" onClick={() => setDeadline("")}>Clear</button></Show>
+              <button class="primary" disabled={!deadlineDirty() || savingDeadline()} onClick={saveDeadline}>{savingDeadline() ? "Saving…" : "Save deadline"}</button>
+            </div>
+          </div>
+          <p class="ps-hint">The deadline appears on the calendar and in Steering. Project name, key and description are managed as the Space container record.</p>
         </section>
 
         <section class="ps-panel">

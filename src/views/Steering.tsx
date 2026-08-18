@@ -41,6 +41,23 @@ export default function Steering() {
     return { statuses, overdue, soon, unassigned, currentWork, meetingsNext, activeCount: active.length };
   });
 
+  // Project deadline state, derived against today: drives the deadline banner tone.
+  const DAY_MS = DAY * 1000;
+  const deadline = createMemo(() => {
+    const d = project()?.deadline;
+    if (!d) return undefined;
+    const today = todayStr();
+    const soon = new Date(Date.now() + 7 * DAY_MS).toISOString().slice(0, 10);
+    const tone: "overdue" | "soon" | "ok" = d < today ? "overdue" : d <= soon ? "soon" : "ok";
+    const days = Math.round((new Date(d + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / DAY_MS);
+    return { date: d, tone, days };
+  });
+  const deadlineNote = () => {
+    const info = deadline(); if (!info) return "";
+    if (info.days === 0) return "due today";
+    return info.days < 0 ? `${-info.days} day${info.days === -1 ? "" : "s"} overdue` : `in ${info.days} day${info.days === 1 ? "" : "s"}`;
+  };
+
   const statusOf = (i: Issue, statuses: Status[]) => statuses.find((s) => s.id === i.status_id);
   const nameFor = (id: string | null) => profiles()?.find((p) => p.id === id)?.display_name || (id ? "—" : "Unassigned");
 
@@ -83,6 +100,15 @@ export default function Steering() {
       <Show when={data.loading}><p class="st-muted">Loading steering overview…</p></Show>
       <Show when={data()}>{d =>
         <>
+          <Show when={deadline()}>{info =>
+            <button class="st-deadline" classList={{ [info().tone]: true }} onClick={() => requestView("ProjectSettings")}>
+              <span class="st-deadline-dot"/>
+              <span class="st-deadline-label">Project deadline</span>
+              <time>{info().date}</time>
+              <em>{deadlineNote()}</em>
+            </button>}
+          </Show>
+
           <div class="st-band">
             <span class="st-band-label">Action needed</span>
             <div class="st-actions">

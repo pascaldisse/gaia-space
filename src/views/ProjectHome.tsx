@@ -32,6 +32,18 @@ export default function ProjectHome() {
     };
   });
 
+  // Optional project deadline, shown as a banner tinted by urgency.
+  const deadline = createMemo(() => {
+    const d = project()?.deadline;
+    if (!d) return undefined;
+    const today = new Date().toISOString().slice(0, 10);
+    const soon = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+    const days = Math.round((new Date(d + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86_400_000);
+    const tone: "overdue" | "soon" | "ok" = d < today ? "overdue" : d <= soon ? "soon" : "ok";
+    const note = days === 0 ? "due today" : days < 0 ? `${-days} day${days === -1 ? "" : "s"} overdue` : `in ${days} day${days === 1 ? "" : "s"}`;
+    return { date: d, tone, note };
+  });
+
   const stat = (label: string, value: number, view: string) =>
     <button class="ph-stat" onClick={() => requestView(view)}>
       <span class="ph-stat-num">{value}</span><span class="ph-stat-label">{label}</span>
@@ -53,6 +65,12 @@ export default function ProjectHome() {
 
     <Show when={projectId()}>
       <Show when={data.loading}><p class="ph-muted">Loading project overview…</p></Show>
+      <Show when={deadline()}>{info =>
+        <button class="ph-deadline" classList={{ [info().tone]: true }} onClick={() => requestView("Calendar")}>
+          <span class="ph-deadline-dot"/><span class="ph-deadline-label">Project deadline</span><time>{info().date}</time><em>{info().note}</em>
+        </button>}
+      </Show>
+
       <Show when={data()}>{d =>
         <>
           <div class="ph-stats">

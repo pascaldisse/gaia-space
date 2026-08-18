@@ -1,1 +1,17 @@
 .calendar-view{padding:24px;max-width:1500px;margin:auto;color:var(--text)}.calendar-head,.calendar-controls,.calendar-detail{display:flex;align-items:center;gap:8px}.calendar-head{justify-content:space-between;margin-bottom:16px}.calendar-head h1{margin:0;color:var(--text-strong)}.calendar-head p{margin:5px 0 0;color:#8b96ad}.calendar-controls strong{min-width:150px;text-align:center;color:var(--text-strong)}.calendar-controls .active{background:var(--accent);color:var(--brand-navy);border-color:var(--accent)}.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid #2b3550;border-radius:10px;overflow:hidden;background:#0e1626}.calendar-weekday{padding:9px;background:#141d30;text-align:center;font-size:.82rem;color:#8b96ad;border-bottom:1px solid #2b3550}.calendar-day{min-height:112px;padding:7px;border-right:1px solid #202a44;border-bottom:1px solid #202a44}.calendar-day:nth-child(7n){border-right:0}.calendar-day time{font-size:.82rem;color:#8b96ad}.calendar-day.muted{background:#0b1220;color:#5a647d}.calendar-event{display:block;width:100%;margin-top:5px;padding:4px 5px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:0;border-left:3px solid var(--accent);border-radius:3px;background:var(--accent-soft);color:var(--accent-text);font-size:.76rem}.calendar-grid.week .calendar-day{min-height:420px}.calendar-detail{justify-content:space-between;margin-top:16px;padding:14px;border:1px solid #2b3550;border-radius:10px;background:#161d2e}.calendar-detail h2,.calendar-detail p{margin:0 0 6px}@media(max-width:700px){.calendar-view{padding:14px}.calendar-head{align-items:flex-start;flex-direction:column}.calendar-controls{flex-wrap:wrap}.calendar-day{min-height:80px}.calendar-grid.week .calendar-day{min-height:260px}.calendar-weekday{font-size:.7rem}.calendar-event{font-size:.68rem}}
+
+/* Typed calendar items — meetings (accent), task due dates (amber), project deadlines (rose). */
+.calendar-legend{display:flex;gap:14px;margin:0 0 12px;font-size:.78rem;color:#8b96ad}
+.cal-key{display:inline-flex;align-items:center;gap:6px}
+.cal-key::before{content:"";width:10px;height:10px;border-radius:2px;display:inline-block}
+.cal-key.meeting::before{background:var(--accent)}
+.cal-key.task::before{background:#e0a83a}
+.cal-key.deadline::before{background:#e0607a}
+.calendar-event.meeting{border-left-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+.calendar-event.task{border-left-color:#e0a83a;background:rgba(224,168,58,.14);color:#f0c778}
+.calendar-event.deadline{border-left-color:#e0607a;background:rgba(224,96,122,.16);color:#f0a3b3;font-weight:600}
+.calendar-event.done{opacity:.55;text-decoration:line-through}
+.cal-tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:.68rem;font-weight:600;vertical-align:middle}
+.cal-tag.meeting{background:var(--accent-soft);color:var(--accent-text)}
+.cal-tag.task{background:rgba(224,168,58,.18);color:#f0c778}
+.cal-tag.deadline{background:rgba(224,96,122,.2);color:#f0a3b3}

@@ -67,3 +67,19 @@
 @media (max-width: 820px) {
   .st-actions { grid-template-columns: 1fr; }
 }
+
+/* Project deadline banner — sits above the action band, tone matches urgency. */
+.st-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: 1px solid #2b3550; border-left-width: 3px; border-radius: 10px; background: #141d30; color: var(--text); cursor: pointer; text-align: left; }
+.st-deadline:hover { border-color: #3d4a68; }
+.st-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: #5b78e5; flex: none; }
+.st-deadline-label { font-weight: 600; color: var(--text-strong); }
+.st-deadline time { color: #8b96ad; font-size: .86rem; }
+.st-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: #8b96ad; }
+.st-deadline.overdue { border-left-color: #e0605e; }
+.st-deadline.overdue .st-deadline-dot { background: #e0605e; }
+.st-deadline.overdue em { color: #f08a88; font-weight: 600; }
+.st-deadline.soon { border-left-color: #f0a742; }
+.st-deadline.soon .st-deadline-dot { background: #f0a742; }
+.st-deadline.soon em { color: #f0bd77; }
+.st-deadline.ok { border-left-color: #4fae6a; }
+.st-deadline.ok .st-deadline-dot { background: #4fae6a; }

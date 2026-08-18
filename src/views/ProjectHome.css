@@ -26,3 +26,19 @@
 .ph-list small { color: #7f8aa3; font-size: 11px; white-space: nowrap; }
 .ph-list time { color: #7f8aa3; font-size: 11px; white-space: nowrap; }
 .ph-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); font-size: 12px; flex: none; }
+
+/* Project deadline banner on the overview — tone by urgency, opens the calendar. */
+.ph-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 16px; padding: 10px 14px; border: 1px solid #2b3550; border-left-width: 3px; border-radius: 10px; background: #141d30; color: var(--text); cursor: pointer; text-align: left; }
+.ph-deadline:hover { border-color: #3d4a68; }
+.ph-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: #5b78e5; flex: none; }
+.ph-deadline-label { font-weight: 600; color: var(--text-strong); }
+.ph-deadline time { color: #8b96ad; font-size: .86rem; }
+.ph-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: #8b96ad; }
+.ph-deadline.overdue { border-left-color: #e0605e; }
+.ph-deadline.overdue .ph-deadline-dot { background: #e0605e; }
+.ph-deadline.overdue em { color: #f08a88; font-weight: 600; }
+.ph-deadline.soon { border-left-color: #f0a742; }
+.ph-deadline.soon .ph-deadline-dot { background: #f0a742; }
+.ph-deadline.soon em { color: #f0bd77; }
+.ph-deadline.ok { border-left-color: #4fae6a; }
+.ph-deadline.ok .ph-deadline-dot { background: #4fae6a; }

@@ -10,7 +10,7 @@ export type Role = { id: string; name: string; description: string | null; paren
 export type Right = { id: string; code: string; title: string; description: string | null; right_type: string; right_group: string | null };
 export type ScopeType = "global" | "project" | "team" | "channel" | "document";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean };
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null };
 export type CfType = "text" | "int" | "date" | "enum" | "profile" | "bool";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;

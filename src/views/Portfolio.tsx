@@ -31,6 +31,7 @@ export default function Portfolio() {
   const [key, setKey] = createSignal("");
   const [keyTouched, setKeyTouched] = createSignal(false);
   const [description, setDescription] = createSignal("");
+  const [deadline, setDeadline] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
@@ -41,7 +42,7 @@ export default function Portfolio() {
   const startCreate = () => { setError(""); setCreating(true); };
   const cancelCreate = () => {
     setCreating(false); setError("");
-    setName(""); setKey(""); setKeyTouched(false); setDescription("");
+    setName(""); setKey(""); setKeyTouched(false); setDescription(""); setDeadline("");
   };
 
   const submit = async (event: SubmitEvent) => {
@@ -53,7 +54,7 @@ export default function Portfolio() {
     if (!trimmedKey) { setError("Give the project a short key (e.g. PLT)."); return; }
     setBusy(true);
     try {
-      const project = await createProject({ name: trimmedName, key: trimmedKey, description: description() });
+      const project = await createProject({ name: trimmedName, key: trimmedKey, description: description(), deadline: deadline() });
       cancelCreate();
       open(project.id); // enter the new project's steering workspace right away
     } catch (reason) {
@@ -78,6 +79,10 @@ export default function Portfolio() {
       <label class="pf-field">
         <span>Description <em>optional</em></span>
         <textarea value={description()} onInput={(e) => setDescription(e.currentTarget.value)} placeholder="What is this project about?" />
+      </label>
+      <label class="pf-field">
+        <span>Deadline <em>optional</em></span>
+        <input type="date" value={deadline()} onInput={(e) => setDeadline(e.currentTarget.value)} />
       </label>
       <div class="pf-create-actions">
         <button type="button" onClick={cancelCreate} disabled={busy()}>Cancel</button>
