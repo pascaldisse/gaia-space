@@ -1,0 +1,49 @@
+/* Contextual calendar day quick-create — modal dialog + the day "Add" menu. */
+
+/* ── Add trigger + kind menu in the day side panel ── */
+.cal-add{position:relative}
+.cal-add-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-text);font-family:var(--font-head);font-weight:600;font-size:12px;padding:4px 10px;border-radius:8px;cursor:pointer}
+.cal-add-btn:hover{filter:brightness(1.08)}
+.cal-add-btn .cal-add-plus{font-size:14px;line-height:1}
+.cal-add-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:40;min-width:200px;padding:6px;border:1px solid #2b3550;border-radius:10px;background:#0f1c34;box-shadow:0 12px 32px rgba(0,0,0,.45);display:grid;gap:2px}
+.cal-add-menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;background:transparent;color:var(--text);font:inherit;font-size:13px;padding:8px 9px;border-radius:7px;cursor:pointer}
+.cal-add-menu button:hover{background:#16294a}
+.cal-add-menu .cal-add-swatch{width:9px;height:9px;border-radius:2px;flex:0 0 auto}
+.cal-add-menu .meeting .cal-add-swatch{background:var(--accent)}
+.cal-add-menu .task .cal-add-swatch{background:#e0a83a}
+.cal-add-menu .deadline .cal-add-swatch{background:#e0607a}
+.cal-add-menu small{display:block;color:#8b96ad;font-size:11px;margin-top:1px}
+
+/* ── Modal dialog ── */
+.qc-overlay{position:fixed;inset:0;z-index:200;background:rgba(6,10,20,.62);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px 16px;overflow:auto}
+.qc-dialog{width:100%;max-width:460px;border:1px solid #2b3550;border-radius:14px;background:#101d38;box-shadow:0 24px 64px rgba(0,0,0,.5);color:var(--text);animation:qc-in .14s ease}
+@keyframes qc-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.qc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 18px 12px;border-bottom:1px solid #223052}
+.qc-head h2{margin:0;display:flex;align-items:center;gap:9px;font-family:var(--font-head);font-size:17px;color:var(--text-strong)}
+.qc-dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;background:var(--accent)}
+.qc-head h2.task .qc-dot{background:#e0a83a}
+.qc-head h2.deadline .qc-dot{background:#e0607a}
+.qc-day{margin:5px 0 0;color:#8b96ad;font-size:12.5px}
+.qc-x{border:0;background:transparent;color:#8b96ad;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
+.qc-x:hover{color:var(--text-strong)}
+.qc-error{margin:12px 18px 0;padding:9px 11px;border:1px solid #7a2f3d;border-radius:8px;background:rgba(224,96,122,.12);color:#f0a3b3;font-size:12.5px}
+.qc-body{padding:16px 18px 18px;display:grid;gap:13px}
+.qc-field{display:grid;gap:5px}
+.qc-label{font-size:12px;font-weight:600;color:#a9b4cc}
+.qc-label small{font-weight:500;color:#7a869e;text-transform:none}
+.qc-field input,.qc-field select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #2b3550;border-radius:9px;background:#0d1830;color:var(--text);font:inherit;font-size:13.5px}
+.qc-field input:focus,.qc-field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.qc-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.qc-hint{margin:0;font-size:12px;color:#8b96ad}
+.qc-hint.warn{color:#f0c778}
+.qc-hint strong{color:var(--text-strong);font-weight:600}
+.qc-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.qc-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 5px 3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-text);font-size:12px}
+.qc-chip button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.qc-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:4px}
+.qc-actions button{border-radius:9px;padding:9px 16px;font-family:var(--font-head);font-weight:600;font-size:13px;cursor:pointer}
+.qc-cancel{border:1px solid #2b3550;background:transparent;color:#a9b4cc}
+.qc-cancel:hover{color:var(--text-strong);border-color:#3d4a68}
+.qc-submit{border:1px solid var(--accent);background:var(--accent);color:var(--brand-navy)}
+.qc-submit:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:520px){.qc-overlay{padding:5vh 10px 10px}.qc-row{grid-template-columns:1fr}}

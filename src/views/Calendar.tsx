@@ -1,10 +1,11 @@
-import { createResource, createSignal, createEffect, For, Show } from "solid-js";
+import { createResource, createSignal, createEffect, For, Show, onMount, onCleanup } from "solid-js";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { profileId, projectId, projects } from "../session";
+import { profileId, projectId, projects, reloadProfiles, reloadProjects } from "../session";
 import { requestedDate, requestDate } from "../nav";
 import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
+import CalendarQuickCreate, { type QuickKind } from "../components/CalendarQuickCreate";
 import "./Calendar.css";
 
 const monthRange = (date:Date) => { const g = monthGrid(date); return [g[0], new Date(g[41].getFullYear(), g[41].getMonth(), g[41].getDate()+1)] as const; };
@@ -24,10 +25,18 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   const [selected,setSelected] = createSignal<CalendarItem>();
   const [selectedDay,setSelectedDay] = createSignal(dayKeyOf(startOfDay(new Date())));
   const range = () => view()==="month" ? monthRange(cursor()) : weekRange(cursor());
+  // Quick-create: which type of item the day "Add" flow is creating, and whether
+  // the kind-picker menu is open. Profiles/projects are needed for its pickers.
+  onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
+  const [addMenu,setAddMenu] = createSignal(false);
+  const [quick,setQuick] = createSignal<QuickKind|undefined>();
+  const closeAddMenu = () => setAddMenu(false);
+  onMount(()=>document.addEventListener("click",closeAddMenu));
+  onCleanup(()=>document.removeEventListener("click",closeAddMenu));
 
   // Fan out to the three calendar sources for the range, then merge into one
   // typed list. Any single source failing must not blank the calendar.
-  const [items] = createResource(() => [range()[0].getTime()/1000, range()[1].getTime()/1000, scope(), projectId()] as const, async ([range_start,range_end,sc,pid]) => {
+  const [items,{refetch:refetchItems}] = createResource(() => [range()[0].getTime()/1000, range()[1].getTime()/1000, scope(), projectId()] as const, async ([range_start,range_end,sc,pid]) => {
     const [occurrences,todos,allProjects] = await Promise.all([
       meetingsApi.occurrences(range_start,range_end).catch(()=>[]),
       (sc==="project" && pid ? personalApi.projectTodos(pid, true) : personalApi.todos(profileId(), true)).catch(()=>[]),
@@ -60,6 +69,10 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   const projectName = () => projects()?.find(p=>p.id===projectId())?.name;
   const readableDay = (key:string) => { const [y,m,d]=key.split("-").map(Number); return new Date(y,(m||1)-1,d||1).toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}); };
   const timeRange = (e:CalendarItem) => `${new Date(e.starts_at!*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} – ${new Date(e.ends_at!*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
+  // After a quick-create, pull fresh calendar items; a new deadline also mutates
+  // the projects list, so reload that too.
+  const onCreated = (kind:QuickKind) => { void refetchItems(); if (kind==="deadline") void reloadProjects(); };
+  const openQuick = (kind:QuickKind) => { setAddMenu(false); setQuick(kind); };
 
   return <section class="calendar-view">
     <header class="calendar-head">
@@ -93,7 +106,22 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
         </For>
       </div>
       <aside class="calendar-side">
-        <header class="cal-side-head"><h2>{readableDay(selectedDay())}</h2><span>{dayAgenda().length} item{dayAgenda().length===1?"":"s"}</span></header>
+        <header class="cal-side-head">
+          <h2>{readableDay(selectedDay())}</h2>
+          <div class="cal-side-head-actions">
+            <span>{dayAgenda().length} item{dayAgenda().length===1?"":"s"}</span>
+            <div class="cal-add" onClick={e=>e.stopPropagation()}>
+              <button class="cal-add-btn" aria-haspopup="menu" aria-expanded={addMenu()} onClick={()=>setAddMenu(v=>!v)}><span class="cal-add-plus" aria-hidden="true">+</span> Add</button>
+              <Show when={addMenu()}>
+                <div class="cal-add-menu" role="menu">
+                  <button class="meeting" role="menuitem" onClick={()=>openQuick("meeting")}><span class="cal-add-swatch" aria-hidden="true"/><span>Meeting<small>Prefilled to this day</small></span></button>
+                  <button class="task" role="menuitem" onClick={()=>openQuick("task")}><span class="cal-add-swatch" aria-hidden="true"/><span>Task<small>Due this day</small></span></button>
+                  <button class="deadline" role="menuitem" onClick={()=>openQuick("deadline")}><span class="cal-add-swatch" aria-hidden="true"/><span>Project deadline<small>Set to this day</small></span></button>
+                </div>
+              </Show>
+            </div>
+          </div>
+        </header>
         <Show when={dayAgenda().length} fallback={<p class="cal-side-empty">Nothing scheduled this day.</p>}>
           <ul class="cal-agenda">
             <For each={dayAgenda()}>{event=>
@@ -110,6 +138,9 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
         </Show>
       </aside>
     </div>
+    <Show when={quick()}>{kind=>
+      <CalendarQuickCreate kind={kind()} dayKey={selectedDay()} scope={scope()} activeProjectId={projectId()} onClose={()=>setQuick(undefined)} onCreated={onCreated}/>}
+    </Show>
     <Show when={selected()}>{event=>
       <aside class="calendar-detail">
         <div>
