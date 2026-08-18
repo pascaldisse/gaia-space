@@ -30,9 +30,15 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [addMenu,setAddMenu] = createSignal(false);
   const [quick,setQuick] = createSignal<QuickKind|undefined>();
-  const closeAddMenu = () => setAddMenu(false);
-  onMount(()=>document.addEventListener("click",closeAddMenu));
-  onCleanup(()=>document.removeEventListener("click",closeAddMenu));
+  let addMenuRef: HTMLDivElement | undefined;
+  // Solid delegates click handlers at document level. A bare document click
+  // listener would run after the trigger and immediately close its new menu;
+  // only dismiss genuine outside clicks instead.
+  const dismissAddMenu = (event: MouseEvent) => {
+    if (!addMenuRef?.contains(event.target as Node)) setAddMenu(false);
+  };
+  onMount(()=>document.addEventListener("click",dismissAddMenu));
+  onCleanup(()=>document.removeEventListener("click",dismissAddMenu));
 
   // Fan out to the three calendar sources for the range, then merge into one
   // typed list. Any single source failing must not blank the calendar.
@@ -110,7 +116,7 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
           <h2>{readableDay(selectedDay())}</h2>
           <div class="cal-side-head-actions">
             <span>{dayAgenda().length} item{dayAgenda().length===1?"":"s"}</span>
-            <div class="cal-add" onClick={e=>e.stopPropagation()}>
+            <div class="cal-add" ref={addMenuRef}>
               <button class="cal-add-btn" aria-haspopup="menu" aria-expanded={addMenu()} onClick={()=>setAddMenu(v=>!v)}><span class="cal-add-plus" aria-hidden="true">+</span> Add</button>
               <Show when={addMenu()}>
                 <div class="cal-add-menu" role="menu">
