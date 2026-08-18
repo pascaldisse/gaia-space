@@ -117,6 +117,11 @@ export default function Documents(props: { scope?: DocScope }) {
         d.container_id === containerId() &&
         (showArchived() || !d.archived),
     );
+  // Archive filtering is only useful when this exact document space contains
+  // archived material; otherwise hide a control that would appear inert.
+  const hasArchived = () =>
+    (allFolders() ?? []).some((f) => f.container_type === activeContainer() && f.container_id === containerId() && f.archived) ||
+    (allDocuments() ?? []).some((d) => d.container_type === activeContainer() && d.container_id === containerId() && d.archived);
 
   const [selectedFolderId, setSelectedFolderId] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
@@ -505,10 +510,12 @@ export default function Documents(props: { scope?: DocScope }) {
           </button>
         </Show>
 
-        <label class="show-archived">
-          <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
-          show archived
-        </label>
+        <Show when={hasArchived()}>
+          <label class="show-archived">
+            <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
+            Show archived
+          </label>
+        </Show>
         <Show when={scope() === "global"}>
           <p class="container-caption">
             {activeContainer() === "my-docs"

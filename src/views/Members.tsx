@@ -29,6 +29,7 @@ export default function Members() {
   const visibleTeams = createMemo(() => (teams() ?? []).filter((t) => showArchived() || !t.archived));
   const activeProfileCount = () => (profiles() ?? []).filter((p) => !p.archived).length;
   const activeTeamCount = () => (teams() ?? []).filter((t) => !t.archived).length;
+  const hasArchived = () => [...(profiles() ?? []), ...(teams() ?? [])].some((item) => item.archived);
 
   const saveProfile = async (e: SubmitEvent) => {
     e.preventDefault();
@@ -82,10 +83,12 @@ export default function Members() {
   return (
     <section class="org-view">
       <WorkspaceHeader icon="org" title="Organization" actions={
-        <label class="org-archived-toggle">
-          <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
-          Show archived
-        </label>
+        <Show when={hasArchived()}>
+          <label class="org-archived-toggle">
+            <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
+            Show archived
+          </label>
+        </Show>
       }>
         Your people and structure in one place — manage <strong>profiles</strong>, shape the
         <strong> team org-chart</strong>, and assign per-team roles.
