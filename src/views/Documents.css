@@ -31,8 +31,9 @@
   font-family: var(--font-head, inherit); font-weight: 700; font-size: 15px;
   box-shadow: 0 2px 10px rgba(0,194,168,0.28);
 }
-/* Org-wide variant: renders a glyph instead of project initials. */
-.dk-mark-global { color: var(--brand-navy, #08131a); }
+/* Knowledge view has no container padding of its own — restore the header inset
+   the old .documents-head provided when using the shared WorkspaceHeader. */
+.dk-workspace-head { padding: 20px 24px 0; }
 
 /* Per-container context caption under the global tabs (owner-friendly hierarchy). */
 .container-caption {

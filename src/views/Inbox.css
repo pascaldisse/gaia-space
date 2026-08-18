@@ -3,13 +3,7 @@
    hierarchy, data-driven filters, and lightened surfaces throughout. ── */
 .inbox-view { height: 100%; overflow: auto; padding: 28px 34px; }
 
-/* Header — icon + purpose line, Acting-as and bulk action on the right */
-.inbox-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.inbox-title { display: flex; align-items: center; gap: 13px; }
-.inbox-title-ic { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
-.inbox-title h1 { margin: 0; font-family: var(--font-head); font-size: 22px; }
-.inbox-title p { color: var(--text-muted, #9da0a8); margin: 4px 0 0; max-width: 56ch; font-size: 13px; }
-.inbox-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+/* Header identity now comes from the shared WorkspaceHeader component. */
 .inbox-muted { color: #8a8d95; }
 
 /* Filter bar — scope segmented control + data-driven category chips */
@@ -84,6 +78,5 @@
 
 @media (max-width: 620px) {
   .inbox-view { padding: 20px 16px; }
-  .inbox-head { flex-direction: column; }
   .inbox-meta time { margin-left: 0; }
 }

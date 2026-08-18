@@ -2,6 +2,7 @@ import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { planningApi } from "../api/issues";
 import { createProject, humanError, projectId, projects, reloadProjects, setProjectId } from "../session";
 import { requestView } from "../nav";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import "./Portfolio.css";
 
 // Portfolio — the real project list. Picking a project sets the active project
@@ -91,12 +92,13 @@ export default function Portfolio() {
     </form>;
 
   return <section class="pf-view">
-    <header class="pf-head">
-      <div><h1>Projects</h1><p>Your portfolio. Open a project to enter its steering workspace.</p></div>
+    <WorkspaceHeader icon="layers" title="Projects" actions={
       <Show when={!creating() && list().length}>
         <button class="primary pf-new" onClick={startCreate}>+ New project</button>
       </Show>
-    </header>
+    }>
+      Your portfolio. Open a project to enter its steering workspace.
+    </WorkspaceHeader>
 
     <Show when={projects() === undefined}><p class="pf-muted">Loading projects…</p></Show>
 

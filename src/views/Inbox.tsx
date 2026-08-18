@@ -2,6 +2,7 @@ import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { personalApi, type Notification } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { Icon, type IconName } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { profileId } from "../session";
 import { requestView } from "../nav";
 import "./Inbox.css";
@@ -126,21 +127,14 @@ export default function Inbox() {
   };
 
   return <section class="inbox-view">
-    <header class="inbox-head">
-      <div class="inbox-title">
-        <span class="inbox-title-ic"><Icon name="inbox" size={20} /></span>
-        <div>
-          <h1>Inbox</h1>
-          <p>Everything addressed to you — mentions, assignments, reviews, and updates across your work.</p>
-        </div>
-      </div>
-      <div class="inbox-head-actions">
-        <ProfilePicker />
-        <Show when={unreadAll().length}>
-          <button class="primary" onClick={markAll}>Mark all read</button>
-        </Show>
-      </div>
-    </header>
+    <WorkspaceHeader icon="inbox" title="Inbox" actions={<>
+      <ProfilePicker />
+      <Show when={unreadAll().length}>
+        <button class="primary" onClick={markAll}>Mark all read</button>
+      </Show>
+    </>}>
+      Everything addressed to you — mentions, assignments, reviews, and updates across your work.
+    </WorkspaceHeader>
 
     <Show when={!profileId()}>
       <div class="inbox-blank">

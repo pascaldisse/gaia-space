@@ -6,6 +6,7 @@ import { meetingsApi } from "../api/meetings";
 import { ProfilePicker } from "../components/Pickers";
 import MiniCalendar from "../components/MiniCalendar";
 import { Icon } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { profileId } from "../session";
 import { requestView, requestTodo, requestDate } from "../nav";
 import { buildCalendarItems, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
@@ -147,10 +148,9 @@ export default function Dashboard() {
   const calTime = (e: CalendarItem) => e.allDay ? (e.kind === "deadline" ? "Deadline" : "All day") : new Date(e.starts_at! * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return <section class="dashboard-view">
-    <header>
-      <div><h1>Overview</h1><p>Your work, calendar, notification feed, and organization availability.</p></div>
-      <ProfilePicker/>
-    </header>
+    <WorkspaceHeader icon="home" title="Overview" actions={<ProfilePicker/>}>
+      Your work, calendar, notification feed, and organization availability.
+    </WorkspaceHeader>
     <Show when={dashboard.loading}><p class="dashboard-muted">Loading dashboard…</p></Show>
     <Show when={!profileId()}><p class="dashboard-empty">No profile selected — add one in Members.</p></Show>
     <Show when={dashboard()}>{data =>

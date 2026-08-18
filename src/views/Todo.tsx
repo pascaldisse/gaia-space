@@ -2,6 +2,7 @@ import { createResource, createSignal, createEffect, For, Show, onMount } from "
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { ProjectControl, DueDateControl, AssigneeControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
@@ -25,7 +26,7 @@ export default function Todo() {
   const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,project_id:f.project_id||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const update=async(todo:TodoItem, patch:Partial<TodoItem>)=>{ try { await personalApi.updateTodo({...todo,...patch}); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const canSubmit=()=>Boolean(profileId().trim()&&form().content.trim());
-  return <section class="personal-view todo-view"><header><div><h1>My tasks</h1><p>Personal tasks with optional bookmarks back to Space entities.</p></div><ProfilePicker/></header><Show when={error()}><p class="personal-error">{error()}</p></Show>
+  return <section class="personal-view todo-view"><WorkspaceHeader icon="check" title="My tasks" actions={<ProfilePicker/>}>Personal tasks with optional bookmarks back to Space entities.</WorkspaceHeader><Show when={error()}><p class="personal-error">{error()}</p></Show>
 
     <form class="task-composer" onSubmit={save}>
       <input class="composer-title" autofocus placeholder="What needs doing?" aria-label="Task title" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>

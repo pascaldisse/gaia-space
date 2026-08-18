@@ -4,6 +4,7 @@ import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
 import { Icon } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import {
   documentsApi,
   newId,
@@ -445,24 +446,21 @@ export default function Documents(props: { scope?: DocScope }) {
         </div>
       </Show>
 
-      <header class="documents-head" classList={{ "is-project": scope() === "project" }}>
-        <Show
-          when={scope() === "project"}
-          fallback={
-            <div class="dk-head-main">
-              <div class="dk-mark dk-mark-global" aria-hidden="true"><Icon name="org" size={22} /></div>
-              <div>
-                <h1>Knowledge</h1>
-                <p>
-                  Your organization’s knowledge home. Keep private drafts in{" "}
-                  <strong>My Documents</strong> and publish shared references to the{" "}
-                  <strong>Knowledge Base</strong>. Docs tied to a single project live in
-                  that project’s <strong>Knowledge</strong> tab.
-                </p>
-              </div>
-            </div>
-          }
-        >
+      {/* Global scope gets the shared workspace banner; project scope keeps its
+          own project mark so a project's identity is never doubled with the
+          workspace brand. */}
+      <Show
+        when={scope() === "project"}
+        fallback={
+          <WorkspaceHeader class="dk-workspace-head" icon="book-nav" title="Knowledge" actions={<ProfilePicker />}>
+            Your organization’s knowledge home. Keep private drafts in{" "}
+            <strong>My Documents</strong> and publish shared references to the{" "}
+            <strong>Knowledge Base</strong>. Docs tied to a single project live in
+            that project’s <strong>Knowledge</strong> tab.
+          </WorkspaceHeader>
+        }
+      >
+        <header class="documents-head is-project">
           <div class="dk-head-main">
             <div class="dk-mark" aria-hidden="true">{activeProjectMark()}</div>
             <div>
@@ -474,9 +472,9 @@ export default function Documents(props: { scope?: DocScope }) {
               </p>
             </div>
           </div>
-        </Show>
-        <ProfilePicker />
-      </header>
+          <ProfilePicker />
+        </header>
+      </Show>
 
       <nav class="container-tabs">
         <Show when={containerTabs().length > 1}>

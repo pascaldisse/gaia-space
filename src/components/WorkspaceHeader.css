@@ -1,0 +1,26 @@
+/* Shared top-level page-identity banner. Matches the project-scoped
+   ProjectHeader mark (44px teal brand tile) so both IA levels feel unified. */
+.workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+.wh-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.wh-mark {
+  width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-teal, #00c2a8), #0f9e8b);
+  color: var(--brand-navy, #08131a);
+  box-shadow: 0 2px 12px rgba(0, 194, 168, 0.28);
+}
+.wh-text { min-width: 0; }
+.workspace-header h1 { margin: 0; font-size: 22px; font-weight: 650; color: var(--text-strong); }
+.workspace-header p { margin: 4px 0 0; color: #9da0a8; max-width: 560px; line-height: 1.5; }
+.workspace-header p strong { color: #c7cad2; font-weight: 600; }
+.wh-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+
+@media (max-width: 640px) {
+  .workspace-header { flex-direction: column; }
+}

@@ -8,6 +8,7 @@ import { requestedDate, requestDate } from "../nav";
 import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, projectMeetingIds, type CalendarItem } from "../calendar";
 import CalendarQuickCreate, { type QuickKind } from "../components/CalendarQuickCreate";
 import { Icon } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import "./Calendar.css";
 
 const monthRange = (date:Date) => { const g = monthGrid(date); return [g[0], new Date(g[41].getFullYear(), g[41].getMonth(), g[41].getDate()+1)] as const; };
@@ -90,25 +91,34 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
   const onCreated = (kind:QuickKind) => { void refetchItems(); if (kind==="deadline") void reloadProjects(); };
   const openQuick = (kind:QuickKind) => { setAddMenu(false); setQuick(kind); };
 
+  const calendarControls = () => <div class="calendar-controls">
+    <button aria-label="Previous" onClick={()=>shift(-1)}><Icon name="chevron-left" size={16} /></button>
+    <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
+    <button aria-label="Next" onClick={()=>shift(1)}><Icon name="chevron-right" size={16} /></button>
+    <button class="cal-today" onClick={goToday}>Today</button>
+    <div class="cal-viewtoggle">
+      <button classList={{active:view()==="month"}} onClick={()=>setView("month")}>Month</button>
+      <button classList={{active:view()==="week"}} onClick={()=>setView("week")}>Week</button>
+    </div>
+  </div>;
+
   return <section class="calendar-view">
-    <header class="calendar-head">
-      <div>
-        <h1>{scope()==="project" ? "Planning calendar" : "Calendar"}</h1>
-        <p>{scope()==="project"
-          ? <>Scoped to <strong>{projectName() ?? "this project"}</strong>: only its meetings, its tasks, and its deadline — not personal or other-project items. Your full schedule lives in the top-nav Calendar.</>
-          : "Every meeting, task due date, and project deadline across your workspace."}</p>
-      </div>
-      <div class="calendar-controls">
-        <button aria-label="Previous" onClick={()=>shift(-1)}><Icon name="chevron-left" size={16} /></button>
-        <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
-        <button aria-label="Next" onClick={()=>shift(1)}><Icon name="chevron-right" size={16} /></button>
-        <button class="cal-today" onClick={goToday}>Today</button>
-        <div class="cal-viewtoggle">
-          <button classList={{active:view()==="month"}} onClick={()=>setView("month")}>Month</button>
-          <button classList={{active:view()==="week"}} onClick={()=>setView("week")}>Week</button>
+    {/* Project scope keeps its plain header so the project's own ProjectHeader
+        identity is never doubled with a workspace brand mark; the top-nav
+        Calendar gets the shared WorkspaceHeader banner. */}
+    <Show when={scope()==="project"} fallback={
+      <WorkspaceHeader icon="calendar-nav" title="Calendar" actions={calendarControls()}>
+        Every meeting, task due date, and project deadline across your workspace.
+      </WorkspaceHeader>
+    }>
+      <header class="calendar-head">
+        <div>
+          <h1>Planning calendar</h1>
+          <p>Scoped to <strong>{projectName() ?? "this project"}</strong>: only its meetings, its tasks, and its deadline — not personal or other-project items. Your full schedule lives in the top-nav Calendar.</p>
         </div>
-      </div>
-    </header>
+        {calendarControls()}
+      </header>
+    </Show>
     <div class="calendar-legend"><span class="cal-key meeting">Meeting</span><span class="cal-key task">Task due</span><span class="cal-key deadline">Project deadline</span></div>
     <Show when={items.loading}><p class="cal-loading">Loading calendar…</p></Show>
     <div class="calendar-main">

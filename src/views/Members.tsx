@@ -1,6 +1,7 @@
 import { createResource, createSignal, createMemo, For, Show } from "solid-js";
 import { platformApi, type Profile, type Team, type TeamMembership, type Role } from "../api/platform";
 import { Icon } from "../components/Icon";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import "./Members.css";
 
 const blankProfile = () => ({ id: "", username: "", display_name: "", email: "" });
@@ -80,22 +81,15 @@ export default function Members() {
 
   return (
     <section class="org-view">
-      <header class="org-head">
-        <div class="org-head-main">
-          <div class="org-mark" aria-hidden="true"><Icon name="org" size={22} /></div>
-          <div>
-            <h1>Organization</h1>
-            <p>
-              Your people and structure in one place — manage <strong>profiles</strong>, shape the
-              <strong> team org-chart</strong>, and assign per-team roles.
-            </p>
-          </div>
-        </div>
+      <WorkspaceHeader icon="org" title="Organization" actions={
         <label class="org-archived-toggle">
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
           Show archived
         </label>
-      </header>
+      }>
+        Your people and structure in one place — manage <strong>profiles</strong>, shape the
+        <strong> team org-chart</strong>, and assign per-team roles.
+      </WorkspaceHeader>
 
       <Show when={error()}><p class="org-error" onClick={() => setError("")}>{error()}</p></Show>
 
