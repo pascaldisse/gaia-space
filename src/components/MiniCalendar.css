@@ -7,12 +7,12 @@
 .mini-nav:hover{border-color:var(--accent);color:var(--text-strong)}
 .mini-today{font-family:var(--font-head);font-weight:600;font-size:11px;padding:4px 9px;border:1px solid #2b3550;background:#101d38;color:var(--accent-text);border-radius:7px;cursor:pointer}
 .mini-today:hover{border-color:var(--accent)}
-.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:54px;gap:3px}
 .mini-wd{text-align:center;font-size:10px;font-weight:600;color:#8b96ad;padding-bottom:2px;text-transform:uppercase;letter-spacing:.04em}
-.mini-day{position:relative;aspect-ratio:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:5px;border:1px solid transparent;background:#0f1c34;border-radius:8px;color:var(--text);cursor:pointer;padding:8px;transition:border-color .12s ease,background .12s ease}
+.mini-day{position:relative;min-width:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:4px;border:1px solid transparent;background:#0f1c34;border-radius:8px;color:var(--text);cursor:pointer;padding:6px;transition:border-color .12s ease,background .12s ease}
 .mini-day:hover{border-color:#33456d;background:#122240}
 .mini-day .mini-num{font-size:12px;font-variant-numeric:tabular-nums;line-height:1}
-.mini-event{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 5px;border-left:2px solid var(--accent);border-radius:3px;background:var(--accent-soft);color:var(--accent-text);font-size:9px;font-weight:600;line-height:1.25}
+.mini-event{display:block;max-width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 5px;border-left:2px solid var(--accent);border-radius:3px;background:var(--accent-soft);color:var(--accent-text);font-size:9px;font-weight:600;line-height:1.25}
 .mini-event.task{border-left-color:var(--status-warning);background:var(--status-warning-bg);color:var(--status-warning-ink)}
 .mini-event.deadline{border-left-color:var(--status-danger);background:var(--status-danger-bg);color:var(--status-danger-ink)}
 .mini-more{position:absolute;right:6px;bottom:5px;color:#8b96ad;font-size:9px;font-weight:600}
@@ -23,4 +23,4 @@
 .mini-day.today .mini-num{color:var(--accent-text);font-weight:700}
 .mini-day.selected{border-color:var(--accent);background:var(--accent-soft)}
 .mini-day.selected .mini-num{color:var(--text-strong);font-weight:700}
-@media(max-width:760px){.mini-day{padding:4px;align-items:center;justify-content:center}.mini-day .mini-num{font-size:11px}.mini-event,.mini-more{display:none}}
+@media(max-width:760px){.mini-grid{grid-auto-rows:42px}.mini-day{padding:4px;align-items:center;justify-content:center}.mini-day .mini-num{font-size:11px}.mini-event,.mini-more{display:none}}

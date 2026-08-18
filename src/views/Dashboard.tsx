@@ -125,14 +125,11 @@ export default function Dashboard() {
     ]);
     return buildCalendarItems({ occurrences, todos, projects: projectsList });
   });
-  // Upcoming agenda — instead of showing only the picked day (which hid future
-  // meetings / task due dates / project deadlines behind faint grid dots), list
-  // every calendar entry from the picked day forward, grouped by day. Day picks
-  // just move the window start, so detail is still reachable and today's default
-  // surfaces what's coming up without hunting dots or opening the full Calendar.
+  // Upcoming is always anchored to today. A day pick highlights that date and
+  // controls the Calendar link, but must not make the rolling agenda disappear.
   const CAL_LOOKAHEAD = 8;
   const upcomingItems = () => (calItems() ?? [])
-    .filter((i) => i.date >= calDay())
+    .filter((i) => i.date >= dayKeyOf(startOfDay(new Date())))
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.allDay !== b.allDay ? (a.allDay ? -1 : 1) : (a.starts_at ?? 0) - (b.starts_at ?? 0)))
     .slice(0, CAL_LOOKAHEAD);
   const upcomingGroups = () => {
@@ -242,7 +239,7 @@ export default function Dashboard() {
               onPick={setCalDay}
             />
             <div class="co-agenda">
-              <header><h3>{calDay() === dayKeyOf(startOfDay(new Date())) ? "Upcoming" : `From ${readableDay(calDay())}`}</h3><span>{upcomingItems().length} item{upcomingItems().length === 1 ? "" : "s"}</span></header>
+              <header><h3>Upcoming</h3><span>{upcomingItems().length} item{upcomingItems().length === 1 ? "" : "s"}</span></header>
               <Show when={upcomingItems().length} fallback={<p class="co-empty">Nothing upcoming. <button class="agenda-inline" onClick={() => openCalendarAt(calDay())}>Open calendar →</button></p>}>
                 <ul>
                   <For each={upcomingGroups()}>{group =>
