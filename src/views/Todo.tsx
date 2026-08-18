@@ -2,6 +2,7 @@ import { createResource, createSignal, createEffect, For, Show, onMount } from "
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
+import { ProjectControl, DueDateControl, AssigneeControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
 import { requestedTodo, requestTodo } from "../nav";
@@ -29,12 +30,11 @@ export default function Todo() {
     <form class="task-composer" onSubmit={save}>
       <input class="composer-title" autofocus placeholder="What needs doing?" aria-label="Task title" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
       <div class="composer-meta">
-        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">▦</span><span class="meta-label">Project</span><select aria-label="Project" value={form().project_id} onChange={e=>setForm({...form(),project_id:e.currentTarget.value})}><option value="">No project — personal</option><For each={openProjects()}>{p=><option value={p.id}>{p.name}</option>}</For></select></label>
-        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">◷</span><span class="meta-label">Due</span><input type="date" aria-label="Due date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/></label>
-        <label class="meta-chip"><span class="meta-icon" aria-hidden="true">＋</span><select aria-label="Add assignee" value="" onChange={e=>{addAssignee(e.currentTarget.value);e.currentTarget.value="";}}><option value="">Assignee</option><For each={active().filter(p=>!form().assignee_ids.includes(p.id))}>{p=><option value={p.id}>{p.display_name||p.username}</option>}</For></select></label>
-        <button class="primary composer-submit" disabled={!canSubmit()}>Add task</button>
+        <ProjectControl value={form().project_id} projects={openProjects().map(p=>({id:p.id,name:p.name,key:p.key}))} onChange={id=>setForm({...form(),project_id:id})}/>
+        <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
+        <AssigneeControl value={form().assignee_ids} people={active().map(p=>({id:p.id,label:p.display_name||p.username,sub:`@${p.username}`}))} onToggle={id=>form().assignee_ids.includes(id)?removeAssignee(id):addAssignee(id)}/>
       </div>
-      <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
+      <div class="composer-actions"><button class="primary composer-submit" disabled={!canSubmit()}>Add task</button></div>
       <details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><label class="todo-field"><span class="field-label">Entity type</span><input placeholder="issue, document…" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/></label><label class="todo-field"><span class="field-label">Entity ID</span><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></label></div></details>
     </form>
 

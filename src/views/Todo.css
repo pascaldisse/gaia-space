@@ -15,18 +15,10 @@
 .composer-title::placeholder{color:#6d7c99;font-weight:500}
 .composer-title:focus{outline:none;border-bottom-color:var(--accent)!important;box-shadow:0 1px 0 0 var(--accent)!important}
 
-/* metadata row: quiet chips + one strong submit, equal heights */
-.composer-meta{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
-.meta-chip{display:inline-flex;align-items:center;gap:0;background:var(--ctl-bg);border:1px solid var(--ctl-border);border-radius:999px;padding:0 4px 0 12px;height:38px;transition:border-color .14s ease,background .14s ease}
-.meta-chip:hover{border-color:var(--ctl-border-hover);background:var(--ctl-bg-hover)}
-.meta-chip:focus-within{border-color:var(--accent);box-shadow:var(--ctl-focus-ring)}
-.meta-icon{color:#8b96ad;font-size:13px;line-height:1;pointer-events:none}
-.meta-label{margin-left:6px;color:#8b96ad;font-family:var(--font-head);font-size:11px;font-weight:600;letter-spacing:.02em;pointer-events:none}
-.meta-chip select,.meta-chip input{background:transparent!important;border:none!important;box-shadow:none!important;height:100%;padding:0 6px!important;color:var(--text-strong);font-size:13px!important}
-.meta-chip select{padding-right:1.8em!important;background-position:right .4em center!important}
-.meta-chip input[type=date]{min-width:120px}
-.meta-chip select:focus,.meta-chip input:focus{outline:none}
-.composer-submit{height:38px;margin-left:auto;padding:0 22px;border-radius:999px;font-size:13.5px}
+/* metadata row: three equal, generous, same-colour popover controls */
+.composer-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:stretch}
+.composer-actions{display:flex;justify-content:flex-end}
+.composer-submit{height:42px;padding:0 26px;border-radius:999px;font-size:13.5px}
 
 .composer-source{border-top:1px solid #223052;padding-top:12px;color:#aeb1b8}
 .composer-source summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
@@ -67,4 +59,4 @@
 .task-project-edit .field-label{font-size:11px;color:#8b96ad}
 .task-delete{flex:none;margin-top:-2px}
 
-@media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-submit{margin-left:0;flex:1}.personal-view>header{display:grid}.personal-view header label{width:auto}}
+@media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}.personal-view>header{display:grid}.personal-view header label{width:auto}}
