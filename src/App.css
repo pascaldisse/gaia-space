@@ -101,14 +101,17 @@
      padding, left-aligned readable cap) comes from these tokens.
        view-pad-*   : shared top/side/bottom padding of a view body
        view-max     : standard readable content cap (left-aligned)
-       view-max-wide: wide layouts (calendar / meetings grids)
-       view-head-gap: header → body vertical rhythm */
+       view-max-wide: wide data/two-column layouts (fills wide monitors)
+       view-head-gap: header → body vertical rhythm
+       rail-w       : width of the context/next-action rail */
   --view-pad-y: 26px;
   --view-pad-x: 34px;
   --view-pad-bottom: 44px;
   --view-max: 1160px;
   --view-max-wide: 1280px;
+  --view-max-canvas: 1560px;
   --view-head-gap: 22px;
+  --rail-w: 312px;
 
   --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -707,6 +710,47 @@ textarea:focus {
 .resource-list pre { margin: 8px 0 0; color: #7fb8b0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 /* shared compact empty surface — centered card, never a huge dead block */
 .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 28px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #92959d; border-radius: 12px; max-width: 520px; margin: 24px auto; }
+
+/* ── shared two-column workspace: main content + sticky context rail ──
+   Views that are otherwise a single narrow column adopt .view-cols so wide
+   monitors carry a useful, data-grounded rail (summary / next-action /
+   quick-start) instead of dead horizontal space. All surfaces are built from
+   the view's real data — no invented dashboards. */
+.view-cols { display: grid; grid-template-columns: minmax(0, 1fr) var(--rail-w); gap: 24px; align-items: start; }
+.view-main { min-width: 0; display: grid; gap: 16px; align-content: start; }
+.view-rail { display: grid; gap: 14px; position: sticky; top: 0; align-content: start; }
+.rail-card { border: 1px solid var(--surface-border); border-radius: 14px; background: var(--surface); padding: 15px 16px; }
+.rail-card > h3 { margin: 0 0 12px; font-family: var(--font-head); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); display: flex; align-items: center; gap: 7px; }
+.rail-card > h3 .rail-count { margin-left: auto; color: var(--text-muted); font-size: 11px; letter-spacing: 0; }
+/* metric grid — big numbers pulled from real counts */
+.rail-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rail-metric { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid var(--surface-border); border-radius: 11px; background: var(--surface-2, rgba(255,255,255,0.02)); }
+.rail-metric .rail-num { font-family: var(--font-head); font-size: 21px; font-weight: 700; line-height: 1; color: var(--text-strong); }
+.rail-metric .rail-lbl { font-size: 11px; color: #9297a3; }
+.rail-metric.accent .rail-num { color: var(--accent-text, var(--accent)); }
+.rail-metric.warn .rail-num { color: var(--status-warning-ink); }
+/* labelled key/value breakdown rows */
+.rail-rows { display: grid; gap: 2px; }
+.rail-row { display: flex; align-items: center; gap: 9px; padding: 7px 4px; border-radius: 8px; font-size: 13px; color: var(--text-muted); width: 100%; text-align: left; background: transparent; border: 0; }
+button.rail-row { cursor: pointer; }
+button.rail-row:hover { background: var(--surface-hover); color: var(--text-strong); }
+.rail-row .rail-row-ic { flex: none; display: grid; place-items: center; color: var(--text-dim); }
+.rail-row .rail-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-row .rail-row-val { margin-left: auto; flex: none; color: var(--text-strong); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rail-row.muted .rail-row-val { color: var(--text-faint); font-weight: 500; }
+/* compact next-action items */
+.rail-item { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid var(--surface-border); border-radius: 10px; background: transparent; text-align: left; width: 100%; }
+button.rail-item { cursor: pointer; }
+button.rail-item:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+.rail-item .rail-item-title { font-size: 13px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item .rail-item-sub { font-size: 11.5px; color: #9297a3; }
+.rail-empty { font-size: 12.5px; color: var(--text-faint); padding: 4px 2px; }
+.rail-actions { display: grid; gap: 8px; }
+.rail-actions button { justify-content: flex-start; width: 100%; }
+@media (max-width: 1040px) {
+  .view-cols { grid-template-columns: 1fr; }
+  .view-rail { position: static; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}
 
 /* ── responsive ─────────────────────────────────────────────── */
 @media (max-width: 1100px) {

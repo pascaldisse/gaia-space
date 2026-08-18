@@ -148,25 +148,6 @@ export default function Inbox() {
     <Show when={profileId()}>
       <Show when={items.loading}><p class="inbox-muted">Loading your inbox…</p></Show>
       <Show when={!items.loading}>
-        {/* ── Filter bar ── scope (all / unread) + data-driven category chips ── */}
-        <div class="inbox-filters">
-          <div class="inbox-scope">
-            <button classList={{ on: scope() === "all" }} onClick={() => setScope("all")}>All</button>
-            <button classList={{ on: scope() === "unread" }} onClick={() => setScope("unread")}>
-              Unread<Show when={unreadAll().length}><em>{unreadAll().length}</em></Show>
-            </button>
-          </div>
-          <Show when={cats().length > 1}>
-            <div class="inbox-cats">
-              <button classList={{ on: cat() === "all" }} onClick={() => setCat("all")}>All types</button>
-              <For each={cats()}>{({ cat: c, count }) =>
-                <button classList={{ on: cat() === c.key, [c.tone]: true }} onClick={() => setCat(c.key)}>
-                  <Icon name={c.icon} size={13} /> {c.label}<em>{count}</em>
-                </button>}</For>
-            </div>
-          </Show>
-        </div>
-
         {/* ── Fully empty ── no notifications at all ── */}
         <Show when={!all().length}>
           <div class="inbox-blank">
@@ -178,6 +159,17 @@ export default function Inbox() {
         </Show>
 
         <Show when={all().length}>
+        <div class="view-cols inbox-cols"><div class="view-main">
+        {/* ── Filter bar ── scope (all / unread) + data-driven category chips ── */}
+        <div class="inbox-filters">
+          <div class="inbox-scope">
+            <button classList={{ on: scope() === "all" }} onClick={() => setScope("all")}>All</button>
+            <button classList={{ on: scope() === "unread" }} onClick={() => setScope("unread")}>
+              Unread<Show when={unreadAll().length}><em>{unreadAll().length}</em></Show>
+            </button>
+          </div>
+        </div>
+
           <div class="inbox-groups">
             <section>
               <h2>Unread <span>{unread().length}</span></h2>
@@ -201,6 +193,42 @@ export default function Inbox() {
               </section>
             </Show>
           </div>
+        </div>
+
+        <aside class="view-rail inbox-rail">
+          <div class="rail-card">
+            <h3><Icon name="inbox" size={13}/> Inbox summary</h3>
+            <div class="rail-metrics">
+              <div class="rail-metric accent"><span class="rail-num">{unreadAll().length}</span><span class="rail-lbl">Unread</span></div>
+              <div class="rail-metric"><span class="rail-num">{all().length}</span><span class="rail-lbl">Total</span></div>
+            </div>
+            <Show when={unreadAll().length}>
+              <div class="rail-actions" style={{ "margin-top": "12px" }}>
+                <button class="primary" onClick={markAll}>Mark all read</button>
+              </div>
+            </Show>
+          </div>
+
+          <Show when={cats().length > 1}>
+            <div class="rail-card">
+              <h3>By type</h3>
+              <div class="rail-rows">
+                <button class="rail-row" classList={{ muted: cat() !== "all" }} onClick={() => setCat("all")}>
+                  <span class="rail-row-ic"><Icon name="inbox" size={13}/></span>
+                  <span class="rail-row-label">All types</span>
+                  <span class="rail-row-val">{all().length}</span>
+                </button>
+                <For each={cats()}>{({ cat: c, count }) =>
+                  <button class="rail-row" classList={{ muted: cat() !== "all" && cat() !== c.key }} onClick={() => setCat(cat() === c.key ? "all" : c.key)}>
+                    <span class="rail-row-ic"><Icon name={c.icon} size={13}/></span>
+                    <span class="rail-row-label">{c.label}</span>
+                    <span class="rail-row-val">{count}</span>
+                  </button>}</For>
+              </div>
+            </div>
+          </Show>
+        </aside>
+        </div>
         </Show>
       </Show>
     </Show>

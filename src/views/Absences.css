@@ -1,7 +1,11 @@
 /* Time off (Absences) — premium paloptic system, layered over App.css control
    primitives (button, input, .primary, .ghost, .pill). Scoped to .timeoff-view. */
 
-.timeoff-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); color: var(--text); }
+.timeoff-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max-canvas); color: var(--text); }
+.timeoff-rail { max-width: var(--rail-w); }
+.timeoff-rail .rail-item-act { margin-top: 4px; }
+.timeoff-rail .rail-item-act .ghost.small { padding: 3px 10px; font-size: 11.5px; }
+@media (max-width: 1040px) { .timeoff-rail { max-width: none; } }
 
 /* ── header: mark + owner-friendly purpose, filter + primary CTA ── */
 .timeoff-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: var(--view-head-gap); }

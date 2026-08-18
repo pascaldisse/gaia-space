@@ -1,13 +1,14 @@
-.personal-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max)}
+.personal-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-max-canvas)}
 .personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:var(--view-head-gap)}
 .personal-view h1{margin:0;font-size:22px}
 .personal-view p{color:var(--text-muted);margin:5px 0}
 .personal-view header label{width:210px}
 .personal-error{background:var(--status-danger-bg)!important;color:var(--status-danger-ink)!important;padding:8px 10px;border-radius:5px}
 
-/* ── task view layout: single calm column ──────────────────── */
+/* ── task view layout: main work column + context rail ─────── */
 .todo-view{display:block}
-.task-composer,.task-list{max-width:720px}
+.todo-cols .task-composer{margin-bottom:0}
+.todo-rail{max-width:var(--rail-w)}
 
 /* ── compact add-task disclosure trigger (shown when tasks exist) ── */
 .task-add-trigger{display:inline-flex;align-items:center;gap:9px;margin:0 0 18px;padding:10px 16px;border:1px dashed var(--surface-border);border-radius:12px;background:var(--surface);color:#c2ccdf;font-family:var(--font-head);font-weight:600;font-size:13px;transition:border-color .14s ease,background .14s ease,color .14s ease}
@@ -68,4 +69,5 @@
 .task-project-edit .field-label{font-size:11px;color:var(--text-faint)}
 .task-delete{flex:none;margin-top:-2px}
 
+@media(max-width:1040px){.todo-rail{max-width:none}}
 @media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}.personal-view>header{display:grid}.personal-view header label{width:auto}}

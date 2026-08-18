@@ -26,6 +26,14 @@ export default function Portfolio() {
 
   const open = (id: string) => { setProjectId(id); requestView("Steering"); };
 
+  // ── portfolio summary ── all from real project + issue data ──
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const openTotal = createMemo(() => { let s = 0; const by = counts(); if (by) for (const v of by.values()) s += v; return s; });
+  const withDeadline = createMemo(() => list().filter((p) => p.deadline).length);
+  const nextDeadline = createMemo(() =>
+    list().filter((p) => p.deadline && (p.deadline as string) >= todayISO)
+      .sort((a, b) => (a.deadline ?? "").localeCompare(b.deadline ?? ""))[0]);
+
   // ── create-project flow ──
   const [creating, setCreating] = createSignal(false);
   const [name, setName] = createSignal("");
@@ -113,6 +121,20 @@ export default function Portfolio() {
     </Show>
 
     <Show when={creating()}>{createForm()}</Show>
+
+    <Show when={list().length && !creating()}>
+      <div class="pf-summary">
+        <div class="pf-metric"><span class="pf-metric-num">{list().length}</span><span class="pf-metric-lbl">Active projects</span></div>
+        <div class="pf-metric"><span class="pf-metric-num">{openTotal()}</span><span class="pf-metric-lbl">Open issues</span></div>
+        <div class="pf-metric"><span class="pf-metric-num">{withDeadline()}</span><span class="pf-metric-lbl">With a deadline</span></div>
+        <Show when={nextDeadline()} fallback={<div class="pf-metric"><span class="pf-metric-num">—</span><span class="pf-metric-lbl">Next deadline</span></div>}>
+          {(p) => <button class="pf-metric pf-metric-link" onClick={() => open(p().id)}>
+            <span class="pf-metric-num sm">{p().deadline}</span>
+            <span class="pf-metric-lbl">Next: {p().name}</span>
+          </button>}
+        </Show>
+      </div>
+    </Show>
 
     <Show when={list().length}>
       <div class="pf-grid">

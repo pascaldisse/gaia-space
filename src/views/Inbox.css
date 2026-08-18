@@ -1,13 +1,15 @@
 /* ── Inbox ── the human notification feed, brought to the paloptic premium
    standard: an owner-friendly header, global Acting-as, a clear read/unread
    hierarchy, data-driven filters, and lightened surfaces throughout. ── */
-.inbox-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
+.inbox-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max-canvas); }
+.inbox-rail { max-width: var(--rail-w); }
+@media (max-width: 1040px) { .inbox-rail { max-width: none; } }
 
 /* Header identity now comes from the shared WorkspaceHeader component. */
 .inbox-muted { color: var(--text-faint); }
 
 /* Filter bar — scope segmented control + data-driven category chips */
-.inbox-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; max-width: 820px; }
+.inbox-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
 .inbox-scope { display: inline-flex; padding: 3px; gap: 2px; background: var(--ctl-bg, var(--surface)); border: 1px solid var(--surface-border); border-radius: 10px; }
 .inbox-scope button { border: none; background: transparent; color: #9aa3b8; font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .14s ease, color .14s ease; }
 .inbox-scope button:hover { color: var(--text-strong); }
@@ -21,7 +23,7 @@
 .inbox-cats em { font-style: normal; font-size: 10.5px; color: #7fb8b0; background: #1f2740; padding: 0 6px; border-radius: 9px; margin-left: 1px; }
 
 /* Groups */
-.inbox-groups { display: grid; gap: 22px; max-width: 820px; }
+.inbox-groups { display: grid; gap: 22px; }
 .inbox-groups h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin: 0 0 10px; display: flex; align-items: center; gap: 7px; }
 .inbox-groups h2 span { color: var(--accent); font-size: 11px; background: var(--accent-soft); padding: 1px 7px; border-radius: 10px; letter-spacing: 0; }
 

@@ -37,8 +37,11 @@ export default function Absences() {
 
   // Sort newest-start first so upcoming/current time off sits at the top.
   const sorted = createMemo(() => [...(absences() ?? [])].sort((a, b) => (b.date_from ?? "").localeCompare(a.date_from ?? "")));
-  const awayNow = createMemo(() => sorted().filter((a) => phaseOf(a).key === "current").length);
-  const pending = createMemo(() => sorted().filter((a) => !a.approved).length);
+  const awayList = createMemo(() => sorted().filter((a) => phaseOf(a).key === "current"));
+  const upcomingList = createMemo(() => sorted().filter((a) => phaseOf(a).key === "upcoming"));
+  const pendingList = createMemo(() => sorted().filter((a) => !a.approved));
+  const awayNow = createMemo(() => awayList().length);
+  const pending = createMemo(() => pendingList().length);
 
   const openForm = () => { setForm({ ...blank(), profile_id: profileId() || sessionProfile() }); setShowForm(true); };
 
@@ -86,14 +89,6 @@ export default function Absences() {
 
       <Show when={error()}><p class="timeoff-error" onClick={() => setError("")}>{error()}</p></Show>
 
-      <Show when={sorted().length > 0}>
-        <div class="timeoff-stats">
-          <div class="stat"><span class="stat-num">{awayNow()}</span><span class="stat-label">Away now</span></div>
-          <div class="stat"><span class="stat-num">{pending()}</span><span class="stat-label">Pending approval</span></div>
-          <div class="stat"><span class="stat-num">{sorted().length}</span><span class="stat-label">Total records</span></div>
-        </div>
-      </Show>
-
       <Show when={showForm()}>
         <form class="timeoff-form" onSubmit={save}>
           <div class="timeoff-form-head"><h2>Record time off</h2><button type="button" class="ghost" onClick={() => setShowForm(false)} aria-label="Close">×</button></div>
@@ -139,6 +134,7 @@ export default function Absences() {
         }
       >
         <Show when={absences.loading}><p class="timeoff-loading">Loading…</p></Show>
+        <div class="view-cols timeoff-cols"><div class="view-main">
         <ul class="timeoff-list">
           <For each={sorted()}>{(a) => {
             const phase = phaseOf(a);
@@ -167,6 +163,50 @@ export default function Absences() {
             );
           }}</For>
         </ul>
+        </div>
+
+        <Show when={sorted().length > 0}>
+        <aside class="view-rail timeoff-rail">
+          <div class="rail-card">
+            <h3><Icon name="clock-nav" size={13}/> Overview</h3>
+            <div class="rail-metrics">
+              <div class="rail-metric accent"><span class="rail-num">{awayNow()}</span><span class="rail-lbl">Away now</span></div>
+              <div class="rail-metric warn"><span class="rail-num">{pending()}</span><span class="rail-lbl">Pending</span></div>
+              <div class="rail-metric"><span class="rail-num">{upcomingList().length}</span><span class="rail-lbl">Upcoming</span></div>
+              <div class="rail-metric"><span class="rail-num">{sorted().length}</span><span class="rail-lbl">Total</span></div>
+            </div>
+          </div>
+
+          <div class="rail-card">
+            <h3>Needs approval<span class="rail-count">{pendingList().length}</span></h3>
+            <Show when={pendingList().length} fallback={<p class="rail-empty">Everything's approved.</p>}>
+              <div class="rail-rows">
+                <For each={pendingList().slice(0, 6)}>{(a) =>
+                  <div class="rail-item">
+                    <span class="rail-item-title">{personName(a.profile_id)}</span>
+                    <span class="rail-item-sub">{a.reason_type} · {fmtRange(a.date_from, a.date_to)}</span>
+                    <div class="rail-item-act"><button class="ghost small" onClick={() => update(a, { approved: true })}>Approve</button></div>
+                  </div>}</For>
+              </div>
+            </Show>
+          </div>
+
+          <Show when={awayList().length}>
+            <div class="rail-card">
+              <h3>Away now</h3>
+              <div class="rail-rows">
+                <For each={awayList().slice(0, 6)}>{(a) =>
+                  <div class="rail-row">
+                    <span class="rail-row-ic"><Icon name="user" size={13}/></span>
+                    <span class="rail-row-label">{personName(a.profile_id)}</span>
+                    <span class="rail-row-val">{a.reason_type}</span>
+                  </div>}</For>
+              </div>
+            </div>
+          </Show>
+        </aside>
+        </Show>
+        </div>
       </Show>
     </section>
   );
