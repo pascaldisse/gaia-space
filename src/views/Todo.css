@@ -1,3 +1,67 @@
-.personal-view{height:100%;overflow:auto;padding:28px 34px}.personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}.personal-view h1{margin:0;font-size:22px}.personal-view h2{margin:0 0 12px;font-size:15px}.personal-view p{color:#9da0a8;margin:5px 0}.personal-view input,.personal-view select{width:100%}.personal-view label{display:grid;gap:5px;color:#aeb1b8;font-size:12px}.personal-view header label{width:210px}.personal-error{background:#4a1f1f!important;color:#ffb3b3!important;padding:8px 10px;border-radius:5px}.personal-card{border:1px solid #2f3d5c;background:linear-gradient(160deg,#132244,#0f1b33 62%);border-radius:11px;padding:18px;box-shadow:0 6px 20px rgba(0,0,0,.22)}.todo-layout{display:grid;grid-template-columns:minmax(240px,320px) minmax(300px,650px);gap:18px}.todo-form{display:grid;gap:14px;align-content:start}.todo-form-head{display:grid;gap:2px;padding-bottom:2px;border-bottom:1px solid #223052;margin-bottom:2px}.todo-form-head h2{margin:0;font-family:var(--font-head);font-size:15px;color:var(--text-strong)}.todo-form-head p{margin:0;font-size:12px;color:#8b96ad}.todo-field{display:grid;gap:6px}.todo-field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.todo-field-main input{padding:10px 12px;font-size:14px}.todo-form details{color:#aeb1b8;border-top:1px solid #223052;padding-top:12px}.todo-form details[open]{display:grid;gap:12px}.todo-form summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;margin-bottom:4px}.todo-submit{margin-top:2px;padding:10px 14px;font-size:13px;border-radius:8px;justify-self:start;min-width:130px}@media(max-width:520px){.todo-field-row{grid-template-columns:1fr}}.todo-list{display:grid;align-content:start;gap:7px}.todo-row{display:flex;align-items:start;gap:12px;padding:12px 14px;border:1px solid #2b3550;background:#0f1b33;border-radius:6px}.todo-row>input{width:auto;margin-top:3px}.todo-row>div{display:grid;gap:3px;flex:1}.todo-row time,.todo-row small{font-size:11px;color:#93969e}.todo-row.done strong{text-decoration:line-through;color:#898c94}.assignee-chips{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px}.assignee-chip{display:inline-flex;align-items:center;gap:6px;background:#16233d;color:#c9d6f0;border:1px solid #2f4677;border-radius:12px;padding:2px 6px 2px 10px;font-size:12px}.assignee-chips.readonly .assignee-chip{padding:2px 10px}.assignee-chip button{background:none;border:none;color:#7f8aa3;cursor:pointer;font-size:14px;line-height:1;padding:0;width:auto}.assignee-chip button:hover{color:#fff}.personal-empty{padding:24px;border:1px dashed #3d4a68;border-radius:6px}@media(max-width:760px){.todo-layout{grid-template-columns:1fr}.personal-view>header{display:grid}.personal-view header label{width:auto}}
+.personal-view{height:100%;overflow:auto;padding:28px 34px}
+.personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}
+.personal-view h1{margin:0;font-size:22px}
+.personal-view p{color:#9da0a8;margin:5px 0}
+.personal-view header label{width:210px}
+.personal-error{background:#4a1f1f!important;color:#ffb3b3!important;padding:8px 10px;border-radius:5px}
 
-.todo-project-select{margin-top:6px;display:grid;gap:4px}.todo-project-select select{max-width:260px}.todo-project-select .field-label{font-size:11px;color:#8b96ad}.todo-project-tag{display:inline-flex;align-items:center;gap:5px;align-self:start;background:#1c2b4d;color:#9db4e6;border:1px solid #2f4677;border-radius:12px;padding:2px 10px;font-size:11px;width:fit-content}.todo-owner{font-size:11px;color:#93969e}
+/* ── task view layout: single calm column ──────────────────── */
+.todo-view{display:block}
+.task-composer,.task-list{max-width:720px}
+
+/* ── task composer — one calm surface, not fragmented boxes ── */
+.task-composer{margin:0 0 26px;padding:18px 20px;border:1px solid #223052;border-radius:14px;background:linear-gradient(160deg,#132244,#0f1b33 70%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:14px}
+.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 12px!important;font-family:var(--font-head);font-size:21px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid #2a3a5c!important;box-shadow:none!important}
+.composer-title::placeholder{color:#6d7c99;font-weight:500}
+.composer-title:focus{outline:none;border-bottom-color:var(--accent)!important;box-shadow:0 1px 0 0 var(--accent)!important}
+
+/* metadata row: quiet chips + one strong submit, equal heights */
+.composer-meta{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
+.meta-chip{display:inline-flex;align-items:center;gap:0;background:var(--ctl-bg);border:1px solid var(--ctl-border);border-radius:999px;padding:0 4px 0 12px;height:38px;transition:border-color .14s ease,background .14s ease}
+.meta-chip:hover{border-color:var(--ctl-border-hover);background:var(--ctl-bg-hover)}
+.meta-chip:focus-within{border-color:var(--accent);box-shadow:var(--ctl-focus-ring)}
+.meta-icon{color:#8b96ad;font-size:13px;line-height:1;pointer-events:none}
+.meta-chip select,.meta-chip input{background:transparent!important;border:none!important;box-shadow:none!important;height:100%;padding:0 6px!important;color:var(--text-strong);font-size:13px!important}
+.meta-chip select{padding-right:1.8em!important;background-position:right .4em center!important}
+.meta-chip input[type=date]{min-width:120px}
+.meta-chip select:focus,.meta-chip input:focus{outline:none}
+.composer-submit{height:38px;margin-left:auto;padding:0 22px;border-radius:999px;font-size:13.5px}
+
+.composer-source{border-top:1px solid #223052;padding-top:12px;color:#aeb1b8}
+.composer-source summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
+.composer-source summary::-webkit-details-marker{display:none}
+.composer-source summary::before{content:"+ ";color:#6d7c99}
+.composer-source[open] summary::before{content:"\2212 "}
+.composer-source-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.todo-field{display:grid;gap:6px}
+
+/* composer assignee chips */
+.assignee-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.assignee-chip{display:inline-flex;align-items:center;gap:6px;background:#16233d;color:#c9d6f0;border:1px solid #2f4677;border-radius:12px;padding:3px 8px 3px 11px;font-size:12px}
+.assignee-chip button{background:none;border:none;color:#7f8aa3;cursor:pointer;font-size:14px;line-height:1;padding:0;width:auto}
+.assignee-chip button:hover{color:#fff}
+
+/* ── task list — clear work cards with visual hierarchy ────── */
+.task-list{display:grid;align-content:start;gap:10px}
+.personal-empty{padding:24px;border:1px dashed #3d4a68;border-radius:8px}
+.task-card{display:flex;align-items:start;gap:14px;padding:15px 16px;border:1px solid #23324f;border-left:3px solid #2f4677;background:#101d38;border-radius:10px;transition:border-color .14s ease,background .14s ease,transform .06s ease}
+.task-card:hover{border-color:#33456d;border-left-color:var(--accent);background:#122240}
+.task-check{width:18px!important;height:18px!important;margin-top:2px;flex:none}
+.task-body{display:grid;gap:8px;flex:1;min-width:0}
+.task-title{font-family:var(--font-head);font-size:15.5px;font-weight:600;color:var(--text-strong);line-height:1.3}
+.task-card.done{opacity:.62;border-left-color:#2b3550}
+.task-card.done .task-title{text-decoration:line-through;color:#8b8e96}
+
+.task-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.task-tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 9px;border-radius:12px;border:1px solid transparent;line-height:1.5}
+.task-tag.due{background:#1a2b1f;color:#8fd6a2;border-color:#295139}
+.task-tag.project{background:#1c2b4d;color:#9db4e6;border-color:#2f4677}
+.task-tag.assignee{background:#16233d;color:#c9d6f0;border-color:#2f4677}
+.task-tag.source{background:#241d33;color:#c4a9e6;border-color:#402f5c;font-family:var(--font-body)}
+
+.task-project-edit{display:grid;gap:4px;margin-top:2px}
+.task-project-edit select{max-width:260px}
+.task-project-edit .field-label{font-size:11px;color:#8b96ad}
+.task-delete{flex:none;margin-top:-2px}
+
+@media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-submit{margin-left:0;flex:1}.personal-view>header{display:grid}.personal-view header label{width:auto}}
