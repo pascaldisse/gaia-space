@@ -6,7 +6,7 @@
 .wk-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .wk-mark { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 10px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 16px; box-shadow: 0 2px 10px rgba(0,194,168,0.28); }
 .wk-title h1 { margin: 0; font-size: 22px; }
-.wk-title p { margin: 3px 0 0; color: #9da0a8; max-width: 60ch; }
+.wk-title p { margin: 3px 0 0; color: var(--text-muted); max-width: 60ch; }
 .wk-head-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* premium empty / first-run surface */
@@ -16,11 +16,11 @@
 .wk-empty p { margin: 0; max-width: 420px; }
 .wk-empty button { margin-top: 8px; }
 
-.wk-muted { color: #7f8aa3; padding: 6px 0; }
+.wk-muted { color: var(--text-dim); padding: 6px 0; }
 
 /* collapsed "done" group under a task list */
 .wk-done-group { max-width: 720px; margin: 16px 0 0; }
-.wk-done-group summary { cursor: pointer; color: #8b93a6; font-size: 12px; font-family: var(--font-head); font-weight: 600; letter-spacing: .03em; padding: 6px 0; list-style: none; }
+.wk-done-group summary { cursor: pointer; color: var(--text-faint); font-size: 12px; font-family: var(--font-head); font-weight: 600; letter-spacing: .03em; padding: 6px 0; list-style: none; }
 .wk-done-group summary::-webkit-details-marker { display: none; }
 .wk-done-group summary::before { content: "+ "; color: #6d7c99; }
 .wk-done-group[open] summary::before { content: "\2212 "; }

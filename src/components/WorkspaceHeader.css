@@ -17,8 +17,8 @@
 }
 .wh-text { min-width: 0; }
 .workspace-header h1 { margin: 0; font-size: 22px; font-weight: 650; color: var(--text-strong); }
-.workspace-header p { margin: 4px 0 0; color: #9da0a8; max-width: 560px; line-height: 1.5; }
-.workspace-header p strong { color: #c7cad2; font-weight: 600; }
+.workspace-header p { margin: 4px 0 0; color: var(--text-muted); max-width: 560px; line-height: 1.5; }
+.workspace-header p strong { color: var(--text-emphasis); font-weight: 600; }
 .wh-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 
 @media (max-width: 640px) {

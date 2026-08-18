@@ -1,9 +1,9 @@
 .personal-view{height:100%;overflow:auto;padding:28px 34px}
 .personal-view>header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:22px}
 .personal-view h1{margin:0;font-size:22px}
-.personal-view p{color:#9da0a8;margin:5px 0}
+.personal-view p{color:var(--text-muted);margin:5px 0}
 .personal-view header label{width:210px}
-.personal-error{background:#4a1f1f!important;color:#ffb3b3!important;padding:8px 10px;border-radius:5px}
+.personal-error{background:var(--status-danger-bg)!important;color:var(--status-danger-ink)!important;padding:8px 10px;border-radius:5px}
 
 /* ── task view layout: single calm column ──────────────────── */
 .todo-view{display:block}
@@ -40,7 +40,7 @@
 /* composer assignee chips */
 .assignee-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .assignee-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-hover);color:#c9d6f0;border:1px solid #3a4f80;border-radius:12px;padding:3px 8px 3px 11px;font-size:12px}
-.assignee-chip button{background:none;border:none;color:#7f8aa3;cursor:pointer;font-size:14px;line-height:1;padding:0;width:auto}
+.assignee-chip button{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;padding:0;width:auto}
 .assignee-chip button:hover{color:#fff}
 
 /* ── task list — clear work cards with visual hierarchy ────── */
@@ -54,7 +54,7 @@
 .task-body{display:grid;gap:8px;flex:1;min-width:0}
 .task-title{font-family:var(--font-head);font-size:15.5px;font-weight:600;color:var(--text-strong);line-height:1.3}
 .task-card.done{opacity:.62;border-left-color:#2b3550}
-.task-card.done .task-title{text-decoration:line-through;color:#8b8e96}
+.task-card.done .task-title{text-decoration:line-through;color:var(--text-faint)}
 
 .task-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .task-tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 9px;border-radius:12px;border:1px solid transparent;line-height:1.5}
@@ -65,7 +65,7 @@
 
 .task-project-edit{display:grid;gap:4px;margin-top:2px}
 .task-project-edit select{max-width:260px}
-.task-project-edit .field-label{font-size:11px;color:#8b96ad}
+.task-project-edit .field-label{font-size:11px;color:var(--text-faint)}
 .task-delete{flex:none;margin-top:-2px}
 
 @media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}.personal-view>header{display:grid}.personal-view header label{width:auto}}

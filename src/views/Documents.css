@@ -6,7 +6,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  color: #d4d6db;
+  color: var(--text);
 }
 
 .documents-head {
@@ -17,9 +17,9 @@
   padding: 20px 24px 0;
 }
 .documents-head h1 { margin: 0; font-size: 21px; font-weight: 600; }
-.documents-head p { color: #9da0a8; margin: 5px 0 0; max-width: 620px; }
-.documents-head p strong { color: #c7cad2; font-weight: 600; }
-.documents-head label { font-size: 11px; color: #9da0a8; display: flex; flex-direction: column; gap: 4px; }
+.documents-head p { color: var(--text-muted); margin: 5px 0 0; max-width: 620px; }
+.documents-head p strong { color: var(--text-emphasis); font-weight: 600; }
+.documents-head label { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; }
 
 /* Premium project header: project mark + owner-friendly purpose line. */
 .dk-head-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -55,8 +55,8 @@
   color: #5fe6d4; margin-bottom: 2px;
 }
 .dk-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
-.dk-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
-.dk-empty-card p strong { color: #c7cad2; font-weight: 600; }
+.dk-empty-card p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+.dk-empty-card p strong { color: var(--text-emphasis); font-weight: 600; }
 .dk-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
 .dk-empty-inline { margin-top: 10px; display: flex; gap: 8px; width: 100%; max-width: 380px; }
 .dk-empty-inline .dk-empty-cta { margin-top: 0; flex: 0 0 auto; }
@@ -88,7 +88,7 @@
   align-items: center;
   gap: 0.35em;
   font-size: 11px;
-  color: #9da0a8;
+  color: var(--text-muted);
 }
 
 .documents-body {
@@ -113,7 +113,7 @@
   cursor: pointer;
   border-radius: 4px;
   font-size: 0.85em;
-  color: #9da0a8;
+  color: var(--text-muted);
 }
 .tree-root.active, .tree-root:hover {
   background: #141d30;
@@ -258,7 +258,7 @@
   border-radius: 10px;
   padding: 0.1em 0.6em;
   font-size: 0.78em;
-  color: #9da0a8;
+  color: var(--text-muted);
 }
 .archived-chip {
   background: #4a2426;
@@ -340,7 +340,7 @@
   font-size: 0.75em;
 }
 .version-author {
-  color: #9da0a8;
+  color: var(--text-muted);
   font-size: 0.78em;
   margin: 0.15em 0;
 }

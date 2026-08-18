@@ -4,14 +4,14 @@
 .st-title { display: flex; align-items: center; gap: 14px; }
 .st-mark { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 10px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 16px; box-shadow: 0 2px 10px rgba(0,194,168,0.28); }
 .st-title h1 { margin: 0; font-size: 22px; }
-.st-title p { margin: 3px 0 0; color: #9da0a8; }
+.st-title p { margin: 3px 0 0; color: var(--text-muted); }
 
 .st-empty { padding: 26px; border: 1px dashed var(--surface-border-hover); border-radius: 8px; background: var(--surface); color: #a3a9b5; }
-.st-muted { color: #7f8aa3; padding: 6px 0; }
+.st-muted { color: var(--text-dim); padding: 6px 0; }
 
 /* ── action-needed band ── */
 .st-band { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px 16px 16px; margin-bottom: 20px; }
-.st-band-label { display: inline-block; font-family: var(--font-head); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: #f0a742; margin-bottom: 12px; }
+.st-band-label { display: inline-block; font-family: var(--font-head); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--attn-amber); margin-bottom: 12px; }
 .st-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 
 .st-action { background: var(--surface-raised); border: 1px solid var(--surface-border); border-radius: 8px; padding: 12px 12px 8px; border-top: 2px solid var(--surface-border-hover); }
@@ -23,9 +23,9 @@
 .st-action.overdue { border-top-color: var(--status-risk-overdue); }
 .st-action.overdue .st-dot { background: var(--status-risk-overdue); }
 .st-action.overdue header b { color: var(--status-danger-ink); }
-.st-action.soon { border-top-color: #f0a742; }
-.st-action.soon .st-dot { background: #f0a742; }
-.st-action.soon header b { color: #f0bd77; }
+.st-action.soon { border-top-color: var(--attn-amber); }
+.st-action.soon .st-dot { background: var(--attn-amber); }
+.st-action.soon header b { color: var(--attn-amber-text); }
 .st-action.unassigned { border-top-color: #7ab8f5; }
 .st-action.unassigned .st-dot { background: #7ab8f5; }
 .st-action.unassigned header b { color: #9dcbf8; }
@@ -41,21 +41,21 @@
 .st-list { list-style: none; margin: 0; padding: 0; }
 .st-list li { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border-radius: 6px; cursor: pointer; }
 .st-list li:hover { background: rgba(255,255,255,0.04); }
-.st-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #7f8aa3; font-size: 11px; flex: none; }
+.st-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-dim); font-size: 11px; flex: none; }
 .st-list strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .st-status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.st-assignee { color: #8b93a6; font-size: 11px; white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
-.st-list time { color: #8b93a6; font-size: 11px; white-space: nowrap; }
+.st-assignee { color: var(--text-faint); font-size: 11px; white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.st-list time { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
 .st-list time.late { color: #f08a88; }
 .st-list.plain li { flex-direction: column; align-items: flex-start; gap: 1px; }
-.st-list.plain small { color: #8b93a6; }
+.st-list.plain small { color: var(--text-faint); }
 
 /* ── secondary grid ── */
 .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .st-card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px 16px 12px; }
 .st-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .st-card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.st-card-head small { color: #7f8aa3; font-weight: 400; margin-left: 6px; }
+.st-card-head small { color: var(--text-dim); font-weight: 400; margin-left: 6px; }
 .st-link { background: transparent; border: 0; color: var(--accent-text); font-size: 12px; font-weight: 600; padding: 2px 4px; }
 .st-link:hover { color: var(--accent-hover); }
 /* upcoming-agenda card: give the calendar path a real button + roomy rows */
@@ -67,7 +67,7 @@
 .st-list.agenda li:hover { background: var(--surface-hover); }
 .st-list.agenda time { color: var(--accent-text); font-size: 11px; font-variant-numeric: tabular-nums; }
 .st-list.agenda strong { white-space: normal; }
-.st-list.agenda small { color: #8b93a6; font-size: 11px; }
+.st-list.agenda small { color: var(--text-faint); font-size: 11px; }
 
 @media (max-width: 820px) {
   .st-actions { grid-template-columns: 1fr; }
@@ -76,15 +76,15 @@
 /* Project deadline banner — sits above the action band, tone matches urgency. */
 .st-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--surface-border); border-left-width: 3px; border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
 .st-deadline:hover { border-color: var(--surface-border-hover); }
-.st-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: #5b78e5; flex: none; }
+.st-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--deadline-blue); flex: none; }
 .st-deadline-label { font-weight: 600; color: var(--text-strong); }
-.st-deadline time { color: #8b96ad; font-size: .86rem; }
-.st-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: #8b96ad; }
+.st-deadline time { color: var(--text-faint); font-size: .86rem; }
+.st-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: var(--text-faint); }
 .st-deadline.overdue { border-left-color: var(--status-risk-overdue); }
 .st-deadline.overdue .st-deadline-dot { background: var(--status-risk-overdue); }
 .st-deadline.overdue em { color: var(--status-danger-ink); font-weight: 600; }
-.st-deadline.soon { border-left-color: #f0a742; }
-.st-deadline.soon .st-deadline-dot { background: #f0a742; }
-.st-deadline.soon em { color: #f0bd77; }
+.st-deadline.soon { border-left-color: var(--attn-amber); }
+.st-deadline.soon .st-deadline-dot { background: var(--attn-amber); }
+.st-deadline.soon em { color: var(--attn-amber-text); }
 .st-deadline.ok { border-left-color: #4fae6a; }
 .st-deadline.ok .st-deadline-dot { background: #4fae6a; }

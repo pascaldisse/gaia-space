@@ -20,7 +20,7 @@
    pins the picker-specific size so triggers and rows line up. */
 .ep-avatar { --avatar-size: 26px; }
 .ep-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ep-chevron { flex: none; color: #8b96ad; font-size: 11px; margin-left: 2px; }
+.ep-chevron { flex: none; color: var(--text-faint); font-size: 11px; margin-left: 2px; }
 
 /* popover surface — matches composer card treatment */
 .ep-menu {
@@ -32,11 +32,11 @@
 .ep-menu .ep-caption { padding: 0 4px 6px; }
 
 .ep-search { position: relative; margin-bottom: 6px; }
-.ep-search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #7f8aa3; font-size: 13px; pointer-events: none; }
+.ep-search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 13px; pointer-events: none; }
 .ep-search input { width: 100%; padding-left: 30px !important; height: 36px; border-radius: 8px; }
 
 .ep-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; display: grid; gap: 2px; }
-.ep-note { color: #8b96ad; padding: 10px 8px; font-size: 12px; }
+.ep-note { color: var(--text-faint); padding: 10px 8px; font-size: 12px; }
 .ep-opt {
   display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer;
   transition: background 0.1s ease;
@@ -45,7 +45,7 @@
 .ep-opt.selected { background: var(--accent-soft); }
 .ep-opt-text { display: grid; min-width: 0; flex: 1; }
 .ep-opt-name { font-family: var(--font-head); font-weight: 550; font-size: 13px; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ep-opt-sub { font-size: 11px; color: #8b96ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-opt-sub { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-opt.selected .ep-opt-name { color: var(--accent-text); }
 .ep-check { flex: none; color: var(--accent); font-size: 12px; }
 

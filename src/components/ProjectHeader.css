@@ -16,10 +16,10 @@
 }
 .proj-head-text { min-width: 0; }
 .proj-head-text h1 { margin: 0; font-size: 21px; font-weight: 600; }
-.proj-head-text p { color: #9da0a8; margin: 4px 0 0; max-width: 640px; line-height: 1.45; }
-.proj-head-text p strong { color: #c7cad2; font-weight: 600; }
+.proj-head-text p { color: var(--text-muted); margin: 4px 0 0; max-width: 640px; line-height: 1.45; }
+.proj-head-text p strong { color: var(--text-emphasis); font-weight: 600; }
 .proj-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
-.proj-head-acting { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #9da0a8; }
+.proj-head-acting { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-muted); }
 
 /* Guided empty / onboarding states shared by project-scoped views. */
 .proj-empty { flex: 1; display: grid; place-items: center; padding: 40px 24px; overflow: auto; }
@@ -33,6 +33,6 @@
   color: #5fe6d4; margin-bottom: 2px;
 }
 .proj-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
-.proj-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
-.proj-empty-card p strong { color: #c7cad2; font-weight: 600; }
+.proj-empty-card p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+.proj-empty-card p strong { color: var(--text-emphasis); font-weight: 600; }
 .proj-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }

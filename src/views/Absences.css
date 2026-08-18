@@ -12,8 +12,8 @@
   color: var(--brand-navy); box-shadow: 0 2px 12px rgba(0,194,168,0.28);
 }
 .timeoff-head h1 { margin: 0; font-size: 22px; font-weight: 650; color: var(--text-strong); }
-.timeoff-head p { margin: 4px 0 0; color: #9da0a8; max-width: 560px; line-height: 1.5; }
-.timeoff-head p strong { color: #c7cad2; font-weight: 600; }
+.timeoff-head p { margin: 4px 0 0; color: var(--text-muted); max-width: 560px; line-height: 1.5; }
+.timeoff-head p strong { color: var(--text-emphasis); font-weight: 600; }
 .timeoff-head-side { display: flex; align-items: flex-end; gap: 12px; flex: none; }
 .timeoff-new { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
@@ -21,7 +21,7 @@
   background: var(--status-danger-bg); color: var(--status-danger-ink);
   padding: 9px 12px; border-radius: 8px; margin: 0 0 14px; cursor: pointer; font-size: 13px;
 }
-.timeoff-loading { color: #8a8d96; font-size: 12px; margin: 8px 2px; }
+.timeoff-loading { color: var(--text-faint); font-size: 12px; margin: 8px 2px; }
 
 /* ── at-a-glance stats ── */
 .timeoff-stats { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -58,7 +58,7 @@
   background: rgba(0,194,168,0.10); border: 1px solid rgba(0,194,168,0.28); color: #5fe6d4;
 }
 .timeoff-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
-.timeoff-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
+.timeoff-empty-card p { margin: 0; color: var(--text-muted); line-height: 1.5; }
 .timeoff-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
 
 /* ── list of time-off records ── */

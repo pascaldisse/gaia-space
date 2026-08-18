@@ -12,7 +12,7 @@
 .cal-add-menu .meeting .cal-add-swatch{background:var(--accent)}
 .cal-add-menu .task .cal-add-swatch{background:#e0a83a}
 .cal-add-menu .deadline .cal-add-swatch{background:#e0607a}
-.cal-add-menu small{display:block;color:#8b96ad;font-size:11px;margin-top:1px}
+.cal-add-menu small{display:block;color:var(--text-faint);font-size:11px;margin-top:1px}
 
 /* ── Modal dialog ── */
 .qc-overlay{position:fixed;inset:0;z-index:200;background:rgba(6,10,20,.62);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px 16px;overflow:auto}
@@ -23,8 +23,8 @@
 .qc-dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;background:var(--accent)}
 .qc-head h2.task .qc-dot{background:#e0a83a}
 .qc-head h2.deadline .qc-dot{background:#e0607a}
-.qc-day{margin:5px 0 0;color:#8b96ad;font-size:12.5px}
-.qc-x{border:0;background:transparent;color:#8b96ad;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
+.qc-day{margin:5px 0 0;color:var(--text-faint);font-size:12.5px}
+.qc-x{border:0;background:transparent;color:var(--text-faint);font-size:22px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
 .qc-x:hover{color:var(--text-strong)}
 .qc-error{margin:12px 18px 0;padding:9px 11px;border:1px solid #7a2f3d;border-radius:8px;background:rgba(224,96,122,.12);color:#f0a3b3;font-size:12.5px}
 .qc-body{padding:16px 18px 18px;display:grid;gap:13px}
@@ -34,8 +34,8 @@
 .qc-field input,.qc-field select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #2b3550;border-radius:9px;background:#0d1830;color:var(--text);font:inherit;font-size:13.5px}
 .qc-field input:focus,.qc-field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .qc-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.qc-hint{margin:0;font-size:12px;color:#8b96ad}
-.qc-hint.warn{color:#f0c778}
+.qc-hint{margin:0;font-size:12px;color:var(--text-faint)}
+.qc-hint.warn{color:var(--attn-amber-text)}
 .qc-hint strong{color:var(--text-strong);font-weight:600}
 .qc-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .qc-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 5px 3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-text);font-size:12px}
