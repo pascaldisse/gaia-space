@@ -498,7 +498,9 @@ textarea:focus {
 .project-context { background: #0f1b33; border-bottom: 1px solid #2b3550; padding: 12px 20px 0; flex: none; }
 .pc-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .pc-crumb { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.pc-scope { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #7f8aa3; }
+.pc-back { background: transparent; border: 0; padding: 0; color: #7f8aa3; font-family: var(--font-head); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.pc-back:hover { color: var(--accent-text); border-color: transparent; }
+.pc-sep { color: #4a566f; }
 .pc-crumb strong { font-family: var(--font-head); font-size: 15px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-head .picker { min-width: 0; }
 .pc-head .picker select { max-width: 240px; }
