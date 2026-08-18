@@ -230,6 +230,7 @@ pub fn run() {
             pipelines::publish_package_version,
             pipelines::delete_package_version,
             personal::list_todos,
+            personal::list_project_todos,
             personal::create_todo,
             personal::update_todo,
             personal::delete_todo,

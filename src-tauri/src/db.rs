@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -121,6 +121,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V3)?;
         tx.execute_batch(SCHEMA_V4)?;
     }
+    if version < 6 {
+        // Optional local-only project association for personal todos. Existing rows
+        // get NULL project_id (personal, unassigned) — no data loss. A dropped column
+        // is impossible in SQLite, but ADD COLUMN with a NULL default is safe on any
+        // populated table and its foreign key only binds non-NULL values to a live project.
+        migrate_v6(&tx)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -210,6 +217,21 @@ CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todo
 CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
 "#;
 
+/// v6 adds `todos.project_id` (nullable FK → projects) so a personal task can be
+/// filed under a project. `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`, so this
+/// probes the column first, making the step a no-op on databases that already have
+/// it (idempotent for re-runs / drifted schemas).
+pub(crate) fn migrate_v6(conn: &Connection) -> Result<()> {
+    let has_column: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('todos') WHERE name='project_id'")?
+        .exists([])?;
+    if !has_column {
+        conn.execute_batch("ALTER TABLE todos ADD COLUMN project_id TEXT REFERENCES projects(id);")?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS todos_project ON todos(project_id);")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +285,32 @@ mod tests {
             let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
             assert_eq!(exists, 1, "{table} must exist after heal");
         }
+    }
+
+    /// v6 backfills `todos.project_id` onto a populated database without touching
+    /// existing rows: they survive with a NULL (personal, unassigned) association.
+    #[test]
+    fn v6_adds_project_id_without_data_loss() {
+        let conn = open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch(SCHEMA_V3).unwrap();
+        conn.execute_batch(SCHEMA_V4).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','u','U',1)", []).unwrap();
+        conn.execute("INSERT INTO projects(id,name,key,created_at) VALUES('proj','Proj','P',1)", []).unwrap();
+        conn.execute("INSERT INTO todos(id,profile_id,content) VALUES('t','p','Legacy task')", []).unwrap();
+        conn.pragma_update(None, "user_version", 5).unwrap();
+        migrate(&conn).expect("migration");
+        assert_eq!(conn.query_row::<i64, _, _>("PRAGMA user_version", [], |r| r.get(0)).unwrap(), SCHEMA_VERSION);
+        // Legacy row preserved, defaulted to no project.
+        let (content, project): (String, Option<String>) = conn.query_row("SELECT content,project_id FROM todos WHERE id='t'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(content, "Legacy task");
+        assert_eq!(project, None);
+        // The new column accepts a live project and rejects a dangling one (FK enforced).
+        conn.execute("UPDATE todos SET project_id='proj' WHERE id='t'", []).unwrap();
+        assert!(conn.execute("UPDATE todos SET project_id='ghost' WHERE id='t'", []).is_err(), "FK must reject unknown project");
+        // Re-running the step is a harmless no-op (idempotent).
+        migrate_v6(&conn).expect("re-run");
     }
 
     #[test]

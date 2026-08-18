@@ -12,6 +12,7 @@ import Repos from "./views/Repos";
 import Reviews from "./views/Reviews";
 import Issues from "./views/Issues";
 import Boards from "./views/Boards";
+import ProjectTasks from "./views/ProjectTasks";
 import Chat from "./views/Chat";
 import Documents from "./views/Documents";
 // Same Documents module, two IA destinations: project-independent knowledge in the
@@ -49,6 +50,7 @@ const registry: Record<string, Dest> = {
   Steering:        { name: "Steering",        label: "Steering",         icon: "◎", component: Steering },
   Issues:          { name: "Issues",          label: "Issues",           icon: "✓", component: Issues },
   Boards:          { name: "Boards",          label: "Boards",           icon: "▦", component: Boards },
+  ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "✓", component: ProjectTasks },
   Docs:            { name: "Docs",            label: "Docs",             icon: "▤", component: ProjectDocs },
   Chat:            { name: "Chat",            label: "Chat",             icon: "◌", component: Chat },
   Calendar:        { name: "Calendar",        label: "Calendar",         icon: "▦", component: Calendar },
@@ -72,7 +74,7 @@ const sectionNav = new Set(["Projects", "Organization"]);
 type Tab = { tab: string; icon: string; views: string[] };
 const projectTabs: Tab[] = [
   { tab: "Steering",      icon: "◎", views: ["Steering"] },
-  { tab: "Work",          icon: "▦", views: ["Issues", "Boards"] },
+  { tab: "Work",          icon: "▦", views: ["Issues", "Boards", "ProjectTasks"] },
   { tab: "Planning",      icon: "▦", views: ["Calendar", "Meetings"] },
   { tab: "Knowledge",     icon: "▤", views: ["Docs"] },
   { tab: "Communication", icon: "◌", views: ["Chat"] },

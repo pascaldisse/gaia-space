@@ -410,6 +410,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl I
     "list_teams" => platform::list_teams(),
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
+    "list_project_todos" => personal::list_project_todos(project_id: String, include_done: Option<bool>),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
