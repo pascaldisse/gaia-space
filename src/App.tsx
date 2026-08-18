@@ -40,7 +40,7 @@ import { authChecked, checkAuth, currentUser, isWeb, projectId, projects } from 
 import { requestedView, requestView } from "./nav";
 
 // ── destination registry: every module still exists; the IA just groups them ──
-type Dest = { name: string; label: string; icon: IconName; component: Component; desktopOnly?: boolean };
+type Dest = { name: string; label: string; icon: IconName; component: Component; desktopOnly?: boolean; hint?: string };
 const registry: Record<string, Dest> = {
   // primary / personal
   MyWork:       { name: "MyWork",       label: "Overview",       icon: "home", component: Dashboard },
@@ -55,9 +55,9 @@ const registry: Record<string, Dest> = {
   Users:        { name: "Users",        label: "User accounts",  icon: "users", component: Users },
   // project-context destinations
   Steering:        { name: "Steering",        label: "Steering",         icon: "target", component: Steering },
-  Issues:          { name: "Issues",          label: "Issues",           icon: "check", component: Issues },
-  Boards:          { name: "Boards",          label: "Boards",           icon: "columns", component: Boards },
-  ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "check", component: ProjectTasks },
+  ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "check", component: ProjectTasks, hint: "Your everyday to-dos for this project — the things you do next." },
+  Boards:          { name: "Boards",          label: "Board",            icon: "columns", component: Boards, hint: "Move work across status columns to see how the project is flowing." },
+  Issues:          { name: "Issues",          label: "Issues",           icon: "check", component: Issues, hint: "Bigger blockers, requirements, and tracked work — with owners and detail." },
   Docs:            { name: "Docs",            label: "Docs",             icon: "book", component: ProjectDocs },
   Chat:            { name: "Chat",            label: "Chat",             icon: "chat", component: Chat },
   ProjectCalendar: { name: "ProjectCalendar", label: "Calendar",         icon: "calendar-nav", component: ProjectCalendar },
@@ -81,7 +81,7 @@ const sectionNav = new Set(["Projects", "Organization"]);
 type Tab = { tab: string; icon: IconName; views: string[] };
 const projectTabs: Tab[] = [
   { tab: "Steering",      icon: "target", views: ["Steering"] },
-  { tab: "Work",          icon: "columns", views: ["Issues", "Boards", "ProjectTasks"] },
+  { tab: "Work",          icon: "columns", views: ["ProjectTasks", "Boards", "Issues"] },
   { tab: "Planning",      icon: "calendar", views: ["ProjectCalendar", "Meetings"] },
   { tab: "Knowledge",     icon: "book", views: ["Docs"] },
   { tab: "Communication", icon: "chat", views: ["Chat"] },
@@ -193,8 +193,9 @@ export default function App() {
               <Show when={tabViews(activeTab()).length > 1}>
                 <div class="pc-sub">
                   {tabViews(activeTab()).map((v) =>
-                    <button classList={{ active: active() === v }} onClick={() => setActive(v)}>{registry[v].label}</button>)}
+                    <button classList={{ active: active() === v }} title={registry[v].hint} onClick={() => setActive(v)}>{registry[v].label}</button>)}
                 </div>
+                <Show when={registry[active()]?.hint}><p class="pc-sub-hint">{registry[active()].hint}</p></Show>
               </Show>
             </div>
           </Show>

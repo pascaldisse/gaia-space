@@ -647,6 +647,7 @@ textarea:focus {
 .pc-sub button { background: #16233d; border: 1px solid #2b3550; border-radius: 999px; padding: 4px 12px; color: #b9c2d4; font-size: 12px; }
 .pc-sub button:hover { border-color: var(--accent); }
 .pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.pc-sub-hint { margin: -2px 0 8px; color: #8b93a6; font-size: 12px; }
 .resource-view { height: 100%; overflow: auto; padding: 28px 34px; }
 .resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .resource-view header p { color: #9da0a8; margin: 5px 0 24px; }
