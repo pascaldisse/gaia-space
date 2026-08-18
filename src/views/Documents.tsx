@@ -3,6 +3,7 @@ import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import { Icon } from "../components/Icon";
 import {
   documentsApi,
   newId,
@@ -334,13 +335,13 @@ export default function Documents(props: { scope?: DocScope }) {
               onInput={(e) => setRenameValue(e.currentTarget.value)}
               onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(f())}
             />
-            <button class="ghost small" onClick={() => saveRenameFolder(f())}>
-              ✓
+            <button class="ghost small" title="Save" aria-label="Save" onClick={() => saveRenameFolder(f())}>
+              <Icon name="check" size={14} />
             </button>
           </Show>
           <span class="folder-actions">
-            <button class="ghost small" title="rename" onClick={() => startRenameFolder(f())}>
-              ✎
+            <button class="ghost small" title="rename" aria-label="Rename" onClick={() => startRenameFolder(f())}>
+              <Icon name="edit" size={14} />
             </button>
             <select
               class="folder-move-select"
@@ -368,7 +369,7 @@ export default function Documents(props: { scope?: DocScope }) {
                 classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
                 onClick={() => setSelectedDocumentId(d.id)}
               >
-                <span class="doc-icon">📄</span>
+                <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                 <span class="doc-title">{d.title}</span>
                 <span class="doc-version">v{d.version}</span>
               </li>
@@ -479,7 +480,7 @@ export default function Documents(props: { scope?: DocScope }) {
                     classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
                     onClick={() => setSelectedDocumentId(d.id)}
                   >
-                    <span class="doc-icon">📄</span>
+                    <span class="doc-icon" aria-hidden="true"><Icon name="doc" size={15} /></span>
                     <span class="doc-title">{d.title}</span>
                     <span class="doc-version">v{d.version}</span>
                   </li>

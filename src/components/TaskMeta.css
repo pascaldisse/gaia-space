@@ -42,12 +42,8 @@
 }
 .tm-opt:hover { background: rgba(255, 255, 255, 0.06); }
 .tm-opt.selected { background: var(--accent-soft); }
-.tm-opt-badge {
-  display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%;
-  font-family: var(--font-head); font-weight: 700; font-size: 11px; color: #fff;
-  background: hsl(var(--tm-hue, 200), 42%, 42%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.tm-opt-badge.all { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(0, 194, 168, 0.35); }
+/* badge visuals come from the shared <Avatar>; pin the composer size only. */
+.tm-opt-badge { --avatar-size: 28px; }
 .tm-opt-text { display: grid; min-width: 0; flex: 1; }
 .tm-opt-name { font-family: var(--font-head); font-weight: 550; font-size: 13px; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-opt-sub { font-size: 11px; color: #8b96ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -6,6 +6,7 @@ import { profileId, projectId, projects, reloadProfiles, reloadProjects } from "
 import { requestedDate, requestDate } from "../nav";
 import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
 import CalendarQuickCreate, { type QuickKind } from "../components/CalendarQuickCreate";
+import { Icon } from "../components/Icon";
 import "./Calendar.css";
 
 const monthRange = (date:Date) => { const g = monthGrid(date); return [g[0], new Date(g[41].getFullYear(), g[41].getMonth(), g[41].getDate()+1)] as const; };
@@ -89,9 +90,9 @@ export default function Calendar(props: { scope?: "global" | "project" }) {
           : "Every meeting, task due date, and project deadline across your workspace."}</p>
       </div>
       <div class="calendar-controls">
-        <button onClick={()=>shift(-1)}>←</button>
+        <button aria-label="Previous" onClick={()=>shift(-1)}><Icon name="chevron-left" size={16} /></button>
         <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
-        <button onClick={()=>shift(1)}>→</button>
+        <button aria-label="Next" onClick={()=>shift(1)}><Icon name="chevron-right" size={16} /></button>
         <button class="cal-today" onClick={goToday}>Today</button>
         <div class="cal-viewtoggle">
           <button classList={{active:view()==="month"}} onClick={()=>setView("month")}>Month</button>

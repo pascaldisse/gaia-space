@@ -20,9 +20,9 @@
 .st-action header h3 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; }
 .st-action header b { font-family: var(--font-head); font-size: 15px; }
 .st-dot { width: 8px; height: 8px; border-radius: 50%; background: #3d4a68; }
-.st-action.overdue { border-top-color: #e0605e; }
-.st-action.overdue .st-dot { background: #e0605e; }
-.st-action.overdue header b { color: #f08a88; }
+.st-action.overdue { border-top-color: var(--status-risk-overdue); }
+.st-action.overdue .st-dot { background: var(--status-risk-overdue); }
+.st-action.overdue header b { color: var(--status-danger-ink); }
 .st-action.soon { border-top-color: #f0a742; }
 .st-action.soon .st-dot { background: #f0a742; }
 .st-action.soon header b { color: #f0bd77; }
@@ -75,9 +75,9 @@
 .st-deadline-label { font-weight: 600; color: var(--text-strong); }
 .st-deadline time { color: #8b96ad; font-size: .86rem; }
 .st-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: #8b96ad; }
-.st-deadline.overdue { border-left-color: #e0605e; }
-.st-deadline.overdue .st-deadline-dot { background: #e0605e; }
-.st-deadline.overdue em { color: #f08a88; font-weight: 600; }
+.st-deadline.overdue { border-left-color: var(--status-risk-overdue); }
+.st-deadline.overdue .st-deadline-dot { background: var(--status-risk-overdue); }
+.st-deadline.overdue em { color: var(--status-danger-ink); font-weight: 600; }
 .st-deadline.soon { border-left-color: #f0a742; }
 .st-deadline.soon .st-deadline-dot { background: #f0a742; }
 .st-deadline.soon em { color: #f0bd77; }

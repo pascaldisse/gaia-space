@@ -18,6 +18,34 @@
   --text: var(--brand-cool-gray);
   --text-strong: var(--brand-ice);
 
+  /* ── identity avatars ──────────────────────────────────────
+     Person avatars are monochrome deep slate (no rainbow hues);
+     project marks keep the distinct teal brand treatment. */
+  --avatar-person-bg: #2a3446;
+  --avatar-person-ink: #cdd6e6;
+  --avatar-person-ring: rgba(255,255,255,0.08);
+
+  /* ── central status tokens ─────────────────────────────────
+     Shared semantic states for high-visibility status surfaces
+     (pipelines, reviews, risk, deadlines). Each has a text ink
+     and a soft tinted fill. Persisted per-project custom status
+     colours are NOT governed by these — they stay data-driven. */
+  --status-success-ink: #7cd68a;
+  --status-success-bg: #1e3a2b;
+  --status-info-ink: #5fe6d4;
+  --status-info-bg: #26305c;
+  --status-warning-ink: #e0a05e;
+  --status-warning-bg: #3a2c1a;
+  --status-danger-ink: #ff9a9a;
+  --status-danger-bg: #4a2426;
+  --status-neutral-ink: #9aa4bb;
+  --status-neutral-bg: #2a3140;
+  /* risk scale — deadline/risk dots & badges */
+  --status-risk-overdue: #f26d6d;
+  --status-risk-high: #f2a24b;
+  --status-risk-medium: #e6cf5f;
+  --status-risk-low: #5fe6d4;
+
   /* ── unified bold control system ──────────────────────────
      ONE control family for buttons, fields, selects & action
      links: same height, padding, radius, filled surface and a
@@ -554,7 +582,8 @@ textarea:focus {
 .topnav-divider { width: 1px; height: 22px; background: #2b3550; margin: 0 8px; flex: none; }
 .topnav-item { display: flex; align-items: center; gap: 8px; flex: none; background: transparent; border: 0; border-radius: 7px; padding: 8px 12px; color: #b9c2d4; font-family: var(--font-head); font-weight: 500; }
 .topnav-label { white-space: nowrap; }
-.nav-icon { width: 18px; flex: none; text-align: center; color: #9da0a8; }
+.icon { display: block; flex: none; }
+.nav-icon { display: grid; place-items: center; width: 18px; flex: none; color: #9da0a8; }
 .topnav-item:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
 .topnav-item.active { background: var(--accent-soft); color: var(--text-strong); }
 .topnav-item.active .nav-icon { color: var(--accent); }
@@ -575,7 +604,7 @@ textarea:focus {
 .topbar-icon, .topbar-account { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: #b9c2d4; }
 .topbar-icon:hover, .topbar-account:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
 .topbar-icon.active, .topbar-account.active { background: var(--accent-soft); color: var(--text-strong); border-color: var(--accent); }
-.account-avatar { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 12px; }
+/* account avatar visuals come from the shared <Avatar> (person = slate). */
 
 /* compact dropdowns for secondary/admin + account */
 .topbar-dropdown { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; min-width: 200px; background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,0.4); }

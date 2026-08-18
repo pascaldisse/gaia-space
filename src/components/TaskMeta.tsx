@@ -1,15 +1,8 @@
 import { For, Show, createMemo, createSignal, createUniqueId, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { Avatar } from "./Avatar";
+import { Icon, type IconName } from "./Icon";
 import "./TaskMeta.css";
-
-// Deterministic avatar hue so a person/project keeps one colour (mirrors Pickers).
-const hueOf = (seed: string) => {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
-  return h;
-};
-const initials = (label: string) =>
-  label.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 
 /**
  * One generous, same-language metadata control for the task composer.
@@ -19,7 +12,7 @@ const initials = (label: string) =>
  * cramped inline labels or a bare native select.
  */
 function MetaControl(props: {
-  icon: string;
+  icon: IconName;
   label: string;
   value?: string;          // resting-state value line; empty → placeholder
   placeholder: string;
@@ -49,12 +42,12 @@ function MetaControl(props: {
         aria-haspopup="dialog" aria-expanded={open()} aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
       >
-        <span class="tm-icon" aria-hidden="true">{props.icon}</span>
+        <span class="tm-icon" aria-hidden="true"><Icon name={props.icon} size={16} /></span>
         <span class="tm-text">
           <span class="tm-label">{props.label}</span>
           <span class="tm-value" classList={{ placeholder: !props.set }}>{props.set ? props.value : props.placeholder}</span>
         </span>
-        <span class="tm-chevron" aria-hidden="true">▾</span>
+        <span class="tm-chevron" aria-hidden="true"><Icon name="chevron-down" size={13} /></span>
       </button>
       <Show when={open()}>
         <div class="tm-menu" id={menuId} role="dialog" aria-label={props.menuLabel}>
@@ -72,24 +65,24 @@ type Person = { id: string; label: string; sub?: string };
 export function ProjectControl(props: { value: string; projects: Project[]; onChange: (id: string) => void }) {
   const selected = createMemo(() => props.projects.find((p) => p.id === props.value) ?? null);
   return (
-    <MetaControl icon="▦" label="Project" placeholder="No project — personal"
+    <MetaControl icon="grid" label="Project" placeholder="No project — personal"
       value={selected()?.name} set={Boolean(props.value)} menuLabel="Choose project">
       {(close) => (
         <ul class="tm-list" role="listbox" aria-label="Project">
           <li role="option" aria-selected={props.value === ""}
             classList={{ "tm-opt": true, selected: props.value === "" }}
             onMouseDown={(e) => { e.preventDefault(); props.onChange(""); close(); }}>
-            <span class="tm-opt-badge all" aria-hidden="true">∗</span>
+            <Avatar class="tm-opt-badge" variant="all" />
             <span class="tm-opt-text"><span class="tm-opt-name">No project</span><span class="tm-opt-sub">Personal task</span></span>
-            <Show when={props.value === ""}><span class="tm-check" aria-hidden="true">✓</span></Show>
+            <Show when={props.value === ""}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
           </li>
           <For each={props.projects}>{(p) =>
             <li role="option" aria-selected={p.id === props.value}
               classList={{ "tm-opt": true, selected: p.id === props.value }}
               onMouseDown={(e) => { e.preventDefault(); props.onChange(p.id); close(); }}>
-              <span class="tm-opt-badge" style={{ "--tm-hue": String(hueOf(p.id)) }} aria-hidden="true">{initials(p.name)}</span>
+              <Avatar class="tm-opt-badge" variant="project" name={p.name} />
               <span class="tm-opt-text"><span class="tm-opt-name">{p.name}</span><Show when={p.key}><span class="tm-opt-sub">{p.key}</span></Show></span>
-              <Show when={p.id === props.value}><span class="tm-check" aria-hidden="true">✓</span></Show>
+              <Show when={p.id === props.value}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
             </li>}
           </For>
         </ul>
@@ -111,7 +104,7 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
   const quick: [string, string][] = [["Today", isoOffset(0)], ["Tomorrow", isoOffset(1)], ["Next week", isoOffset(7)]];
   let dateEl: HTMLInputElement | undefined;
   return (
-    <MetaControl icon="◷" label="Due date" placeholder="No due date"
+    <MetaControl icon="clock" label="Due date" placeholder="No due date"
       value={fmtDate(props.value)} set={Boolean(props.value)} menuLabel="Choose due date">
       {(close) => (
         <div class="tm-date">
@@ -145,7 +138,7 @@ export function AssigneeControl(props: { value: string[]; people: Person[]; onTo
     return `${n[0]}, ${n[1]} +${n.length - 2}`;
   });
   return (
-    <MetaControl icon="◍" label="Assignee" placeholder="Unassigned"
+    <MetaControl icon="user" label="Assignee" placeholder="Unassigned"
       value={summary()} set={props.value.length > 0} menuLabel="Choose assignees">
       {() => (
         <ul class="tm-list" role="listbox" aria-multiselectable="true" aria-label="Assignees">
@@ -156,9 +149,9 @@ export function AssigneeControl(props: { value: string[]; people: Person[]; onTo
               <li role="option" aria-selected={on()}
                 classList={{ "tm-opt": true, selected: on() }}
                 onMouseDown={(e) => { e.preventDefault(); props.onToggle(p.id); }}>
-                <span class="tm-opt-badge" style={{ "--tm-hue": String(hueOf(p.id)) }} aria-hidden="true">{initials(p.label)}</span>
+                <Avatar class="tm-opt-badge" variant="person" name={p.label} />
                 <span class="tm-opt-text"><span class="tm-opt-name">{p.label}</span><Show when={p.sub}><span class="tm-opt-sub">{p.sub}</span></Show></span>
-                <span class="tm-checkbox" classList={{ on: on() }} aria-hidden="true">{on() ? "✓" : ""}</span>
+                <span class="tm-checkbox" classList={{ on: on() }} aria-hidden="true"><Show when={on()}><Icon name="check" size={12} /></Show></span>
               </li>
             );
           }}</For>

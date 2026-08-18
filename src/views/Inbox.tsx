@@ -28,7 +28,7 @@ export default function Inbox() {
       <div class="inbox-groups">
         <section>
           <h2>Unread <span>{unread().length}</span></h2>
-          <Show when={unread().length} fallback={<p class="inbox-muted">You're all caught up. 🎉</p>}>
+          <Show when={unread().length} fallback={<p class="inbox-muted">You're all caught up.</p>}>
             <ul class="inbox-list">
               <For each={unread()}>{n =>
                 <li class="unread">

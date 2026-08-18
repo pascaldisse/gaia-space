@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { changePassword, currentUser, humanError, logout } from "../session";
+import { Icon } from "./Icon";
 
 /** Web-mode sidebar footer: who's logged in, logout, change-password. Not shown in Tauri. */
 export default function AccountFooter() {
@@ -31,8 +32,8 @@ export default function AccountFooter() {
     <footer class="nav-footer">
       <div class="nav-footer-row">
         <span class="nav-footer-user" title={currentUser()?.username}>{currentUser()?.display_name ?? currentUser()?.username}</span>
-        <button class="ghost small" title="Change password" onClick={() => setOpen((v) => !v)}>⚿</button>
-        <button class="ghost small" title="Log out" onClick={() => void logout()}>⏻</button>
+        <button class="ghost small" title="Change password" aria-label="Change password" onClick={() => setOpen((v) => !v)}><Icon name="key" size={15} /></button>
+        <button class="ghost small" title="Log out" aria-label="Log out" onClick={() => void logout()}><Icon name="power" size={15} /></button>
       </div>
       <Show when={open()}>
         <form class="nav-footer-pw" onSubmit={submit}>

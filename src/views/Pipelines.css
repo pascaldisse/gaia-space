@@ -47,12 +47,12 @@
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 .status { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
-.status-scheduled, .status-pending, .status-ready_to_start { background: #333; color: #aaa; }
-.status-running, .status-finishing, .status-deploying { background: #2c3a5c; color: #5fe6d4; }
-.status-finished, .status-current { background: #1e3a2b; color: #7cd68a; }
-.status-failed, .status-terminated { background: #4a2426; color: #ff9a9a; }
-.status-hibernating, .status-hibernated, .status-hanging { background: #4a3a1e; color: #e0a05e; }
-.status-obsolete, .status-skipped { background: #2a2a2a; color: #83868f; }
+.status-scheduled, .status-pending, .status-ready_to_start { background: var(--status-neutral-bg); color: var(--status-neutral-ink); }
+.status-running, .status-finishing, .status-deploying { background: var(--status-info-bg); color: var(--status-info-ink); }
+.status-finished, .status-current { background: var(--status-success-bg); color: var(--status-success-ink); }
+.status-failed, .status-terminated { background: var(--status-danger-bg); color: var(--status-danger-ink); }
+.status-hibernating, .status-hibernated, .status-hanging { background: var(--status-warning-bg); color: var(--status-warning-ink); }
+.status-obsolete, .status-skipped { background: var(--status-neutral-bg); color: var(--status-neutral-ink); }
 
 /* ---------- Deployments ---------- */
 .target-detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

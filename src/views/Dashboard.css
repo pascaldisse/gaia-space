@@ -41,7 +41,7 @@
 .tn-tasksec{display:grid;gap:5px;margin-bottom:6px}
 .tn-seclabel{font-family:var(--font-head);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8b96ad;display:flex;align-items:center;gap:6px}
 .tn-seclabel em{font-style:normal;font-size:10px;color:#7fb8b0;background:#1f2740;padding:0 5px;border-radius:8px}
-.tn-seclabel.overdue{color:#f2a2a2}
+.tn-seclabel.overdue{color:var(--status-danger-ink)}
 .tn-seclabel.today{color:var(--accent-text)}
 .tn-tasksec li{display:flex;align-items:flex-start;gap:9px;padding:4px 0}
 .tn-check-box{margin-top:2px;flex:none;cursor:pointer}
@@ -49,16 +49,16 @@
 .tn-task-body:hover strong{color:var(--accent-text)}
 .tn-task-body strong{font-size:13px;color:var(--text-strong);font-weight:550;line-height:1.25}
 .tn-task-body small{font-size:11px;color:#8b96ad}
-.tn-task-body small.overdue{color:#f2a2a2}
+.tn-task-body small.overdue{color:var(--status-danger-ink)}
 
 /* project risk column */
 .tn-risklist li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;background:#111f3a;cursor:pointer}
 .tn-risklist li:hover{background:#16264a}
 .tn-riskdot{width:9px;height:9px;border-radius:50%;flex:none}
-.tn-riskdot.overdue,.tn-riskbadge.overdue{--r:#f26d6d}
-.tn-riskdot.high,.tn-riskbadge.high{--r:#f2a24b}
-.tn-riskdot.medium,.tn-riskbadge.medium{--r:#e6cf5f}
-.tn-riskdot.low,.tn-riskbadge.low{--r:#5fe6d4}
+.tn-riskdot.overdue,.tn-riskbadge.overdue{--r:var(--status-risk-overdue)}
+.tn-riskdot.high,.tn-riskbadge.high{--r:var(--status-risk-high)}
+.tn-riskdot.medium,.tn-riskbadge.medium{--r:var(--status-risk-medium)}
+.tn-riskdot.low,.tn-riskbadge.low{--r:var(--status-risk-low)}
 .tn-riskdot{background:var(--r)}
 .tn-risk-body{display:grid;gap:1px;min-width:0}
 .tn-risk-body strong{font-size:13px;color:var(--text-strong);font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

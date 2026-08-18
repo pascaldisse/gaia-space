@@ -34,9 +34,9 @@
 .ph-deadline-label { font-weight: 600; color: var(--text-strong); }
 .ph-deadline time { color: #8b96ad; font-size: .86rem; }
 .ph-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: #8b96ad; }
-.ph-deadline.overdue { border-left-color: #e0605e; }
-.ph-deadline.overdue .ph-deadline-dot { background: #e0605e; }
-.ph-deadline.overdue em { color: #f08a88; font-weight: 600; }
+.ph-deadline.overdue { border-left-color: var(--status-risk-overdue); }
+.ph-deadline.overdue .ph-deadline-dot { background: var(--status-risk-overdue); }
+.ph-deadline.overdue em { color: var(--status-danger-ink); font-weight: 600; }
 .ph-deadline.soon { border-left-color: #f0a742; }
 .ph-deadline.soon .ph-deadline-dot { background: #f0a742; }
 .ph-deadline.soon em { color: #f0bd77; }

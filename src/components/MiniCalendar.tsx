@@ -1,5 +1,6 @@
 import { For, Show, createMemo } from "solid-js";
 import { dayKeyOf, kindsOnDay, monthGrid, startOfDay, type CalendarItem } from "../calendar";
+import { Icon } from "./Icon";
 import "./MiniCalendar.css";
 
 // Compact month calendar for the Overview. Purely presentational over a typed
@@ -22,11 +23,11 @@ export default function MiniCalendar(props: {
   return (
     <div class="mini-cal">
       <div class="mini-cal-head">
-        <button class="mini-nav" title="Previous month" onClick={props.onPrev}>‹</button>
+        <button class="mini-nav" title="Previous month" aria-label="Previous month" onClick={props.onPrev}><Icon name="chevron-left" size={16} /></button>
         <strong>{props.cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
         <div class="mini-cal-headbtns">
           <button class="mini-today" title="Jump to today" onClick={props.onToday}>Today</button>
-          <button class="mini-nav" title="Next month" onClick={props.onNext}>›</button>
+          <button class="mini-nav" title="Next month" aria-label="Next month" onClick={props.onNext}><Icon name="chevron-right" size={16} /></button>
         </div>
       </div>
       <div class="mini-grid">

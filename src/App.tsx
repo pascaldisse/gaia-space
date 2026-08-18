@@ -34,37 +34,39 @@ import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import { ProjectPicker } from "./components/Pickers";
+import { Avatar } from "./components/Avatar";
+import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb, projectId, projects } from "./session";
 import { requestedView, requestView } from "./nav";
 
 // ── destination registry: every module still exists; the IA just groups them ──
-type Dest = { name: string; label: string; icon: string; component: Component; desktopOnly?: boolean };
+type Dest = { name: string; label: string; icon: IconName; component: Component; desktopOnly?: boolean };
 const registry: Record<string, Dest> = {
   // primary / personal
-  MyWork:       { name: "MyWork",       label: "Overview",       icon: "⌂", component: Dashboard },
-  "To-Do":      { name: "To-Do",        label: "My tasks",       icon: "✓", component: Todo },
-  Absences:     { name: "Absences",     label: "Time off",       icon: "◷", component: Absences },
-  Inbox:        { name: "Inbox",        label: "Inbox",          icon: "✉", component: Inbox },
-  Projects:     { name: "Projects",     label: "Projects",       icon: "◈", component: Portfolio },
-  Calendar:     { name: "Calendar",     label: "Calendar",       icon: "▦", component: GlobalCalendar },
-  Knowledge:    { name: "Knowledge",    label: "Knowledge",      icon: "▤", component: GlobalKnowledge },
-  Organization: { name: "Organization", label: "Organization",   icon: "♟", component: Members },
-  Admin:        { name: "Admin",        label: "Admin",          icon: "⚙", component: Admin },
-  Users:        { name: "Users",        label: "User accounts",  icon: "⚉", component: Users },
+  MyWork:       { name: "MyWork",       label: "Overview",       icon: "home", component: Dashboard },
+  "To-Do":      { name: "To-Do",        label: "My tasks",       icon: "check", component: Todo },
+  Absences:     { name: "Absences",     label: "Time off",       icon: "clock", component: Absences },
+  Inbox:        { name: "Inbox",        label: "Inbox",          icon: "inbox", component: Inbox },
+  Projects:     { name: "Projects",     label: "Projects",       icon: "layers", component: Portfolio },
+  Calendar:     { name: "Calendar",     label: "Calendar",       icon: "calendar", component: GlobalCalendar },
+  Knowledge:    { name: "Knowledge",    label: "Knowledge",      icon: "book", component: GlobalKnowledge },
+  Organization: { name: "Organization", label: "Organization",   icon: "org", component: Members },
+  Admin:        { name: "Admin",        label: "Admin",          icon: "settings", component: Admin },
+  Users:        { name: "Users",        label: "User accounts",  icon: "users", component: Users },
   // project-context destinations
-  Steering:        { name: "Steering",        label: "Steering",         icon: "◎", component: Steering },
-  Issues:          { name: "Issues",          label: "Issues",           icon: "✓", component: Issues },
-  Boards:          { name: "Boards",          label: "Boards",           icon: "▦", component: Boards },
-  ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "✓", component: ProjectTasks },
-  Docs:            { name: "Docs",            label: "Docs",             icon: "▤", component: ProjectDocs },
-  Chat:            { name: "Chat",            label: "Chat",             icon: "◌", component: Chat },
-  ProjectCalendar: { name: "ProjectCalendar", label: "Calendar",         icon: "▦", component: ProjectCalendar },
-  Meetings:        { name: "Meetings",        label: "Meetings",         icon: "◷", component: Meetings },
-  Repos:           { name: "Repos",           label: "Repositories",     icon: "⌘", component: Repos, desktopOnly: true },
-  Reviews:         { name: "Reviews",         label: "Code reviews",     icon: "⇄", component: Reviews, desktopOnly: true },
-  Pipelines:       { name: "Pipelines",       label: "Pipelines",        icon: "▷", component: Pipelines, desktopOnly: true },
-  Packages:        { name: "Packages",        label: "Packages",         icon: "◇", component: Packages },
-  ProjectSettings: { name: "ProjectSettings", label: "Project settings", icon: "⚙", component: ProjectSettings },
+  Steering:        { name: "Steering",        label: "Steering",         icon: "target", component: Steering },
+  Issues:          { name: "Issues",          label: "Issues",           icon: "check", component: Issues },
+  Boards:          { name: "Boards",          label: "Boards",           icon: "columns", component: Boards },
+  ProjectTasks:    { name: "ProjectTasks",    label: "Tasks",            icon: "check", component: ProjectTasks },
+  Docs:            { name: "Docs",            label: "Docs",             icon: "book", component: ProjectDocs },
+  Chat:            { name: "Chat",            label: "Chat",             icon: "chat", component: Chat },
+  ProjectCalendar: { name: "ProjectCalendar", label: "Calendar",         icon: "calendar", component: ProjectCalendar },
+  Meetings:        { name: "Meetings",        label: "Meetings",         icon: "clock", component: Meetings },
+  Repos:           { name: "Repos",           label: "Repositories",     icon: "repo", component: Repos, desktopOnly: true },
+  Reviews:         { name: "Reviews",         label: "Code reviews",     icon: "review", component: Reviews, desktopOnly: true },
+  Pipelines:       { name: "Pipelines",       label: "Pipelines",        icon: "pipeline", component: Pipelines, desktopOnly: true },
+  Packages:        { name: "Packages",        label: "Packages",         icon: "package", component: Packages },
+  ProjectSettings: { name: "ProjectSettings", label: "Project settings", icon: "settings", component: ProjectSettings },
 };
 
 // primary top-navigation: the four destinations the workspace centers on.
@@ -76,15 +78,15 @@ const secondaryNav = ["Absences", "Organization"];
 const sectionNav = new Set(["Projects", "Organization"]);
 
 // project context surface: tabs → the destination(s) each reveals
-type Tab = { tab: string; icon: string; views: string[] };
+type Tab = { tab: string; icon: IconName; views: string[] };
 const projectTabs: Tab[] = [
-  { tab: "Steering",      icon: "◎", views: ["Steering"] },
-  { tab: "Work",          icon: "▦", views: ["Issues", "Boards", "ProjectTasks"] },
-  { tab: "Planning",      icon: "▦", views: ["ProjectCalendar", "Meetings"] },
-  { tab: "Knowledge",     icon: "▤", views: ["Docs"] },
-  { tab: "Communication", icon: "◌", views: ["Chat"] },
-  { tab: "Delivery",      icon: "⌘", views: ["Repos", "Reviews", "Pipelines", "Packages"] },
-  { tab: "Settings",      icon: "⚙", views: ["ProjectSettings"] },
+  { tab: "Steering",      icon: "target", views: ["Steering"] },
+  { tab: "Work",          icon: "columns", views: ["Issues", "Boards", "ProjectTasks"] },
+  { tab: "Planning",      icon: "calendar", views: ["ProjectCalendar", "Meetings"] },
+  { tab: "Knowledge",     icon: "book", views: ["Docs"] },
+  { tab: "Communication", icon: "chat", views: ["Chat"] },
+  { tab: "Delivery",      icon: "repo", views: ["Repos", "Reviews", "Pipelines", "Packages"] },
+  { tab: "Settings",      icon: "settings", views: ["ProjectSettings"] },
 ];
 const projectDestinations = new Set(projectTabs.flatMap((t) => t.views));
 
@@ -131,7 +133,7 @@ export default function App() {
     const d = registry[name];
     const isActive = () => (sectionNav.has(name) ? section() === name : active() === name);
     return <button class="topnav-item" title={d.label} classList={{ active: isActive(), secondary }} onClick={() => go(name)}>
-      <span class="nav-icon">{d.icon}</span><span class="topnav-label">{d.label}</span>
+      <span class="nav-icon"><Icon name={d.icon} size={17} /></span><span class="topnav-label">{d.label}</span>
     </button>;
   };
 
@@ -148,17 +150,17 @@ export default function App() {
             <For each={secondaryNav}>{(name) => navButton(name, true)}</For>
           </nav>
           <div class="topbar-right">
-            <button class="topbar-search" title="Search (⌘K)" onClick={() => setGotoOpen(true)}><span class="nav-icon">⌕</span><span class="topbar-search-hint">Search</span></button>
+            <button class="topbar-search" title="Search (⌘K)" onClick={() => setGotoOpen(true)}><span class="nav-icon"><Icon name="search" size={16} /></span><span class="topbar-search-hint">Search</span></button>
 
             {/* secondary / admin controls: compact menu, not primary nav */}
             <div class="topbar-menu">
-              <button class="topbar-icon" classList={{ active: menu() === "manage" || inManageMenu() }} title="Manage" onClick={() => toggleMenu("manage")}>⚙</button>
+              <button class="topbar-icon" classList={{ active: menu() === "manage" || inManageMenu() }} title="Manage" onClick={() => toggleMenu("manage")}><Icon name="settings" size={17} label="Manage" /></button>
               <Show when={menu() === "manage"}>
                 <div class="topbar-dropdown">
                   <p class="dropdown-label">Manage</p>
-                  <button classList={{ active: active() === "Admin" }} onClick={() => go("Admin")}><span class="nav-icon">⚙</span>Admin</button>
+                  <button classList={{ active: active() === "Admin" }} onClick={() => go("Admin")}><span class="nav-icon"><Icon name="settings" size={16} /></span>Admin</button>
                   <Show when={isWeb() && currentUser()?.role === "admin"}>
-                    <button classList={{ active: active() === "Users" }} onClick={() => go("Users")}><span class="nav-icon">⚉</span>User accounts</button>
+                    <button classList={{ active: active() === "Users" }} onClick={() => go("Users")}><span class="nav-icon"><Icon name="users" size={16} /></span>User accounts</button>
                   </Show>
                 </div>
               </Show>
@@ -167,7 +169,7 @@ export default function App() {
             <Show when={isWeb()}>
               <div class="topbar-menu">
                 <button class="topbar-account" classList={{ active: menu() === "account" }} title="Account" onClick={() => toggleMenu("account")}>
-                  <span class="account-avatar">{(currentUser()?.display_name ?? currentUser()?.username ?? "?").slice(0, 1).toUpperCase()}</span>
+                  <Avatar class="account-avatar" variant="person" size={26} name={currentUser()?.display_name ?? currentUser()?.username ?? "?"} />
                 </button>
                 <Show when={menu() === "account"}>
                   <div class="topbar-dropdown account-dropdown"><AccountFooter/></div>
@@ -186,7 +188,7 @@ export default function App() {
               </div>
               <nav class="pc-tabs">
                 {projectTabs.filter((t) => tabViews(t).length).map((t) =>
-                  <button classList={{ active: activeTab().tab === t.tab }} onClick={() => openTab(t)}><span class="pc-tab-icon">{t.icon}</span>{t.tab}</button>)}
+                  <button classList={{ active: activeTab().tab === t.tab }} onClick={() => openTab(t)}><span class="pc-tab-icon"><Icon name={t.icon} size={16} /></span>{t.tab}</button>)}
               </nav>
               <Show when={tabViews(activeTab()).length > 1}>
                 <div class="pc-sub">

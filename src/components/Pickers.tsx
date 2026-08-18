@@ -3,18 +3,12 @@ import {
   ensureDefaults, profileId, profileLocked, profiles, projectId, projects,
   reloadProfiles, reloadProjects, setProfileId, setProjectId,
 } from "../session";
+import { Avatar } from "./Avatar";
+import { Icon } from "./Icon";
 import "./Pickers.css";
 
 // ── shared visual helpers ────────────────────────────────────────────────
 // Deterministic avatar hue from an id so a person/project keeps one colour.
-const hueOf = (seed: string) => {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
-  return h;
-};
-const initials = (label: string) =>
-  label.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
-
 type Option = { id: string; label: string; sub?: string };
 
 /**
@@ -99,18 +93,17 @@ function EntityPicker(props: {
         disabled={props.locked} title={props.locked ? props.lockedTitle : undefined}
         onClick={() => (open() ? close() : openMenu())}
       >
-        <span class="ep-avatar" classList={{ "ep-avatar-all": props.value === "" && props.allowAll }}
-          style={props.value ? { "--ep-hue": String(hueOf(props.value)) } : undefined} aria-hidden="true">
-          {props.value === "" && props.allowAll ? "∗" : initials(triggerLabel())}
-        </span>
+        <Avatar class="ep-avatar"
+          variant={props.value === "" && props.allowAll ? "all" : props.kind === "project" ? "project" : "person"}
+          name={triggerLabel()} />
         <span class="ep-name">{triggerLabel()}</span>
-        <Show when={!props.locked}><span class="ep-chevron" aria-hidden="true">▾</span></Show>
+        <Show when={!props.locked}><span class="ep-chevron" aria-hidden="true"><Icon name="chevron-down" size={12} /></span></Show>
       </button>
 
       <Show when={open()}>
         <div class="ep-menu" role="dialog" aria-label={props.label || props.placeholder}>
           <div class="ep-search">
-            <span class="ep-search-icon" aria-hidden="true">⌕</span>
+            <span class="ep-search-icon" aria-hidden="true"><Icon name="search" size={15} /></span>
             <input ref={searchEl} type="text" value={query()} placeholder={props.placeholder}
               aria-label={props.placeholder} aria-activedescendant={rows()[activeIdx()] ? `${listId}-${activeIdx()}` : undefined}
               onInput={(e) => { setQuery(e.currentTarget.value); setActiveIdx(0); }} onKeyDown={onKey} />
@@ -122,12 +115,11 @@ function EntityPicker(props: {
               <li id={`${listId}-${i()}`} role="option" aria-selected={o.id === (props.value ?? "")}
                 classList={{ "ep-opt": true, active: i() === activeIdx(), selected: o.id === (props.value ?? "") }}
                 onMouseEnter={() => setActiveIdx(i())} onMouseDown={(e) => { e.preventDefault(); choose(o.id); }}>
-                <span class="ep-avatar" classList={{ "ep-avatar-all": o.id === "" }}
-                  style={o.id ? { "--ep-hue": String(hueOf(o.id)) } : undefined} aria-hidden="true">
-                  {o.id === "" ? "∗" : initials(o.label)}
-                </span>
+                <Avatar class="ep-avatar"
+                  variant={o.id === "" ? "all" : props.kind === "project" ? "project" : "person"}
+                  name={o.label} />
                 <span class="ep-opt-text"><span class="ep-opt-name">{o.label}</span><Show when={o.sub}><span class="ep-opt-sub">{o.sub}</span></Show></span>
-                <Show when={o.id === (props.value ?? "")}><span class="ep-check" aria-hidden="true">✓</span></Show>
+                <Show when={o.id === (props.value ?? "")}><span class="ep-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
               </li>}</For>
           </ul>
         </div>
