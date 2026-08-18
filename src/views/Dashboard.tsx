@@ -8,7 +8,7 @@ import MiniCalendar from "../components/MiniCalendar";
 import { Icon } from "../components/Icon";
 import { profileId } from "../session";
 import { requestView, requestTodo, requestDate } from "../nav";
-import { buildCalendarItems, itemsOnDay, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
+import { buildCalendarItems, monthGrid, startOfDay, dayKeyOf, type CalendarItem } from "../calendar";
 import "./Dashboard.css";
 
 // agenda helpers — group the next meetings into human day-buckets so the
@@ -114,7 +114,7 @@ export default function Dashboard() {
   // workspace focused on that day. Sources mirror the Calendar view exactly.
   const [calCursor, setCalCursor] = createSignal(startOfDay(new Date()));
   const [calDay, setCalDay] = createSignal(dayKeyOf(startOfDay(new Date())));
-  const [calItems] = createResource(() => [calCursor().getTime(), profileId()] as const, async () => {
+  const [calItems, { refetch: refetchCal }] = createResource(() => [calCursor().getTime(), profileId()] as const, async () => {
     const g = monthGrid(calCursor());
     const rangeStart = g[0].getTime() / 1000;
     const rangeEnd = new Date(g[41].getFullYear(), g[41].getMonth(), g[41].getDate() + 1).getTime() / 1000;
@@ -125,7 +125,25 @@ export default function Dashboard() {
     ]);
     return buildCalendarItems({ occurrences, todos, projects: projectsList });
   });
-  const calAgenda = () => itemsOnDay(calItems() ?? [], calDay());
+  // Upcoming agenda — instead of showing only the picked day (which hid future
+  // meetings / task due dates / project deadlines behind faint grid dots), list
+  // every calendar entry from the picked day forward, grouped by day. Day picks
+  // just move the window start, so detail is still reachable and today's default
+  // surfaces what's coming up without hunting dots or opening the full Calendar.
+  const CAL_LOOKAHEAD = 8;
+  const upcomingItems = () => (calItems() ?? [])
+    .filter((i) => i.date >= calDay())
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.allDay !== b.allDay ? (a.allDay ? -1 : 1) : (a.starts_at ?? 0) - (b.starts_at ?? 0)))
+    .slice(0, CAL_LOOKAHEAD);
+  const upcomingGroups = () => {
+    const groups: { day: string; items: CalendarItem[] }[] = [];
+    for (const it of upcomingItems()) {
+      let g = groups.find((x) => x.day === it.date);
+      if (!g) { g = { day: it.date, items: [] }; groups.push(g); }
+      g.items.push(it);
+    }
+    return groups;
+  };
   const shiftCal = (amount: number) => { const next = new Date(calCursor()); next.setMonth(next.getMonth() + amount); setCalCursor(startOfDay(next)); };
   const openCalendarAt = (dayKey: string) => { requestDate(dayKey); requestView("Calendar"); };
   const readableDay = (key: string) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }); };
@@ -224,18 +242,22 @@ export default function Dashboard() {
               onPick={setCalDay}
             />
             <div class="co-agenda">
-              <header><h3>{readableDay(calDay())}</h3><span>{calAgenda().length} item{calAgenda().length === 1 ? "" : "s"}</span></header>
-              <Show when={calAgenda().length} fallback={<p class="co-empty">Nothing scheduled. <button class="agenda-inline" onClick={() => openCalendarAt(calDay())}>Open calendar →</button></p>}>
+              <header><h3>{calDay() === dayKeyOf(startOfDay(new Date())) ? "Upcoming" : `From ${readableDay(calDay())}`}</h3><span>{upcomingItems().length} item{upcomingItems().length === 1 ? "" : "s"}</span></header>
+              <Show when={upcomingItems().length} fallback={<p class="co-empty">Nothing upcoming. <button class="agenda-inline" onClick={() => openCalendarAt(calDay())}>Open calendar →</button></p>}>
                 <ul>
-                  <For each={calAgenda()}>{event =>
-                    <li classList={{ [event.kind]: true, done: event.done }}>
-                      <button onClick={() => openCalendarAt(event.date)}>
-                        <span class="co-time">{calTime(event)}</span>
-                        <strong>{event.title}</strong>
-                        <Show when={event.label}><small class="co-label">{event.label}</small></Show>
-                        <Show when={event.location}><small>{event.location}</small></Show>
-                      </button>
-                    </li>}</For>
+                  <For each={upcomingGroups()}>{group =>
+                    <>
+                      <li class="co-daygroup"><span class="co-dayhead">{readableDay(group.day)}</span></li>
+                      <For each={group.items}>{event =>
+                        <li classList={{ [event.kind]: true, done: event.done }}>
+                          <button onClick={() => openCalendarAt(event.date)}>
+                            <span class="co-time">{calTime(event)}</span>
+                            <strong>{event.title}</strong>
+                            <Show when={event.label}><small class="co-label">{event.label}</small></Show>
+                            <Show when={event.location}><small>{event.location}</small></Show>
+                          </button>
+                        </li>}</For>
+                    </>}</For>
                 </ul>
               </Show>
             </div>
@@ -291,6 +313,6 @@ export default function Dashboard() {
         </div>
       </>
     }</Show>
-    <Show when={profileId()}><button class="dashboard-refresh" onClick={() => { refetch(); refetchProjects(); }}>Refresh dashboard</button></Show>
+    <Show when={profileId()}><button class="dashboard-refresh" onClick={() => { refetch(); refetchProjects(); refetchCal(); }}>Refresh dashboard</button></Show>
   </section>;
 }

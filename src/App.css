@@ -587,10 +587,9 @@ textarea:focus {
 .topnav-item:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
 .topnav-item.active { background: var(--accent-soft); color: var(--text-strong); }
 .topnav-item.active .nav-icon { color: var(--accent); }
-/* secondary cluster: still reachable, but visually recessive vs the primary four */
-.topnav-item.secondary { font-weight: 450; padding: 8px 10px; color: #8b95ab; }
-.topnav-item.secondary .nav-icon { color: #6f7a92; font-size: 0.95em; }
-.topnav-item.secondary .topnav-label { font-size: 12px; }
+/* secondary cluster: the divider is the only grouping cue — icon size, gap,
+   colour, weight and padding stay identical to the primary items so every
+   primary-row destination carries a consistent line icon before its label. */
 .topnav-item.secondary:hover { color: var(--text-strong); }
 .topnav-item.secondary.active { color: var(--text-strong); }
 
