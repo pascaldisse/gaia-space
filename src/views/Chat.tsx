@@ -1,6 +1,8 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
-import { isWeb, profileId } from "../session";
+import { isWeb, profileId, projectId, projects } from "../session";
 import { ProfilePicker } from "../components/Pickers";
+import { Avatar } from "../components/Avatar";
+import { Icon } from "../components/Icon";
 import { authApi } from "../api/auth";
 import "../App.css";
 import "./Chat.css";
@@ -14,20 +16,27 @@ import {
   type ProfileLite,
 } from "../api/chat";
 
+// Communication is the project's own conversation space. Channels are grouped by
+// how they are shared; entity discussions are auto-created elsewhere and simply
+// surface here, so the manual "new conversation" control never offers them.
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
-  { key: "public", label: "Public" },
-  { key: "private", label: "Private" },
-  { key: "dm", label: "Direct Messages" },
-  { key: "entity-bound", label: "Entity Discussions" },
+  { key: "public", label: "Open channels" },
+  { key: "private", label: "Private channels" },
+  { key: "dm", label: "Direct messages" },
+  { key: "entity-bound", label: "Entity discussions" },
 ];
 
+// Friendly, non-technical label for a channel's sharing kind.
+const KIND_LABEL: Record<string, string> = {
+  public: "Open channel",
+  private: "Private channel",
+  dm: "Direct message",
+  "entity-bound": "Entity discussion",
+};
+
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "👀"];
-const POLL_OPTIONS = [
-  { label: "2s", ms: 2000 },
-  { label: "5s", ms: 5000 },
-  { label: "10s", ms: 10000 },
-  { label: "off", ms: 0 },
-];
+// Quiet background refresh — no user-facing polling controls.
+const POLL_MS = 5000;
 
 function when(ts: number | null) {
   if (!ts) return "";
@@ -57,25 +66,39 @@ export default function Chat() {
   // instead of keeping a divergent per-view default.
   const actingProfileId = () => profileId() || null;
 
-  // polling
-  const [pollMs, setPollMs] = createSignal(5000);
+  // Active project context — Communication only ever shows this project's own
+  // conversations, kept separate from any broader / cross-project chat.
+  const activeProject = () => projectsList()?.find((p) => p.id === projectId()) ?? null;
+  const projectsList = () => projects();
+  const activeProjectName = () => activeProject()?.name ?? null;
 
-  // channels (sidebar), grouped by content_type, with unread + member meta
+  // channels (sidebar), grouped by content_type, with unread + member meta.
+  // Fetched for the acting profile, then scoped client-side to the active project
+  // so nothing leaks in from other projects or the org-wide space.
   const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
   );
+  const scopedChannels = () => {
+    const pid = projectId();
+    if (!pid) return [] as ChannelSummary[];
+    return (channels() ?? []).filter((c) => c.project_id === pid);
+  };
   const grouped = () => {
     const groups: Record<string, ChannelSummary[]> = { public: [], private: [], dm: [], "entity-bound": [] };
-    for (const c of channels() ?? []) (groups[c.content_type] ??= []).push(c);
+    for (const c of scopedChannels()) (groups[c.content_type] ??= []).push(c);
     return groups;
   };
 
   const [activeChannelId, setActiveChannelId] = createSignal<string | null>(null);
+  // Keep the active channel valid for the current project: default to the first
+  // scoped channel and drop a selection that no longer belongs to this project.
   createEffect(() => {
-    const list = channels();
-    if (list && list.length && !activeChannelId()) setActiveChannelId(list[0].id);
+    const list = scopedChannels();
+    const current = activeChannelId();
+    if (current && list.some((c) => c.id === current)) return;
+    setActiveChannelId(list.length ? list[0].id : null);
   });
-  const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  const activeChannel = () => scopedChannels().find((c) => c.id === activeChannelId()) ?? null;
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {
@@ -117,16 +140,14 @@ export default function Chat() {
   const memberIds = () => new Set((members() ?? []).map((m) => m.profile_id));
   const [showMembers, setShowMembers] = createSignal(false);
 
-  // polling loop — refreshes whatever is currently on screen
+  // quiet polling loop — refreshes whatever is currently on screen
   createEffect(() => {
-    const ms = pollMs();
-    if (!ms) return;
     const t = setInterval(() => {
       refetchChannels();
       refetchMessages();
       if (threadRootId()) refetchThread();
       refetchMembers();
-    }, ms);
+    }, POLL_MS);
     onCleanup(() => clearInterval(t));
   });
 
@@ -229,29 +250,57 @@ export default function Chat() {
   }
 
   // ---- channel creation ----
+  const [showNewChannel, setShowNewChannel] = createSignal(false);
   const [newChannelName, setNewChannelName] = createSignal("");
   const [newChannelType, setNewChannelType] = createSignal<ChannelContentType>("public");
   const [directRecipientId, setDirectRecipientId] = createSignal("");
   async function createChannel() {
     const p = actingProfileId();
+    const pid = projectId();
     const recipient = directRecipientId();
     const direct = newChannelType() === "dm";
     const name = direct
       ? `${profileName(p)} · ${profileName(recipient)}`
       : newChannelName().trim();
-    if (!name || !p || (direct && !recipient)) return;
+    if (!name || !p || !pid || (direct && !recipient)) return;
     const channel: Channel = {
       id: newId("chan"),
       content_type: newChannelType(),
       name,
       description: null,
-      project_id: null,
+      // Bind every conversation started here to the active project so it stays
+      // inside this project's Communication space.
+      project_id: pid,
       archived: false,
     };
     try {
       await chatApi.createChannel(channel, direct ? [p, recipient] : [p]);
       setNewChannelName("");
       setDirectRecipientId("");
+      setShowNewChannel(false);
+      refetchChannels();
+      setActiveChannelId(channel.id);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  // One clear onboarding action for a project with no conversations yet: create
+  // a general open channel and drop straight into it.
+  async function startFirstChannel() {
+    const p = actingProfileId();
+    const pid = projectId();
+    if (!p || !pid) return;
+    const channel: Channel = {
+      id: newId("chan"),
+      content_type: "public",
+      name: "general",
+      description: null,
+      project_id: pid,
+      archived: false,
+    };
+    try {
+      await chatApi.createChannel(channel, [p]);
       refetchChannels();
       setActiveChannelId(channel.id);
     } catch (e) {
@@ -303,6 +352,7 @@ export default function Chat() {
           fallback={
             <>
               <div class="message-head">
+                <Avatar name={profileName(m.author_id)} size={22} />
                 <span class="message-author">{profileName(m.author_id)}</span>
                 <span class="message-time">{when(m.created_at)}</span>
                 <Show when={m.edited_at}>
@@ -374,19 +424,71 @@ export default function Chat() {
     );
   }
 
+  // View states: no project chosen → guided empty; project chosen but no
+  // conversations yet → onboarding. Otherwise the full communication workspace.
+  const noProject = () => !projectId();
+  const projectEmpty = () => !noProject() && !channels.loading && scopedChannels().length === 0;
+
   return (
-    <div class="chat-shell">
+    <div class="chat-view">
       <Show when={error()}>
         <div class="error-bar" onClick={() => setError(null)}>
           {error()}
         </div>
       </Show>
 
-      <aside class="chat-sidebar">
-        <div class="chat-profile-picker">
-          <ProfilePicker />
+      <header class="chat-project-head">
+        <div class="cph-main">
+          <Show
+            when={activeProject()}
+            fallback={<span class="cph-mark placeholder" aria-hidden="true">··</span>}
+          >
+            <Avatar name={activeProject()!.name} variant="project" size={44} class="cph-mark" />
+          </Show>
+          <div class="cph-text">
+            <h1>Communication</h1>
+            <p>
+              Messages that live only in{" "}
+              <strong>{activeProjectName() ?? "this project"}</strong> — kept separate from your
+              broader, cross-project conversations.
+            </p>
+          </div>
         </div>
+        <label class="cph-acting">
+          <span>Acting as</span>
+          <ProfilePicker />
+        </label>
+      </header>
 
+      <Show when={noProject()}>
+        <div class="chat-empty">
+          <div class="chat-empty-card">
+            <div class="chat-empty-icon" aria-hidden="true"><Icon name="chat" size={26} /></div>
+            <h2>No project selected</h2>
+            <p>Choose a project from the context header to see and take part in its conversations.</p>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={projectEmpty()}>
+        <div class="chat-empty">
+          <div class="chat-empty-card">
+            <div class="chat-empty-icon" aria-hidden="true"><Icon name="chat" size={26} /></div>
+            <h2>Start the conversation</h2>
+            <p>
+              Discuss decisions, share updates, and keep everyone on{" "}
+              <strong>{activeProjectName() ?? "this project"}</strong> aligned. Messages here stay
+              within the project.
+            </p>
+            <button class="primary chat-empty-cta" onClick={startFirstChannel}>
+              <Icon name="plus" size={15} /> Start a channel
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <div class="chat-shell" classList={{ hidden: noProject() || projectEmpty() }}>
+      <aside class="chat-sidebar">
         <div class="channel-groups">
           <For each={GROUP_ORDER}>
             {(group) => (
@@ -410,62 +512,53 @@ export default function Chat() {
               </Show>
             )}
           </For>
-          <Show when={!channels()?.length}>
-            <p class="hint">No channels yet — create one below.</p>
-          </Show>
         </div>
 
         <div class="new-channel-form">
-          <div class="section-label" style="padding:0">
-            New conversation
-          </div>
-          <Show when={newChannelType() !== "dm"}>
-            <input
-              placeholder="Channel name"
-              value={newChannelName()}
-              onInput={(e) => setNewChannelName(e.currentTarget.value)}
-            />
-          </Show>
-          <select
-            value={newChannelType()}
-            onChange={(e) => setNewChannelType(e.currentTarget.value as ChannelContentType)}
-          >
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-            <option value="dm">Direct message</option>
-            <option value="entity-bound">Entity-bound</option>
-          </select>
-          <Show when={newChannelType() === "dm"}>
-            <label class="recipient-picker">To
-              <select aria-label="Direct message recipient" value={directRecipientId()} disabled={recipientsLoading() || !directCandidates().length} onChange={(e) => setDirectRecipientId(e.currentTarget.value)}>
-                <option value="">{recipientsLoading() ? "Loading users…" : directCandidates().length ? "Choose user…" : "No other active users"}</option>
-                <For each={directCandidates()}>
-                  {(p) => <option value={p.id}>{p.display_name} (@{p.username})</option>}
-                </For>
-              </select>
-            </label>
-            <Show when={!recipientsLoading() && !directCandidates().length}>
-              <small class="hint">Add an account in Users first.</small>
-            </Show>
-          </Show>
-          <button class="primary" onClick={createChannel} disabled={newChannelType() === "dm" ? !directRecipientId() : !newChannelName().trim()}>
-            {newChannelType() === "dm" ? "Start chat" : "Create"}
-          </button>
-        </div>
-
-        <div class="poll-picker">
-          Refresh:
-          <For each={POLL_OPTIONS}>
-            {(opt) => (
-              <button
-                class="ghost small"
-                classList={{ active: pollMs() === opt.ms }}
-                onClick={() => setPollMs(opt.ms)}
-              >
-                {opt.label}
+          <Show
+            when={showNewChannel()}
+            fallback={
+              <button class="ghost new-channel-open" onClick={() => setShowNewChannel(true)}>
+                <Icon name="plus" size={14} /> New channel
               </button>
-            )}
-          </For>
+            }
+          >
+            <div class="section-label" style="padding:0">New conversation</div>
+            <Show when={newChannelType() !== "dm"}>
+              <input
+                placeholder="Channel name"
+                value={newChannelName()}
+                onInput={(e) => setNewChannelName(e.currentTarget.value)}
+              />
+            </Show>
+            <select
+              value={newChannelType()}
+              onChange={(e) => setNewChannelType(e.currentTarget.value as ChannelContentType)}
+            >
+              <option value="public">Open channel</option>
+              <option value="private">Private channel</option>
+              <option value="dm">Direct message</option>
+            </select>
+            <Show when={newChannelType() === "dm"}>
+              <label class="recipient-picker">To
+                <select aria-label="Direct message recipient" value={directRecipientId()} disabled={recipientsLoading() || !directCandidates().length} onChange={(e) => setDirectRecipientId(e.currentTarget.value)}>
+                  <option value="">{recipientsLoading() ? "Loading users…" : directCandidates().length ? "Choose user…" : "No other active users"}</option>
+                  <For each={directCandidates()}>
+                    {(p) => <option value={p.id}>{p.display_name} (@{p.username})</option>}
+                  </For>
+                </select>
+              </label>
+              <Show when={!recipientsLoading() && !directCandidates().length}>
+                <small class="hint">Add an account in Users first.</small>
+              </Show>
+            </Show>
+            <div class="row-actions">
+              <button class="ghost small" onClick={() => setShowNewChannel(false)}>Cancel</button>
+              <button class="primary" onClick={createChannel} disabled={newChannelType() === "dm" ? !directRecipientId() : !newChannelName().trim()}>
+                {newChannelType() === "dm" ? "Start chat" : "Create"}
+              </button>
+            </div>
+          </Show>
         </div>
       </aside>
 
@@ -473,7 +566,7 @@ export default function Chat() {
         <header class="chat-topbar">
           <Show when={activeChannel()} fallback={<span class="hint">No channel selected</span>}>
             <strong>{activeChannel()!.name ?? activeChannel()!.content_type}</strong>
-            <span class="branch-chip">{activeChannel()!.content_type}</span>
+            <span class="kind-chip">{KIND_LABEL[activeChannel()!.content_type] ?? activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">
             <button class="ghost small" onClick={() => setShowMembers((v) => !v)}>
@@ -521,7 +614,8 @@ export default function Chat() {
               <For each={members()}>
                 {(m) => (
                   <li>
-                    <span>
+                    <span class="member-name">
+                      <Avatar name={profileName(m.profile_id)} size={20} />
                       {profileName(m.profile_id)} {m.administrator ? "★" : ""}
                     </span>
                     <button class="ghost small" onClick={() => removeMember(m.profile_id)}>
@@ -590,6 +684,7 @@ export default function Chat() {
         </Show>
       </aside>
       </Show>
+      </div>
     </div>
   );
 }

@@ -1,11 +1,62 @@
 /* Chat (m2) view — scoped classes, layered over the shared App.css primitives
    (button, textarea, .hint, .section-label, .error-bar, .branch-chip, .row-actions). */
 
-.chat-shell {
+.chat-view {
   display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
+
+/* Premium project header: project mark + owner-friendly scope line. */
+.chat-project-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #243050;
+}
+.cph-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.cph-mark { flex: none; }
+.cph-mark.placeholder {
+  width: 44px; height: 44px; display: grid; place-items: center;
+  border-radius: 11px; background: #141d30; border: 1px solid #243050;
+  color: #5b6478; font-weight: 700; font-size: 15px;
+}
+.cph-text { min-width: 0; }
+.cph-text h1 { margin: 0; font-size: 21px; font-weight: 600; }
+.cph-text p { color: #9da0a8; margin: 4px 0 0; max-width: 620px; line-height: 1.45; }
+.cph-text p strong { color: #c7cad2; font-weight: 600; }
+.cph-acting {
+  display: flex; flex-direction: column; gap: 4px; flex: none;
+  font-size: 11px; color: #9da0a8;
+}
+
+/* Guided empty / onboarding states (no project chosen / no conversations yet). */
+.chat-empty { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto; }
+.chat-empty-card {
+  max-width: 440px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.chat-empty-icon {
+  width: 58px; height: 58px; display: grid; place-items: center; border-radius: 16px;
+  background: rgba(0,194,168,0.10); border: 1px solid rgba(0,194,168,0.28);
+  color: #5fe6d4; margin-bottom: 2px;
+}
+.chat-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
+.chat-empty-card p { margin: 0; color: #9da0a8; line-height: 1.5; }
+.chat-empty-card p strong { color: #c7cad2; font-weight: 600; }
+.chat-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
+
+.chat-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.chat-shell.hidden { display: none; }
 
 .chat-sidebar {
   flex: 0 0 210px;
@@ -36,7 +87,7 @@
   flex: 1;
   min-height: 5em;
   overflow-y: auto;
-  padding-bottom: 0.4em;
+  padding: 0.5em 0 0.4em;
 }
 
 .channel-list {
@@ -95,6 +146,14 @@
   width: 100%;
 }
 
+.new-channel-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  width: 100%;
+}
+
 .recipient-picker {
   display: grid;
   gap: 0.25em;
@@ -102,20 +161,20 @@
   font-size: 0.82em;
 }
 
-.poll-picker {
-  order: 3;
-  display: flex;
-  align-items: center;
-  gap: 0.35em;
-  padding: 0.4em 0.9em;
-  font-size: 0.78em;
-  color: #7a7a7a;
-  border-top: 1px solid #243050;
+/* Friendly, subdued channel-kind chip in the conversation topbar. */
+.kind-chip {
+  font-size: 0.72em;
+  color: #9da0a8;
+  background: #141d30;
+  border: 1px solid #243050;
+  border-radius: 10px;
+  padding: 0.1em 0.6em;
 }
 
-.poll-picker button.active {
-  color: #5fe6d4;
-  border-color: #00c2a8;
+.member-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
 }
 
 .chat-center {
@@ -157,7 +216,7 @@
 .message-head {
   display: flex;
   gap: 0.5em;
-  align-items: baseline;
+  align-items: center;
 }
 
 .message-author {
