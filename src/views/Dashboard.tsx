@@ -142,11 +142,11 @@ export default function Dashboard() {
 
             {/* Project deadlines & risk — read-only, never completed here */}
             <article class="tn-col tn-risk">
-              <header><h3>Project deadlines <span>{riskyProjects().length}</span></h3><button class="tn-link" onClick={() => requestView("Portfolio")}>Portfolio →</button></header>
+              <header><h3>Project deadlines <span>{riskyProjects().length}</span></h3><button class="tn-link" onClick={() => requestView("Projects")}>Portfolio →</button></header>
               <Show when={riskyProjects().length} fallback={<p class="tn-empty">No projects have deadlines set.</p>}>
                 <ul class="tn-risklist">
                   <For each={riskyProjects()}>{({ project, risk }) =>
-                    <li onClick={() => requestView("Portfolio")}>
+                    <li onClick={() => requestView("Projects")}>
                       <span class="tn-riskdot" classList={{ [risk]: true }} />
                       <span class="tn-risk-body">
                         <strong>{project.name}</strong>
