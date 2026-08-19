@@ -25,6 +25,7 @@ import AccountFooter from "./components/AccountFooter";
 import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews, setRoutePending } from "./router";
+import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
@@ -34,7 +35,7 @@ const usersView:View={name:"Users",icon:"users",component:Users};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
 
 export default function App() {
-  const active=()=>activeView()||"Dashboard";
+  const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
   const [accountOpen,setAccountOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
@@ -60,6 +61,10 @@ export default function App() {
     setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView].map(v=>v.name));
   });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
+  const groups=()=>visibleGroups(views().map(view=>view.name));
+  const activeGroup=()=>groupOfView(groups(),active());
+  const groupNav=(group:NavGroup)=><a class="topnav-item" title={group.label} aria-label={group.label} classList={{active:activeGroup()?.id===group.id}} {...linkProps({view:group.views[0]})}><span class="nav-icon" aria-hidden="true"><Icon name={group.icon} size={18} /></span><span class="topnav-label">{group.label}</span></a>;
+  const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{name}</a>;
   return <Switch>
     <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>
     <Match when={isWeb()&&!currentUser()}><Login/></Match>
@@ -67,12 +72,15 @@ export default function App() {
       <div class="space-shell">
         <header class="topbar">
           <div class="topbar-brand"><span class="space-mark" aria-hidden="true">S</span><em>GAIA Space</em></div>
-          <nav class="topnav" aria-label="Workspace navigation"><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></nav>
+          <nav class="topnav" aria-label="Workspace navigation"><Show when={navLayout()==="grouped"} fallback={<><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></>}><For each={groups()}>{groupNav}</For></Show></nav>
           <div class="topbar-right">
             <button class="topbar-search" aria-label="Open Go to search" title="Search (Ctrl/Cmd + K)" onClick={()=>setGotoOpen(true)}><span class="nav-icon" aria-hidden="true"><Icon name="search" size={16} /></span><span class="topbar-search-hint">Go to</span></button>
             <Show when={isWeb()}><button class="topbar-account account-trigger" aria-label="Open account menu" aria-expanded={accountOpen()} onClick={()=>setAccountOpen(v=>!v)}><span class="account-avatar" aria-hidden="true">{(currentUser()?.display_name??currentUser()?.username??"?").slice(0,1).toUpperCase()}</span></button><Show when={accountOpen()}><div class="account-dropdown"><AccountFooter/></div></Show></Show>
           </div>
         </header>
+        <Show when={navLayout()==="grouped"&&(activeGroup()?.views.length??0)>1}>
+          <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
+        </Show>
         <main class="workspace"><Dynamic component={current().component}/></main>
         <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
