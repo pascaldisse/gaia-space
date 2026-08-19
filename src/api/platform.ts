@@ -10,7 +10,7 @@ export type Role = { id: string; name: string; description: string | null; paren
 export type Right = { id: string; code: string; title: string; description: string | null; right_type: string; right_group: string | null };
 export type ScopeType = "global" | "project" | "team" | "channel" | "document";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean };
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null }; 
 export type CfType = "text" | "int" | "date" | "enum" | "profile" | "bool";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
@@ -65,6 +65,8 @@ export const platformApi = {
 
   // Projects (read-mostly here; Projects.tsx owns its own view)
   projects: () => call<Project[]>("list_projects"),
+  createProject: (project: Project) => call<void>("create_project", { project }),
+  updateProject: (project: Project) => call<void>("update_project", { project }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

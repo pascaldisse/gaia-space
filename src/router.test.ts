@@ -4,7 +4,7 @@ import {
   createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Projects", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
+const VIEWS = ["Dashboard", "To-Do", "Projects", "Project Tasks", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -100,6 +100,13 @@ describe("grammar", () => {
     const path = buildPath({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
     expect(path).toBe("projects/p-1/issues/i-1");
     expect(parsePath(path)).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
+  });
+
+  test("project task and calendar routes retain their project context", () => {
+    expect(buildPath({ view: "Project Tasks", projectId: "p-1" })).toBe("projects/p-1/tasks");
+    expect(parsePath("projects/p-1/tasks")).toMatchObject({ view: "Project Tasks", projectId: "p-1" });
+    expect(buildPath({ view: "Calendar", projectId: "p-1" })).toBe("projects/p-1/calendar");
+    expect(parsePath("projects/p-1/calendar")).toMatchObject({ view: "Calendar", projectId: "p-1" });
   });
 
   test("document routes carry a valid container type + id, incl. the null container", () => {

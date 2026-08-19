@@ -97,11 +97,13 @@ export function parsePath(path: string): Route {
   if (!segs.length) return { view: FALLBACK_VIEW };
   const [head, ...rest] = segs;
 
-  // /projects/<projectId>[/issues/<issueId>]
+  // /projects/<projectId>[/issues/<issueId>|/tasks|/calendar]
   if (head === "projects" && rest.length) {
     const projectId = rest[0];
     if (rest[1] === "issues" && rest[2])
       return norm({ view: "Issues", entityType: "issue", entityId: rest.slice(2).join("/"), projectId });
+    if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks", projectId });
+    if (rest.length === 2 && rest[1] === "calendar") return norm({ view: "Calendar", projectId });
     if (rest.length === 1)
       return norm({ view: "Projects", entityType: "project", entityId: projectId });
   }
@@ -132,6 +134,8 @@ export function buildPath(r: Route): string {
   const slug = viewToSlug[view] ?? toSlug(view);
   const desc = r.entityType ? entityRoutes[r.entityType] : undefined;
 
+  if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
+  if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
   if (desc && r.entityId) {
     if (desc.parent === "project" && r.projectId)
       return `projects/${enc(r.projectId)}/${desc.segment}/${enc(r.entityId)}`;

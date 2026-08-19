@@ -13,6 +13,7 @@ import Chat from "./views/Chat";
 import Documents from "./views/Documents";
 import Meetings from "./views/Meetings";
 import Calendar from "./views/Calendar";
+import ProjectTasks from "./views/ProjectTasks";
 import Packages from "./views/Packages";
 import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
@@ -31,6 +32,7 @@ const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{n
 const localOnlyViews:View[]=[{name:"Repos",icon:"⌘",component:Repos},{name:"Code Reviews",icon:"⇄",component:Reviews},{name:"Pipelines",icon:"▷",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"◈",component:Projects},...localOnlyViews,{name:"Issues",icon:"✓",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"◇",component:Packages},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
 const usersView:View={name:"Users",icon:"⚉",component:Users};
+const projectTasksView:View={name:"Project Tasks",icon:"✓",component:ProjectTasks};
 
 
 export default function App() {
@@ -41,14 +43,14 @@ export default function App() {
     if(isWeb()&&currentUser()?.role==="admin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews()]; const current=()=>views().find(view=>view.name===active())??personalViews[0];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView]; const current=()=>views().find(view=>view.name===active())??personalViews[0];
   const [navWidth,setNavWidth]=paneWidth("space.nav.width",208);
   const [pinnedCollapsed,setPinnedCollapsed]=createSignal(localStorage.getItem("space.nav.collapsed")==="1");
   const [narrow,setNarrow]=createSignal(false); // viewport too small for labels → icons only
   const collapsed=()=>pinnedCollapsed()||narrow();
   const toggle=()=>{const next=!pinnedCollapsed();setPinnedCollapsed(next);localStorage.setItem("space.nav.collapsed",next?"1":"0")};
   onMount(()=>{
-    registerViews([...personalViews,...workspaceViews,usersView].map(v=>({name:v.name})));
+    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView].map(v=>({name:v.name})));
     // Web keeps real paths (History API); the Tauri webview has no server behind it, so it — and
     // only it — uses the hash adapter.
     setRoutePending(isWeb()&&!authChecked()); // hold the boot URL before the first resync
@@ -65,7 +67,7 @@ export default function App() {
   // unauthorized one — so the route is held, not rewritten, and settled once auth is known.
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews()].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView].map(v=>v.name));
   });
   const nav=(view:View)=><a class="nav-link" title={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></a>;
   // NB: plain `if` returns here would only run once at mount (Solid components

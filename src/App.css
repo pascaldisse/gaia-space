@@ -8,6 +8,16 @@
   line-height: 1.4;
   color: #e6e6e6;
   background-color: #1e1f22;
+  --surface: #25272a;
+  --surface-raised: #2a2b2e;
+  --surface-border: #393b40;
+  --text-muted: #9da0a8;
+  --accent: #5b78e5;
+  --status-danger-bg: #4a1f1f;
+  --status-danger-ink: #ffb3b3;
+  --calendar-meeting: var(--accent);
+  --calendar-task: #5f9e75;
+  --calendar-deadline: #c38a42;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
