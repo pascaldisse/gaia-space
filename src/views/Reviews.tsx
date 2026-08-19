@@ -7,6 +7,7 @@ import {
   type ReviewDiscussion,
 } from "../api/review";
 import { Diff } from "../Diff";
+import { useDeepLink, linkProps, route } from "../router";
 import "./Reviews.css";
 
 export default function Reviews() {
@@ -41,10 +42,16 @@ export default function Reviews() {
 
   const [reviews, { refetch: refetchReviews }] = createResource(() => reviewApi.list());
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  // Default to the first review once, on load only. After that the URL is the source of
+  // truth for the selection, so back-navigating to the view-only URL (which clears the
+  // selection below) must not trigger a re-select of the first review.
+  let didAutoSelect = false;
   createEffect(() => {
-    if (!selectedId() && reviews()?.length) setSelectedId(reviews()![0].id);
+    if (didAutoSelect) return;
+    if (reviews()?.length) { didAutoSelect = true; if (!selectedId() && !route().entityId) setSelectedId(reviews()![0].id); }
   });
   const selected = (): Review | null => reviews()?.find((r) => r.id === selectedId()) ?? null;
+  useDeepLink("review", (id) => setSelectedId(id), () => setSelectedId(null));
 
   async function createMR(e: SubmitEvent) {
     e.preventDefault();
@@ -283,11 +290,13 @@ export default function Reviews() {
             <ul>
               <For each={reviews()}>
                 {(r) => (
-                  <li classList={{ active: r.id === selectedId() }} onClick={() => setSelectedId(r.id)}>
-                    <span class="num">#{r.number}</span>
-                    <strong>{r.title}</strong>
-                    <span class={`state state-${r.state.toLowerCase()}`}>{r.state}</span>
-                    <span class="branches">{r.source_branch} → {r.target_branch}</span>
+                  <li classList={{ active: r.id === selectedId() }}>
+                    <a class="row-link" {...linkProps({ view: "Code Reviews", entityType: "review", entityId: r.id })}>
+                      <span class="num">#{r.number}</span>
+                      <strong>{r.title}</strong>
+                      <span class={`state state-${r.state.toLowerCase()}`}>{r.state}</span>
+                      <span class="branches">{r.source_branch} → {r.target_branch}</span>
+                    </a>
                   </li>
                 )}
               </For>

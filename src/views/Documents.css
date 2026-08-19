@@ -28,7 +28,8 @@
   border-bottom: 1px solid #2a2b2e;
   flex-wrap: wrap;
 }
-.container-tabs button.active {
+.container-tabs .container-tab { border: 1px solid #33353a; border-radius: 5px; padding: 4px 10px; color: inherit; text-decoration: none; background: #202124; }
+.container-tabs button.active, .container-tabs .container-tab.active {
   background: #26304d;
   border-color: #3f63e0;
   color: #a9c0ff;
@@ -129,6 +130,7 @@
   max-width: 5.5em;
 }
 
+.doc-row { color: inherit; text-decoration: none; }
 .doc-row {
   display: flex;
   align-items: center;

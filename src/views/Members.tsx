@@ -1,6 +1,7 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type Profile, type Team, type TeamMembership, type Role } from "../api/platform";
 import "./Members.css";
+import { useDeepLink, linkProps } from "../router";
 
 const blankProfile = () => ({ id: "", username: "", display_name: "", email: "" });
 const blankTeam = () => ({ name: "", description: "" });
@@ -38,7 +39,7 @@ export default function Members() {
       reloadProfiles();
     } catch (e) { setError(String(e)); }
   };
-  const editProfile = (p: Profile) => { setEditingProfile(p); setProfileForm({ id: p.id, username: p.username, display_name: p.display_name, email: p.email ?? "" }); };
+  useDeepLink("profile", (id) => { if (editingProfile()?.id === id) return; const found = profiles()?.find(p => p.id === id); if (found) { setEditingProfile(found); setProfileForm({ id: found.id, username: found.username, display_name: found.display_name, email: found.email ?? "" }); } }, () => { if (editingProfile()) { setEditingProfile(null); setProfileForm(blankProfile()); } });
   const toggleArchiveProfile = async (p: Profile) => { try { await platformApi.updateProfile({ ...p, archived: !p.archived }); reloadProfiles(); } catch (e) { setError(String(e)); } };
 
   const saveTeam = async (e: SubmitEvent) => {
@@ -82,8 +83,8 @@ export default function Members() {
         <Show when={profiles.loading}><p class="hint">Loading…</p></Show>
         <ul class="entity-list"><For each={profiles()}>{p =>
           <li classList={{ archived: p.archived }}>
-            <div><strong>{p.display_name}</strong><code>@{p.username}</code><Show when={p.email}><span class="muted">{p.email}</span></Show></div>
-            <div class="row-buttons"><button class="ghost" onClick={() => editProfile(p)}>Edit</button><button class="ghost" onClick={() => toggleArchiveProfile(p)}>{p.archived ? "Restore" : "Archive"}</button></div>
+            <a class="row-link" {...linkProps({ view: "Members", entityType: "profile", entityId: p.id })}><strong>{p.display_name}</strong><code>@{p.username}</code><Show when={p.email}><span class="muted">{p.email}</span></Show></a>
+            <div class="row-buttons"><a class="ghost" {...linkProps({ view: "Members", entityType: "profile", entityId: p.id })}>Edit</a><button class="ghost" onClick={() => toggleArchiveProfile(p)}>{p.archived ? "Restore" : "Archive"}</button></div>
           </li>
         }</For></ul>
       </section>

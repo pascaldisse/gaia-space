@@ -3,6 +3,7 @@ import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
 import {
   documentsApi,
   newId,
@@ -208,6 +209,37 @@ export default function Documents() {
   }
 
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
+  // A document URL carries its container, so a cold direct link restores the same tree the
+  // in-app click would have opened (tab + project/book selection), not just the id.
+  const docRoute = (id:string, container:ContainerType = activeContainer(), cid:string|null = containerId()) =>
+    ({ view:"Documents", entityType:"document", entityId:id, containerType:container, containerId:cid ?? undefined });
+  const containerRoute = (container:ContainerType) => ({
+    view: "Documents", containerType: container,
+    containerId: (container === "my-docs" ? actingProfileId() : container === "project" ? selectedProjectId() : selectedBookId()) ?? undefined,
+  });
+  const applyContainer = (container:string, cid?:string) => {
+    if (container !== activeContainer()) setActiveContainer(container as ContainerType);
+    if (!cid) return;
+    if (container === "project") setSelectedProjectId(cid);
+    else if (container === "kb") setSelectedBookId(cid);
+    else if (container === "my-docs") setActingProfileId(cid);
+  };
+  // route -> container switch (direct link / back / forward)
+  createEffect(() => {
+    const r = route();
+    if (r.view !== "Documents" || !r.containerType) return;
+    applyContainer(r.containerType, r.containerId);
+  });
+  useDeepLink("document", (id) => {
+    setSelectedDocumentId(id);
+    if (route().containerType) return;
+    // container-less link (e.g. Goto hit): resolve the document's own container and
+    // rewrite the URL so address bar and UI agree.
+    const doc = allDocuments()?.find((d) => d.id === id);
+    if (!doc) return;
+    applyContainer(doc.container_type, doc.container_id ?? undefined);
+    linkEntity("document", id, { containerType: doc.container_type, containerId: doc.container_id ?? undefined });
+  }, () => setSelectedDocumentId(null));
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
@@ -344,15 +376,16 @@ export default function Documents() {
         <Show when={isOpen()}>
           <For each={childDocs()}>
             {(d) => (
-              <li
-                class="doc-row"
-                style={{ "padding-left": `${(props.depth + 1) * 1.1 + 0.4}em` }}
-                classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                onClick={() => setSelectedDocumentId(d.id)}
-              >
-                <span class="doc-icon">📄</span>
-                <span class="doc-title">{d.title}</span>
-                <span class="doc-version">v{d.version}</span>
+              <li style={{ "padding-left": `${(props.depth + 1) * 1.1 + 0.4}em` }}>
+                <a
+                  class="doc-row"
+                  classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
+                  {...linkProps(docRoute(d.id))}
+                >
+                  <span class="doc-icon">📄</span>
+                  <span class="doc-title">{d.title}</span>
+                  <span class="doc-version">v{d.version}</span>
+                </a>
               </li>
             )}
           </For>
@@ -377,7 +410,11 @@ export default function Documents() {
         </div>
         <label>
           Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => setActingProfileId(e.currentTarget.value || null)}>
+          <select value={actingProfileId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setActingProfileId(id);
+            if (activeContainer() === "my-docs") linkContainer("my-docs", id ?? undefined);
+          }}>
             <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
           </select>
         </label>
@@ -386,27 +423,39 @@ export default function Documents() {
       <nav class="container-tabs">
         <For each={CONTAINER_TABS}>
           {(t) => (
-            <button
+            <a
+              class="container-tab"
               classList={{ active: activeContainer() === t.key }}
-              onClick={() => {
-                setActiveContainer(t.key);
-                setSelectedFolderId(null);
-                setSelectedDocumentId(null);
+              {...linkProps(containerRoute(t.key))}
+              onClick={(event) => {
+                linkProps(containerRoute(t.key)).onClick(event);
+                if (event.defaultPrevented) {
+                  setSelectedFolderId(null);
+                  setSelectedDocumentId(null);
+                }
               }}
             >
               {t.label}
-            </button>
+            </a>
           )}
         </For>
 
         <Show when={activeContainer() === "project"}>
-          <select value={selectedProjectId() ?? ""} onChange={(e) => setSelectedProjectId(e.currentTarget.value || null)}>
+          <select value={selectedProjectId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setSelectedProjectId(id);
+            linkContainer("project", id ?? undefined);
+          }}>
             <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
           </select>
         </Show>
 
         <Show when={activeContainer() === "kb"}>
-          <select value={selectedBookId() ?? ""} onChange={(e) => setSelectedBookId(e.currentTarget.value || null)}>
+          <select value={selectedBookId() ?? ""} onChange={(e) => {
+            const id = e.currentTarget.value || null;
+            setSelectedBookId(id);
+            linkContainer("kb", id ?? undefined);
+          }}>
             <option value="">select a book…</option>
             <For each={books()}>{(b) => <option value={b.id}>{b.name}</option>}</For>
           </select>
@@ -434,15 +483,16 @@ export default function Documents() {
             <ul class="folder-tree">
               <For each={scopedDocuments().filter((d) => d.folder_id === null)}>
                 {(d) => (
-                  <li
-                    class="doc-row"
-                    style={{ "padding-left": "0.4em" }}
-                    classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                    onClick={() => setSelectedDocumentId(d.id)}
-                  >
-                    <span class="doc-icon">📄</span>
-                    <span class="doc-title">{d.title}</span>
-                    <span class="doc-version">v{d.version}</span>
+                  <li style={{ "padding-left": "0.4em" }}>
+                    <a
+                      class="doc-row"
+                      classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
+                      {...linkProps(docRoute(d.id))}
+                    >
+                      <span class="doc-icon">📄</span>
+                      <span class="doc-title">{d.title}</span>
+                      <span class="doc-version">v{d.version}</span>
+                    </a>
                   </li>
                 )}
               </For>

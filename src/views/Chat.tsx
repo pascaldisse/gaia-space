@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
 import { authApi } from "../api/auth";
 import "../App.css";
@@ -72,11 +73,17 @@ export default function Chat() {
   };
 
   const [activeChannelId, setActiveChannelId] = createSignal<string | null>(null);
+  // Default to the first channel once, on load only. Afterwards the URL owns the selection,
+  // so back-navigating to the view-only URL (which clears the channel below) must not
+  // immediately re-select the first channel.
+  let didAutoSelect = false;
   createEffect(() => {
+    if (didAutoSelect) return;
     const list = channels();
-    if (list && list.length && !activeChannelId()) setActiveChannelId(list[0].id);
+    if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {
@@ -408,12 +415,13 @@ export default function Chat() {
                     {(c) => (
                       <li
                         classList={{ active: c.id === activeChannelId() }}
-                        onClick={() => setActiveChannelId(c.id)}
                       >
+                        <a class="row-link" {...linkProps({ view: "Chat", entityType: "channel", entityId: c.id })}>
                         <span class="channel-name">{c.name ?? c.content_type}</span>
                         <Show when={c.unread_count > 0}>
                           <span class="unread-badge">{c.unread_count}</span>
                         </Show>
+                        </a>
                       </li>
                     )}
                   </For>
