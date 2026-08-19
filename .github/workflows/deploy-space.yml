@@ -1,0 +1,71 @@
+name: Deploy GAIA Space
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "bun.lock"
+      - "deploy/**"
+      - ".github/workflows/deploy-space.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gaia-space-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + deploy
+    runs-on: ubuntu-latest
+    if: ${{ secrets.SPACE_DEPLOY_HOST != '' && secrets.SPACE_DEPLOY_USER != '' && secrets.SPACE_DEPLOY_SSH_KEY != '' && secrets.SPACE_DEPLOY_KNOWN_HOSTS != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web
+        run: bun run build:web
+
+      - name: Build API
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --no-default-features --bin space-server
+
+      - name: Configure SSH
+        env:
+          SPACE_DEPLOY_SSH_KEY: ${{ secrets.SPACE_DEPLOY_SSH_KEY }}
+          SPACE_DEPLOY_KNOWN_HOSTS: ${{ secrets.SPACE_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SPACE_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SPACE_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          HOST: ${{ secrets.SPACE_DEPLOY_HOST }}
+          USER: ${{ secrets.SPACE_DEPLOY_USER }}
+        run: |
+          release_dir="/tmp/gaia-space-${GITHUB_SHA}"
+          ssh "$USER@$HOST" "rm -rf '$release_dir' && mkdir -p '$release_dir/dist'"
+          rsync -az --delete dist/ "$USER@$HOST:$release_dir/dist/"
+          rsync -az target/release/space-server "$USER@$HOST:$release_dir/space-server"
+
+      - name: Activate release
+        env:
+          HOST: ${{ secrets.SPACE_DEPLOY_HOST }}
+          USER: ${{ secrets.SPACE_DEPLOY_USER }}
+        run: |
+          release_dir="/tmp/gaia-space-${GITHUB_SHA}"
+          ssh "$USER@$HOST" "sudo install -d -o gaia-space -g gaia-space /var/www/gaia-space /opt/gaia-space/bin && sudo rsync -a --delete '$release_dir/dist/' /var/www/gaia-space/ && sudo install -o gaia-space -g gaia-space -m 0755 '$release_dir/space-server' /opt/gaia-space/bin/space-server && sudo systemctl restart gaia-space && rm -rf '$release_dir'"
