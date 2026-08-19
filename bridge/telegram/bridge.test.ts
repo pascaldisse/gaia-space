@@ -65,3 +65,39 @@ describe("Telegram API", () => {
     expect(JSON.parse(body)).toEqual({ chat_id: "-100123", text: "hello" });
   });
 });
+
+describe("bridge flow", () => {
+  test("captures /start, posts Telegram ingress, and forwards new Space messages without echo", async () => {
+    const path = `/tmp/gaia-space-telegram-${crypto.randomUUID()}.json`;
+    files.push(path);
+    const updates = [
+      [{ update_id: 1, message: { chat: { id: 44 }, text: "/start", from: { username: "alice" } } }],
+      [{ update_id: 2, message: { chat: { id: 44 }, text: "from Telegram", from: { username: "alice" } } }],
+      [],
+    ];
+    const sent: Array<[string, string]> = [];
+    const messages: any[] = [];
+    const telegram = {
+      getUpdates: async () => updates.shift() ?? [],
+      sendMessage: async (chatId: string, text: string) => { sent.push([chatId, text]); },
+    };
+    const space = {
+      login: async () => {},
+      listMessages: async () => messages,
+      createMessage: async (_channelId: string, text: string) => {
+        const message = { id: "telegram-ingress", text };
+        messages.push(message);
+        return message;
+      },
+    };
+    const { TelegramBridge } = await import("./bridge.ts");
+    const bridge = new TelegramBridge({ telegramToken: "token", spaceServerUrl: "http://space", spaceUsername: "telegram-bridge", spacePassword: "secret", channelId: "general", pollIntervalMs: 1, statePath: path }, telegram as any, space as any);
+    await bridge.start();
+    await bridge.pollOnce();
+    await bridge.pollOnce();
+    messages.push({ id: "space-outbound", text: "from Space" });
+    await bridge.pollOnce();
+    expect(sent).toEqual([["44", "GAIA Space bridge connected."], ["44", "from Space"]]);
+    expect((await loadState(path)).chats).toEqual({ "44": { channelId: "general" } });
+  });
+});
