@@ -1,0 +1,17 @@
+{
+  "mappings": [{ "spaceChannelId": "your-space-channel", "roomId": "your-gaia-room" }],
+  "space": {
+    "baseUrl": "http://127.0.0.1:8090",
+    "username": "bridge-user",
+    "password": "set-this-outside-git",
+    "pollIntervalMs": 1000,
+    "requestTimeoutMs": 15000
+  },
+  "gaia": {
+    "baseUrl": "http://127.0.0.1:8787",
+    "workspaceId": "your-gaia-workspace",
+    "replyTimeoutMs": 120000,
+    "pollIntervalMs": 1000,
+    "requestTimeoutMs": 15000
+  }
+}
