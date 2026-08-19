@@ -47,7 +47,7 @@ export default function Dashboard() {
   const complete = async (todo: Todo) => { await personalApi.setTodoCompletion(todo.id, true); refetchDashboard(); refetchCalendar(); };
 
   return <section class="dashboard-view">
-    <WorkspaceHeader icon="home" title="Overview" actions={<ProfilePicker locked/>}>Your work, calendar, notification feed, and organization availability.</WorkspaceHeader>
+    <WorkspaceHeader icon="⌂" title="Overview" actions={<ProfilePicker locked/>}>Your work, calendar, notification feed, and organization availability.</WorkspaceHeader>
     <Show when={dashboard.loading || calendar.loading}><p class="dashboard-muted">Loading overview…</p></Show>
     <Show when={!profileId()}><p class="dashboard-empty">No profile selected — add one in Members.</p></Show>
     <Show when={dashboard()}>{data => <>
