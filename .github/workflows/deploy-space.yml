@@ -44,6 +44,13 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib
       - name: Server binary tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --bin space-server
+      # The desktop target links GTK/WebKit through Tauri; the runner has none
+      # of it by default. This gate exists because a cfg-only change once broke
+      # the desktop build invisibly for five landings — it earns its 40 seconds.
+      - name: Desktop system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Desktop target still compiles
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 
