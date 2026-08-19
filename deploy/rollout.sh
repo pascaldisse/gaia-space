@@ -46,12 +46,22 @@ chmod -R go-rwx "$BACKUP"
 census "$BACKUP/space.db" > /tmp/census-backup.txt
 diff /tmp/census-pre.txt /tmp/census-backup.txt   # the backup must be a faithful copy
 
+# The database is only restored when the migration itself is the casualty.
+# A failed HTTP gate must not throw away writes real users made in the
+# meantime — rolling the binary back is enough, and older binaries accept a
+# newer user_version (migrate() is a no-op when the schema is already ahead).
+DB_SUSPECT=0
 restore() {
-  echo "!! gate failed — restoring $BACKUP"
+  echo "!! FAILED at: ${STEP:-unknown} — restoring $BACKUP"
   systemctl stop gaia-space || true
   install -o gaia-space -g gaia-space -m 0755 "$BACKUP/space-server" "$BIN"
   rm -rf "${STATIC:?}/"* && tar -C "$STATIC" -xzf "$BACKUP/static.tar.gz"
-  cp -a "$BACKUP/space.db" "$DB" && chown gaia-space:gaia-space "$DB"
+  if [ "$DB_SUSPECT" = "1" ]; then
+    echo "   migration was the failure — restoring the database too"
+    cp -a "$BACKUP/space.db" "$DB" && chown gaia-space:gaia-space "$DB"
+  else
+    echo "   database left as-is (no migration fault; user writes preserved)"
+  fi
   restorecon -RF "$STATIC" || true
   systemctl start gaia-space
   sleep 3
@@ -61,6 +71,7 @@ restore() {
 }
 trap restore ERR
 
+STEP="install"
 echo "== install"
 systemctl stop gaia-space
 install -o gaia-space -g gaia-space -m 0755 "$RELEASE_DIR/space-server" "$BIN"
@@ -68,29 +79,41 @@ rsync -a --delete "$RELEASE_DIR/static/" "$STATIC/"
 # SELinux: fresh files carry the wrong type and Caddy answers 403 without this.
 restorecon -RF "$STATIC"
 ls -Z "$STATIC" | head -3
-printf '%s\n' "$REVISION" > /opt/gaia-space/REVISION
+STEP="service start"
+DB_SUSPECT=1                 # from here until the census clears, the schema is in play
 systemctl start gaia-space
 sleep 4
 
-echo "== service"
+STEP="service active"
 systemctl is-active gaia-space
 
+STEP="post-census"
 echo "== post-census (migrations run at start)"
 census "$DB" | tee /tmp/census-post.txt
 
+STEP="no table lost rows"
 echo "== no pre-existing table lost rows"
 python3 - <<'PY'
 pre = dict(line.rsplit(" ", 1) for line in open("/tmp/census-pre.txt").read().splitlines())
 post = dict(line.rsplit(" ", 1) for line in open("/tmp/census-post.txt").read().splitlines())
-lost = {k: (pre[k], post.get(k)) for k in pre if k not in ("user_version", "integrity") and post.get(k) != pre[k]}
 assert post["integrity"] == "ok", post["integrity"]
-assert not lost, f"row counts changed: {lost}"
-print("census identical for every pre-existing table")
+# Live service: rows may APPEAR between census and deploy (people keep working).
+# Only a LOSS is a migration fault.
+lost = {k: (pre[k], post.get(k)) for k in pre
+        if k not in ("user_version", "integrity") and int(post.get(k, -1)) < int(pre[k])}
+assert not lost, f"rows lost: {lost}"
+grew = {k: (pre[k], post[k]) for k in pre
+        if k not in ("user_version", "integrity") and int(post.get(k, 0)) > int(pre[k])}
+print("no rows lost; live growth during deploy:", grew or "none")
 print("new tables:", sorted(set(post) - set(pre)))
 PY
+DB_SUSPECT=0                 # schema survived; later failures must not touch the DB
 
+STEP="local api gate"
 echo "== local gates"
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/api/auth/me)" = 401
 
+# Only a release that passed every gate gets to claim the revision.
+printf '%s\n' "$REVISION" > /opt/gaia-space/REVISION
 trap - ERR
 echo "DEPLOYED=true $REVISION (backup $BACKUP)"
