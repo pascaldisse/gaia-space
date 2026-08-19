@@ -3,7 +3,7 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
 use gaia_space_lib::{db, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
 use rand::RngCore;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, net::SocketAddr, path::PathBuf};
@@ -172,6 +172,398 @@ fn chat_can_manage(profile_id: &str, channel_id: &str) -> bool {
     let admins: i64 = c.query_row("SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND administrator=1", [channel_id], |r| r.get(0)).unwrap_or(0);
     member.is_some_and(|administrator| administrator || admins == 0)
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommandPolicy {
+    Session,
+    TodoRead,
+    TodoCreate,
+    TodoWrite,
+    ProjectCreate,
+    ProjectWrite,
+    Unavailable,
+}
+
+/// The web command allow-list. Every `/api/cmd/*` request must resolve here
+/// before it can reach `dispatch!`; missing entries fail closed with 403.
+fn command_policy(name: &str) -> Option<CommandPolicy> {
+    Some(match name {
+        "create_project" => CommandPolicy::ProjectCreate,
+        "update_project" => CommandPolicy::ProjectWrite,
+        "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
+        "create_todo" => CommandPolicy::TodoCreate,
+        "update_todo" | "delete_todo" => CommandPolicy::TodoWrite,
+        "app_info"
+        | "join_meeting_call"
+        | "start_livekit_server"
+        | "trigger_pipeline_script"
+        | "review_diff"
+        | "dry_run_merge"
+        | "attempt_merge"
+        | "open_merge_request"
+        | "list_channels" => CommandPolicy::Unavailable,
+        "add_channel_member"
+        | "add_issue_child"
+        | "add_reaction"
+        | "add_review_participant"
+        | "add_team_membership"
+        | "archive_cf_definition" => CommandPolicy::Session,
+        "archive_document" | "archive_issue" | "archive_meeting" | "archive_role"
+        | "archive_sprint" | "archive_team" => CommandPolicy::Session,
+        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint" | "create_absence"
+        | "create_board" => CommandPolicy::Session,
+        "create_cf_definition"
+        | "create_channel"
+        | "create_deploy_target"
+        | "create_document"
+        | "create_document_folder"
+        | "create_entity_channel" => CommandPolicy::Session,
+        "create_issue"
+        | "create_issue_status"
+        | "create_meeting"
+        | "create_message"
+        | "create_package_repository"
+        | "create_pipeline_script" => CommandPolicy::Session,
+        "create_profile"
+        | "create_quality_gate_rule"
+        | "create_review"
+        | "create_review_discussion"
+        | "create_role"
+        | "create_role_assignment" => CommandPolicy::Session,
+        "create_sprint"
+        | "create_team"
+        | "current_absences"
+        | "delete_absence"
+        | "delete_board"
+        | "delete_board_column" => CommandPolicy::Session,
+        "delete_checklist"
+        | "delete_checklist_item"
+        | "delete_deploy_target"
+        | "delete_issue_status"
+        | "delete_message"
+        | "delete_package_repository" => CommandPolicy::Session,
+        "delete_package_version"
+        | "delete_pipeline_script"
+        | "delete_planning_tag"
+        | "delete_quality_gate_rule"
+        | "delete_role_assignment"
+        | "delete_sprint" => CommandPolicy::Session,
+        "delete_subscription_setting"
+        | "delete_swimlane"
+        | "delete_time_tracking_entry"
+        | "emit_notification"
+        | "evaluate_quality_gate"
+        | "expand_meeting_occurrences" => CommandPolicy::Session,
+        "get_channel"
+        | "get_channel_by_entity"
+        | "get_document"
+        | "get_issue"
+        | "get_issue_detail"
+        | "get_meeting" => CommandPolicy::Session,
+        "get_profile" | "get_project" | "get_review" | "get_role" | "get_team" | "goto_search" => {
+            CommandPolicy::Session
+        }
+        "invite_meeting_participant"
+        | "issue_time_total"
+        | "join_channel"
+        | "launch_sprint"
+        | "leave_channel"
+        | "list_absences" => CommandPolicy::Session,
+        "list_backlog_issues"
+        | "list_board_columns"
+        | "list_board_issues"
+        | "list_boards"
+        | "list_cf_definitions"
+        | "list_channel_members" => CommandPolicy::Session,
+        "list_channels_with_meta"
+        | "list_checklist_items"
+        | "list_checklists"
+        | "list_deploy_targets"
+        | "list_deployments_for_target"
+        | "list_doc_versions" => CommandPolicy::Session,
+        "list_document_folders"
+        | "list_documents"
+        | "list_issue_statuses"
+        | "list_issues"
+        | "list_job_runs"
+        | "list_job_runs_for_script" => CommandPolicy::Session,
+        "list_jobs"
+        | "list_jobs_for_script"
+        | "list_meeting_participants"
+        | "list_meetings"
+        | "list_messages"
+        | "list_notifications" => CommandPolicy::Session,
+        "list_package_repositories"
+        | "list_package_versions"
+        | "list_pipeline_scripts"
+        | "list_planning_tags"
+        | "list_profiles"
+        | "list_projects" => CommandPolicy::Session,
+        "list_quality_gate_rules"
+        | "list_review_discussions"
+        | "list_review_participants"
+        | "list_reviews"
+        | "list_rights"
+        | "list_role_assignments" => CommandPolicy::Session,
+        "list_role_rights"
+        | "list_roles"
+        | "list_safe_merge_runs"
+        | "list_sprints"
+        | "list_subscription_settings"
+        | "list_swimlanes" => CommandPolicy::Session,
+        "list_team_memberships"
+        | "list_teams"
+        | "list_thread_replies"
+        | "list_time_tracking_entries"
+        | "livekit_server_status"
+        | "mark_channel_read" => CommandPolicy::Session,
+        "mark_notification_read"
+        | "move_document"
+        | "move_document_folder"
+        | "move_issue_on_board"
+        | "publish_package_version"
+        | "remove_channel_member" => CommandPolicy::Session,
+        "remove_issue_from_board"
+        | "remove_issue_link"
+        | "remove_reaction"
+        | "remove_team_membership"
+        | "restore_doc_version"
+        | "save_board_column" => CommandPolicy::Session,
+        "save_checklist"
+        | "save_checklist_item"
+        | "save_document"
+        | "save_planning_tag"
+        | "save_subscription_setting"
+        | "save_swimlane" => CommandPolicy::Session,
+        "save_time_tracking_entry"
+        | "schedule_deployment"
+        | "seed_rights"
+        | "set_discussion_resolved"
+        | "set_issue_tags"
+        | "set_meeting_participant_status" => CommandPolicy::Session,
+        "set_participant_state"
+        | "set_role_rights"
+        | "toggle_checklist_item"
+        | "transition_deployment"
+        | "update_absence"
+        | "update_board" => CommandPolicy::Session,
+        "update_cf_definition"
+        | "update_channel"
+        | "update_deploy_target"
+        | "update_document"
+        | "update_document_folder"
+        | "update_issue" => CommandPolicy::Session,
+        "update_issue_status"
+        | "update_meeting"
+        | "update_message"
+        | "update_package_repository"
+        | "update_pipeline_script"
+        | "update_profile" => CommandPolicy::Session,
+        "update_quality_gate_rule"
+        | "update_review"
+        | "update_role"
+        | "update_sprint"
+        | "update_team"
+        | "update_team_membership" => CommandPolicy::Session,
+        _ => return None,
+    })
+}
+
+fn bind_session_identity(value: &mut Value, profile_id: &str) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "profile_id"
+                        | "profileId"
+                        | "created_by"
+                        | "createdBy"
+                        | "owner"
+                        | "owner_id"
+                        | "ownerId"
+                        | "author_id"
+                        | "authorId"
+                        | "acting_profile_id"
+                        | "actingProfileId"
+                        | "recipient_id"
+                        | "recipientId"
+                ) {
+                    *child = json!(profile_id);
+                } else {
+                    bind_session_identity(child, profile_id);
+                }
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                bind_session_identity(child, profile_id);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn project_owner(project_id: &str) -> Result<Option<String>, String> {
+    db::conn()
+        .map_err(|e| e.to_string())?
+        .query_row(
+            "SELECT created_by FROM projects WHERE id=?1",
+            [project_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
+fn project_from_body(body: &Value) -> Result<(String, Option<String>), String> {
+    let project = body.get("project").ok_or("invalid argument `project`")?;
+    Ok((arg(project, "id")?, arg(project, "created_by")?))
+}
+
+/// Single authorization + identity-binding gate for the complete web command
+/// surface. Domain dispatch is deliberately below this function.
+fn authorize_command(
+    user: &User,
+    name: &str,
+    body: &mut Value,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let policy =
+        command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
+    bind_session_identity(body, &user.profile_id);
+    match policy {
+        CommandPolicy::Unavailable => Err(err(
+            StatusCode::NOT_IMPLEMENTED,
+            "not available in web mode",
+        )),
+        CommandPolicy::ProjectCreate => Ok(()),
+        CommandPolicy::ProjectWrite => {
+            let (project_id, _) =
+                project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let owner = project_owner(&project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if user.role != "admin" && owner != user.profile_id {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the project owner or an admin can change this project",
+                ));
+            }
+            // `created_by` is immutable after creation; never let an update transfer ownership.
+            if let Some(project) = body.get_mut("project").and_then(Value::as_object_mut) {
+                project.insert("created_by".into(), json!(owner));
+            }
+            Ok(())
+        }
+        CommandPolicy::TodoRead | CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::TodoWrite => {
+            let todo_id: Option<String> = if name == "update_todo" {
+                body.get("todo")
+                    .and_then(|todo| todo.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                arg(body, "id").ok()
+            };
+            let Some(todo_id) = todo_id else {
+                return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`"));
+            };
+            if !todo_owned_by(&user.profile_id, &todo_id) {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the owner can change this todo",
+                ));
+            }
+            Ok(())
+        }
+        CommandPolicy::Session => {
+            if matches!(
+                name,
+                "list_messages"
+                    | "list_channel_members"
+                    | "get_channel"
+                    | "mark_channel_read"
+                    | "join_channel"
+                    | "leave_channel"
+            ) {
+                let key = if name == "get_channel" {
+                    "id"
+                } else {
+                    "channel_id"
+                };
+                let channel_id: String =
+                    arg(body, key).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if name == "list_thread_replies" {
+                let thread_of: String =
+                    arg(body, "thread_of").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_message_channel(&thread_of)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if matches!(name, "add_reaction" | "remove_reaction") {
+                let message_id: String =
+                    arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_message_channel(&message_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if matches!(name, "update_message" | "delete_message") {
+                let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_message_owned(&user.profile_id, &id) {
+                    return Err(err(
+                        StatusCode::FORBIDDEN,
+                        "only the author can change this message",
+                    ));
+                }
+            }
+            if name == "create_channel" {
+                let supplied: Vec<String> = arg(body, "member_ids").unwrap_or_default();
+                let mut members = vec![user.profile_id.clone()];
+                for id in supplied {
+                    if id != user.profile_id && !members.contains(&id) {
+                        members.push(id);
+                    }
+                }
+                let content_type = body
+                    .get("channel")
+                    .and_then(|v| v.get("content_type").or_else(|| v.get("contentType")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if content_type == "dm" && members.len() != 2 {
+                    return Err(err(
+                        StatusCode::BAD_REQUEST,
+                        "a direct message requires exactly one recipient",
+                    ));
+                }
+                put_arg(body, "member_ids", json!(members));
+            }
+            if matches!(name, "add_channel_member" | "remove_channel_member") {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let target: String =
+                    arg(body, "profile_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let removing_self = name == "remove_channel_member" && target == user.profile_id;
+                if chat_channel_type(&channel_id).as_deref() == Some("dm")
+                    || (!removing_self && !chat_can_manage(&user.profile_id, &channel_id))
+                {
+                    return Err(err(
+                        StatusCode::FORBIDDEN,
+                        "channel membership is fixed or requires a channel administrator",
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 macro_rules! dispatch {
     ($name:expr, $body:expr, { $($cmd:literal => $m:ident :: $f:ident ( $($a:ident : $t:ty),* $(,)? )),* $(,)? }) => {
         match $name {
@@ -192,92 +584,9 @@ macro_rules! dispatch {
         }
     };
 }
-async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(body):Json<Value>)->impl IntoResponse{
+async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->impl IntoResponse{
     let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
-    if name.starts_with("repo_") || matches!(name.as_str(),
-        "app_info" | "join_meeting_call" | "start_livekit_server" |
-        "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
-        "attempt_merge" | "open_merge_request" | "list_channels"
-    ) { return err(StatusCode::NOT_IMPLEMENTED, "not available in web mode").into_response(); }
-    let profile_id = user.profile_id.clone();
-    let mut body = body;
-    match name.as_str() {
-        "list_channels_with_meta" => put_arg(&mut body, "profile_id", json!(profile_id)),
-        "list_messages" | "list_thread_replies" => put_arg(&mut body, "acting_profile_id", json!(profile_id)),
-        "mark_channel_read" | "join_channel" | "leave_channel" | "add_reaction" | "remove_reaction" =>
-            put_arg(&mut body, "profile_id", json!(profile_id)),
-        "create_message" => {
-            if let Some(message) = body.get_mut("message").and_then(Value::as_object_mut) {
-                message.insert("author_id".into(), json!(profile_id));
-            }
-        }
-        "list_todos" | "dashboard_aggregate" => put_arg(&mut body, "profile_id", json!(profile_id)),
-        "create_todo" => {
-            if let Some(input) = body.get_mut("input").and_then(Value::as_object_mut) {
-                input.insert("profile_id".into(), json!(profile_id));
-            }
-        }
-        "update_todo" => {
-            if let Some(todo) = body.get_mut("todo").and_then(Value::as_object_mut) {
-                todo.insert("profile_id".into(), json!(profile_id));
-            }
-        }
-        "create_channel" => {
-            let supplied: Vec<String> = arg(&body, "member_ids").unwrap_or_default();
-            let mut members = vec![profile_id.clone()];
-            for id in supplied { if id != profile_id && !members.contains(&id) { members.push(id); } }
-            let content_type = body.get("channel").and_then(|v| v.get("content_type")).and_then(Value::as_str).unwrap_or("");
-            if content_type == "dm" && members.len() != 2 {
-                return err(StatusCode::BAD_REQUEST, "a direct message requires exactly one recipient").into_response();
-            }
-            put_arg(&mut body, "member_ids", json!(members));
-        }
-        _ => {}
-    }
-    if matches!(name.as_str(), "list_messages" | "list_channel_members" | "get_channel" | "mark_channel_read" | "join_channel" | "leave_channel") {
-        let key = if name == "get_channel" { "id" } else { "channel_id" };
-        let channel_id: String = match arg(&body, key) { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        if !chat_channel_access(&profile_id, &channel_id) {
-            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
-        }
-    }
-    if name == "list_thread_replies" {
-        let thread_of: String = match arg(&body, "thread_of") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        if !chat_message_channel(&thread_of).is_some_and(|channel_id| chat_channel_access(&profile_id, &channel_id)) {
-            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
-        }
-    }
-    if matches!(name.as_str(), "add_reaction" | "remove_reaction") {
-        let message_id: String = match arg(&body, "message_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        if !chat_message_channel(&message_id).is_some_and(|channel_id| chat_channel_access(&profile_id, &channel_id)) {
-            return err(StatusCode::FORBIDDEN, "channel access denied").into_response();
-        }
-    }
-    if matches!(name.as_str(), "update_message" | "delete_message") {
-        let id: String = match arg(&body, "id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        if !chat_message_owned(&profile_id, &id) {
-            return err(StatusCode::FORBIDDEN, "only the author can change this message").into_response();
-        }
-    }
-    if matches!(name.as_str(), "update_todo" | "delete_todo") {
-        let todo_id: Option<String> = if name == "update_todo" {
-            body.get("todo").and_then(|todo| todo.get("id")).and_then(Value::as_str).map(str::to_string)
-        } else {
-            arg(&body, "id").ok()
-        };
-        let Some(todo_id) = todo_id else { return err(StatusCode::BAD_REQUEST, "invalid argument `id`").into_response() };
-        if !todo_owned_by(&profile_id, &todo_id) {
-            return err(StatusCode::FORBIDDEN, "only the owner can change this todo").into_response();
-        }
-    }
-    if matches!(name.as_str(), "add_channel_member" | "remove_channel_member") {
-        let channel_id: String = match arg(&body, "channel_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        let target: String = match arg(&body, "profile_id") { Ok(id) => id, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-        let removing_self = name == "remove_channel_member" && target == profile_id;
-        if chat_channel_type(&channel_id).as_deref() == Some("dm") || (!removing_self && !chat_can_manage(&profile_id, &channel_id)) {
-            return err(StatusCode::FORBIDDEN, "channel membership is fixed or requires a channel administrator").into_response();
-        }
-    }
+    if let Err(e) = authorize_command(&user, &name, &mut body) { return e.into_response(); }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
@@ -475,6 +784,9 @@ fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");l
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+    use std::sync::{Mutex, OnceLock};
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> { TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap() }
 
     fn cookie(token: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -497,13 +809,14 @@ mod tests {
         db::set_db_path(path);
         let c = db::conn().expect("database");
         db::seed(&c).expect("seed");
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1)", []).unwrap();
-        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1)", []).unwrap();
-        c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600)", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1)", []).unwrap();
+        c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600)", []).unwrap();
     }
 
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
+        let _serial = test_lock();
         setup();
         // Unauthenticated access is rejected before any command runs.
         let (status, _) = call(HeaderMap::new(), "list_todos", json!({})).await;
@@ -551,5 +864,33 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
         assert_eq!(orphans, 0);
+    }
+
+    #[tokio::test]
+    async fn command_policy_binds_project_identity_and_enforces_ownership() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at) VALUES('admin-project','Admin project','ADMIN',NULL,'pc',0,1)", []).unwrap();
+
+        let (status, value) = call(cookie("ta"), "create_project", json!({"project":{"id":"alice-project","name":"Alice project","key":"ALICE","description":null,"created_by":"pc","archived":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: String = c.query_row("SELECT created_by FROM projects WHERE id='alice-project'", [], |row| row.get(0)).unwrap();
+        assert_eq!(owner, "pa");
+
+        for archived in [false, true] {
+            let (status, _) = call(cookie("ta"), "update_project", json!({"project":{"id":"admin-project","name":"Hijacked","key":"ADMIN","description":null,"created_by":"pa","archived":archived}})).await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+        }
+        let unchanged: (String, bool) = c.query_row("SELECT name,archived FROM projects WHERE id='admin-project'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(unchanged, ("Admin project".into(), false));
+
+        let (status, value) = call(cookie("ta"), "update_project", json!({"project":{"id":"alice-project","name":"Alice renamed","key":"ALICE","description":null,"created_by":"pc","archived":true}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let changed: (String, String, bool) = c.query_row("SELECT name,created_by,archived FROM projects WHERE id='alice-project'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(changed, ("Alice renamed".into(), "pa".into(), true));
+
+        let (status, _) = call(cookie("ta"), "invent_a_backdoor", json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }
