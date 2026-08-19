@@ -1,0 +1,9 @@
+/* Opened project: the board surface lives inside the project, not in a sibling tab. */
+.project-open { margin-top: 26px; border-top: 1px solid var(--surface-border); padding-top: 18px; }
+.project-open-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+.project-open-head h2 { display: flex; align-items: baseline; gap: 9px; margin: 0; font-size: 18px; }
+.project-open-head code { color: var(--text-faint); font-size: 12px; }
+.project-open-head a { color: var(--accent-text, var(--accent)); font-size: 13px; }
+/* the embedded board must not re-declare the page frame */
+.project-open .planning-view { height: auto; padding: 0; max-width: none; }
+.project-open .planning-head { display: none; }
