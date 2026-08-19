@@ -17,3 +17,41 @@
 .column-add-trigger:disabled { opacity: .45; cursor: not-allowed; }
 .column-add form { display: flex; gap: 6px; align-items: center; }
 .column-add form input { flex: 1; min-width: 0; font-size: 13px; }
+
+/* ── board: Trello-shaped columns, cards that carry real work ───────── */
+.board-split { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 18px; align-items: start; }
+.board-create { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.board-column { display: grid; gap: 8px; align-content: start; }
+.column-head { display: flex; align-items: center; gap: 8px; }
+.column-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.column-title h2 { margin: 0; font-size: 14px; }
+.column-title small { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.column-plus { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border-radius: 8px; font-size: 17px; line-height: 1; background: transparent; border: 1px solid transparent; color: var(--text-muted); }
+.column-plus:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+.column-compose { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface); }
+.column-compose-actions { display: flex; gap: 6px; }
+.column-empty { margin: 0; padding: 10px 2px; color: var(--text-faint); font-size: 12.5px; }
+
+.issue-card { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid var(--surface-border); border-radius: 10px; background: var(--surface); cursor: pointer; transition: border-color .14s ease, background .14s ease; }
+.issue-card:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+.issue-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.issue-card.active { border-color: var(--accent); background: var(--surface-hover); }
+.card-top { display: flex; align-items: center; gap: 8px; }
+.card-status { width: 9px; height: 9px; border-radius: 50%; margin-left: auto; }
+.card-title { font-family: var(--font-head); font-size: 14px; color: var(--text-strong); line-height: 1.3; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+.card-meta .task-tag.overdue { background: var(--status-danger-bg); color: var(--status-danger-ink); border-color: transparent; }
+.card-meta .task-tag.checklist, .card-meta .task-tag.sub { background: var(--surface-hover); color: #c9d6f0; border-color: #3a4f80; }
+.issue-card .card-move { display: none; gap: 5px; flex-wrap: wrap; }
+.issue-card:hover .card-move, .issue-card.active .card-move { display: flex; }
+.issue-card .card-move button { font-size: 11px; padding: 3px 8px; }
+
+.column-menu { position: fixed; z-index: 50; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--surface-border-hover); border-radius: 10px; background: var(--surface-raised, #16213c); box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+.column-menu button { justify-content: flex-start; width: 100%; background: transparent; border: 0; font-size: 13px; }
+.column-menu button:hover { background: var(--surface-hover); }
+.column-menu button.danger { color: var(--status-danger-ink); }
+.column-menu-map { padding: 4px 6px; font-size: 12.5px; color: var(--text-muted); }
+.column-menu-map label { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
+.column-menu-map i { width: 8px; height: 8px; border-radius: 50%; }
+.backlog-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+.backlog-row strong { flex: 1; min-width: 0; color: var(--text-strong); font-weight: 600; }
