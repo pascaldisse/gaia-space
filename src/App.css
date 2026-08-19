@@ -635,6 +635,13 @@ textarea:focus {
 .topbar-brand { display: flex; align-items: center; gap: 9px; flex: none; }
 .topbar-brand em { font-style: normal; font-weight: 650; font-family: var(--font-head); color: var(--text-strong); white-space: nowrap; }
 
+/* hamburger toggle for the mobile nav drawer — hidden on wide viewports,
+   where the horizontal .topnav below has room to show every destination. */
+.topbar-menu-btn { display: none; place-items: center; width: 34px; height: 34px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: #b9c2d4; flex: none; }
+.topbar-menu-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+.nav-drawer-backdrop { display: none; }
+.nav-drawer { display: none; }
+
 /* primary nav: broad, always-visible horizontal destinations */
 .topnav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .topnav::-webkit-scrollbar { display: none; }
@@ -688,6 +695,25 @@ a:hover { color: var(--text-strong); }
 
 /* ── web-mode account menu (rendered inside the account dropdown) ── */
 .nav-footer { padding: 6px; }
+
+/* mobile nav drawer: replaces the top nav below ~720px, where it has no room
+   to show more than one destination pill (it was only ever horizontally
+   scrollable there, with no visible affordance that more items existed).
+   Placed after the base .topnav/.topbar-right rules above so it wins the
+   cascade at equal specificity — media-query position doesn't add
+   specificity, only source order does. */
+@media (max-width: 720px) {
+  .topnav { display: none; }
+  .topbar-menu-btn { display: grid; }
+  .topbar-right { margin-left: auto; }
+  .nav-drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 45; background: rgba(4,8,18,0.55); }
+  .nav-drawer { display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 46; width: min(78vw, 300px); background: #0f1b33; border-right: 1px solid #2b3550; box-shadow: 12px 0 30px rgba(0,0,0,0.35); overflow-y: auto; }
+  .nav-drawer-head { display: flex; align-items: center; justify-content: space-between; flex: none; height: 54px; padding: 0 8px 0 16px; border-bottom: 1px solid #2b3550; color: var(--text-strong); font-family: var(--font-head); font-weight: 650; }
+  .nav-drawer-close { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: #b9c2d4; }
+  .nav-drawer-close:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+  .nav-drawer-list { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+  .nav-drawer-list .topnav-item { width: 100%; padding: 10px 12px; }
+}
 .nav-footer-row { display: flex; align-items: center; gap: 4px; }
 .nav-footer-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; color: #c9cbd1; padding: 2px 4px; }
 .nav-footer-pw { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }

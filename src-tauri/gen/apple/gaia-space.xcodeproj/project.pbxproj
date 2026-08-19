@@ -1,0 +1,501 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0532C938B2402286D87BDFF4 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 315D170C1EAB12FB69F36134 /* QuartzCore.framework */; };
+		165B05A95736DD8408123B9F /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C7A95605383097BE486B5626 /* main.mm */; };
+		37CB0004FD5CD3B0D116C677 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 63E1C55D9099FAC2D1B5989B /* WebKit.framework */; };
+		3FBC1F817A08E92F27F571C1 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9E86833FD25F3577B8E6A686 /* MetalKit.framework */; };
+		40316B4CB10F2CFD539DCA03 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0FF7212362EB9F968B14B87 /* Metal.framework */; };
+		48E2B1544B828654B36333CC /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D867503268CC5B21DB9E9E8 /* CoreGraphics.framework */; };
+		49500C791E877AE0B5DC7DF4 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A08B3FB79D3B9D16FA1DC56D /* LaunchScreen.storyboard */; };
+		6D5CE9795CE5DF2FF699108D /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = AF17A9E9F09011738A418F5E /* libapp.a */; };
+		72B49D306DADD667056E8472 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = FDD8EFFBCC0EA1DF59A4DC1E /* assets */; };
+		A79816F2D4DDCC21B63F6A96 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D70DE5981114514E23B5F7D /* UIKit.framework */; };
+		C78A9F2A34AF44C9D0532A70 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DECD45718C03ADA94BFFA2AE /* Security.framework */; };
+		FC409C4AB3C4C3D32305EA05 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E518D1746CAF487A792F7DD7 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		00472C8E2F706C2F027BA9A0 /* review.rs */ = {isa = PBXFileReference; path = review.rs; sourceTree = "<group>"; };
+		0FA4237F270D19DADEE40101 /* issues.rs */ = {isa = PBXFileReference; path = issues.rs; sourceTree = "<group>"; };
+		17359F58CC74E88F19F3CD7B /* gaia-space_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "gaia-space_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		19309E7DB390D4A9FD6EF182 /* gaia-space_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "gaia-space_iOS.entitlements"; sourceTree = "<group>"; };
+		19441B53613CFEC60B7FB1C7 /* secretbox.rs */ = {isa = PBXFileReference; path = secretbox.rs; sourceTree = "<group>"; };
+		19C1E46E4865D73667A301B6 /* meetings.rs */ = {isa = PBXFileReference; path = meetings.rs; sourceTree = "<group>"; };
+		1BBECEC25A08C63010FA4DA1 /* chat.rs */ = {isa = PBXFileReference; path = chat.rs; sourceTree = "<group>"; };
+		1FD27806CA84A61CD7DFB101 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		2D06ECC49D2A639DA9DE25CF /* calls.rs */ = {isa = PBXFileReference; path = calls.rs; sourceTree = "<group>"; };
+		315D170C1EAB12FB69F36134 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		39B1A9E09C0C571CFFE352F0 /* git.rs */ = {isa = PBXFileReference; path = git.rs; sourceTree = "<group>"; };
+		47DE2918AC8DAEE87B066A26 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		4D70DE5981114514E23B5F7D /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		5A59B0C0574E3B9FD0979D60 /* platform.rs */ = {isa = PBXFileReference; path = platform.rs; sourceTree = "<group>"; };
+		63E1C55D9099FAC2D1B5989B /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		66A1CC4324B3AC1BF13C1E97 /* documents.rs */ = {isa = PBXFileReference; path = documents.rs; sourceTree = "<group>"; };
+		7D867503268CC5B21DB9E9E8 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		8CC220F6C8DF25AA62391CE1 /* debug_server.rs */ = {isa = PBXFileReference; path = debug_server.rs; sourceTree = "<group>"; };
+		94D302606B5E8E05E3064726 /* db.rs */ = {isa = PBXFileReference; path = db.rs; sourceTree = "<group>"; };
+		9E86833FD25F3577B8E6A686 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		A08B3FB79D3B9D16FA1DC56D /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		AF17A9E9F09011738A418F5E /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		B439F77FC391E807645B62DD /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		B613C500AF444CDA6DEE2C36 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C2CE25D98D7673BD1C713782 /* space-server.rs */ = {isa = PBXFileReference; path = "space-server.rs"; sourceTree = "<group>"; };
+		C7A95605383097BE486B5626 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		DECD45718C03ADA94BFFA2AE /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		E518D1746CAF487A792F7DD7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F0E36D9174F361E49BBA2FC7 /* pipelines.rs */ = {isa = PBXFileReference; path = pipelines.rs; sourceTree = "<group>"; };
+		F0FF7212362EB9F968B14B87 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		FDB7032834649B4AFCCA41B6 /* personal.rs */ = {isa = PBXFileReference; path = personal.rs; sourceTree = "<group>"; };
+		FDD8EFFBCC0EA1DF59A4DC1E /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		6D2B5868C4B8339257E1A852 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D5CE9795CE5DF2FF699108D /* libapp.a in Frameworks */,
+				48E2B1544B828654B36333CC /* CoreGraphics.framework in Frameworks */,
+				40316B4CB10F2CFD539DCA03 /* Metal.framework in Frameworks */,
+				3FBC1F817A08E92F27F571C1 /* MetalKit.framework in Frameworks */,
+				0532C938B2402286D87BDFF4 /* QuartzCore.framework in Frameworks */,
+				C78A9F2A34AF44C9D0532A70 /* Security.framework in Frameworks */,
+				A79816F2D4DDCC21B63F6A96 /* UIKit.framework in Frameworks */,
+				37CB0004FD5CD3B0D116C677 /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C74DF03CA155F76F1261D17 /* bin */ = {
+			isa = PBXGroup;
+			children = (
+				C2CE25D98D7673BD1C713782 /* space-server.rs */,
+			);
+			path = bin;
+			sourceTree = "<group>";
+		};
+		2E06D9DEE9EF0185C359C82F /* gaia-space */ = {
+			isa = PBXGroup;
+			children = (
+				C7A95605383097BE486B5626 /* main.mm */,
+				CDE099AE764F0A8D0B6F47DC /* bindings */,
+			);
+			path = "gaia-space";
+			sourceTree = "<group>";
+		};
+		69456FAB344F41B6A27D9AD4 /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		6EB6D15D7C3ADAAF5FF9F207 /* gaia-space_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				19309E7DB390D4A9FD6EF182 /* gaia-space_iOS.entitlements */,
+				B613C500AF444CDA6DEE2C36 /* Info.plist */,
+			);
+			path = "gaia-space_iOS";
+			sourceTree = "<group>";
+		};
+		93D2118F35D74C9283ACF077 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				2E06D9DEE9EF0185C359C82F /* gaia-space */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		9D631527DE1AE0E2BB29724B /* src */ = {
+			isa = PBXGroup;
+			children = (
+				2D06ECC49D2A639DA9DE25CF /* calls.rs */,
+				1BBECEC25A08C63010FA4DA1 /* chat.rs */,
+				94D302606B5E8E05E3064726 /* db.rs */,
+				8CC220F6C8DF25AA62391CE1 /* debug_server.rs */,
+				66A1CC4324B3AC1BF13C1E97 /* documents.rs */,
+				39B1A9E09C0C571CFFE352F0 /* git.rs */,
+				0FA4237F270D19DADEE40101 /* issues.rs */,
+				B439F77FC391E807645B62DD /* lib.rs */,
+				1FD27806CA84A61CD7DFB101 /* main.rs */,
+				19C1E46E4865D73667A301B6 /* meetings.rs */,
+				FDB7032834649B4AFCCA41B6 /* personal.rs */,
+				F0E36D9174F361E49BBA2FC7 /* pipelines.rs */,
+				5A59B0C0574E3B9FD0979D60 /* platform.rs */,
+				00472C8E2F706C2F027BA9A0 /* review.rs */,
+				19441B53613CFEC60B7FB1C7 /* secretbox.rs */,
+				2C74DF03CA155F76F1261D17 /* bin */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		A3D7FE0ECBE8C6878273052C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				17359F58CC74E88F19F3CD7B /* gaia-space_iOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AB895B189E836F6D5EFA2AA2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7D867503268CC5B21DB9E9E8 /* CoreGraphics.framework */,
+				AF17A9E9F09011738A418F5E /* libapp.a */,
+				F0FF7212362EB9F968B14B87 /* Metal.framework */,
+				9E86833FD25F3577B8E6A686 /* MetalKit.framework */,
+				315D170C1EAB12FB69F36134 /* QuartzCore.framework */,
+				DECD45718C03ADA94BFFA2AE /* Security.framework */,
+				4D70DE5981114514E23B5F7D /* UIKit.framework */,
+				63E1C55D9099FAC2D1B5989B /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		CDE099AE764F0A8D0B6F47DC /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				47DE2918AC8DAEE87B066A26 /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		E88B393684EDDE379784925F = {
+			isa = PBXGroup;
+			children = (
+				FDD8EFFBCC0EA1DF59A4DC1E /* assets */,
+				E518D1746CAF487A792F7DD7 /* Assets.xcassets */,
+				A08B3FB79D3B9D16FA1DC56D /* LaunchScreen.storyboard */,
+				69456FAB344F41B6A27D9AD4 /* Externals */,
+				6EB6D15D7C3ADAAF5FF9F207 /* gaia-space_iOS */,
+				93D2118F35D74C9283ACF077 /* Sources */,
+				9D631527DE1AE0E2BB29724B /* src */,
+				AB895B189E836F6D5EFA2AA2 /* Frameworks */,
+				A3D7FE0ECBE8C6878273052C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2C2EC79AB6A7CBB8206C5B32 /* gaia-space_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3FAECD537A3334032D0C57C /* Build configuration list for PBXNativeTarget "gaia-space_iOS" */;
+			buildPhases = (
+				3D3AA33C472E25CC974C338B /* Build Rust Code */,
+				0AA7341D80CFD3E898F7630A /* Sources */,
+				1B566B8DEFDE69C1369A5FEB /* Resources */,
+				6D2B5868C4B8339257E1A852 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "gaia-space_iOS";
+			packageProductDependencies = (
+			);
+			productName = "gaia-space_iOS";
+			productReference = 17359F58CC74E88F19F3CD7B /* gaia-space_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		716EB3568F1C1378EA10AD2A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2C2EC79AB6A7CBB8206C5B32 = {
+						DevelopmentTeam = T2253T7WJE;
+					};
+				};
+			};
+			buildConfigurationList = 227805EA910076BCE88E68B9 /* Build configuration list for PBXProject "gaia-space" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E88B393684EDDE379784925F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A3D7FE0ECBE8C6878273052C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2C2EC79AB6A7CBB8206C5B32 /* gaia-space_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1B566B8DEFDE69C1369A5FEB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FC409C4AB3C4C3D32305EA05 /* Assets.xcassets in Resources */,
+				49500C791E877AE0B5DC7DF4 /* LaunchScreen.storyboard in Resources */,
+				72B49D306DADD667056E8472 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3D3AA33C472E25CC974C338B /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0AA7341D80CFD3E898F7630A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				165B05A95736DD8408123B9F /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		152D25A943E8B08041A7C217 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+		74C8684ACDAECA28E8A59C3B /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+		762BBA995E82821BF24F943A /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "gaia-space_iOS/gaia-space_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "T2253T7WJE";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "gaia-space_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.gaia.space;
+				PRODUCT_NAME = "GAIA Space";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+		E736F31FA3D0523190CB3AAB /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "gaia-space_iOS/gaia-space_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "T2253T7WJE";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "gaia-space_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.gaia.space;
+				PRODUCT_NAME = "GAIA Space";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		227805EA910076BCE88E68B9 /* Build configuration list for PBXProject "gaia-space" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				152D25A943E8B08041A7C217 /* debug */,
+				74C8684ACDAECA28E8A59C3B /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		B3FAECD537A3334032D0C57C /* Build configuration list for PBXNativeTarget "gaia-space_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				762BBA995E82821BF24F943A /* debug */,
+				E736F31FA3D0523190CB3AAB /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 716EB3568F1C1378EA10AD2A /* Project object */;
+}

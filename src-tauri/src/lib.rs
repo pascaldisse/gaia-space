@@ -1,16 +1,34 @@
+// These modules own the desktop app's local sqlite db + vendored libgit2
+// (git.rs/review.rs) and the space-server HTTP/crypto stack (calls.rs's JWT,
+// secretbox's chacha20poly1305) — all desktop/server-only per the matching
+// Cargo.toml target-conditional dependency split. The mobile shell (iOS)
+// never compiles them; it's a thin webview pointed at a live server instead
+// (see `run()` below).
+#[cfg(desktop)]
 pub mod chat;
+#[cfg(desktop)]
 pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
+#[cfg(desktop)]
 pub mod documents;
+#[cfg(desktop)]
 pub mod git;
+#[cfg(desktop)]
 pub mod issues;
+#[cfg(desktop)]
 pub mod meetings;
+#[cfg(desktop)]
 pub mod calls;
+#[cfg(desktop)]
 pub mod pipelines;
+#[cfg(desktop)]
 pub mod platform;
+#[cfg(desktop)]
 pub mod personal;
+#[cfg(desktop)]
 pub mod review;
+#[cfg(desktop)]
 pub mod secretbox;
 
 #[cfg(feature = "desktop")]
@@ -40,8 +58,10 @@ fn app_info() -> AppInfo {
     }
 }
 
-#[cfg(feature = "desktop")]
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Full local-first native app: 150+ commands over a local sqlite db + vendored
+/// libgit2 (repo tools) + the space-server business modules. macOS/Windows/Linux
+/// only — see the mobile shell variant below for iOS.
+#[cfg(all(feature = "desktop", desktop))]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -263,6 +283,51 @@ pub fn run() {
                 .inner_size(800.0, 600.0)
                 .min_inner_size(480.0, 360.0)
                 .resizable(true)
+                .initialization_script(&debug_server::init_script())
+                .build()?;
+            debug_server::spawn(app.handle().clone());
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+/// iOS/Android shell: no local db, no bundled repo tools — a thin native
+/// window pointed at a real GAIA Space server, same shape as gaia-daemon's
+/// mobile client (src-tauri/src/lib.rs `resolve_url`). Runtime env wins,
+/// then a compile-time bake (`GAIA_SPACE_MOBILE_URL=... tauri ios build`),
+/// then a default so a plain `tauri ios dev` still has somewhere to point.
+#[cfg(all(feature = "desktop", mobile))]
+fn resolve_space_url() -> String {
+    if let Some(url) = std::env::var("GAIA_SPACE_MOBILE_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        return url;
+    }
+    if let Some(url) = option_env!("GAIA_SPACE_MOBILE_URL") {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "https://151.115.73.182/space/".to_string()
+}
+
+#[cfg(all(feature = "desktop", mobile))]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    let url: tauri::Url = resolve_space_url()
+        .parse()
+        .expect("GAIA_SPACE_MOBILE_URL is not a valid URL");
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![app_info])
+        .setup(move |app| {
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
+                .title("GAIA Space")
                 .initialization_script(&debug_server::init_script())
                 .build()?;
             debug_server::spawn(app.handle().clone());

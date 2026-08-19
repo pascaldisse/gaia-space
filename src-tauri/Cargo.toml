@@ -26,12 +26,25 @@ tauri = { version = "2", features = ["devtools"], optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-dialog = { version = "2.7.2", optional = true }
+# App-tools debug door (see src/debug_server.rs) — same pattern as gaia-shell. Pure
+# Rust, iOS-safe, kept unconditional so the debug door works on mobile too.
+tungstenite = "0.24"
+
+[[bin]]
+name = "space-server"
+path = "src/bin/space-server.rs"
+
+# Desktop/server-only native stack: local sqlite (db.rs), vendored libgit2
+# (git.rs/review.rs), the space-server HTTP/crypto stack (axum/tokio/argon2/
+# jsonwebtoken/rand/hex), and secretbox's chacha20poly1305/base64. None of it
+# is used by the mobile shell (lib.rs gates the modules that need it under
+# `#[cfg(desktop)]`, which is exactly this target set) — excluding it here
+# means the iOS build never has to cross-compile libgit2/sqlite at all.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 dirs = "6.0.0"
-tauri-plugin-dialog = { version = "2.7.2", optional = true }
-# App-tools debug door (see src/debug_server.rs) — same pattern as gaia-shell.
-tungstenite = "0.24"
 chrono = "0.4"
 jsonwebtoken = "9"
 axum = "0.8"
@@ -41,10 +54,6 @@ rand = "0.8"
 hex = "0.4"
 chacha20poly1305 = "0.11.0"
 base64 = "0.23.1"
-
-[[bin]]
-name = "space-server"
-path = "src/bin/space-server.rs"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"

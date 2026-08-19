@@ -39,6 +39,7 @@ export default function App() {
   const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
   const [accountOpen,setAccountOpen]=createSignal(false);
+  const [menuOpen,setMenuOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
@@ -54,7 +55,7 @@ export default function App() {
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
-    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
+    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
     const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
     window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
     onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
@@ -63,6 +64,7 @@ export default function App() {
     setRoutePending(isWeb()&&!authChecked());
     setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView].map(v=>v.name));
   });
+  createEffect(()=>{ active(); setMenuOpen(false); });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
   const groups=()=>visibleGroups(views().map(view=>view.name));
   const activeGroup=()=>groupOfView(groups(),active());
@@ -74,6 +76,7 @@ export default function App() {
     <Match when={true}>
       <div class="space-shell">
         <header class="topbar">
+          <button class="topbar-menu-btn" aria-label="Open navigation menu" aria-expanded={menuOpen()} onClick={()=>setMenuOpen(v=>!v)}><Icon name="menu" size={20} /></button>
           <div class="topbar-brand"><span class="space-mark" aria-hidden="true">S</span><em>GAIA Space</em></div>
           <nav class="topnav" aria-label="Workspace navigation"><Show when={navLayout()==="grouped"} fallback={<><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></>}><For each={groups()}>{groupNav}</For></Show></nav>
           <div class="topbar-right">
@@ -81,6 +84,13 @@ export default function App() {
             <Show when={isWeb()}><button class="topbar-account account-trigger" aria-label="Open account menu" aria-expanded={accountOpen()} onClick={()=>setAccountOpen(v=>!v)}><span class="account-avatar" aria-hidden="true">{(currentUser()?.display_name??currentUser()?.username??"?").slice(0,1).toUpperCase()}</span></button><Show when={accountOpen()}><div class="account-dropdown"><AccountFooter/></div></Show></Show>
           </div>
         </header>
+        <Show when={menuOpen()}>
+          <div class="nav-drawer-backdrop" onClick={()=>setMenuOpen(false)}/>
+          <nav class="nav-drawer" aria-label="Workspace navigation (mobile)">
+            <div class="nav-drawer-head"><span>Navigation</span><button class="nav-drawer-close" aria-label="Close navigation menu" onClick={()=>setMenuOpen(false)}><Icon name="close" size={18} /></button></div>
+            <div class="nav-drawer-list" onClick={()=>setMenuOpen(false)}><Show when={navLayout()==="grouped"} fallback={<><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></>}><For each={groups()}>{groupNav}</For></Show></div>
+          </nav>
+        </Show>
         <Show when={navLayout()==="grouped"&&(activeGroup()?.views.length??0)>1}>
           <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
         </Show>
