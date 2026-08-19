@@ -10,5 +10,5 @@
 - [x] Router → canonical /space paths · semantic anchors/hrefFor · route tests · Goto allowed/desktop gates
 - [x] Product → workspace/project compositions · project archive/deadline · scoped calendar · project todos
 - [x] Frontend → loud calendar error · theme tokens only
-- [ ] Gates → cargo lib/bin · tsc · bun test · build
-- [ ] Landing → merge master · repeat gates · push origin master · sweep
+- [x] Gates → cargo lib/bin · tsc · bun test · build
+- [x] Landing → merge master · repeat gates · push origin master · sweep
