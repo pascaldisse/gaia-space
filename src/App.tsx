@@ -19,6 +19,7 @@ import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
 import Admin from "./views/Admin";
 import Users from "./views/Users";
+import Settings from "./views/Settings";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
@@ -32,6 +33,7 @@ const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Documents",icon:"book-nav",component:Documents},{name:"Meetings",icon:"calendar",component:Meetings},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin}];
 const usersView:View={name:"Users",icon:"users",component:Users};
+const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
 
 export default function App() {
@@ -44,10 +46,10 @@ export default function App() {
     if(isWeb()&&currentUser()?.role==="admin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
-    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView].map(v=>({name:v.name})));
+    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,settingsView].map(v=>({name:v.name})));
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
@@ -58,7 +60,7 @@ export default function App() {
   });
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView].map(v=>v.name));
   });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
   const groups=()=>visibleGroups(views().map(view=>view.name));

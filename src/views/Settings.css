@@ -1,0 +1,8 @@
+.settings-card{margin:0 0 18px;padding:18px 20px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);max-width:var(--rail-max,720px)}
+.settings-card h2{margin:0 0 12px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.settings-hint{margin:-6px 0 12px;color:var(--text-muted);font-size:13px}
+.settings-option{display:flex;align-items:center;gap:10px;padding:8px 0;color:#c2ccdf;font-size:14px}
+.settings-option strong{color:var(--text-strong);font-weight:600}
+.settings-groups{display:grid;gap:2px}
+.settings-sub{display:block;color:var(--text-faint);font-style:normal;font-size:12px;margin-top:2px}
+.settings-view select{min-width:220px}

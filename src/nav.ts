@@ -15,7 +15,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Chat"] },
   { id: "timeoff", label: "Time off", icon: "clock-nav", views: ["Absences"] },
-  { id: "org", label: "Organization", icon: "org", views: ["Members", "Users", "Admin"] },
+  { id: "org", label: "Organization", icon: "org", views: ["Members", "Users", "Admin", "Settings"] },
 ];
 
 const LAYOUT_KEY = "space.nav.layout";
