@@ -826,5 +826,8 @@ button.rail-item:hover { border-color: var(--surface-border-hover); background: 
   .commits .meta { display: none; }
 }
 
-.picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: 210px; }
+/* min-width must yield when the container is narrower than 210px, else the picker
+   steals the whole row on a phone and the title column collapses to one word per line. */
+.picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: min(210px, 100%); }
 .picker select { width: 100%; max-width: 320px; }
+@media (max-width: 720px) { .picker select { max-width: none; } }
