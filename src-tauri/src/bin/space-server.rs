@@ -91,6 +91,12 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
     let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
     let id = token();
     let pid = x.profile_id.unwrap_or_else(|| format!("profile-{}", &id[..12]));
+    // Identity law: a user account is a person, never the shared organization
+    // profile, and never a profile another account already owns.
+    if pid == "default-org" { return err(StatusCode::BAD_REQUEST, "the organization profile cannot be a user identity").into_response(); }
+    if c.query_row("SELECT count(*) FROM users WHERE profile_id=?1", params![pid], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0 {
+        return err(StatusCode::BAD_REQUEST, "that profile already belongs to another user").into_response();
+    }
     if let Err(e) = c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())", params![pid, username, display_name]) {
         return err(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
     }
@@ -869,7 +875,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
     })
 }
-fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','default-org','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
+fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('profile-admin','admin','Administrator',unixepoch())",[]).unwrap();c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
 #[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/directory",get(directory)).route("/api/cmd/{command}",post(cmd)).with_state(App::new());let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();}
 
 #[cfg(test)]

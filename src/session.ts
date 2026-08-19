@@ -38,8 +38,15 @@ const session = createRoot(() => {
 
   // Default to the first available entry so nothing starts in an unusable state.
   const ensureDefaults = () => {
-    const p = profiles()?.filter((x) => !x.archived);
-    if (p?.length && !p.some((x) => x.id === profileId())) setProfileId(p[0].id);
+    // Identity law (web): you act as your own account's profile — never as the
+    // organization profile, never as somebody else. Desktop stays a local
+    // operator tool where the profile is a free choice.
+    const own = isWeb() ? currentUser()?.profile_id : undefined;
+    if (own) { if (profileId() !== own) setProfileId(own); }
+    else {
+      const p = profiles()?.filter((x) => !x.archived);
+      if (p?.length && !p.some((x) => x.id === profileId())) setProfileId(p[0].id);
+    }
     const pr = projects()?.filter((x) => !x.archived);
     if (pr?.length && !pr.some((x) => x.id === projectId())) setProjectId(pr[0].id);
   };
@@ -103,7 +110,8 @@ const auth = createRoot(() => {
 export const { currentUser, authChecked, checkAuth, login, logout, changePassword } = auth;
 
 /** Locked = acting-as profile can't be changed by the user (web member). */
-export const profileLocked = (): boolean => isWeb() && currentUser()?.role === "member";
+/** Web sessions are bound to the logged-in account: nobody acts as another profile. */
+export const profileLocked = (): boolean => isWeb();
 
 /** Turn raw backend/SQLite failures into something a human can act on. */
 export function humanError(reason: unknown): string {

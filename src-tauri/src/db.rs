@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -125,6 +125,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 8 {
         tx.execute_batch(SCHEMA_V8)?;
     }
+    if version < 9 {
+        tx.execute_batch(SCHEMA_V9)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -233,6 +236,23 @@ CREATE TABLE IF NOT EXISTS project_members (project_id TEXT NOT NULL REFERENCES 
 CREATE INDEX IF NOT EXISTS project_members_profile ON project_members(profile_id);
 "#;
 
+/// V9 separates人 from org: a user account must never author as the shared
+/// organization profile. Users still bound to `default-org` are rebound to a
+/// personal profile — an existing profile whose username matches, otherwise a
+/// freshly created one. Historic authorship is left untouched (unattributable).
+pub(crate) const SCHEMA_V9: &str = r#"
+UPDATE users SET profile_id = (SELECT p.id FROM profiles p WHERE lower(p.username) = lower(users.username) LIMIT 1)
+ WHERE profile_id = 'default-org'
+   AND EXISTS (SELECT 1 FROM profiles p WHERE lower(p.username) = lower(users.username))
+   AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.id <> users.id AND u2.profile_id = (SELECT p.id FROM profiles p WHERE lower(p.username) = lower(users.username) LIMIT 1));
+INSERT OR IGNORE INTO profiles(id, username, display_name, created_at)
+ SELECT 'profile-' || u.id, u.username, COALESCE(NULLIF(u.display_name, ''), u.username), unixepoch()
+   FROM users u WHERE u.profile_id = 'default-org';
+UPDATE users SET profile_id = 'profile-' || id
+ WHERE profile_id = 'default-org'
+   AND EXISTS (SELECT 1 FROM profiles p WHERE p.id = 'profile-' || users.id);
+"#;
+
 fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let found = stmt.query_map([], |row| row.get::<_, String>(1))?
@@ -270,6 +290,30 @@ mod tests {
             ))).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap()
         }).collect()
     }
+    #[test]
+    fn v9_rebinds_users_off_the_organization_profile() {
+        let temp = TempDb::new("gaia-space-v9-identity");
+        let conn = open_at(&temp).expect("database");
+        conn.execute_batch(SCHEMA_V1).expect("v1");
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        // A pre-existing personal profile for bjarne, plus two users still bound to the org.
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('profile-bj','Bjarne','Bjarne',1)", []).unwrap();
+        conn.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('u-bj','bjarne','x','Bjarne','default-org','member',1),('u-ja','jannes','x','Jannes','default-org','member',1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 8).unwrap();
+        migrate(&conn).expect("v9");
+
+        let bjarne: String = conn.query_row("SELECT profile_id FROM users WHERE id='u-bj'", [], |r| r.get(0)).unwrap();
+        let jannes: String = conn.query_row("SELECT profile_id FROM users WHERE id='u-ja'", [], |r| r.get(0)).unwrap();
+        assert_eq!(bjarne, "profile-bj", "an existing matching profile is reused, not duplicated");
+        assert_eq!(jannes, "profile-u-ja", "a user without a profile gets a personal one");
+        let org_users: i64 = conn.query_row("SELECT count(*) FROM users WHERE profile_id='default-org'", [], |r| r.get(0)).unwrap();
+        assert_eq!(org_users, 0, "no account may author as the organization profile");
+        let shared: i64 = conn.query_row("SELECT count(*) FROM (SELECT profile_id FROM users GROUP BY profile_id HAVING count(*) > 1)", [], |r| r.get(0)).unwrap();
+        assert_eq!(shared, 0, "one profile per account");
+    }
+
     #[test]
     fn v1_database_upgrades_to_latest() {
         let temp = TempDb::new("gaia-space-v1-upgrade");
