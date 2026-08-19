@@ -24,7 +24,7 @@
 .matrix-row code{font-size:10px;color:#777b85}
 .cf-tabs{display:flex;gap:6px;margin-bottom:10px}
 .cf-tabs button{flex:1;background:#191a1d}
-.cf-tabs button.active{background:#3f63e0;border-color:#3f63e0;color:#fff}
+.cf-tabs button.active{background:#3f63e0;border-color:#3f63e0;color:var(--text-on-accent)}
 .result-true{color:#7be08a;font-weight:600}
 .result-false{color:#ff8a8f;font-weight:600}
 @media(max-width:1300px){.admin-grid{grid-template-columns:1fr 1fr}}

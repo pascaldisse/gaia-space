@@ -237,6 +237,30 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definitio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    type SchemaObject = (String, String, String, Option<String>);
+    type ForeignKey = (String, i64, i64, String, String, String, String, String, String);
+
+    fn normalized_schema_objects(conn: &Connection) -> BTreeSet<SchemaObject> {
+        let mut statement = conn.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger') AND name NOT LIKE 'sqlite_%'").unwrap();
+        statement.query_map([], |row| Ok((
+            row.get(0)?, row.get(1)?, row.get(2)?,
+            row.get::<_, Option<String>>(3)?.map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" ")),
+        ))).unwrap().collect::<std::result::Result<_, _>>().unwrap()
+    }
+
+    fn foreign_key_rows(conn: &Connection) -> BTreeSet<ForeignKey> {
+        let mut tables = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
+        let tables = tables.query_map([], |row| row.get::<_, String>(0)).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+        tables.into_iter().flat_map(|table| {
+            let mut statement = conn.prepare(&format!("PRAGMA foreign_key_list({table})")).unwrap();
+            statement.query_map([], |row| Ok((
+                table.clone(), row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+            ))).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap()
+        }).collect()
+    }
     #[test]
     fn v1_database_upgrades_to_latest() {
         let temp = TempDb::new("gaia-space-v1-upgrade");
@@ -285,11 +309,14 @@ mod tests {
 
         let fresh = open_in_memory().unwrap();
         migrate(&fresh).unwrap();
-        for (table, column) in [("todos", "project_id"), ("projects", "deadline")] {
-            let columns = |c: &Connection| c.prepare(&format!("PRAGMA table_info({table})")).unwrap().query_map([], |r| r.get::<_, String>(1)).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
-            assert_eq!(columns(&drifted), columns(&fresh), "{table} shape");
-            assert!(columns(&fresh).contains(&column.to_string()));
-        }
+        assert_eq!(
+            normalized_schema_objects(&drifted), normalized_schema_objects(&fresh),
+            "V4-to-V7 migration must retain every table, index, and trigger",
+        );
+        assert_eq!(
+            foreign_key_rows(&drifted), foreign_key_rows(&fresh),
+            "V4-to-V7 migration must retain every table foreign key",
+        );
     }
 
     #[test]

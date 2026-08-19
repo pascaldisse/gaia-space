@@ -20,6 +20,9 @@ export type CfValueEntry = CfDefinition & { value_json: string | null };
 
 const call = <T>(command: string, args: Record<string, unknown> = {}) => invoke<T>(command, args);
 
+const submitProject = (operation: "create" | "update", value: Project) =>
+  call<void>(`${operation}_project`, { project: value });
+
 export const platformApi = {
   // Profiles
   profiles: () => call<Profile[]>("list_profiles"),
@@ -65,8 +68,12 @@ export const platformApi = {
 
   // Projects (read-mostly here; Projects.tsx owns its own view)
   projects: () => call<Project[]>("list_projects"),
-  createProject: (project: Project) => call<void>("create_project", { project }),
-  updateProject: (project: Project) => call<void>("update_project", { project }),
+  createProject(project: Project) {
+    return submitProject("create", project);
+  },
+  updateProject(project: Project) {
+    return submitProject("update", project);
+  },
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

@@ -12,12 +12,15 @@
   --surface-raised: #2a2b2e;
   --surface-border: #393b40;
   --text-muted: #9da0a8;
-  --accent: #5b78e5;
+  --calendar-deadline: #c38a42;
+  --accent: var(--calendar-deadline);
+  --text-on-accent: #fff;
+  --surface-light: #fff;
   --status-danger-bg: #4a1f1f;
   --status-danger-ink: #ffb3b3;
+  --status-danger-surface: #fff0ef;
   --calendar-meeting: var(--accent);
   --calendar-task: #5f9e75;
-  --calendar-deadline: #c38a42;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -67,7 +70,7 @@ li.active button.ghost.small {
 button.primary {
   background: #3f63e0;
   border-color: #3f63e0;
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 button.primary:hover {
@@ -123,7 +126,7 @@ textarea {
 .resizer:hover,
 .resizer:focus-visible,
 .resizer.dragging {
-  background: #5b78e5;
+  background: var(--accent);
   outline: none;
 }
 
@@ -425,15 +428,15 @@ textarea {
 .nav { grid-column: 1; background: #25272a; border-right: 1px solid #393b40; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .nav header { display: flex; align-items: center; gap: 9px; padding: 10px 8px 12px; }
 .nav header em { font-style: normal; font-weight: 650; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.space-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 6px; background: #5b78e5; color: white; font-weight: 700; }
+.space-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--accent); color: white; font-weight: 700; }
 .nav-toggle { background: transparent; border: 0; color: #8b8e96; padding: 2px 5px; }
-.nav-toggle:hover { color: #fff; }
+.nav-toggle:hover { color: var(--text-on-accent); }
 .nav nav { display: grid; gap: 1px; align-content: start; overflow-y: auto; padding-bottom: 10px; }
 .nav-section { color: #8b8e96; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 12px 10px 3px; margin: 0; white-space: nowrap; }
 .nav nav .nav-link { display: flex; text-decoration: none; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px; padding: 6px 10px; color: #c9cbd1; }
 .nav nav .nav-link em { font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-icon { width: 18px; flex: none; text-align: center; color: #9da0a8; }
-.nav nav .nav-link.active, .nav nav .nav-link:hover { background: #383b44; color: #fff; }
+.nav nav .nav-link.active, .nav nav .nav-link:hover { background: #383b44; color: var(--text-on-accent); }
 .nav nav .nav-link.active .nav-icon { color: #dce4ff; }
 /* collapsed: icons only, no handle */
 .space-shell.collapsed { grid-template-columns: var(--nav-w, 52px) 0 minmax(0, 1fr); }

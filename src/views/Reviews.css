@@ -8,7 +8,7 @@
   background: #202226; border: 1px solid #3a3c42; color: #d4d6db; border-radius: 4px; padding: 5px 8px; font: inherit;
 }
 .reviews-view button { background: #2c2e33; border: 1px solid #3a3c42; color: #d4d6db; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-.reviews-view button.primary { background: #5b78e5; border-color: #5b78e5; color: #fff; }
+.reviews-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
 .reviews-view button.ghost { background: transparent; }
 .reviews-view button.ghost.small, .reviews-view button.small { padding: 2px 7px; font-size: 11px; }
 
@@ -24,7 +24,7 @@
 .reviews-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
 .reviews-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .reviews-list li { border: 1px solid #34363b; border-radius: 6px; padding: 8px 10px; background: #25272a; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.reviews-list li.active { border-color: #5b78e5; background: #262b3d; }
+.reviews-list li.active { border-color: var(--accent); background: #262b3d; }
 .reviews-list .num { color: #83868f; font-size: 11px; }
 .reviews-list .branches { color: #8b8e96; font-size: 11px; }
 

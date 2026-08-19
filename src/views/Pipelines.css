@@ -3,14 +3,14 @@
 .pipelines-head p { color: #9da0a8; margin: 5px 0 0; max-width: 720px; }
 .tab-switch { display: flex; gap: 8px; margin-top: 14px; }
 .tab-switch button { background: #202226; border: 1px solid #3a3c42; color: #9da0a8; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
-.tab-switch button.active { background: #262b3d; border-color: #5b78e5; color: #d4d6db; }
+.tab-switch button.active { background: #262b3d; border-color: var(--accent); color: #d4d6db; }
 
 .pipelines-view select, .pipelines-view input[type="text"], .pipelines-view input:not([type]), .pipelines-view input[type="number"], .pipelines-view textarea {
   background: #202226; border: 1px solid #3a3c42; color: #d4d6db; border-radius: 4px; padding: 5px 8px; font: inherit;
 }
 .pipelines-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
 .pipelines-view button { background: #2c2e33; border: 1px solid #3a3c42; color: #d4d6db; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-.pipelines-view button.primary { background: #5b78e5; border-color: #5b78e5; color: #fff; }
+.pipelines-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
 .pipelines-view button.ghost { background: transparent; }
 .pipelines-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
 .pipelines-view button.danger { color: #ff9a9a; border-color: #7a3336; }
@@ -27,7 +27,7 @@
 .automation-grid, .deployments-grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
 .scripts-list ul, .targets-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .scripts-list li, .targets-list li { border: 1px solid #34363b; border-radius: 6px; padding: 8px 10px; background: #25272a; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.scripts-list li.active, .targets-list li.active { border-color: #5b78e5; background: #262b3d; }
+.scripts-list li.active, .targets-list li.active { border-color: var(--accent); background: #262b3d; }
 
 .script-detail, .target-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .script-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
