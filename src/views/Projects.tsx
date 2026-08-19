@@ -23,7 +23,27 @@ export default function Projects() {
   const update = async (project: Project, patch: Partial<Project>) => { try { await platformApi.updateProject({ ...project, ...patch }); await refetch(); } catch (reason) { setError(humanError(reason)); } };
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
-  return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" value={form().name} onInput={e=>setForm({...form(),name:e.currentTarget.value})}/><input placeholder="KEY" value={form().key} onInput={e=>setForm({...form(),key:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form><ul class="resource-list"><For each={items()}>{project=><li classList={{ archived:project.archived }}><a class="row-link" {...linkProps({view:"Projects",entityType:"project",entityId:project.id})} onClick={event=>{ const props=linkProps({view:"Projects",entityType:"project",entityId:project.id}); props.onClick(event); setProjectId(project.id); }}><strong>{project.name}</strong><code>{project.key}</code></a><p>{project.description}</p><label>Deadline <input type="date" value={project.deadline ?? ""} onChange={e=>void update(project,{deadline:e.currentTarget.value || null})}/></label><div class="row-actions"><a {...linkProps({view:"Project Tasks",projectId:project.id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project.id})}>Calendar</a><button class="ghost" onClick={()=>void update(project,{archived:!project.archived})}>{project.archived ? "Restore" : "Archive"}</button></div></li>}</For></ul>
+  return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" value={form().name} onInput={e=>setForm({...form(),name:e.currentTarget.value})}/><input placeholder="KEY" value={form().key} onInput={e=>setForm({...form(),key:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form><ul class="project-cards"><For each={items()}>{project=>{
+      const open=(event:MouseEvent)=>{
+        // The whole card selects the project — except where a real control lives
+        // (deadline field, archive button, the per-project links).
+        if((event.target as HTMLElement).closest("input,button,a,label")) return;
+        const props=linkProps({view:"Projects",entityType:"project",entityId:project.id});
+        props.onClick(event as unknown as MouseEvent & { currentTarget: HTMLAnchorElement });
+        setProjectId(project.id);
+      };
+      return <li classList={{ "project-card":true, archived:project.archived, active:openId()===project.id }}
+            role="button" tabindex="0" aria-pressed={openId()===project.id}
+            onClick={open}
+            onKeyDown={event=>{ if(event.key==="Enter"||event.key===" "){ event.preventDefault(); open(event as unknown as MouseEvent); } }}>
+        <div class="project-card-head"><strong>{project.name}</strong><code>{project.key}</code></div>
+        <Show when={project.description}><p>{project.description}</p></Show>
+        <div class="project-card-foot">
+          <label>Deadline <input type="date" value={project.deadline ?? ""} onChange={e=>void update(project,{deadline:e.currentTarget.value || null})}/></label>
+          <div class="row-actions"><a {...linkProps({view:"Project Tasks",projectId:project.id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project.id})}>Calendar</a><button class="ghost" onClick={()=>void update(project,{archived:!project.archived})}>{project.archived ? "Restore" : "Archive"}</button></div>
+        </div>
+      </li>;
+    }}</For></ul>
     <Show when={openProject()}>{project=>
       <section class="project-open">
         <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><a {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</a></header>
