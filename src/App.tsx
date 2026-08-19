@@ -22,8 +22,10 @@ import Settings from "./views/Settings";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
+import ServerConnect from "./components/ServerConnect";
 import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
+import { isMobileSetup } from "./mobile";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews, setRoutePending } from "./router";
 import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
 
@@ -71,6 +73,7 @@ export default function App() {
   const groupNav=(group:NavGroup)=><a class="topnav-item" title={group.label} aria-label={group.label} classList={{active:activeGroup()?.id===group.id}} {...linkProps({view:group.views[0]})}><span class="nav-icon" aria-hidden="true"><Icon name={group.icon} size={18} /></span><span class="topnav-label">{group.label}</span></a>;
   const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{name}</a>;
   return <Switch>
+    <Match when={isMobileSetup()}><ServerConnect/></Match>
     <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>
     <Match when={isWeb()&&!currentUser()}><Login/></Match>
     <Match when={true}>

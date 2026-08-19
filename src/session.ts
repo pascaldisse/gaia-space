@@ -1,10 +1,11 @@
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { platformApi, type Profile, type Project } from "./api/platform";
 import { authApi, type User } from "./api/auth";
+import { isMobileServer } from "./mobile";
 
-/** True when running in a plain browser (web build), false inside the Tauri app. */
+/** True for a server-backed client: browser or mobile shell after it connects. */
 export const isWeb = (): boolean =>
-  typeof window !== "undefined" && window.__TAURI_INTERNALS__ === undefined;
+  typeof window !== "undefined" && (window.__TAURI_INTERNALS__ === undefined || isMobileServer());
 
 /** App-wide identity/context: who am I acting as, which project am I in. */
 const session = createRoot(() => {

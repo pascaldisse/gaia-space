@@ -27,9 +27,12 @@ declare global {
 }
 
 const isTauri = () => typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
+// A remote page inside the mobile shell has Tauri available, but must call its
+// selected server over HTTP rather than the shell's intentionally empty IPC API.
+const isMobileServer = () => isTauri() && window.__GAIA_SPACE_MOBILE__ === true && window.location.hostname !== "tauri.localhost" && window.location.protocol !== "tauri:";
 
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri()) {
+  if (isTauri() && !isMobileServer()) {
     return window.__TAURI_INTERNALS__!.invoke(cmd, args) as Promise<T>;
   }
   const base = import.meta.env.BASE_URL;

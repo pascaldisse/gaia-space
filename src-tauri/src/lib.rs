@@ -34,7 +34,7 @@ pub mod secretbox;
 #[cfg(feature = "desktop")]
 use serde::Serialize;
 #[cfg(feature = "desktop")]
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(feature = "desktop")]
 #[derive(Serialize)]
@@ -292,43 +292,44 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// iOS/Android shell: no local db, no bundled repo tools — a thin native
-/// window pointed at a real GAIA Space server, same shape as gaia-daemon's
-/// mobile client (src-tauri/src/lib.rs `resolve_url`). Runtime env wins,
-/// then a compile-time bake (`GAIA_SPACE_MOBILE_URL=... tauri ios build`),
-/// then a default so a plain `tauri ios dev` still has somewhere to point.
+/// Mobile client: starts locally so a fresh install can choose any server.
+/// The selected remote page then uses its own HTTP API and cookie-based login.
 #[cfg(all(feature = "desktop", mobile))]
-fn resolve_space_url() -> String {
-    if let Some(url) = std::env::var("GAIA_SPACE_MOBILE_URL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        return url;
+#[tauri::command]
+fn connect_space_server(app: AppHandle, url: String) -> Result<(), String> {
+    let target: tauri::Url = url.parse().map_err(|_| "Enter a valid server URL.")?;
+    if target.scheme() != "https" && target.scheme() != "http" {
+        return Err("Server URL must start with http:// or https://.".into());
     }
-    if let Some(url) = option_env!("GAIA_SPACE_MOBILE_URL") {
-        let trimmed = url.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    "https://151.115.73.182/space/".to_string()
+    app.get_webview_window("main")
+        .ok_or("Main window is unavailable.")?
+        .navigate(target)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(all(feature = "desktop", mobile))]
+#[tauri::command]
+fn open_space_setup(app: AppHandle) -> Result<(), String> {
+    // Tauri uses HTTPS for its app protocol on iOS; `tauri://localhost` is
+    // retained for desktop-compatible mobile targets.
+    let url = if cfg!(target_os = "ios") { "https://tauri.localhost" } else { "tauri://localhost" };
+    app.get_webview_window("main")
+        .ok_or("Main window is unavailable.")?
+        .navigate(url.parse().expect("valid bundled app URL"))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(all(feature = "desktop", mobile))]
 #[tauri::mobile_entry_point]
 pub fn run() {
-    let url: tauri::Url = resolve_space_url()
-        .parse()
-        .expect("GAIA_SPACE_MOBILE_URL is not a valid URL");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![app_info])
+        .invoke_handler(tauri::generate_handler![app_info, connect_space_server, open_space_setup])
         .setup(move |app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("GAIA Space")
-                .initialization_script(&debug_server::init_script())
+                .initialization_script(format!("window.__GAIA_SPACE_MOBILE__=true;{}", debug_server::init_script()))
                 .build()?;
             debug_server::spawn(app.handle().clone());
             Ok(())

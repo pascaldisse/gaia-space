@@ -1,5 +1,7 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
+import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
+import { isMobileServer, openServerSetup } from "../mobile";
 import { NAV_GROUPS, defaultView, hiddenGroups, navLayout, setDefaultView, setNavLayout, toggleGroup } from "../nav";
 import "./Settings.css";
 
@@ -36,6 +38,12 @@ export default function Settings() {
         }</For>
       </div>
     </div>
+
+    <Show when={isMobileServer()}><div class="settings-card">
+      <h2>Server</h2>
+      <p class="settings-hint">This phone is connected to the server in the address bar. Switching server returns you to the connection screen.</p>
+      <button type="button" onClick={() => { editSavedServer(); void openServerSetup(); }}>Change server</button>
+    </div></Show>
 
     <div class="settings-card">
       <h2>Start view</h2>
