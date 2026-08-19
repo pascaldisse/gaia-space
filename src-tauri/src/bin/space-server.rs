@@ -216,6 +216,9 @@ enum CommandPolicy {
     CalendarRead,
     ProjectTodoRead,
     SessionIdentityWrite,
+    DocumentCreate, DocumentReadList, DocumentRead, DocumentWrite,
+    DocumentFolderCreate, DocumentFolderReadList, DocumentFolderWrite,
+    MeetingReadList, MeetingRead, MeetingWrite, MeetingParticipantWrite, SearchRead,
     Unavailable,
 }
 
@@ -232,7 +235,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
-        "create_meeting" | "create_document" | "save_document" | "restore_doc_version" => CommandPolicy::SessionIdentityWrite,
+        "create_meeting" => CommandPolicy::SessionIdentityWrite,
+        "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
+        "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
         | "join_meeting_call"
         | "start_livekit_server"
@@ -248,15 +253,16 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" | "archive_issue" | "archive_meeting" | "archive_role"
-        | "archive_sprint" | "archive_team" => CommandPolicy::Session,
+        "archive_document" | "delete_document" => CommandPolicy::DocumentWrite,
+        "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => CommandPolicy::Session,
         "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint" | "create_absence"
         | "create_board" => CommandPolicy::Session,
         "create_cf_definition"
         | "create_channel"
         | "create_deploy_target"
-        | "create_document_folder"
         | "create_entity_channel" => CommandPolicy::Session,
+        "create_document_folder" => CommandPolicy::DocumentFolderCreate,
         "create_issue"
         | "create_issue_status"
         | "create_message"
@@ -290,23 +296,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_swimlane"
         | "delete_time_tracking_entry"
         | "emit_notification"
-        | "evaluate_quality_gate"
-        | "expand_meeting_occurrences" => CommandPolicy::Session,
-        "get_channel"
-        | "get_channel_by_entity"
-        | "get_document"
-        | "get_issue"
-        | "get_issue_detail"
-        | "get_meeting" => CommandPolicy::Session,
-        "get_profile" | "get_project" | "get_review" | "get_role" | "get_team" | "goto_search" => {
-            CommandPolicy::Session
-        }
-        "invite_meeting_participant"
-        | "issue_time_total"
+        | "evaluate_quality_gate" => CommandPolicy::Session,
+        "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
+        "get_channel" | "get_channel_by_entity" | "get_issue" | "get_issue_detail" => CommandPolicy::Session,
+        "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
+        "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
+        "get_profile" | "get_project" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
+        "goto_search" => CommandPolicy::SearchRead,
+        "issue_time_total"
         | "join_channel"
         | "launch_sprint"
         | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
+        "invite_meeting_participant" => CommandPolicy::MeetingWrite,
         "list_backlog_issues"
         | "list_board_columns"
         | "list_board_issues"
@@ -317,20 +319,18 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_checklist_items"
         | "list_checklists"
         | "list_deploy_targets"
-        | "list_deployments_for_target"
-        | "list_doc_versions" => CommandPolicy::Session,
-        "list_document_folders"
-        | "list_documents"
-        | "list_issue_statuses"
+        | "list_deployments_for_target" => CommandPolicy::Session,
+        "list_document_folders" => CommandPolicy::DocumentFolderReadList,
+        "list_documents" => CommandPolicy::DocumentReadList,
+        "list_issue_statuses"
         | "list_issues"
         | "list_job_runs"
         | "list_job_runs_for_script" => CommandPolicy::Session,
         "list_jobs"
         | "list_jobs_for_script"
-        | "list_meeting_participants"
-        | "list_meetings"
         | "list_messages"
         | "list_notifications" => CommandPolicy::Session,
+        "list_meetings" => CommandPolicy::MeetingReadList,
         "list_package_repositories"
         | "list_package_versions"
         | "list_pipeline_scripts"
@@ -355,11 +355,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_time_tracking_entries"
         | "livekit_server_status"
         | "mark_channel_read" => CommandPolicy::Session,
-        "move_document"
-        | "move_document_folder"
-        | "move_issue_on_board"
+        "move_issue_on_board"
         | "publish_package_version"
         | "remove_channel_member" => CommandPolicy::Session,
+        "move_document" => CommandPolicy::DocumentWrite,
+        "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
@@ -374,8 +374,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "schedule_deployment"
         | "seed_rights"
         | "set_discussion_resolved"
-        | "set_issue_tags"
-        | "set_meeting_participant_status" => CommandPolicy::Session,
+        | "set_issue_tags" => CommandPolicy::Session,
+        "set_meeting_participant_status" => CommandPolicy::MeetingParticipantWrite,
         "set_participant_state"
         | "set_role_rights"
         | "toggle_checklist_item"
@@ -385,15 +385,15 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_cf_definition"
         | "update_channel"
         | "update_deploy_target"
-        | "update_document"
-        | "update_document_folder"
         | "update_issue" => CommandPolicy::Session,
+        "update_document" => CommandPolicy::DocumentWrite,
+        "update_document_folder" => CommandPolicy::DocumentFolderWrite,
         "update_issue_status"
-        | "update_meeting"
         | "update_message"
         | "update_package_repository"
         | "update_pipeline_script"
         | "update_profile" => CommandPolicy::Session,
+        "update_meeting" => CommandPolicy::MeetingWrite,
         "update_quality_gate_rule"
         | "update_review"
         | "update_role"
@@ -466,6 +466,11 @@ fn project_from_body(body: &Value) -> Result<(String, Option<String>), String> {
     let project = body.get("project").ok_or("invalid argument `project`")?;
     Ok((arg(project, "id")?, arg(project, "created_by")?))
 }
+fn nested_id(body:&Value,key:&str)->Option<String>{body.get(key)?.get("id")?.as_str().map(str::to_owned)}
+fn document_id(body:&Value,name:&str)->Option<String>{if name=="update_document"{nested_id(body,"document")}else if matches!(name,"restore_doc_version"|"list_doc_versions"){arg(body,"document_id").ok()}else{arg(body,"id").ok()}}
+fn meeting_id(body:&Value,name:&str)->Option<String>{if name=="update_meeting"{nested_id(body,"meeting")}else if matches!(name,"invite_meeting_participant"|"set_meeting_participant_status"|"list_meeting_participants"){arg(body,"meeting_id").ok()}else{arg(body,"id").ok()}}
+fn bind_document_create(user:&User,body:&mut Value)->Result<(),String>{let d=body.get_mut("document").and_then(Value::as_object_mut).ok_or("invalid argument `document`")?;d.insert("created_by".into(),json!(user.profile_id));let t=d.get("container_type").and_then(Value::as_str).ok_or("document container_type is required")?.to_owned();if t=="my-docs"{d.insert("container_id".into(),json!(user.profile_id));}if t=="project"{let p=d.get("container_id").and_then(Value::as_str).ok_or("project document requires container_id")?;if user.role!="admin"&&!personal::project_member_by(p,&user.profile_id)?{return Err("project access denied".into());}}Ok(())}
+fn bind_folder_create(user:&User,body:&mut Value)->Result<(),String>{let f=body.get_mut("folder").and_then(Value::as_object_mut).ok_or("invalid argument `folder`")?;let t=f.get("container_type").and_then(Value::as_str).ok_or("folder container_type is required")?.to_owned();if t=="my-docs"{f.insert("container_id".into(),json!(user.profile_id));}if t=="project"{let p=f.get("container_id").and_then(Value::as_str).ok_or("project folder requires container_id")?;if user.role!="admin"&&!personal::project_member_by(p,&user.profile_id)?{return Err("project access denied".into());}}if t=="kb"{return Err("knowledge-base folders require a project attachment in web mode".into());}Ok(())}
 
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
@@ -542,10 +547,20 @@ fn authorize_command(
         }
         CommandPolicy::SessionIdentityWrite => match name {
             "create_meeting" => bind_required_object_identity(body, "meeting", "organizer_id", "organizerId", &user.profile_id),
-            "create_document" => bind_required_object_identity(body, "document", "created_by", "createdBy", &user.profile_id),
-            "save_document" | "restore_doc_version" => { put_arg(body, "actor", json!(user.profile_id)); Ok(()) }
             _ => unreachable!("identity-write policy must name an identity-write command"),
         }.map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
+        CommandPolicy::DocumentCreate => bind_document_create(user,body).map_err(|e|err(StatusCode::FORBIDDEN,&e)),
+        CommandPolicy::DocumentReadList => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
+        CommandPolicy::DocumentRead => {let id=document_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid document id"))?;if documents::document_readable_by(&id,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{put_arg(body,"profile_id",json!(user.profile_id));Ok(())}else{Err(err(StatusCode::FORBIDDEN,"document access denied"))}}
+        CommandPolicy::DocumentWrite => {let id=document_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid document id"))?;if documents::document_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{if matches!(name,"save_document"|"restore_doc_version"){put_arg(body,"actor",json!(user.profile_id));}Ok(())}else{Err(err(StatusCode::FORBIDDEN,"document write denied"))}}
+        CommandPolicy::DocumentFolderCreate => bind_folder_create(user,body).map_err(|e|err(StatusCode::FORBIDDEN,&e)),
+        CommandPolicy::DocumentFolderReadList => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
+        CommandPolicy::DocumentFolderWrite => {let id=if name=="update_document_folder"{nested_id(body,"folder")}else{arg(body,"id").ok()}.ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid folder id"))?;if documents::document_folder_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"document folder write denied"))}}
+        CommandPolicy::MeetingReadList => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
+        CommandPolicy::MeetingRead => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if meetings::meeting_readable_by(&id,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{put_arg(body,"profile_id",json!(user.profile_id));Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting access denied"))}}
+        CommandPolicy::MeetingWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if !meetings::meeting_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{return Err(err(StatusCode::FORBIDDEN,"meeting write denied"));}if name=="update_meeting"{let organizer=meetings::get_meeting(id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?.and_then(|m|m.organizer_id).ok_or_else(||err(StatusCode::FORBIDDEN,"meeting write denied"))?;body.get_mut("meeting").and_then(Value::as_object_mut).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid argument `meeting`"))?.insert("organizer_id".into(),json!(organizer));}Ok(())}
+        CommandPolicy::MeetingParticipantWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?;let allowed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)",params![id,user.profile_id],|r|r.get(0)).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()))?;if allowed{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting participant access denied"))}}
+        CommandPolicy::SearchRead => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
         CommandPolicy::Session => {
             if matches!(
                 name,
@@ -666,8 +681,10 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
     "archive_document" => documents::archive_document(id: String, archived: bool),
+    "delete_document" => documents::delete_document(id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
+    "delete_meeting" => meetings::delete_meeting(id: String),
     "archive_role" => platform::archive_role(id: String, archived: bool),
     "archive_sprint" => issues::archive_sprint(id: String, archived: bool),
     "archive_team" => platform::archive_team(id: String, archived: bool),
@@ -724,19 +741,19 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
-    "expand_meeting_occurrences" => meetings::expand_meeting_occurrences(range_start: i64, range_end: i64),
+    "expand_meeting_occurrences" => meetings::expand_meeting_occurrences_scoped(range_start: i64, range_end: i64, profile_id: String),
     "get_channel" => chat::get_channel(id: String),
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
-    "get_document" => documents::get_document(id: String),
+    "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_issue" => issues::get_issue(id: String),
     "get_issue_detail" => issues::get_issue_detail(id: String),
-    "get_meeting" => meetings::get_meeting(id: String),
+    "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
     "get_profile" => platform::get_profile(id: String),
     "get_project" => platform::get_project(id: String),
     "get_review" => review::get_review(id: String),
     "get_role" => platform::get_role(id: String),
     "get_team" => platform::get_team(id: String),
-    "goto_search" => personal::goto_search(query: String, limit: Option<i64>),
+    "goto_search" => personal::goto_search_scoped(query: String, limit: Option<i64>, profile_id: String),
     "invite_meeting_participant" => meetings::invite_meeting_participant(meeting_id: String, profile_id: String),
     "issue_time_total" => issues::issue_time_total(issue_id: String),
     "join_channel" => chat::join_channel(channel_id: String, profile_id: String),
@@ -755,17 +772,17 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "list_checklists" => issues::list_checklists(issue_id: String),
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
-    "list_doc_versions" => documents::list_doc_versions(document_id: String),
-    "list_document_folders" => documents::list_document_folders(),
-    "list_documents" => documents::list_documents(),
+    "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
+    "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
+    "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
     "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, include_archived: Option<bool>),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
     "list_jobs" => pipelines::list_jobs(),
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
-    "list_meeting_participants" => meetings::list_meeting_participants(meeting_id: String),
-    "list_meetings" => meetings::list_meetings(),
+    "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
+    "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
@@ -1019,6 +1036,241 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         let read_at: Option<i64> = c.query_row("SELECT read_at FROM notifications WHERE id='alice-notification'", [], |row| row.get(0)).unwrap();
         assert_eq!(read_at, None);
+    }
+
+    #[tokio::test]
+    async fn document_and_meeting_scopes_block_private_leaks_and_rebind_identity() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        let private_document = json!({"id":"alice-private-doc","container_type":"my-docs","container_id":"pb","folder_id":null,"doc_type":"text","title":"Alice private","body":"secret","version":1,"archived":false,"created_by":"pd"});
+        let (status, value) = call(
+            cookie("ta"),
+            "create_document",
+            json!({"document":private_document}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let stored: (String, String) = c
+            .query_row(
+                "SELECT created_by,container_id FROM documents WHERE id='alice-private-doc'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            ("pa".into(), "pa".into()),
+            "creator and personal container are session-bound"
+        );
+
+        // Every private-document read/write surface gives Bob no access.
+        let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(
+            cookie("tb"),
+            "goto_search",
+            json!({"query":"Alice private","limit":10}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(
+            value["value"].as_array().unwrap().is_empty(),
+            "search must not leak private documents"
+        );
+        for (command, body) in [
+            ("get_document", json!({"id":"alice-private-doc"})),
+            (
+                "list_doc_versions",
+                json!({"document_id":"alice-private-doc"}),
+            ),
+            (
+                "update_document",
+                json!({"document":{"id":"alice-private-doc","container_type":"my-docs","container_id":"pb","folder_id":null,"doc_type":"text","title":"stolen","body":"secret","version":1,"archived":false,"created_by":"pb"}}),
+            ),
+            (
+                "move_document",
+                json!({"id":"alice-private-doc","container_type":"my-docs","container_id":"pb","folder_id":null}),
+            ),
+            (
+                "archive_document",
+                json!({"id":"alice-private-doc","archived":true}),
+            ),
+            (
+                "save_document",
+                json!({"id":"alice-private-doc","title":"stolen","body":"stolen","actor":"pb"}),
+            ),
+            (
+                "restore_doc_version",
+                json!({"document_id":"alice-private-doc","version":1,"actor":"pb"}),
+            ),
+            ("delete_document", json!({"id":"alice-private-doc"})),
+        ] {
+            let (status, _) = call(cookie("tb"), command, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{command}");
+        }
+        let unchanged: (String, bool) = c
+            .query_row(
+                "SELECT body,archived FROM documents WHERE id='alice-private-doc'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged, ("secret".into(), false));
+
+        // Owner save works; a forged actor becomes the session profile in the immutable version row.
+        let (status, value) = call(cookie("ta"), "save_document", json!({"id":"alice-private-doc","title":"Alice private v2","body":"secret v2","actor":"pb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='alice-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
+        assert_eq!(actor, "pa");
+        let (status, _) = call(
+            cookie("ta"),
+            "delete_document",
+            json!({"id":"alice-private-doc"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "owner can delete private document");
+
+        let private_meeting = json!({"id":"alice-private-meeting","title":"Alice private","description":null,"starts_at":100,"ends_at":200,"rrule":null,"location":null,"organizer_id":"pd","channel_id":null,"archived":false});
+        let (status, value) = call(
+            cookie("ta"),
+            "create_meeting",
+            json!({"meeting":private_meeting}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='alice-private-meeting'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organizer, "pa", "forged organizer must never persist");
+        let (status, value) = call(cookie("tb"), "list_meetings", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(
+            cookie("tb"),
+            "goto_search",
+            json!({"query":"Alice private","limit":10}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(
+            value["value"].as_array().unwrap().is_empty(),
+            "search must not leak private meetings"
+        );
+        for (command, body) in [
+            ("get_meeting", json!({"id":"alice-private-meeting"})),
+            (
+                "list_meeting_participants",
+                json!({"meeting_id":"alice-private-meeting"}),
+            ),
+            (
+                "update_meeting",
+                json!({"meeting":{"id":"alice-private-meeting","title":"stolen","description":null,"starts_at":100,"ends_at":200,"rrule":null,"location":null,"organizer_id":"pb","channel_id":null,"archived":false}}),
+            ),
+            (
+                "archive_meeting",
+                json!({"id":"alice-private-meeting","archived":true}),
+            ),
+            ("delete_meeting", json!({"id":"alice-private-meeting"})),
+            (
+                "invite_meeting_participant",
+                json!({"meeting_id":"alice-private-meeting","profile_id":"pa"}),
+            ),
+            (
+                "set_meeting_participant_status",
+                json!({"meeting_id":"alice-private-meeting","profile_id":"pa","status":"accepted"}),
+            ),
+        ] {
+            let (status, _) = call(cookie("tb"), command, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{command}");
+        }
+        let unchanged: (String, bool) = c
+            .query_row(
+                "SELECT title,archived FROM meetings WHERE id='alice-private-meeting'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged, ("Alice private".into(), false));
+        let (status, _) = call(
+            cookie("ta"),
+            "delete_meeting",
+            json!({"id":"alice-private-meeting"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "organizer can delete private meeting"
+        );
+
+        // Project attachment grants Bob read access, while writes stay with the document
+        // owner / project creator. The meeting derives its group scope from its channel.
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('group','Group','GROUP','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('group','pb'); INSERT INTO channels(id,content_type,name,project_id) VALUES('group-channel','entity-bound','Group channel','group');").unwrap();
+        let group_document = json!({"id":"group-doc","container_type":"project","container_id":"group","folder_id":null,"doc_type":"text","title":"Group document","body":"shared","version":1,"archived":false,"created_by":"pd"});
+        let (status, _) = call(
+            cookie("ta"),
+            "create_document",
+            json!({"document":group_document}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["value"][0]["id"], json!("group-doc"));
+        let (status, _) = call(cookie("tb"), "get_document", json!({"id":"group-doc"})).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "project member can read project document"
+        );
+        let (status, _) = call(
+            cookie("tb"),
+            "archive_document",
+            json!({"id":"group-doc","archived":true}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "member is not the project admin or document owner"
+        );
+
+        let group_meeting = json!({"id":"group-meeting","title":"Group meeting","description":null,"starts_at":300,"ends_at":400,"rrule":null,"location":null,"organizer_id":"pd","channel_id":"group-channel","archived":false});
+        let (status, _) = call(
+            cookie("ta"),
+            "create_meeting",
+            json!({"meeting":group_meeting}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, value) = call(cookie("tb"), "list_meetings", json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["value"][0]["id"], json!("group-meeting"));
+        let (status, _) = call(cookie("tb"), "get_meeting", json!({"id":"group-meeting"})).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "project member can read project meeting"
+        );
+        let (status, value) = call(cookie("ta"), "update_meeting", json!({"meeting":{"id":"group-meeting","title":"Updated group meeting","description":null,"starts_at":300,"ends_at":400,"rrule":null,"location":null,"organizer_id":"pb","channel_id":"group-channel","archived":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='group-meeting'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            organizer, "pa",
+            "updates cannot transfer organizer identity"
+        );
     }
 
     #[tokio::test]

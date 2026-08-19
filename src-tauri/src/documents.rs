@@ -13,6 +13,7 @@
 //! history — it copies the old body forward as a new latest version, so the version list
 //! only ever grows.
 use crate::db;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 type Result<T> = std::result::Result<T, String>;
 
@@ -69,6 +70,58 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
 const DOC_COLUMNS: &str =
     "id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by";
 
+/// SQL scope used by the web gateway. Personal/unattached documents never inherit
+/// access from a container: only `created_by` may read them. A project document is
+/// readable by its creator or any member of the attached project.
+const DOCUMENT_READ_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))))";
+const DOCUMENT_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)))";
+
+pub fn document_readable_by(id: &str, profile_id: &str) -> Result<bool> {
+    let c = db::conn()?;
+    c.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {DOCUMENT_READ_SCOPE})"
+        ),
+        rusqlite::params![profile_id, id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
+    let c = db::conn()?;
+    c.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {DOCUMENT_WRITE_SCOPE})"
+        ),
+        rusqlite::params![profile_id, is_admin, id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
+    let c = db::conn()?;
+    let mut s = c.prepare(&format!("SELECT {DOC_COLUMNS} FROM documents d WHERE {DOCUMENT_READ_SCOPE} ORDER BY d.updated_at DESC")).map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([profile_id], row_to_document)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
+    let c = db::conn()?;
+    c.query_row(
+        &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {DOCUMENT_READ_SCOPE}"),
+        rusqlite::params![profile_id, id],
+        row_to_document,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_documents() -> Result<Vec<Document>> {
     let c = db::conn()?;
@@ -86,12 +139,12 @@ pub fn list_documents() -> Result<Vec<Document>> {
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_document( id: String) -> Result<Option<Document>> {
+pub fn get_document(id: String) -> Result<Option<Document>> {
     Ok(list_documents()?.into_iter().find(|v| v.id == id))
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_document( document: Document) -> Result<()> {
+pub fn create_document(document: Document) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -128,7 +181,7 @@ pub fn create_document( document: Document) -> Result<()> {
 /// Does NOT touch body/version — content saves go through `save_document` so every
 /// content change is versioned.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_document( document: Document) -> Result<()> {
+pub fn update_document(document: Document) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,title=?6,archived=?7,updated_at=unixepoch() WHERE id=?1",
@@ -164,7 +217,7 @@ pub fn move_document(
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn archive_document( id: String, archived: bool) -> Result<()> {
+pub fn archive_document(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE documents SET archived=?2,updated_at=unixepoch() WHERE id=?1",
@@ -172,6 +225,21 @@ pub fn archive_document( id: String, archived: bool) -> Result<()> {
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub fn delete_document(id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM doc_versions WHERE document_id=?1", [&id])
+        .map_err(|e| e.to_string())?;
+    if tx
+        .execute("DELETE FROM documents WHERE id=?1", [&id])
+        .map_err(|e| e.to_string())?
+        == 0
+    {
+        return Err("Document not found".into());
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// Save editor content: bumps `version` and appends an immutable `doc_versions` row.
@@ -185,11 +253,9 @@ pub fn save_document(
     let mut c = db::conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let current_version: i64 = tx
-        .query_row(
-            "SELECT version FROM documents WHERE id=?1",
-            [&id],
-            |r| r.get(0),
-        )
+        .query_row("SELECT version FROM documents WHERE id=?1", [&id], |r| {
+            r.get(0)
+        })
         .map_err(|e| e.to_string())?;
     let next_version = current_version + 1;
     tx.execute(
@@ -212,23 +278,40 @@ pub fn save_document(
     get_document(id)?.ok_or_else(|| "document vanished after save".to_string())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_doc_versions( document_id: String) -> Result<Vec<DocVersion>> {
+fn row_to_doc_version(r: &rusqlite::Row) -> rusqlite::Result<DocVersion> {
+    Ok(DocVersion {
+        id: r.get(0)?,
+        document_id: r.get(1)?,
+        version: r.get(2)?,
+        body: r.get(3)?,
+        created_by: r.get(4)?,
+        created_at: r.get(5)?,
+    })
+}
+
+pub fn list_doc_versions_scoped(
+    document_id: String,
+    profile_id: String,
+) -> Result<Vec<DocVersion>> {
     let c = db::conn()?;
-    let mut s = c
-        .prepare("SELECT id,document_id,version,body,created_by,created_at FROM doc_versions WHERE document_id=?1 ORDER BY version DESC")
-        .map_err(|e| e.to_string())?;
+    let mut s = c.prepare(&format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {DOCUMENT_READ_SCOPE} ORDER BY v.version DESC")).map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([&document_id], |r| {
-            Ok(DocVersion {
-                id: r.get(0)?,
-                document_id: r.get(1)?,
-                version: r.get(2)?,
-                body: r.get(3)?,
-                created_by: r.get(4)?,
-                created_at: r.get(5)?,
-            })
-        })
+        .query_map(
+            rusqlite::params![profile_id, document_id],
+            row_to_doc_version,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_doc_versions(document_id: String) -> Result<Vec<DocVersion>> {
+    let c = db::conn()?;
+    let mut s = c.prepare("SELECT id,document_id,version,body,created_by,created_at FROM doc_versions WHERE document_id=?1 ORDER BY version DESC").map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([document_id], row_to_doc_version)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -264,22 +347,43 @@ pub fn restore_doc_version(
     save_document(document_id, title, restored_body, actor)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
+const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))))";
+const FOLDER_WRITE_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND p.created_by=?1) OR ?2=1)))";
+
+fn row_to_folder(r: &rusqlite::Row) -> rusqlite::Result<DocumentFolder> {
+    Ok(DocumentFolder {
+        id: r.get(0)?,
+        container_type: r.get(1)?,
+        container_id: r.get(2)?,
+        parent_id: r.get(3)?,
+        name: r.get(4)?,
+        description: r.get(5)?,
+        archived: r.get(6)?,
+    })
+}
+
+pub fn document_folder_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
-    let mut s=c.prepare("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders ORDER BY name").map_err(|e|e.to_string())?;
+    c.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?2 AND {FOLDER_READ_SCOPE})"
+        ),
+        rusqlite::params![profile_id, id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn document_folder_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
+    let c = db::conn()?;
+    c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND {FOLDER_WRITE_SCOPE})"), rusqlite::params![profile_id, is_admin, id], |row| row.get(0)).map_err(|e| e.to_string())
+}
+
+pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFolder>> {
+    let c = db::conn()?;
+    let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(DocumentFolder {
-                id: r.get(0)?,
-                container_type: r.get(1)?,
-                container_id: r.get(2)?,
-                parent_id: r.get(3)?,
-                name: r.get(4)?,
-                description: r.get(5)?,
-                archived: r.get(6)?,
-            })
-        })
+        .query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -287,7 +391,19 @@ pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_document_folder( folder: DocumentFolder) -> Result<()> {
+pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
+    let c = db::conn()?;
+    let mut s=c.prepare("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders ORDER BY name").map_err(|e|e.to_string())?;
+    let rows = s
+        .query_map([], row_to_folder)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_document_folder(folder: DocumentFolder) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
@@ -308,7 +424,7 @@ pub fn create_document_folder( folder: DocumentFolder) -> Result<()> {
 /// Full-replace update: rename, edit description, move to a new parent (children follow
 /// automatically since they merely reference this folder's id), toggle archived.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_document_folder( folder: DocumentFolder) -> Result<()> {
+pub fn update_document_folder(folder: DocumentFolder) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE document_folders SET container_type=?2,container_id=?3,parent_id=?4,name=?5,description=?6,archived=?7 WHERE id=?1",
@@ -329,7 +445,7 @@ pub fn update_document_folder( folder: DocumentFolder) -> Result<()> {
 /// Move a folder under a new parent (or to root with `None`). Subfolders/documents keep
 /// referencing this folder's id, so they move along transparently.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn move_document_folder( id: String, parent_id: Option<String>) -> Result<()> {
+pub fn move_document_folder(id: String, parent_id: Option<String>) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE document_folders SET parent_id=?2 WHERE id=?1",
@@ -356,7 +472,14 @@ mod tests {
         db::migrate_path(&path).expect("migration")
     }
 
-    fn insert_doc(c: &rusqlite::Connection, id: &str, container_type: &str, container_id: Option<&str>, folder_id: Option<&str>, body: &str) {
+    fn insert_doc(
+        c: &rusqlite::Connection,
+        id: &str,
+        container_type: &str,
+        container_id: Option<&str>,
+        folder_id: Option<&str>,
+        body: &str,
+    ) {
         c.execute(
             "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'text',?5,?6,1,0,NULL)",
             rusqlite::params![id, container_type, container_id, folder_id, format!("Doc {id}"), body],
@@ -378,7 +501,9 @@ mod tests {
         // (save_document itself opens its own AppHandle-scoped connection in prod).
         let bump = |c: &rusqlite::Connection, body: &str| {
             let cur: i64 = c
-                .query_row("SELECT version FROM documents WHERE id='doc1'", [], |r| r.get(0))
+                .query_row("SELECT version FROM documents WHERE id='doc1'", [], |r| {
+                    r.get(0)
+                })
                 .unwrap();
             let next = cur + 1;
             c.execute(
@@ -397,7 +522,11 @@ mod tests {
         bump(&c, "v3 body");
 
         let versions: i64 = c
-            .query_row("SELECT count(*) FROM doc_versions WHERE document_id='doc1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM doc_versions WHERE document_id='doc1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(versions, 3);
 
@@ -423,16 +552,37 @@ mod tests {
         assert_eq!(final_body, "v1 body");
         assert_eq!(final_version, 4);
         let versions_after: i64 = c
-            .query_row("SELECT count(*) FROM doc_versions WHERE document_id='doc1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM doc_versions WHERE document_id='doc1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(versions_after, 4, "restore appends, never overwrites history");
+        assert_eq!(
+            versions_after, 4,
+            "restore appends, never overwrites history"
+        );
     }
 
     #[test]
     fn container_scoping_isolation() {
         let c = test_conn();
-        insert_doc(&c, "my1", "my-docs", Some("profile-a"), None, "personal note");
-        insert_doc(&c, "proj1", "project", Some("demo-project"), None, "project doc");
+        insert_doc(
+            &c,
+            "my1",
+            "my-docs",
+            Some("profile-a"),
+            None,
+            "personal note",
+        );
+        insert_doc(
+            &c,
+            "proj1",
+            "project",
+            Some("demo-project"),
+            None,
+            "project doc",
+        );
         insert_doc(&c, "kb1", "kb", Some("book-1"), None, "kb article");
 
         let mut stmt = c
@@ -445,11 +595,17 @@ mod tests {
             .unwrap();
         assert_eq!(docs.len(), 3);
 
-        let my_docs: Vec<_> = docs.iter().filter(|d| d.container_type == "my-docs").collect();
+        let my_docs: Vec<_> = docs
+            .iter()
+            .filter(|d| d.container_type == "my-docs")
+            .collect();
         assert_eq!(my_docs.len(), 1);
         assert_eq!(my_docs[0].container_id.as_deref(), Some("profile-a"));
 
-        let proj_docs: Vec<_> = docs.iter().filter(|d| d.container_type == "project").collect();
+        let proj_docs: Vec<_> = docs
+            .iter()
+            .filter(|d| d.container_type == "project")
+            .collect();
         assert_eq!(proj_docs.len(), 1);
         assert_eq!(proj_docs[0].container_id.as_deref(), Some("demo-project"));
 
@@ -495,7 +651,11 @@ mod tests {
         .unwrap();
 
         let parent_of_a: Option<String> = c
-            .query_row("SELECT parent_id FROM document_folders WHERE id='folder-a'", [], |r| r.get(0))
+            .query_row(
+                "SELECT parent_id FROM document_folders WHERE id='folder-a'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(parent_of_a.as_deref(), Some("book-1"));
 

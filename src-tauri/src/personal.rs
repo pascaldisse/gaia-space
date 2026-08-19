@@ -322,6 +322,15 @@ fn goto_search_on(c: &Connection, query: &str, limit: i64) -> Result<Vec<GotoRes
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn goto_search( query: String, limit: Option<i64>) -> Result<Vec<GotoResult>> { goto_search_on(&db::conn()?, &query, limit.unwrap_or(30)) }
+pub fn goto_search_scoped(query:String,limit:Option<i64>,profile_id:String)->Result<Vec<GotoResult>>{let term=query.trim();if term.is_empty(){return Ok(Vec::new());}let pattern=format!("%{}%",term.to_lowercase());let exact=term.to_lowercase();let c=db::conn()?;let mut s=err(c.prepare("SELECT id,entity_type,title,details,score FROM (
+SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
+UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+UNION ALL SELECT id,'issue',title,project_id || ' #' || number,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM issues WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+UNION ALL SELECT id,'channel',coalesce(name,''),description,CASE WHEN lower(coalesce(name,''))=?2 THEN 100 ELSE 40 END FROM channels WHERE archived=0 AND (lower(coalesce(name,'')) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+UNION ALL SELECT d.id,'document',d.title,d.container_type,CASE WHEN lower(d.title)=?2 THEN 100 ELSE 45 END FROM documents d WHERE d.archived=0 AND (lower(d.title) LIKE ?1 OR lower(coalesce(d.body,'')) LIKE ?1) AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
+UNION ALL SELECT id,'review',title,project_id || ' #' || number,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM reviews WHERE lower(title) LIKE ?1
+UNION ALL SELECT m.id,'meeting',m.title,m.location,CASE WHEN lower(m.title)=?2 THEN 100 ELSE 45 END FROM meetings m WHERE m.archived=0 AND (lower(m.title) LIKE ?1 OR lower(coalesce(m.description,'')) LIKE ?1) AND (m.organizer_id=?3 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?3) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))
+) ORDER BY score DESC,title COLLATE NOCASE LIMIT ?4"))?;let rows=err(s.query_map(params![pattern,exact,profile_id,limit.unwrap_or(30).clamp(1,100)],|r|Ok(GotoResult{id:r.get(0)?,entity_type:r.get(1)?,title:r.get(2)?,details:r.get(3)?,score:r.get(4)?})))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string());rows}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CalendarItem {
@@ -339,7 +348,7 @@ pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) 
     if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
     let c = db::conn()?;
     let mut items = Vec::new();
-    let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3)"))?;
+    let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))"))?;
     for row in err(meetings.query_map(params![range_start, range_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None })))? { items.push(row.map_err(|e| e.to_string())?); }
     let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?3))))"))?;
     for row in err(todos.query_map(params![range_start, range_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id,kind:"task".into(),title,starts_at,ends_at:None,project_id}); }
@@ -362,7 +371,7 @@ pub fn dashboard_aggregate( profile_id: String) -> Result<Dashboard> {
     let now = Utc::now();
     let today = now.date_naive().to_string();
     let end = now + Duration::days(7);
-    Ok(Dashboard { open_todos: list_todos(profile_id.clone(), Some(false))?, assigned_issues, meeting_occurrences: meetings::expand_meeting_occurrences(now.timestamp(), end.timestamp())?, unread_notifications: list_notifications(profile_id, Some(true))?, current_absences: current_absences_on(&c, &today)? })
+    Ok(Dashboard { open_todos: list_todos(profile_id.clone(), Some(false))?, assigned_issues, meeting_occurrences: meetings::expand_meeting_occurrences_scoped(now.timestamp(), end.timestamp(), profile_id.clone())?, unread_notifications: list_notifications(profile_id, Some(true))?, current_absences: current_absences_on(&c, &today)? })
 }
 
 #[cfg(test)]
