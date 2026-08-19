@@ -1,3 +1,7 @@
+@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-SemiBold.ttf") format("truetype"); font-weight:600; font-style:normal; font-display:swap; }
+@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight:700 900; font-style:normal; font-display:swap; }
+
 * { box-sizing: border-box; }
 
 /* Theme: the sole color source for the Space UI. */
@@ -23,8 +27,8 @@
   --success: #a7dbaa;
   --success-surface: #294633;
   --overlay: rgba(7, 12, 10, .78);
-  --font-body: Inter, system-ui, sans-serif;
-  --font-head: Inter, system-ui, sans-serif;
+  --font-body: "Gaia Inter";
+  --font-head: "Gaia Inter";
   font-family: var(--font-body);
   font-size: 13px;
   line-height: 1.45;
