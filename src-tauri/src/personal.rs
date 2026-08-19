@@ -111,6 +111,7 @@ pub fn todo_assigned_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND t.project_id IS NOT NULL AND a.profile_id=?2)", params![id, profile_id], |row| row.get(0)))
 }
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn project_member_ids(project_id: String) -> Result<Vec<String>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT profile_id FROM (SELECT created_by AS profile_id FROM projects WHERE id=?1 AND created_by IS NOT NULL UNION SELECT profile_id FROM project_members WHERE project_id=?1) ORDER BY profile_id"))?;

@@ -188,6 +188,7 @@ enum CommandPolicy {
     ProjectWrite,
     CalendarRead,
     ProjectTodoRead,
+    SessionIdentityWrite,
     Unavailable,
 }
 
@@ -204,6 +205,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
+        "create_meeting" | "create_document" | "save_document" | "restore_doc_version" => CommandPolicy::SessionIdentityWrite,
         "app_info"
         | "join_meeting_call"
         | "start_livekit_server"
@@ -226,12 +228,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_cf_definition"
         | "create_channel"
         | "create_deploy_target"
-        | "create_document"
         | "create_document_folder"
         | "create_entity_channel" => CommandPolicy::Session,
         "create_issue"
         | "create_issue_status"
-        | "create_meeting"
         | "create_message"
         | "create_package_repository"
         | "create_pipeline_script" => CommandPolicy::Session,
@@ -337,11 +337,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "remove_issue_link"
         | "remove_reaction"
         | "remove_team_membership"
-        | "restore_doc_version"
         | "save_board_column" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
-        | "save_document"
         | "save_planning_tag"
         | "save_subscription_setting"
         | "save_swimlane" => CommandPolicy::Session,
@@ -398,6 +396,9 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
                         | "actingProfileId"
                         | "recipient_id"
                         | "recipientId"
+                        | "organizer_id"
+                        | "organizerId"
+                        | "actor"
                 ) {
                     *child = json!(profile_id);
                 } else {
@@ -412,6 +413,14 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
         }
         _ => {}
     }
+}
+
+fn bind_required_object_identity(body: &mut Value, object_name: &str, snake_key: &str, camel_key: &str, profile_id: &str) -> Result<(), String> {
+    let object = body.get_mut(object_name).and_then(Value::as_object_mut).ok_or_else(|| format!("invalid argument `{object_name}`"))?;
+    if let Some(value) = object.get_mut(snake_key) { *value = json!(profile_id); }
+    else if let Some(value) = object.get_mut(camel_key) { *value = json!(profile_id); }
+    else { object.insert(snake_key.to_string(), json!(profile_id)); }
+    Ok(())
 }
 
 fn project_owner(project_id: &str) -> Result<Option<String>, String> {
@@ -504,6 +513,12 @@ fn authorize_command(
             let notification_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             if notification_owned_by(&user.profile_id, &notification_id) { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "only the recipient can change this notification")) }
         }
+        CommandPolicy::SessionIdentityWrite => match name {
+            "create_meeting" => bind_required_object_identity(body, "meeting", "organizer_id", "organizerId", &user.profile_id),
+            "create_document" => bind_required_object_identity(body, "document", "created_by", "createdBy", &user.profile_id),
+            "save_document" | "restore_doc_version" => { put_arg(body, "actor", json!(user.profile_id)); Ok(()) }
+            _ => unreachable!("identity-write policy must name an identity-write command"),
+        }.map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
         CommandPolicy::Session => {
             if matches!(
                 name,
@@ -1005,5 +1020,29 @@ mod tests {
         assert!(value["value"].as_array().unwrap().is_empty(), "non-members receive no project todos");
         let (status, _) = call(cookie("ta"), "invent_a_backdoor", json!({})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn meeting_and_document_identity_writes_rebind_the_session_profile() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+
+        let (status, value) = call(cookie("ta"), "create_meeting", json!({"meeting":{"id":"identity-meeting","title":"Alice meeting","description":null,"starts_at":1893456000,"ends_at":1893459600,"rrule":null,"location":null,"organizer_id":"pb","channel_id":null,"archived":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let organizer: Option<String> = c.query_row("SELECT organizer_id FROM meetings WHERE id='identity-meeting'", [], |row| row.get(0)).unwrap();
+        assert_eq!(organizer.as_deref(), Some("pa"));
+
+        let (status, value) = call(cookie("ta"), "create_document", json!({"document":{"id":"identity-document","container_type":"my-docs","container_id":"pa","folder_id":null,"doc_type":"text","title":"Alice document","body":"first","version":1,"archived":false,"created_by":"pb"}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let creator: Option<String> = c.query_row("SELECT created_by FROM documents WHERE id='identity-document'", [], |row| row.get(0)).unwrap();
+        assert_eq!(creator.as_deref(), Some("pa"));
+
+        let (status, value) = call(cookie("ta"), "save_document", json!({"id":"identity-document","title":"Alice document","body":"second","actor":"pb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, value) = call(cookie("ta"), "restore_doc_version", json!({"document_id":"identity-document","version":1,"actor":"pb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let authors: Vec<Option<String>> = c.prepare("SELECT created_by FROM doc_versions WHERE document_id='identity-document' ORDER BY version").unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(authors, vec![Some("pa".into()), Some("pa".into()), Some("pa".into())]);
     }
 }
