@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -122,6 +122,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "projects", "deadline", "TEXT")?;
         tx.execute_batch(SCHEMA_V7)?;
     }
+    if version < 8 {
+        tx.execute_batch(SCHEMA_V8)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -223,6 +226,12 @@ pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
 pub(crate) const SCHEMA_V7: &str = r#""#;
+/// Explicit project membership for group-scoped resources. Project creators remain
+/// members implicitly, preserving pre-membership projects without a backfill.
+pub(crate) const SCHEMA_V8: &str = r#"
+CREATE TABLE IF NOT EXISTS project_members (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(project_id, profile_id));
+CREATE INDEX IF NOT EXISTS project_members_profile ON project_members(profile_id);
+"#;
 
 fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;

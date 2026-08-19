@@ -72,12 +72,23 @@ fn assignee_is_active(c: &Connection, profile_id: &str) -> Result<bool> {
     let active: i64 = err(c.query_row("SELECT count(*) FROM users WHERE profile_id=?1 AND active=1", [profile_id], |row| row.get(0)))?;
     Ok(active > 0)
 }
+fn normalized_project_id(project_id: Option<String>) -> Option<String> {
+    project_id.and_then(|id| (!id.trim().is_empty()).then(|| id.trim().to_string()))
+}
+fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
+    err(c.query_row("SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2)))", params![project_id, profile_id], |row| row.get(0)))
+}
+pub fn project_member_by(project_id: &str, profile_id: &str) -> Result<bool> {
+    project_member_on(&db::conn()?, project_id, profile_id)
+}
 /// Caller must run this inside a transaction: validation and rewrite are one atomic unit,
 /// so one invalid assignee rolls the whole todo write back.
-fn replace_assignees(c: &Connection, todo_id: &str, ids: &[String]) -> Result<()> {
+fn replace_assignees(c: &Connection, todo_id: &str, project_id: Option<&str>, ids: &[String]) -> Result<()> {
     let ids = clean_assignees(ids);
+    if project_id.is_none() && !ids.is_empty() { return Err("assignment requires a project todo".into()); }
     for pid in &ids {
         if !assignee_is_active(c, pid)? { return Err(format!("Assignee profile is not active: {pid}")); }
+        if !project_member_on(c, project_id.expect("non-empty assignees require project"), pid)? { return Err(format!("Assignee must be a project member: {pid}")); }
     }
     err(c.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [todo_id]))?;
     for pid in &ids {
@@ -90,10 +101,21 @@ pub fn todo_owner(id: &str) -> Result<Option<String>> {
     let c = db::conn()?;
     err(c.query_row("SELECT profile_id FROM todos WHERE id=?1", [id], |row| row.get::<_, String>(0)).optional())
 }
-/// True only when the profile owns the personal todo.
+/// Group todos are readable by their owner, project members, and assignees. Personal
+/// todos stay owner-only, including legacy personal rows that still have assignees.
 pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
-    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos WHERE id=?1 AND profile_id=?2)", params![id, profile_id], |row| row.get(0)))
+    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t WHERE t.id=?1 AND (t.profile_id=?2 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)))))", params![id, profile_id], |row| row.get(0)))
+}
+pub fn todo_assigned_by(id: &str, profile_id: &str) -> Result<bool> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND t.project_id IS NOT NULL AND a.profile_id=?2)", params![id, profile_id], |row| row.get(0)))
+}
+pub fn project_member_ids(project_id: String) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare("SELECT profile_id FROM (SELECT created_by AS profile_id FROM projects WHERE id=?1 AND created_by IS NOT NULL UNION SELECT profile_id FROM project_members WHERE project_id=?1) ORDER BY profile_id"))?;
+    let ids = err(statement.query_map([project_id], |row| row.get::<_, String>(0)))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(ids)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
@@ -105,8 +127,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    // Personal todos are visible only to their owner; assignees never receive their contents.
-    let mut statement = err(c.prepare("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -123,9 +144,10 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     if input.profile_id.trim().is_empty() || input.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
     let id = input.id.unwrap_or_else(|| new_id("todo"));
+    let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![id, input.profile_id, input.content.trim(), input.due_date, input.project_id.filter(|id| !id.trim().is_empty()), input.done, input.source_entity_type, input.source_entity_id]))?;
-    replace_assignees(&tx, &id, &input.assignee_ids)?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id]))?;
+    replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
 }
@@ -137,18 +159,19 @@ pub fn update_todo( todo: Todo) -> Result<Todo> {
 fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     if todo.profile_id.trim().is_empty() || todo.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
+    let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.project_id.filter(|id| !id.trim().is_empty()), todo.done, todo.source_entity_type, todo.source_entity_id]))?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
     if updated == 0 { return Err("Todo not found".into()); }
-    replace_assignees(&tx, &todo.id, &todo.assignee_ids)?;
+    replace_assignees(&tx, &todo.id, project_id.as_deref(), &todo.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_project_todos(project_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+pub fn list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE t.project_id=?1 AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
-    let mut todos = err(statement.query_map(params![project_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut todos = err(statement.query_map(params![project_id, profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
     Ok(todos)
@@ -164,6 +187,16 @@ fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
     if err(tx.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 { return Err("Todo not found".into()); }
     err(tx.commit())?;
     Ok(())
+}
+/// Dedicated completion-only command. Authorization lives in the web chokepoint;
+/// this function never accepts a wider todo payload.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
+    let mut c = db::conn()?;
+    let tx = err(c.transaction())?;
+    if err(tx.execute("UPDATE todos SET done=?2,updated_at=unixepoch() WHERE id=?1", params![id, done]))? == 0 { return Err("Todo not found".into()); }
+    err(tx.commit())?;
+    todo_on(&c, &id)?.ok_or_else(|| "Todo not found".into())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -298,8 +331,8 @@ pub struct CalendarItem {
     pub ends_at: Option<i64>,
     pub project_id: Option<String>,
 }
-/// Calendar is derived from session-visible records only: own/assigned todos,
-/// organized/attended meetings, and projects owned by the session profile.
+/// Calendar is derived from session-visible records only: own personal/group todos,
+/// project-member or assignee group todos, organized/attended meetings, and owned projects.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) -> Result<Vec<CalendarItem>> {
     if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
@@ -307,7 +340,7 @@ pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) 
     let mut items = Vec::new();
     let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3)"))?;
     for row in err(meetings.query_map(params![range_start, range_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None })))? { items.push(row.map_err(|e| e.to_string())?); }
-    let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR a.profile_id=?3)"))?;
+    let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?3))))"))?;
     for row in err(todos.query_map(params![range_start, range_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id,kind:"task".into(),title,starts_at,ends_at:None,project_id}); }
     let mut deadlines = err(c.prepare("SELECT id,name,deadline FROM projects WHERE archived=0 AND created_by=?1 AND deadline IS NOT NULL AND unixepoch(deadline)>=?2 AND unixepoch(deadline)<?3"))?;
     for row in err(deadlines.query_map(params![profile_id, range_start, range_end], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))))? { let (id,name,date)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid project deadline")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id:format!("deadline-{id}"),kind:"deadline".into(),title:format!("{name} deadline"),starts_at,ends_at:None,project_id:Some(id)}); }
@@ -338,18 +371,19 @@ mod tests {
         let c = db::open_in_memory().unwrap();
         db::migrate(&c).unwrap();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('r','third','Third',1)", []).unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO project_members(project_id,profile_id) VALUES('project','q'),('project','r');").unwrap();
         c
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
         drop(statement);
         for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
         todos
     }
     fn todo_input(id: &str, owner: &str, assignees: &[&str]) -> TodoInput {
-        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: None, done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
+        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: Some("project".into()), done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
     }
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {
@@ -391,10 +425,10 @@ mod tests {
     }
     #[test]
     fn multi_assignee_roundtrip_keeps_personal_todos_owner_only() {
-        let c = conn();
+        let mut c = conn();
         // Owner 'p', assigned to 'q' and 'r'.
         c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t1','p','Shared task')", []).unwrap();
-        replace_assignees(&c, "t1", &["q".into(), "r".into(), "q".into(), " ".into()]).unwrap();
+        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('t1','q'),('t1','r')", []).unwrap();
         // Owner 'q', no assignees.
         c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t2','q','Q private task')", []).unwrap();
         // Roundtrip: distinct, blank-stripped.
@@ -406,8 +440,11 @@ mod tests {
         assert!(list_todos_on(&c, "r", true).is_empty());
         assert_eq!(list_todos_on(&c, "q", true).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t2"]);
         // Reassign clears prior links.
-        replace_assignees(&c, "t1", &["r".into()]).unwrap();
-        assert_eq!(assignees_on(&c, "t1").unwrap(), vec!["r".to_string()]);
+        // Legacy personal rows remain untouched/read-private, but their next write
+        // must clear assignments or attach a project.
+        let mut legacy = todo_on(&c, "t1").unwrap().unwrap();
+        legacy.content = "Changed".into();
+        assert!(update_todo_on(&mut c, legacy).unwrap_err().contains("assignment requires a project todo"));
         assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
     #[test]
@@ -429,8 +466,8 @@ mod tests {
     #[test]
     fn goto_search_hits_three_entity_types() {
         let c = conn();
-        c.execute("INSERT INTO projects(id,name,key,created_at) VALUES('project','Search alpha','SEA',1)", []).unwrap();
-        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('issue','project',1,'Search issue',0)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_at) VALUES('search-project','Search alpha','SEA',1)", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('issue','search-project',1,'Search issue',0)", []).unwrap();
         c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('channel','public','Search channel',0)", []).unwrap();
         let results = goto_search_on(&c, "search", 20).unwrap();
         assert!(results.iter().any(|result| result.entity_type == "project"));

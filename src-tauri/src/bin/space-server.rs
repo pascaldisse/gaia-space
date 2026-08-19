@@ -151,10 +151,11 @@ fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
 /// Todo authorization policy (web mode), enforced entirely from the session:
 /// * identity — `profile_id` on the request body is always overwritten with the session profile,
 ///   so a client can neither read as, nor create todos for, somebody else.
-/// * read/write/delete (`list_todos`, `dashboard_aggregate`, `update_todo`, `delete_todo`) — owner only.
+/// * owner/admin — create, full update, delete; group reads are additionally SQL-scoped to
+///   project members and assignees.
+/// * assignee — the dedicated completion-only command, never a wider todo payload.
 ///
-/// A todo that exists but belongs to somebody else is answered with 403, exactly like a
-/// missing one, so ownership is never disclosed.
+/// A todo that exists but is not readable is answered with 403, exactly like a missing one.
 fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
     personal::todo_owner(todo_id).ok().flatten().is_some_and(|owner| owner == profile_id)
 }
@@ -180,7 +181,8 @@ enum CommandPolicy {
     Session,
     TodoRead,
     TodoCreate,
-    TodoWrite,
+    TodoOwnerWrite,
+    TodoCompletionWrite,
     NotificationWrite,
     ProjectCreate,
     ProjectWrite,
@@ -197,9 +199,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_project" => CommandPolicy::ProjectWrite,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
-        "list_project_todos" => CommandPolicy::ProjectTodoRead,
+        "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "delete_todo" => CommandPolicy::TodoWrite,
+        "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
+        "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "app_info"
         | "join_meeting_call"
@@ -462,25 +465,40 @@ fn authorize_command(
             }
             Ok(())
         }
-        CommandPolicy::TodoRead | CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::TodoRead => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::TodoCreate => Ok(()),
         CommandPolicy::CalendarRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
         }
         CommandPolicy::ProjectTodoRead => {
-            let project_id: String = arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            let visible: bool = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
-                .query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND (created_by=?2 OR ?3='admin'))", params![project_id, user.profile_id, user.role], |r| r.get(0))
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-            if visible { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "project access denied")) }
+            // SQL applies the row-level todo scope. Member-directory reads themselves
+            // are limited to project members (or the global admin).
+            if name == "list_project_member_ids" {
+                let project_id: String = arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if user.role != "admin" && !personal::project_member_by(&project_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? {
+                    return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+                }
+            }
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
         }
-        CommandPolicy::TodoWrite => {
+        CommandPolicy::TodoOwnerWrite => {
             let todo_id: Option<String> = if name == "update_todo" {
                 body.get("todo").and_then(|todo| todo.get("id")).and_then(Value::as_str).map(str::to_string)
             } else { arg(body, "id").ok() };
             let Some(todo_id) = todo_id else { return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`")); };
-            if !todo_owned_by(&user.profile_id, &todo_id) { return Err(err(StatusCode::FORBIDDEN, "only the owner can change this todo")); }
+            if user.role != "admin" && !todo_owned_by(&user.profile_id, &todo_id) { return Err(err(StatusCode::FORBIDDEN, "only the owner can change this todo")); }
             Ok(())
+        }
+        CommandPolicy::TodoCompletionWrite => {
+            let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if user.role == "admin" || todo_owned_by(&user.profile_id, &todo_id) { return Ok(()); }
+            let assigned = personal::todo_assigned_by(&todo_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            if assigned { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "only the owner or an assignee can complete this todo")) }
         }
         CommandPolicy::NotificationWrite => {
             let notification_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -731,7 +749,8 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
-    "list_project_todos" => personal::list_project_todos(project_id: String, include_done: Option<bool>),
+    "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
+    "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
@@ -788,6 +807,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "update_team" => platform::update_team(team: platform::Team),
     "update_team_membership" => platform::update_team_membership(membership: platform::TeamMembership),
     "update_todo" => personal::update_todo(todo: personal::Todo),
+    "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
     })
 }
 fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','default-org','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
@@ -822,9 +842,9 @@ mod tests {
         db::set_db_path(path);
         let c = db::conn().expect("database");
         db::seed(&c).expect("seed");
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1)", []).unwrap();
-        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1)", []).unwrap();
-        c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600)", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1),('pd','dora','Dora',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
+        c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
     }
 
     #[tokio::test]
@@ -835,8 +855,8 @@ mod tests {
         let (status, _) = call(HeaderMap::new(), "list_todos", json!({})).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-        // Spoofed owner and spoofed assignee-owner are both replaced by the session profile.
-        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pb","content":"Alice task","done":false,"assignee_ids":["pb"]}})).await;
+        // Spoofed owner is replaced by the session profile; personal assignments are rejected.
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pb","content":"Alice task","done":false,"assignee_ids":[]}})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let todo = value["value"].clone();
         assert_eq!(todo["profile_id"], json!("pa"), "client-supplied owner must be ignored");
@@ -878,6 +898,61 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
         assert_eq!(orphans, 0);
+    }
+
+    #[tokio::test]
+    async fn todo_scope_matrix_blocks_spoofs_and_allows_assignee_completion_only() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('group','Group','GROUP','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('group','pb');").unwrap();
+
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Shared task","due_date":"2030-01-02","project_id":"group","done":false,"source_entity_type":null,"source_entity_id":null,"assignee_ids":["pb"]}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let shared = value["value"].clone();
+        let id = shared["id"].as_str().unwrap().to_string();
+        assert_eq!(shared["profile_id"], json!("pa"), "owner spoof must be bound to the session");
+
+        // Legacy personal assignments stay private; the next write will reject them.
+        c.execute_batch("INSERT INTO todos(id,profile_id,content) VALUES('legacy-personal','pa','Private legacy'); INSERT INTO todo_assignees(todo_id,profile_id) VALUES('legacy-personal','pb');").unwrap();
+
+        // Non-member: neither a list nor dashboard/calendar aggregate exposes the task.
+        let (status, value) = call(cookie("td"), "list_todos", json!({"profile_id":"pa","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(cookie("td"), "dashboard_aggregate", json!({"profile_id":"pa"})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"]["open_todos"].as_array().unwrap().is_empty());
+        let (status, value) = call(cookie("td"), "calendar_aggregate", json!({"profile_id":"pa","range_start":1893456000,"range_end":1893715200})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().iter().all(|item| item["id"].as_str() != Some(id.as_str())));
+        let (status, value) = call(cookie("td"), "list_project_todos", json!({"project_id":"group","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty());
+
+        // Assignee reads the group task, never the other user's personal todo, and can
+        // only use the explicit completion path.
+        let (status, value) = call(cookie("tb"), "list_todos", json!({"profile_id":"pa","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["value"][0]["id"], json!(id));
+        assert!(value["value"].as_array().unwrap().iter().all(|todo| todo["id"].as_str() != Some("legacy-personal")));
+        let (status, value) = call(cookie("tb"), "list_project_todos", json!({"project_id":"group","include_done":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["value"][0]["id"], json!(id));
+        let (status, value) = call(cookie("tb"), "set_todo_completion", json!({"id":id,"done":true})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let mut forged = shared.clone();
+        forged["content"] = json!("Bob rewrote this");
+        let (status, _) = call(cookie("tb"), "update_todo", json!({"todo":forged})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // New personal assignments and non-member group assignments fail loudly.
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Private","done":false,"assignee_ids":["pb"]}})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(value["error"].as_str().unwrap_or_default().contains("assignment requires a project todo"), "{value}");
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Bad assignment","project_id":"group","done":false,"assignee_ids":["pd"]}})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(value["error"].as_str().unwrap_or_default().contains("Assignee must be a project member"));
     }
 
     #[tokio::test]
@@ -925,8 +1000,9 @@ mod tests {
         let (status, value) = call(cookie("tb"), "calendar_aggregate", json!({"profile_id":"pa","range_start":1893456000,"range_end":1893715200})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert!(value["value"].as_array().unwrap().is_empty());
-        let (status, _) = call(cookie("tb"), "list_project_todos", json!({"project_id":"alice-project","include_done":false})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, value) = call(cookie("tb"), "list_project_todos", json!({"project_id":"alice-project","include_done":false})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().is_empty(), "non-members receive no project todos");
         let (status, _) = call(cookie("ta"), "invent_a_backdoor", json!({})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
