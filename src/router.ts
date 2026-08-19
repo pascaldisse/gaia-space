@@ -28,7 +28,7 @@ const entityRoutes: Record<string, { view: string; segment: string; parent?: "pr
   issue:    { view: "Issues",       segment: "issues", parent: "project" },
   channel:  { view: "Chat",         segment: "channels" },
   document: { view: "Documents",    segment: "documents", container: true },
-  meeting:  { view: "Meetings",     segment: "meetings" },
+  meeting:  { view: "Calendar",     segment: "meetings" },
   profile:  { view: "Members",      segment: "profiles" },
   review:   { view: "Code Reviews", segment: "reviews" },
 };

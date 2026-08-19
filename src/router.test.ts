@@ -133,7 +133,8 @@ describe("grammar", () => {
 
   test("channels/meetings/profiles/projects/reviews resolve", () => {
     expect(parsePath("channels/c-1")).toMatchObject({ view: "Chat", entityType: "channel", entityId: "c-1" });
-    expect(parsePath("meetings/m-1")).toMatchObject({ view: "Meetings", entityType: "meeting", entityId: "m-1" });
+    // Meetings were merged into Calendar: the /meetings/ segment is kept so old links resolve.
+    expect(parsePath("meetings/m-1")).toMatchObject({ view: "Calendar", entityType: "meeting", entityId: "m-1" });
     expect(parsePath("profiles/pr-1")).toMatchObject({ view: "Members", entityType: "profile", entityId: "pr-1" });
     expect(parsePath("projects/p-1")).toMatchObject({ view: "Projects", entityType: "project", entityId: "p-1" });
     expect(parsePath("reviews/r-1")).toMatchObject({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
@@ -142,7 +143,7 @@ describe("grammar", () => {
 
   test("ids with unusual characters survive a round trip", () => {
     const id = "a/b c#d?e";
-    const path = buildPath({ view: "Meetings", entityType: "meeting", entityId: id });
+    const path = buildPath({ view: "Calendar", entityType: "meeting", entityId: id });
     expect(parsePath(path).entityId).toBe(id);
   });
 

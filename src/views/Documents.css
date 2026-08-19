@@ -83,10 +83,28 @@
   border-bottom: 1px solid #243050;
   flex-wrap: wrap;
 }
-.container-tabs button.active {
+.container-tabs button.active,
+.container-tabs .container-tab.active {
   background: #0d2f35;
   border-color: #00c2a8;
   color: #5fe6d4;
+}
+/* container tabs are real links (deep-linkable) but must read as controls */
+.container-tabs .container-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border: 1px solid var(--ctl-border, #2b3550);
+  border-radius: 8px;
+  background: var(--ctl-bg, #16213c);
+  color: #b9c2d4;
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: 500;
+}
+.container-tabs .container-tab:hover {
+  border-color: var(--accent, #00c2a8);
+  color: var(--text-strong, #fff);
 }
 .container-tabs .show-archived {
   margin-left: auto;

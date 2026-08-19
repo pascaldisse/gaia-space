@@ -11,7 +11,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: "overview", label: "Overview", icon: "home", views: ["Dashboard"] },
   { id: "tasks", label: "My tasks", icon: "check", views: ["To-Do", "Project Tasks"] },
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Issues", "Boards", "Repos", "Code Reviews", "Pipelines", "Packages"] },
-  { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
+  { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar"] },
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Chat"] },
   { id: "timeoff", label: "Time off", icon: "clock-nav", views: ["Absences"] },

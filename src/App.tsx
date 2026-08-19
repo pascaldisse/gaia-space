@@ -11,7 +11,6 @@ import Issues from "./views/Issues";
 import Boards from "./views/Boards";
 import Chat from "./views/Chat";
 import Documents from "./views/Documents";
-import Meetings from "./views/Meetings";
 import Calendar from "./views/Calendar";
 import ProjectTasks from "./views/ProjectTasks";
 import Packages from "./views/Packages";
@@ -31,7 +30,7 @@ import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } fro
 type View = { name:string; icon:IconName; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
-const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Documents",icon:"book-nav",component:Documents},{name:"Meetings",icon:"calendar",component:Meetings},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin}];
+const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Documents",icon:"book-nav",component:Documents},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
@@ -49,7 +48,9 @@ export default function App() {
   const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
-    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,settingsView].map(v=>({name:v.name})));
+    // "Meetings" is retained as an alias only: the destination is now Calendar,
+    // where meetings are created and answered. Old links must keep resolving.
+    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,settingsView].map(v=>v.name==="Calendar"?{name:v.name,aliases:["meetings"]}:{name:v.name}));
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();

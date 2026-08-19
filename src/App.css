@@ -652,6 +652,12 @@ textarea:focus {
 .topnav-item.secondary:hover { color: var(--text-strong); }
 .topnav-item.secondary.active { color: var(--text-strong); }
 
+/* Anchor reset: path routing turned many controls into real <a href> elements.
+   Browser-default blue+underline is unreadable on the dark surface, so links
+   inherit their surrounding colour and opt into decoration explicitly. */
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--text-strong); }
+
 /* section navigation: sub-tabs of the active grouped destination */
 .subnav { display: flex; align-items: center; gap: 4px; flex: none; height: 40px; padding: 0 16px; background: #0d1729; border-bottom: 1px solid #2b3550; overflow-x: auto; scrollbar-width: none; }
 .subnav::-webkit-scrollbar { display: none; }
