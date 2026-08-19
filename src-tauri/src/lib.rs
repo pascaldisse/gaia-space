@@ -4,31 +4,31 @@
 // Cargo.toml target-conditional dependency split. The mobile shell (iOS)
 // never compiles them; it's a thin webview pointed at a live server instead
 // (see `run()` below).
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod documents;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod issues;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod platform;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod review;
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod secretbox;
 
 #[cfg(feature = "desktop")]
