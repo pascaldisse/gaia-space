@@ -20,10 +20,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Deployment readiness
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_SECRETS_READY: ${{ secrets.SPACE_DEPLOY_HOST != '' && secrets.SPACE_DEPLOY_USER != '' && secrets.SPACE_DEPLOY_SSH_KEY != '' && secrets.SPACE_DEPLOY_KNOWN_HOSTS != '' }}
+    steps:
+      - name: Report deployment state
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/master" ]; then
+            echo "No deployment: non-production branch."
+          elif [ "${DEPLOY_SECRETS_READY}" != "true" ]; then
+            echo "No deployment: configure the four SPACE_DEPLOY_* repository secrets."
+          else
+            echo "Production deployment ready."
+          fi
+
   deploy:
     name: Build + deploy
+    needs: preflight
     runs-on: ubuntu-latest
-    if: ${{ secrets.SPACE_DEPLOY_HOST != '' && secrets.SPACE_DEPLOY_USER != '' && secrets.SPACE_DEPLOY_SSH_KEY != '' && secrets.SPACE_DEPLOY_KNOWN_HOSTS != '' }}
+    if: ${{ github.ref == 'refs/heads/master' && secrets.SPACE_DEPLOY_HOST != '' && secrets.SPACE_DEPLOY_USER != '' && secrets.SPACE_DEPLOY_SSH_KEY != '' && secrets.SPACE_DEPLOY_KNOWN_HOSTS != '' }}
     steps:
       - uses: actions/checkout@v4
 
