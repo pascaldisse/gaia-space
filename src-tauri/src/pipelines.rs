@@ -626,6 +626,21 @@ fn validate_repo_mode(mode: &str) -> Result<()> {
     }
 }
 
+/// A registry path segment must be one portable filename, never a path expression.
+fn validate_package_path_component(value: &str, field: &str) -> Result<()> {
+    if value.is_empty() || matches!(value, "." | "..") || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
+        return Err(format!("invalid package {field}: expected non-empty [A-Za-z0-9._-]+ path component"));
+    }
+    Ok(())
+}
+fn package_base_dir() -> PathBuf { std::env::temp_dir().join("packages") }
+/// Independently resolve the filesystem path; lexical validation alone never authorizes a write.
+fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
+    let canonical_base = fs::canonicalize(base_dir).map_err(|e| format!("cannot canonicalize package root: {e}"))?;
+    let canonical_path = fs::canonicalize(path).map_err(|e| format!("cannot canonicalize package path: {e}"))?;
+    if canonical_path.starts_with(&canonical_base) { Ok(canonical_path) } else { Err("package path resolves outside package root".into()) }
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
     let c = db::conn()?;
@@ -641,6 +656,7 @@ pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_package_repository( repo: PackageRepository) -> Result<()> {
+    validate_package_path_component(&repo.id, "repository id")?;
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
     let c = db::conn()?;
@@ -704,35 +720,34 @@ fn publish_package_version_tx(
     payload_filename: Option<&str>,
     payload_content: Option<&str>,
 ) -> Result<PackageVersion> {
-    let format: String = conn
-        .query_row("SELECT format FROM package_repositories WHERE id=?1", params![repository_id], |r| r.get(0))
-        .map_err(|_| format!("unknown package repository '{repository_id}'"))?;
+    validate_package_path_component(repository_id, "repository id")?;
+    validate_package_path_component(package_name, "name")?;
+    validate_package_path_component(version, "version")?;
+    if let Some(filename) = payload_filename { validate_package_path_component(filename, "payload filename")?; }
+    if payload_filename.is_some() != payload_content.is_some() { return Err("payload filename and content must be supplied together".into()); }
+    let format: String = conn.query_row("SELECT format FROM package_repositories WHERE id=?1", params![repository_id], |r| r.get(0)).map_err(|_| format!("unknown package repository '{repository_id}'"))?;
     let mut meta: serde_json::Value = match metadata_json {
         Some(s) if !s.trim().is_empty() => serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?,
         _ => serde_json::json!({}),
     };
-    if !meta.is_object() {
-        return Err("metadata must be a JSON object".into());
-    }
+    let Some(meta_object) = meta.as_object_mut() else { return Err("metadata must be a JSON object".into()); };
+    // Server-owned fields cannot be supplied to seed a deletion path.
+    meta_object.remove("_file_path"); meta_object.remove("_file_size"); meta_object.remove("_format");
     if let (Some(filename), Some(content)) = (payload_filename, payload_content) {
-        if filename.trim().is_empty() {
-            return Err("payload filename required when payload content is supplied".into());
-        }
+        fs::create_dir_all(base_dir).map_err(|e| e.to_string())?;
         let dir = base_dir.join(repository_id).join(package_name).join(version);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        canonical_path_within(base_dir, &dir)?;
         let file_path = dir.join(filename);
         fs::write(&file_path, content).map_err(|e| e.to_string())?;
-        meta["_file_path"] = serde_json::Value::String(file_path.display().to_string());
+        let canonical_file_path = canonical_path_within(base_dir, &file_path)?;
+        meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
     }
     meta["_format"] = serde_json::Value::String(format);
     let id = format!("{repository_id}::{package_name}::{version}");
-    conn.execute(
-        "INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json",
-        params![id, repository_id, package_name, version, meta.to_string()],
-    )
-    .map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json) VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json", params![id, repository_id, package_name, version, meta.to_string()]).map_err(|e| e.to_string())?;
     let created_at: i64 = conn.query_row("SELECT created_at FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
     Ok(PackageVersion { id, repository_id: repository_id.into(), package_name: package_name.into(), version: version.into(), metadata_json: Some(meta.to_string()), created_at })
 }
@@ -747,7 +762,7 @@ pub fn publish_package_version(
     payload_content: Option<String>,
 ) -> Result<PackageVersion> {
     let c = db::conn()?;
-    let base_dir = std::env::temp_dir().join("packages");
+    let base_dir = package_base_dir();
     publish_package_version_tx(&c, &base_dir, &repository_id, &package_name, &version, metadata_json.as_deref(), payload_filename.as_deref(), payload_content.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -757,7 +772,10 @@ pub fn delete_package_version( id: String) -> Result<()> {
     if let Some(m) = meta {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
             if let Some(p) = v.get("_file_path").and_then(|p| p.as_str()) {
-                let _ = fs::remove_file(p);
+                match canonical_path_within(&package_base_dir(), Path::new(p)) {
+                    Ok(path) => { let _ = fs::remove_file(path); }
+                    Err(e) => eprintln!("SECURITY: refusing package payload deletion for {id}: {e}"),
+                }
             }
         }
     }
@@ -920,11 +938,36 @@ mod tests {
         let file_path = meta["_file_path"].as_str().unwrap();
         assert!(Path::new(file_path).exists(), "payload file should exist at {file_path}");
         assert_eq!(fs::read_to_string(file_path).unwrap(), "fake package payload bytes");
+        assert!(Path::new(file_path).canonicalize().unwrap().starts_with(base_dir.canonicalize().unwrap()), "payload must resolve inside package base dir");
 
         // oversized/unsupported format rejected before touching disk.
         conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-2','demo-x','npm','HOSTING')", []).unwrap();
         assert!(publish_package_version_tx(&conn, &base_dir, "repo-2", "x", "1.0.0", Some("not json"), None, None).is_err());
         sweep(&db_path);
         sweep(&base_dir);
+    }
+    #[test]
+    fn package_publish_rejects_unsafe_repository_ids() {
+        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); let base_dir=temp_dir("unsafe-repo");
+        for repository_id in ["..", "..%2f", "/tmp/package-escape", "repo/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,repository_id,"pkg","1.0.0",None,Some("pkg.tgz"),Some("payload")).is_err(), "repository id {repository_id:?}"); }
+        sweep(&db_path); sweep(&base_dir);
+    }
+    #[test]
+    fn package_publish_rejects_unsafe_package_names() {
+        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-name");
+        for package_name in ["..", "..%2f", "/tmp/package-escape", "pkg/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe",package_name,"1.0.0",None,Some("pkg.tgz"),Some("payload")).is_err(), "package name {package_name:?}"); }
+        sweep(&db_path); sweep(&base_dir);
+    }
+    #[test]
+    fn package_publish_rejects_unsafe_versions() {
+        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-version");
+        for version in ["..", "..%2f", "/tmp/package-escape", "1.0/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe","pkg",version,None,Some("pkg.tgz"),Some("payload")).is_err(), "version {version:?}"); }
+        sweep(&db_path); sweep(&base_dir);
+    }
+    #[test]
+    fn package_publish_rejects_unsafe_payload_filenames() {
+        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-filename");
+        for filename in ["..", "..%2f", "/tmp/package-escape", "payload/nested.tgz"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe","pkg","1.0.0",None,Some(filename),Some("payload")).is_err(), "payload filename {filename:?}"); }
+        sweep(&db_path); sweep(&base_dir);
     }
 }

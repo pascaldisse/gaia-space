@@ -1,4 +1,4 @@
-use axum::{extract::Path, http::{header, HeaderMap, HeaderValue, StatusCode}, response::IntoResponse, routing::{get, patch, post}, Json, Router};
+use axum::{extract::{ConnectInfo, Path, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::IntoResponse, routing::{get, patch, post}, Json, Router};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
 use gaia_space_lib::{db, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
@@ -6,9 +6,26 @@ use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{env, net::SocketAddr, path::PathBuf};
+use std::{collections::HashMap, env, net::{IpAddr, SocketAddr}, path::PathBuf, sync::{Arc, Mutex}, time::{Duration, Instant}};
 
-#[derive(Clone)] struct App;
+const LOGIN_MAX_FAILED_ATTEMPTS: u32 = 5;
+const LOGIN_LOCKOUT_WINDOW: Duration = Duration::from_secs(60);
+#[derive(Clone)] struct App { login_limiter: Arc<Mutex<LoginRateLimiter>> }
+impl App { fn new() -> Self { Self { login_limiter: Arc::new(Mutex::new(LoginRateLimiter::default())) } } }
+#[derive(Default)] struct LoginRateLimiter { accounts: HashMap<String, LoginFailures>, source_ips: HashMap<IpAddr, LoginFailures> }
+#[derive(Default)] struct LoginFailures { attempts: u32, locked_until: Option<Instant> }
+impl LoginRateLimiter {
+    fn key_is_locked<K: std::cmp::Eq + std::hash::Hash>(entries: &mut HashMap<K, LoginFailures>, key: &K, now: Instant) -> bool { let until=entries.get(key).and_then(|failure| failure.locked_until); if until.is_some_and(|until| until<=now) { entries.remove(key); false } else { until.is_some() } }
+    fn is_locked(&mut self, account: &str, source_ip: IpAddr) -> bool { let now=Instant::now(); Self::key_is_locked(&mut self.accounts,&account.to_string(),now) || Self::key_is_locked(&mut self.source_ips,&source_ip,now) }
+    fn record_key_failure<K: std::cmp::Eq + std::hash::Hash>(entries: &mut HashMap<K, LoginFailures>, key: K, now: Instant) -> bool { let entry=entries.entry(key).or_default(); entry.attempts=entry.attempts.saturating_add(1); if entry.attempts>=LOGIN_MAX_FAILED_ATTEMPTS { entry.locked_until=Some(now+LOGIN_LOCKOUT_WINDOW); } entry.locked_until.is_some_and(|until| until>now) }
+    fn record_failure(&mut self, account: &str, source_ip: IpAddr) -> bool { let now=Instant::now(); let account_locked=Self::record_key_failure(&mut self.accounts,account.to_string(),now); let source_ip_locked=Self::record_key_failure(&mut self.source_ips,source_ip,now); account_locked || source_ip_locked }
+    fn reset(&mut self, account: &str, source_ip: IpAddr) { self.accounts.remove(account); self.source_ips.remove(&source_ip); }
+}
+fn login_source_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+    // Loopback-only service: forwarded source is trusted only from the local reverse proxy.
+    if peer.ip().is_loopback() { if let Some(ip)=headers.get("x-forwarded-for").and_then(|v|v.to_str().ok()).and_then(|v|v.split(',').next()).and_then(|v|v.trim().parse().ok()) { return ip; } }
+    peer.ip()
+}
 #[derive(Serialize)] struct User { id:String, username:String, display_name:String, profile_id:String, role:String }
 #[derive(Deserialize)] struct Login { username:String, password:String }
 #[derive(Deserialize)] struct Password { current:String, next:String }
@@ -19,7 +36,17 @@ fn hash(password:&str)->Result<String,String>{ let salt=SaltString::generate(&mu
 fn token()->String { let mut b=[0u8;32]; rand::thread_rng().fill_bytes(&mut b); hex::encode(b) }
 fn user_by_token(headers:&HeaderMap)->Result<User, (StatusCode,Json<Value>)> { let t=headers.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))).ok_or_else(||err(StatusCode::UNAUTHORIZED,"unauthorized"))?; let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,role:r.get(4)?})).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized")) }
 fn admin(h:&HeaderMap)->Result<User,(StatusCode,Json<Value>)>{let u=user_by_token(h)?;if u.role=="admin" {Ok(u)}else{Err(err(StatusCode::FORBIDDEN,"admin required"))}}
-async fn login(Json(x):Json<Login>)->impl IntoResponse { let c=match db::conn(){Ok(x)=>x,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()}; let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1",[&x.username],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?))); let Ok((id,username,ph,display_name,profile_id,role))=row else { return err(StatusCode::UNAUTHORIZED,"invalid username or password").into_response() }; let ok=PasswordHash::new(&ph).ok().and_then(|p|Argon2::default().verify_password(x.password.as_bytes(),&p).ok()).is_some(); if !ok{return err(StatusCode::UNAUTHORIZED,"invalid username or password").into_response()} let t=token(); let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]); let mut resp=Json(json!({"user":User{id,username,display_name,profile_id,role}})).into_response(); resp.headers_mut().insert(header::SET_COOKIE,match HeaderValue::from_str(&format!("space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000")){Ok(v)=>v,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response()});resp }
+async fn login(State(app): State<App>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(x): Json<Login>) -> impl IntoResponse {
+    let account=x.username.trim().to_string(); let source_ip=login_source_ip(&headers,peer);
+    { let mut limiter=match app.login_limiter.lock(){Ok(limiter)=>limiter,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"login limiter unavailable").into_response()}; if limiter.is_locked(&account,source_ip) { eprintln!("SECURITY: refused locked login username={account:?} source_ip={source_ip}"); return err(StatusCode::TOO_MANY_REQUESTS,"too many failed login attempts; retry later").into_response(); } }
+    let c=match db::conn(){Ok(c)=>c,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response()};
+    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
+    let Ok((id,username,ph,display_name,profile_id,role))=row else { let locked=app.login_limiter.lock().map(|mut limiter|limiter.record_failure(&account,source_ip)).unwrap_or(true); eprintln!("SECURITY: failed login username={account:?} source_ip={source_ip} locked={locked}"); return err(if locked{StatusCode::TOO_MANY_REQUESTS}else{StatusCode::UNAUTHORIZED},if locked{"too many failed login attempts; retry later"}else{"invalid username or password"}).into_response() };
+    let ok=PasswordHash::new(&ph).ok().and_then(|p|Argon2::default().verify_password(x.password.as_bytes(),&p).ok()).is_some();
+    if !ok { let locked=app.login_limiter.lock().map(|mut limiter|limiter.record_failure(&account,source_ip)).unwrap_or(true); eprintln!("SECURITY: failed login username={account:?} source_ip={source_ip} locked={locked}"); return err(if locked{StatusCode::TOO_MANY_REQUESTS}else{StatusCode::UNAUTHORIZED},if locked{"too many failed login attempts; retry later"}else{"invalid username or password"}).into_response() }
+    if app.login_limiter.lock().map(|mut limiter|limiter.reset(&account,source_ip)).is_err() { return err(StatusCode::INTERNAL_SERVER_ERROR,"login limiter unavailable").into_response(); }
+    let t=token(); let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]); let mut resp=Json(json!({"user":User{id,username,display_name,profile_id,role}})).into_response(); resp.headers_mut().insert(header::SET_COOKIE,match HeaderValue::from_str(&format!("space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000")){Ok(v)=>v,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response()});resp
+}
 async fn me(h:HeaderMap)->impl IntoResponse{match user_by_token(&h){Ok(u)=>Json(json!({"user":u})).into_response(),Err(e)=>e.into_response()}}
 async fn logout(h:HeaderMap)->impl IntoResponse{if let Some(t)=h.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))){if let Ok(c)=db::conn(){let _=c.execute("DELETE FROM sessions WHERE token=?1",[t]);}}let mut r=Json(json!({"ok":true})).into_response();r.headers_mut().insert(header::SET_COOKIE,HeaderValue::from_static("space_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"));r}
 async fn change_password(h: HeaderMap, Json(x): Json<Password>) -> impl IntoResponse {
@@ -826,7 +853,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     })
 }
 fn bootstrap(){let c=db::conn().expect("database");db::seed(&c).expect("seed");let _=platform::seed_rights();let n:i64=c.query_row("SELECT count(*) FROM users",[],|r|r.get(0)).unwrap();if n==0{let pw=env::var("SPACE_ADMIN_PASSWORD").unwrap_or_else(|_|{let p=token();println!("SPACE_ADMIN_PASSWORD={p}");p});c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','default-org','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();}}
-#[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/directory",get(directory)).route("/api/cmd/{command}",post(cmd)).with_state(App);let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app).await.unwrap();}
+#[tokio::main] async fn main(){let p=env::var("SPACE_DB").unwrap_or_else(|_|"/var/lib/gaia-space/space.db".into());db::set_db_path(PathBuf::from(p));bootstrap();let app=Router::new().route("/api/auth/login",post(login)).route("/api/auth/logout",post(logout)).route("/api/auth/me",get(me)).route("/api/auth/password",post(change_password)).route("/api/users",get(users).post(create_user)).route("/api/users/{id}",patch(patch_user).delete(delete_user)).route("/api/directory",get(directory)).route("/api/cmd/{command}",post(cmd)).with_state(App::new());let port=env::var("SPACE_PORT").ok().and_then(|x|x.parse().ok()).unwrap_or(8090);axum::serve(tokio::net::TcpListener::bind(SocketAddr::from(([127,0,0,1],port))).await.unwrap(),app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();}
 
 #[cfg(test)]
 mod tests {
@@ -849,6 +876,8 @@ mod tests {
     async fn call(headers: HeaderMap, command: &str, body: Value) -> (StatusCode, Value) {
         status_and_body(cmd(headers, Path(command.to_string()), Json(body)).await.into_response()).await
     }
+    async fn login_call(app: App, source_ip: &str, username: &str, password: &str) -> (StatusCode, Value) { let mut headers=HeaderMap::new(); headers.insert("x-forwarded-for",HeaderValue::from_str(source_ip).unwrap()); status_and_body(login(State(app),ConnectInfo("127.0.0.1:9000".parse().unwrap()),headers,Json(Login{username:username.into(),password:password.into()})).await.into_response()).await }
+    fn set_password(username: &str, password: &str) { db::conn().unwrap().execute("UPDATE users SET password_hash=?1 WHERE username=?2",params![hash(password).unwrap(),username]).unwrap(); }
     /// One database for the whole binary's test run: `db::set_db_path` is process-global,
     /// so the HTTP cases below run as a single sequential scenario.
     fn setup() {
@@ -861,6 +890,13 @@ mod tests {
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
     }
+
+    #[tokio::test]
+    async fn login_limiter_refuses_correct_password_during_lockout() { let _serial=test_lock(); setup(); set_password("alice","correct-password"); let app=App::new(); for _ in 0..(LOGIN_MAX_FAILED_ATTEMPTS-1) { assert_eq!(login_call(app.clone(),"198.51.100.10","alice","wrong-password").await.0,StatusCode::UNAUTHORIZED); } assert_eq!(login_call(app.clone(),"198.51.100.10","alice","wrong-password").await.0,StatusCode::TOO_MANY_REQUESTS); assert_eq!(login_call(app,"198.51.100.10","alice","correct-password").await.0,StatusCode::TOO_MANY_REQUESTS); }
+    #[tokio::test]
+    async fn successful_login_resets_login_limiter() { let _serial=test_lock(); setup(); set_password("alice","correct-password"); let app=App::new(); for _ in 0..2 { assert_eq!(login_call(app.clone(),"198.51.100.11","alice","wrong-password").await.0,StatusCode::UNAUTHORIZED); } assert_eq!(login_call(app.clone(),"198.51.100.11","alice","correct-password").await.0,StatusCode::OK); for _ in 0..(LOGIN_MAX_FAILED_ATTEMPTS-1) { assert_eq!(login_call(app.clone(),"198.51.100.11","alice","wrong-password").await.0,StatusCode::UNAUTHORIZED); } assert_eq!(login_call(app,"198.51.100.11","alice","wrong-password").await.0,StatusCode::TOO_MANY_REQUESTS); }
+    #[tokio::test]
+    async fn login_limiter_enforces_each_key_without_locking_other_account_and_ip() { let _serial=test_lock(); setup(); set_password("alice","alice-password"); set_password("bob","bob-password"); let app=App::new(); for _ in 0..LOGIN_MAX_FAILED_ATTEMPTS { let _=login_call(app.clone(),"198.51.100.12","alice","wrong-password").await; } assert_eq!(login_call(app.clone(),"198.51.100.13","alice","alice-password").await.0,StatusCode::TOO_MANY_REQUESTS, "account lock must survive an IP change"); assert_eq!(login_call(app.clone(),"198.51.100.12","bob","bob-password").await.0,StatusCode::TOO_MANY_REQUESTS, "source IP lock must span accounts"); assert_eq!(login_call(app,"198.51.100.13","bob","bob-password").await.0,StatusCode::OK, "different account and IP must remain available"); }
 
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
