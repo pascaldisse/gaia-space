@@ -90,10 +90,10 @@ pub fn todo_owner(id: &str) -> Result<Option<String>> {
     let c = db::conn()?;
     err(c.query_row("SELECT profile_id FROM todos WHERE id=?1", [id], |row| row.get::<_, String>(0)).optional())
 }
-/// True when the profile owns the todo or is assigned to it (read policy).
+/// True only when the profile owns the personal todo.
 pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
-    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND (t.profile_id=?2 OR a.profile_id=?2))", params![id, profile_id], |row| row.get(0)))
+    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos WHERE id=?1 AND profile_id=?2)", params![id, profile_id], |row| row.get(0)))
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
@@ -105,8 +105,8 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    // Owned by the profile OR assigned to it.
-    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    // Personal todos are visible only to their owner; assignees never receive their contents.
+    let mut statement = err(c.prepare("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at"))?;
     let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -342,7 +342,7 @@ mod tests {
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at").unwrap();
         let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
         drop(statement);
         for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap(), 0, "ON DELETE CASCADE must be enforced");
     }
     #[test]
-    fn multi_assignee_roundtrip_and_visibility() {
+    fn multi_assignee_roundtrip_keeps_personal_todos_owner_only() {
         let c = conn();
         // Owner 'p', assigned to 'q' and 'r'.
         c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t1','p','Shared task')", []).unwrap();
@@ -402,13 +402,9 @@ mod tests {
         assert_eq!(t1.assignee_ids, vec!["q".to_string(), "r".to_string()]);
         // Visibility: owner sees own todo.
         assert!(list_todos_on(&c, "p", true).iter().any(|t| t.id == "t1"));
-        // Visibility: assignee 'r' sees t1 though not the owner, and not t2.
-        let for_r = list_todos_on(&c, "r", true);
-        assert_eq!(for_r.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t1"]);
-        // 'q' sees both owned t2 and assigned t1, deduped.
-        let mut for_q: Vec<String> = list_todos_on(&c, "q", true).iter().map(|t| t.id.clone()).collect();
-        for_q.sort();
-        assert_eq!(for_q, vec!["t1".to_string(), "t2".to_string()]);
+        // Assignees never gain read access to the owner's personal todo.
+        assert!(list_todos_on(&c, "r", true).is_empty());
+        assert_eq!(list_todos_on(&c, "q", true).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t2"]);
         // Reassign clears prior links.
         replace_assignees(&c, "t1", &["r".into()]).unwrap();
         assert_eq!(assignees_on(&c, "t1").unwrap(), vec!["r".to_string()]);

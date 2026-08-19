@@ -151,13 +151,16 @@ fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
 /// Todo authorization policy (web mode), enforced entirely from the session:
 /// * identity — `profile_id` on the request body is always overwritten with the session profile,
 ///   so a client can neither read as, nor create todos for, somebody else.
-/// * read (`list_todos`, `dashboard_aggregate`) — owner **or** assignee, via the query itself.
-/// * write/delete (`update_todo`, `delete_todo`) — owner only; assignees may not edit or delete.
+/// * read/write/delete (`list_todos`, `dashboard_aggregate`, `update_todo`, `delete_todo`) — owner only.
 ///
 /// A todo that exists but belongs to somebody else is answered with 403, exactly like a
 /// missing one, so ownership is never disclosed.
 fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
     personal::todo_owner(todo_id).ok().flatten().is_some_and(|owner| owner == profile_id)
+}
+fn notification_owned_by(profile_id: &str, notification_id: &str) -> bool {
+    let Ok(c) = db::conn() else { return false };
+    c.query_row("SELECT EXISTS(SELECT 1 FROM notifications WHERE id=?1 AND recipient_id=?2)", params![notification_id, profile_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
 }
 fn chat_message_channel(message_id: &str) -> Option<String> {
     db::conn().ok()?.query_row("SELECT channel_id FROM messages WHERE id=?1", [message_id], |r| r.get(0)).ok()
@@ -178,6 +181,7 @@ enum CommandPolicy {
     TodoRead,
     TodoCreate,
     TodoWrite,
+    NotificationWrite,
     ProjectCreate,
     ProjectWrite,
     CalendarRead,
@@ -196,6 +200,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_project_todos" => CommandPolicy::ProjectTodoRead,
         "create_todo" => CommandPolicy::TodoCreate,
         "update_todo" | "delete_todo" => CommandPolicy::TodoWrite,
+        "mark_notification_read" => CommandPolicy::NotificationWrite,
         "app_info"
         | "join_meeting_call"
         | "start_livekit_server"
@@ -320,8 +325,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_time_tracking_entries"
         | "livekit_server_status"
         | "mark_channel_read" => CommandPolicy::Session,
-        "mark_notification_read"
-        | "move_document"
+        "move_document"
         | "move_document_folder"
         | "move_issue_on_board"
         | "publish_package_version"
@@ -472,23 +476,15 @@ fn authorize_command(
         }
         CommandPolicy::TodoWrite => {
             let todo_id: Option<String> = if name == "update_todo" {
-                body.get("todo")
-                    .and_then(|todo| todo.get("id"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            } else {
-                arg(body, "id").ok()
-            };
-            let Some(todo_id) = todo_id else {
-                return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`"));
-            };
-            if !todo_owned_by(&user.profile_id, &todo_id) {
-                return Err(err(
-                    StatusCode::FORBIDDEN,
-                    "only the owner can change this todo",
-                ));
-            }
+                body.get("todo").and_then(|todo| todo.get("id")).and_then(Value::as_str).map(str::to_string)
+            } else { arg(body, "id").ok() };
+            let Some(todo_id) = todo_id else { return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`")); };
+            if !todo_owned_by(&user.profile_id, &todo_id) { return Err(err(StatusCode::FORBIDDEN, "only the owner can change this todo")); }
             Ok(())
+        }
+        CommandPolicy::NotificationWrite => {
+            let notification_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if notification_owned_by(&user.profile_id, &notification_id) { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "only the recipient can change this notification")) }
         }
         CommandPolicy::Session => {
             if matches!(
@@ -846,12 +842,13 @@ mod tests {
         assert_eq!(todo["profile_id"], json!("pa"), "client-supplied owner must be ignored");
         let todo_id = todo["id"].as_str().unwrap().to_string();
 
-        // Reads are scoped to the caller: Bob asking for Alice's list gets his own view.
+        // A forged profile id cannot reveal Alice's personal todo, even to an assignee.
         let (status, value) = call(cookie("tb"), "list_todos", json!({"profile_id":"pa","include_done":true})).await;
         assert_eq!(status, StatusCode::OK);
-        // Bob is an assignee of that todo, so he may read it — but owns nothing else.
-        let ids: Vec<String> = value["value"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect();
-        assert_eq!(ids, vec![todo_id.clone()]);
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(cookie("tb"), "dashboard_aggregate", json!({"profile_id":"pa"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"]["open_todos"].as_array().unwrap().is_empty());
 
         // Assignee is not an owner: no write, no delete.
         let mut foreign = todo.clone();
@@ -881,6 +878,21 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let orphans: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
         assert_eq!(orphans, 0);
+    }
+
+    #[tokio::test]
+    async fn notification_endpoints_bind_the_recipient_and_refuse_foreign_writes() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO notifications(id,recipient_id,event_type,title) VALUES('alice-notification','pa','todo.due','Alice only')", []).unwrap();
+        let (status, value) = call(cookie("tb"), "list_notifications", json!({"recipient_id":"pa","unread_only":true})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, _) = call(cookie("tb"), "mark_notification_read", json!({"id":"alice-notification"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let read_at: Option<i64> = c.query_row("SELECT read_at FROM notifications WHERE id='alice-notification'", [], |row| row.get(0)).unwrap();
+        assert_eq!(read_at, None);
     }
 
     #[tokio::test]

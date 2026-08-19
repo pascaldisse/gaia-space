@@ -5,12 +5,12 @@ import {
 } from "../session";
 
 /** "Acting as" — pick an existing profile instead of typing an opaque id. */
-export function ProfilePicker(props: { label?: string; value?: string; onChange?: (id: string) => void; allowAll?: boolean }) {
+export function ProfilePicker(props: { label?: string; value?: string; onChange?: (id: string) => void; allowAll?: boolean; locked?: boolean }) {
   onMount(() => { void reloadProfiles(); });
   createEffect(() => ensureDefaults());
   const current = () => (props.value !== undefined ? props.value : profileId());
   const set = (id: string) => (props.onChange ? props.onChange(id) : setProfileId(id));
-  const locked = () => profileLocked();
+  const locked = () => props.locked || profileLocked();
   return (
     <label class="picker">
       {props.label ?? "Acting as"}
