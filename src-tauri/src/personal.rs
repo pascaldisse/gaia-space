@@ -23,6 +23,8 @@ pub struct Todo {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    #[serde(default)]
+    pub assignee_ids: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -33,46 +35,123 @@ pub struct TodoInput {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    #[serde(default)]
+    pub assignee_ids: Vec<String>,
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
-    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, done: row.get(4)?, source_entity_type: row.get(5)?, source_entity_id: row.get(6)? })
+    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, done: row.get(4)?, source_entity_type: row.get(5)?, source_entity_id: row.get(6)?, assignee_ids: Vec::new() })
 }
 fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
     if entity_type.is_some() != entity_id.is_some() { return Err("Todo and notification anchors require both entity type and entity ID".into()); }
     Ok(())
 }
+/// Distinct, trimmed, non-empty assignee profile ids, order preserved.
+fn clean_assignees(ids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        let id = id.trim();
+        if id.is_empty() || out.iter().any(|existing| existing == id) { continue; }
+        out.push(id.to_string());
+    }
+    out
+}
+fn assignees_on(c: &Connection, todo_id: &str) -> Result<Vec<String>> {
+    let mut statement = err(c.prepare("SELECT profile_id FROM todo_assignees WHERE todo_id=?1 ORDER BY profile_id"))?;
+    let ids = err(statement.query_map([todo_id], |row| row.get::<_, String>(0)))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(ids)
+}
+/// An assignee must be a live profile; if that profile is backed by login accounts,
+/// at least one of them must still be active. Deactivated people cannot be assigned.
+fn assignee_is_active(c: &Connection, profile_id: &str) -> Result<bool> {
+    let profile_live: bool = err(c.query_row("SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1 AND archived=0)", [profile_id], |row| row.get(0)))?;
+    if !profile_live { return Ok(false); }
+    let accounts: i64 = err(c.query_row("SELECT count(*) FROM users WHERE profile_id=?1", [profile_id], |row| row.get(0)))?;
+    if accounts == 0 { return Ok(true); }
+    let active: i64 = err(c.query_row("SELECT count(*) FROM users WHERE profile_id=?1 AND active=1", [profile_id], |row| row.get(0)))?;
+    Ok(active > 0)
+}
+/// Caller must run this inside a transaction: validation and rewrite are one atomic unit,
+/// so one invalid assignee rolls the whole todo write back.
+fn replace_assignees(c: &Connection, todo_id: &str, ids: &[String]) -> Result<()> {
+    let ids = clean_assignees(ids);
+    for pid in &ids {
+        if !assignee_is_active(c, pid)? { return Err(format!("Assignee profile is not active: {pid}")); }
+    }
+    err(c.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [todo_id]))?;
+    for pid in &ids {
+        err(c.execute("INSERT OR IGNORE INTO todo_assignees(todo_id,profile_id) VALUES(?1,?2)", params![todo_id, pid]))?;
+    }
+    Ok(())
+}
+/// Owner profile of a todo, for authorization at the HTTP layer.
+pub fn todo_owner(id: &str) -> Result<Option<String>> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT profile_id FROM todos WHERE id=?1", [id], |row| row.get::<_, String>(0)).optional())
+}
+/// True when the profile owns the todo or is assigned to it (read policy).
+pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND (t.profile_id=?2 OR a.profile_id=?2))", params![id, profile_id], |row| row.get(0)))
+}
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    match todo {
+        Some(mut todo) => { todo.assignee_ids = assignees_on(c, id)?; Ok(Some(todo)) }
+        None => Ok(None),
+    }
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE profile_id=?1 AND (?2=1 OR done=0) ORDER BY done,due_date IS NULL,due_date,created_at"))?;
-    let todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    // Owned by the profile OR assigned to it.
+    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    drop(statement);
+    for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
     Ok(todos)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_todo( input: TodoInput) -> Result<Todo> {
+    let mut c = db::conn()?;
+    create_todo_on(&mut c, input)
+}
+/// Todo row and its assignee rows are written in one transaction: an invalid or inactive
+/// assignee rolls back the todo itself.
+fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     if input.profile_id.trim().is_empty() || input.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
-    let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("todo"));
-    err(c.execute("INSERT INTO todos(id,profile_id,content,due_date,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.profile_id, input.content.trim(), input.due_date, input.done, input.source_entity_type, input.source_entity_id]))?;
-    todo_on(&c, &id)?.ok_or_else(|| "Created todo was not found".into())
+    let tx = err(c.transaction())?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.profile_id, input.content.trim(), input.due_date, input.done, input.source_entity_type, input.source_entity_id]))?;
+    replace_assignees(&tx, &id, &input.assignee_ids)?;
+    err(tx.commit())?;
+    todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_todo( todo: Todo) -> Result<Todo> {
+    let mut c = db::conn()?;
+    update_todo_on(&mut c, todo)
+}
+fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     if todo.profile_id.trim().is_empty() || todo.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
-    let c = db::conn()?;
-    let updated = err(c.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,done=?5,source_entity_type=?6,source_entity_id=?7,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
+    let tx = err(c.transaction())?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,done=?5,source_entity_type=?6,source_entity_id=?7,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
     if updated == 0 { return Err("Todo not found".into()); }
-    todo_on(&c, &todo.id)?.ok_or_else(|| "Todo not found".into())
+    replace_assignees(&tx, &todo.id, &todo.assignee_ids)?;
+    err(tx.commit())?;
+    todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_todo( id: String) -> Result<()> {
-    let c = db::conn()?;
-    if err(c.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 { return Err("Todo not found".into()); }
+    let mut c = db::conn()?;
+    delete_todo_on(&mut c, id)
+}
+fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
+    let tx = err(c.transaction())?;
+    err(tx.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [&id]))?;
+    if err(tx.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 { return Err("Todo not found".into()); }
+    err(tx.commit())?;
     Ok(())
 }
 
@@ -219,11 +298,87 @@ pub fn dashboard_aggregate( profile_id: String) -> Result<Dashboard> {
 mod tests {
     use super::*;
     fn conn() -> Connection {
-        let c = Connection::open_in_memory().unwrap();
+        let c = db::open_in_memory().unwrap();
         c.execute_batch(crate::db::SCHEMA_V1).unwrap();
         c.execute_batch(crate::db::SCHEMA_V2).unwrap();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute_batch(crate::db::SCHEMA_V3).unwrap();
+        c.execute_batch(crate::db::SCHEMA_V4).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('r','third','Third',1)", []).unwrap();
         c
+    }
+    // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
+    fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
+        let mut statement = c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
+        drop(statement);
+        for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
+        todos
+    }
+    fn todo_input(id: &str, owner: &str, assignees: &[&str]) -> TodoInput {
+        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
+    }
+    #[test]
+    fn invalid_assignee_rolls_back_the_whole_todo_write() {
+        let mut c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        // Unknown profile: nothing at all is persisted.
+        let failed = create_todo_on(&mut c, todo_input("t1", "p", &["q", "ghost"]));
+        assert!(failed.is_err(), "unknown assignee must fail");
+        let todos: i64 = c.query_row("SELECT count(*) FROM todos", [], |r| r.get(0)).unwrap();
+        let links: i64 = c.query_row("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap();
+        assert_eq!((todos, links), (0, 0), "create must roll back entirely");
+        // Deactivated account: also rejected.
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-r','third','x','Third','r','member',0,1)", []).unwrap();
+        assert!(create_todo_on(&mut c, todo_input("t2", "p", &["r"])).is_err(), "inactive assignee must fail");
+        assert_eq!(c.query_row::<i64, _, _>("SELECT count(*) FROM todos", [], |r| r.get(0)).unwrap(), 0);
+        // Valid write survives, then a bad update leaves the prior state untouched.
+        let created = create_todo_on(&mut c, todo_input("t3", "p", &["q"])).unwrap();
+        assert_eq!(created.assignee_ids, vec!["q".to_string()]);
+        let mut bad = created.clone();
+        bad.content = "Changed".into();
+        bad.assignee_ids = vec!["ghost".into()];
+        assert!(update_todo_on(&mut c, bad).is_err());
+        let after = todo_on(&c, "t3").unwrap().unwrap();
+        assert_eq!(after.content, "Task");
+        assert_eq!(after.assignee_ids, vec!["q".to_string()]);
+    }
+    #[test]
+    fn deleting_a_todo_leaves_no_orphan_assignee_rows() {
+        let mut c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        create_todo_on(&mut c, todo_input("t1", "p", &["q", "r"])).unwrap();
+        assert_eq!(c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees WHERE todo_id='t1'", [], |r| r.get(0)).unwrap(), 2);
+        delete_todo_on(&mut c, "t1".into()).unwrap();
+        assert_eq!(c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap(), 0, "junction rows must not outlive the todo");
+        // Independent path: a raw parent delete is refused/cascaded by foreign keys, never orphaned.
+        create_todo_on(&mut c, todo_input("t2", "p", &["q"])).unwrap();
+        c.execute("DELETE FROM todos WHERE id='t2'", []).unwrap();
+        assert_eq!(c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees", [], |r| r.get(0)).unwrap(), 0, "ON DELETE CASCADE must be enforced");
+    }
+    #[test]
+    fn multi_assignee_roundtrip_and_visibility() {
+        let c = conn();
+        // Owner 'p', assigned to 'q' and 'r'.
+        c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t1','p','Shared task')", []).unwrap();
+        replace_assignees(&c, "t1", &["q".into(), "r".into(), "q".into(), " ".into()]).unwrap();
+        // Owner 'q', no assignees.
+        c.execute("INSERT INTO todos(id,profile_id,content) VALUES('t2','q','Q private task')", []).unwrap();
+        // Roundtrip: distinct, blank-stripped.
+        let t1 = todo_on(&c, "t1").unwrap().unwrap();
+        assert_eq!(t1.assignee_ids, vec!["q".to_string(), "r".to_string()]);
+        // Visibility: owner sees own todo.
+        assert!(list_todos_on(&c, "p", true).iter().any(|t| t.id == "t1"));
+        // Visibility: assignee 'r' sees t1 though not the owner, and not t2.
+        let for_r = list_todos_on(&c, "r", true);
+        assert_eq!(for_r.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t1"]);
+        // 'q' sees both owned t2 and assigned t1, deduped.
+        let mut for_q: Vec<String> = list_todos_on(&c, "q", true).iter().map(|t| t.id.clone()).collect();
+        for_q.sort();
+        assert_eq!(for_q, vec!["t1".to_string(), "t2".to_string()]);
+        // Reassign clears prior links.
+        replace_assignees(&c, "t1", &["r".into()]).unwrap();
+        assert_eq!(assignees_on(&c, "t1").unwrap(), vec!["r".to_string()]);
+        assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
     #[test]
     fn todo_anchor_roundtrips() {
