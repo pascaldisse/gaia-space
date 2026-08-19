@@ -180,6 +180,8 @@ enum CommandPolicy {
     TodoWrite,
     ProjectCreate,
     ProjectWrite,
+    CalendarRead,
+    ProjectTodoRead,
     Unavailable,
 }
 
@@ -190,6 +192,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
+        "calendar_aggregate" => CommandPolicy::CalendarRead,
+        "list_project_todos" => CommandPolicy::ProjectTodoRead,
         "create_todo" => CommandPolicy::TodoCreate,
         "update_todo" | "delete_todo" => CommandPolicy::TodoWrite,
         "app_info"
@@ -455,6 +459,17 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::TodoRead | CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::CalendarRead => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::ProjectTodoRead => {
+            let project_id: String = arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let visible: bool = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND (created_by=?2 OR ?3='admin'))", params![project_id, user.profile_id, user.role], |r| r.get(0))
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            if visible { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "project access denied")) }
+        }
         CommandPolicy::TodoWrite => {
             let todo_id: Option<String> = if name == "update_todo" {
                 body.get("todo")
@@ -720,6 +735,8 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
+    "list_project_todos" => personal::list_project_todos(project_id: String, include_done: Option<bool>),
+    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
     "mark_notification_read" => personal::mark_notification_read(id: String),
@@ -890,6 +907,14 @@ mod tests {
         let changed: (String, String, bool) = c.query_row("SELECT name,created_by,archived FROM projects WHERE id='alice-project'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
         assert_eq!(changed, ("Alice renamed".into(), "pa".into(), true));
 
+        // Calendar session identity is injected at the chokepoint; callers cannot
+        // enumerate another profile's todos by supplying a forged profile id.
+        c.execute("INSERT INTO todos(id,profile_id,content,due_date) VALUES('alice-calendar','pa','Private','2030-01-02')", []).unwrap();
+        let (status, value) = call(cookie("tb"), "calendar_aggregate", json!({"profile_id":"pa","range_start":1893456000,"range_end":1893715200})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, _) = call(cookie("tb"), "list_project_todos", json!({"project_id":"alice-project","include_done":false})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(cookie("ta"), "invent_a_backdoor", json!({})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
