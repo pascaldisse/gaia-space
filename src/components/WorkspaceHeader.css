@@ -1,0 +1,5 @@
+.workspace-header { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:20px; margin-bottom:22px; }
+.wh-main { min-width:0; display:flex; align-items:center; gap:13px; }
+.wh-mark { width:42px; height:42px; display:grid; place-items:center; flex:none; background:var(--accent-soft); border:1px solid var(--accent); color:var(--accent-strong); font-size:18px; }
+.wh-text { min-width:0; }.workspace-header h1 { margin:0; color:var(--text-strong); font-size:23px; line-height:1.15; }.workspace-header p { margin:5px 0 0; max-width:600px; color:var(--text-muted); }.wh-actions { display:flex; align-items:center; gap:8px; }
+@media(max-width:720px) { .workspace-header { grid-template-columns:1fr; }.wh-actions { flex-wrap:wrap; } }

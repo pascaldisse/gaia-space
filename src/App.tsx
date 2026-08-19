@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, Match, Show, Switch, type Component } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switch, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import "./App.css";
 import Dashboard from "./views/Dashboard";
@@ -22,68 +22,56 @@ import Users from "./views/Users";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
-import { Resizer, paneWidth } from "./components/Resizer";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews, setRoutePending } from "./router";
 
 type View = { name:string; icon:string; component:Component };
-const personalViews:View[]=[{name:"Dashboard",icon:"◉",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
-// Local git and pipeline execution touch the host filesystem/process table — desktop only.
+const personalViews:View[]=[{name:"Dashboard",icon:"⌂",component:Dashboard},{name:"To-Do",icon:"✓",component:Todo},{name:"Absences",icon:"◷",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"⌘",component:Repos},{name:"Code Reviews",icon:"⇄",component:Reviews},{name:"Pipelines",icon:"▷",component:Pipelines}];
-const workspaceViews:View[]=[{name:"Projects",icon:"◈",component:Projects},...localOnlyViews,{name:"Issues",icon:"✓",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"◇",component:Packages},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
-const usersView:View={name:"Users",icon:"⚉",component:Users};
+const workspaceViews:View[]=[{name:"Projects",icon:"◇",component:Projects},...localOnlyViews,{name:"Issues",icon:"!",component:Issues},{name:"Boards",icon:"▦",component:Boards},{name:"Chat",icon:"◌",component:Chat},{name:"Documents",icon:"▤",component:Documents},{name:"Meetings",icon:"◷",component:Meetings},{name:"Calendar",icon:"□",component:Calendar},{name:"Packages",icon:"▣",component:Packages},{name:"Members",icon:"♙",component:Members},{name:"Admin",icon:"⚙",component:Admin}];
+const usersView:View={name:"Users",icon:"♧",component:Users};
 const projectTasksView:View={name:"Project Tasks",icon:"✓",component:ProjectTasks};
 
-
 export default function App() {
-  const active=()=>activeView()||"Dashboard"; const [gotoOpen,setGotoOpen]=createSignal(false);
+  const active=()=>activeView()||"Dashboard";
+  const [gotoOpen,setGotoOpen]=createSignal(false);
+  const [accountOpen,setAccountOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
     if(isWeb()&&currentUser()?.role==="admin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView]; const current=()=>views().find(view=>view.name===active())??personalViews[0];
-  const [navWidth,setNavWidth]=paneWidth("space.nav.width",208);
-  const [pinnedCollapsed,setPinnedCollapsed]=createSignal(localStorage.getItem("space.nav.collapsed")==="1");
-  const [narrow,setNarrow]=createSignal(false); // viewport too small for labels → icons only
-  const collapsed=()=>pinnedCollapsed()||narrow();
-  const toggle=()=>{const next=!pinnedCollapsed();setPinnedCollapsed(next);localStorage.setItem("space.nav.collapsed",next?"1":"0")};
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView];
+  const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     registerViews([...personalViews,...workspaceViews,usersView,projectTasksView].map(v=>({name:v.name})));
-    // Web keeps real paths (History API); the Tauri webview has no server behind it, so it — and
-    // only it — uses the hash adapter.
-    setRoutePending(isWeb()&&!authChecked()); // hold the boot URL before the first resync
+    setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}};
-    window.addEventListener("keydown",shortcut);
-    const mq=window.matchMedia("(max-width: 900px)"); const sync=()=>setNarrow(mq.matches); sync(); mq.addEventListener("change",sync);
-    onCleanup(()=>{window.removeEventListener("keydown",shortcut);mq.removeEventListener("change",sync)});
+    const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
+    window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
+    onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
   });
-  // Reachable views drive route normalization: a hidden/unauthorized URL resolves to the
-  // fallback view AND the address bar is rewritten to match it.
-  // Until the session resolves, an admin-only URL (/users) is indistinguishable from an
-  // unauthorized one — so the route is held, not rewritten, and settled once auth is known.
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
     setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView].map(v=>v.name));
   });
-  const nav=(view:View)=><a class="nav-link" title={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon">{view.icon}</span><em>{view.name}</em></a>;
-  // NB: plain `if` returns here would only run once at mount (Solid components
-  // don't re-run on signal changes) — Switch/Match keeps this reactive so the
-  // shell swaps in the instant authChecked()/currentUser() resolve post-boot.
+  const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true">{view.icon}</span><span class="topnav-label">{view.name}</span></a>;
   return <Switch>
     <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>
     <Match when={isWeb()&&!currentUser()}><Login/></Match>
     <Match when={true}>
-      <div class="space-shell" classList={{collapsed:collapsed()}} style={{"--nav-w":(collapsed()?52:navWidth())+"px"}}>
-        <aside class="nav">
-          <header><div class="space-mark">S</div><em>GAIA Space</em><button class="nav-toggle" title={collapsed()?"Expand sidebar":"Collapse sidebar"} onClick={toggle}>{collapsed()?"»":"«"}</button></header>
-          <nav><p class="nav-section">Personal</p>{personalViews.map(nav)}<p class="nav-section">Workspace</p>{visibleWorkspaceViews().map(nav)}</nav>
-          <Show when={isWeb()}><AccountFooter/></Show>
-        </aside>
-        <Resizer width={navWidth} setWidth={setNavWidth} min={160} max={420}/>
+      <div class="space-shell">
+        <header class="topbar">
+          <div class="topbar-brand"><span class="space-mark" aria-hidden="true">S</span><em>GAIA Space</em></div>
+          <nav class="topnav" aria-label="Workspace navigation"><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></nav>
+          <div class="topbar-right">
+            <button class="topbar-search" aria-label="Open Go to search" title="Search (Ctrl/Cmd + K)" onClick={()=>setGotoOpen(true)}><span class="nav-icon" aria-hidden="true">⌕</span><span class="topbar-search-hint">Go to</span></button>
+            <Show when={isWeb()}><button class="topbar-account account-trigger" aria-label="Open account menu" aria-expanded={accountOpen()} onClick={()=>setAccountOpen(v=>!v)}><span class="account-avatar" aria-hidden="true">{(currentUser()?.display_name??currentUser()?.username??"?").slice(0,1).toUpperCase()}</span></button><Show when={accountOpen()}><div class="account-dropdown"><AccountFooter/></div></Show></Show>
+          </div>
+        </header>
         <main class="workspace"><Dynamic component={current().component}/></main>
         <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
