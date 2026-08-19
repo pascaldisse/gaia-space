@@ -1,0 +1,136 @@
+# Production rollout for GAIA Space.
+#
+# Written natively against ~/projects/law/deployment.md: a deploy is only
+# allowed to succeed if it can prove it. The ritual is backup → census →
+# install → relabel → migration proof → external gates, with automatic
+# rollback on any failing gate. A skipped deploy reports SKIPPED, never green.
+name: Deploy GAIA Space
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/deploy-space.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One production rollout at a time, and never cancel one midway: a half-applied
+# release is worse than a late one.
+concurrency:
+  group: gaia-space-production
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    name: Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: "1.3.14" }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bunx tsc --noEmit
+      - name: Frontend tests
+        run: bun test
+      - name: Rust library tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib
+      - name: Server binary tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --bin space-server
+      - name: Desktop target still compiles
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+  deploy:
+    name: Deploy
+    needs: gates
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - id: state
+        name: Deployment readiness
+        env:
+          READY: ${{ secrets.SPACE_DEPLOY_HOST != '' && secrets.SPACE_DEPLOY_USER != '' && secrets.SPACE_DEPLOY_SSH_KEY != '' && secrets.SPACE_DEPLOY_KNOWN_HOSTS != '' }}
+        run: |
+          if [ "$READY" != "true" ]; then
+            echo "state=SKIPPED" >> "$GITHUB_OUTPUT"
+            echo "::warning::No deployment: the four SPACE_DEPLOY_* repository secrets are not configured."
+          else
+            echo "state=RUN" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.state.outputs.state == 'RUN'
+      - uses: oven-sh/setup-bun@v2
+        if: steps.state.outputs.state == 'RUN'
+        with: { bun-version: "1.3.14" }
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.state.outputs.state == 'RUN'
+
+      - name: Build web bundle
+        if: steps.state.outputs.state == 'RUN'
+        run: |
+          bun install --frozen-lockfile
+          bunx vite build --mode web        # writes dist-web/, base /space/
+          test -f dist-web/index.html
+
+      - name: Build server binary
+        if: steps.state.outputs.state == 'RUN'
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --no-default-features --bin space-server
+
+      - name: Configure SSH
+        if: steps.state.outputs.state == 'RUN'
+        env:
+          KEY: ${{ secrets.SPACE_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SPACE_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload release
+        if: steps.state.outputs.state == 'RUN'
+        env:
+          HOST: ${{ secrets.SPACE_DEPLOY_HOST }}
+          USER: ${{ secrets.SPACE_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh "$USER@$HOST" "rm -rf /tmp/gaia-space-$GITHUB_SHA && mkdir -p /tmp/gaia-space-$GITHUB_SHA/static"
+          rsync -az --delete dist-web/ "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/static/"
+          rsync -az src-tauri/target/release/space-server "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/space-server"
+          scp deploy/rollout.sh "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/rollout.sh"
+
+      - name: Backup, install, migrate, verify, roll back on failure
+        if: steps.state.outputs.state == 'RUN'
+        env:
+          HOST: ${{ secrets.SPACE_DEPLOY_HOST }}
+          USER: ${{ secrets.SPACE_DEPLOY_USER }}
+        run: ssh "$USER@$HOST" "bash /tmp/gaia-space-$GITHUB_SHA/rollout.sh /tmp/gaia-space-$GITHUB_SHA $GITHUB_SHA"
+
+      - name: External gates
+        if: steps.state.outputs.state == 'RUN'
+        run: |
+          set -euo pipefail
+          code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$1"; }
+          test "$(code https://paloptic.com/space/)" = 200
+          test "$(code https://paloptic.com/space/api/auth/me)" = 401
+          test "$(code https://paloptic.com/space/settings)" = 200
+          test "$(code https://paloptic.com/space/boards)" = 200
+          echo "served bundle:"
+          curl -s https://paloptic.com/space/ | grep -o 'index-[A-Za-z0-9]*\.js'
+
+      - name: Result
+        run: |
+          if [ "${{ steps.state.outputs.state }}" = "SKIPPED" ]; then
+            echo "DEPLOYED=false (skipped: secrets not configured)"
+          else
+            echo "DEPLOYED=true ${GITHUB_SHA}"
+          fi
