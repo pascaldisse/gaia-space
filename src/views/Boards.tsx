@@ -85,7 +85,7 @@ export default function Boards() {
     try {
       let statusId = column.status_ids[0];
       if (!statusId) { statusId = await statusFor(column.name) ?? ""; if (statusId) await planningApi.saveColumn({ ...column, status_ids: [statusId] }); }
-      const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, archived: false });
+      const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
       await planningApi.move(b.id, issue.id, column.id, sprintId());
       setCardTitle(""); setComposeIn(undefined); await reloadStatuses(); reloadColumns(); reloadIssues(); setOpenIssue(issue.id);
     } catch (reason) { setError(humanError(reason)); }
@@ -185,6 +185,7 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; 
     <div class="card-top"><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
     <strong class="card-title">{props.issue.title}</strong>
     <div class="card-meta">
+      <Show when={props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
       <Show when={props.issue.due_date}>{due => <span classList={{ "task-tag": true, due: true, overdue: overdue() }}>{due()}</span>}</Show>
       <Show when={assignee()}>{name => <span class="task-tag assignee">{name()}</span>}</Show>
       <Show when={items()?.length}><span class="task-tag checklist">☑ {doneCount()}/{items()!.length}</span></Show>

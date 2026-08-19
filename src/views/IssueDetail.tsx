@@ -49,6 +49,15 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           <label>Due date
             <input type="date" value={item().due_date ?? ""} onChange={e => { patch({ due_date: e.currentTarget.value || null }); void save(); }} />
           </label>
+          <label>Priority
+            <select value={item().priority ?? ""} onChange={e => { patch({ priority: e.currentTarget.value || null }); void save(); }}>
+              <option value="">None</option>
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
+            </select>
+          </label>
         </div>
 
         <section class="idp-section">

@@ -33,6 +33,7 @@ pub struct Issue {
     pub assignee_id: Option<String>,
     pub created_by: Option<String>,
     pub due_date: Option<String>,
+    pub priority: Option<String>,
     pub archived: bool,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -140,6 +141,7 @@ pub struct IssueInput {
     pub assignee_id: Option<String>,
     pub created_by: Option<String>,
     pub due_date: Option<String>,
+    pub priority: Option<String>,
     pub archived: Option<bool>,
 }
 #[derive(Debug, Deserialize)]
@@ -230,7 +232,8 @@ fn read_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<Issue> {
         assignee_id: r.get(6)?,
         created_by: r.get(7)?,
         due_date: r.get(8)?,
-        archived: r.get(9)?,
+        priority: r.get(9)?,
+        archived: r.get(10)?,
     })
 }
 fn list_issues_on(
@@ -242,7 +245,7 @@ fn list_issues_on(
     tag_id: Option<&str>,
     include_archived: bool,
 ) -> Result<Vec<Issue>> {
-    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
+    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
     sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6=1 OR i.archived=0) ORDER BY i.project_id,i.number");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(
@@ -284,7 +287,7 @@ pub fn list_issues(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue( id: String) -> Result<Option<Issue>> {
     let c = db::conn()?;
-    err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,archived FROM issues WHERE id=?1",[id],read_issue).optional())
+    err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1",[id],read_issue).optional())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_issue( input: IssueInput) -> Result<Issue> {
@@ -295,13 +298,13 @@ pub fn create_issue( input: IssueInput) -> Result<Issue> {
         [&input.project_id],
         |r| r.get(0),
     ))?;
-    err(c.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![id,input.project_id,number,input.title,input.description,input.status_id,input.assignee_id,input.created_by,input.due_date,input.archived.unwrap_or(false)]))?;
+    err(c.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,input.project_id,number,input.title,input.description,input.status_id,input.assignee_id,input.created_by,input.due_date,input.priority,input.archived.unwrap_or(false)]))?;
     get_issue(id)?.ok_or_else(|| "Created issue was not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_issue( issue: Issue) -> Result<Issue> {
     let c = db::conn()?;
-    err(c.execute("UPDATE issues SET title=?2,description=?3,status_id=?4,assignee_id=?5,due_date=?6,archived=?7 WHERE id=?1",params![issue.id,issue.title,issue.description,issue.status_id,issue.assignee_id,issue.due_date,issue.archived]))?;
+    err(c.execute("UPDATE issues SET title=?2,description=?3,status_id=?4,assignee_id=?5,due_date=?6,priority=?7,archived=?8 WHERE id=?1",params![issue.id,issue.title,issue.description,issue.status_id,issue.assignee_id,issue.due_date,issue.priority,issue.archived]))?;
     get_issue(issue.id)?.ok_or_else(|| "Issue not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -593,7 +596,7 @@ pub fn list_board_issues(
     sprint_id: Option<String>,
 ) -> Result<Vec<Issue>> {
     let c = db::conn()?;
-    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issue_board_positions p JOIN issues i ON i.id=p.issue_id WHERE p.board_id=?1 AND (?2 IS NULL OR p.sprint_id=?2) ORDER BY p.position"))?;
+    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issue_board_positions p JOIN issues i ON i.id=p.issue_id WHERE p.board_id=?1 AND (?2 IS NULL OR p.sprint_id=?2) ORDER BY p.position"))?;
     let rows = err(s.query_map(params![board_id, sprint_id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -607,7 +610,7 @@ pub fn list_backlog_issues( board_id: String) -> Result<Vec<Issue>> {
         [&board_id],
         |r| r.get(0),
     ))?;
-    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issues i WHERE i.project_id=?1 AND i.archived=0 AND NOT EXISTS(SELECT 1 FROM issue_board_positions p WHERE p.issue_id=i.id AND p.board_id=?2) ORDER BY i.number"))?;
+    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i WHERE i.project_id=?1 AND i.archived=0 AND NOT EXISTS(SELECT 1 FROM issue_board_positions p WHERE p.issue_id=i.id AND p.board_id=?2) ORDER BY i.number"))?;
     let rows = err(s.query_map(params![project, board_id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1088,7 +1091,7 @@ pub fn get_issue_detail( id: String) -> Result<Option<IssueDetail>> {
     .map_err(|e| e.to_string())?;
     let checklists = list_checklists(id.clone())?;
     let time_total_minutes = issue_time_total(id.clone())?;
-    let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
+    let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
     let children = err(child_s.query_map([id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;

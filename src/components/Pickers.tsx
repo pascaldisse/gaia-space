@@ -5,12 +5,15 @@ import {
 } from "../session";
 
 /** "Acting as" — pick an existing profile instead of typing an opaque id. */
-export function ProfilePicker(props: { label?: string; value?: string; onChange?: (id: string) => void; allowAll?: boolean; locked?: boolean }) {
+/** `identity` marks the "who am I acting as" picker — that one is bound to the
+ *  logged-in account in web mode. Choosing OTHER people (assignee, invitee) is
+ *  a different act and must stay open, or nothing can ever be assigned. */
+export function ProfilePicker(props: { label?: string; value?: string; onChange?: (id: string) => void; allowAll?: boolean; locked?: boolean; identity?: boolean }) {
   onMount(() => { void reloadProfiles(); });
   createEffect(() => ensureDefaults());
   const current = () => (props.value !== undefined ? props.value : profileId());
   const set = (id: string) => (props.onChange ? props.onChange(id) : setProfileId(id));
-  const locked = () => props.locked || profileLocked();
+  const locked = () => props.locked || (props.identity === true && profileLocked());
   return (
     <label class="picker">
       {props.label ?? "Acting as"}
@@ -25,7 +28,7 @@ export function ProfilePicker(props: { label?: string; value?: string; onChange?
           <option value="">No profiles — add one in Members</option>
         </Show>
         <For each={profiles()?.filter((p) => !p.archived)}>
-          {(p) => <option value={p.id}>{p.display_name || p.username} ({p.id})</option>}
+          {(p) => <option value={p.id}>{p.display_name || p.username}</option>}
         </For>
       </select>
     </label>

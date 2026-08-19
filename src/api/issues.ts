@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; archived:boolean };
+export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; priority:string|null; archived:boolean };
 export type Status = { id:string; project_id:string; name:string; resolved:boolean; color:string; ordering:number };
 export type Board = { id:string; project_id:string; name:string; backlog_type:string; archived:boolean };
 export type BoardColumn = { id:string; board_id:string; name:string; ordering:number; status_ids:string[] };

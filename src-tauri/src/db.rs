@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -127,6 +127,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 9 {
         tx.execute_batch(SCHEMA_V9)?;
+    }
+    // V10: issues carry a priority (NULL = unset, then LOW/MEDIUM/HIGH/URGENT).
+    if version < 10 {
+        add_column_if_missing(&tx, "issues", "priority", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
