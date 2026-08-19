@@ -11,6 +11,7 @@ pub mod pipelines;
 pub mod platform;
 pub mod personal;
 pub mod review;
+pub mod secretbox;
 
 #[cfg(feature = "desktop")]
 use serde::Serialize;
