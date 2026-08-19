@@ -86,7 +86,11 @@ pub fn conn() -> Result<Connection, String> {
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let conn = open_at(dir.join("space.db")).map_err(|e| e.to_string())?;
+    let path = dir.join("space.db");
+    // Tauri commands use `conn()` after startup; retain the desktop path so
+    // packaged builds do not depend on a development-only SPACE_DB variable.
+    set_db_path(path.clone());
+    let conn = open_at(path).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
