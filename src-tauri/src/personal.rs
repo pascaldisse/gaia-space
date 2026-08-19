@@ -20,6 +20,7 @@ pub struct Todo {
     pub profile_id: String,
     pub content: String,
     pub due_date: Option<String>,
+    pub project_id: Option<String>,
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
@@ -32,6 +33,7 @@ pub struct TodoInput {
     pub profile_id: String,
     pub content: String,
     pub due_date: Option<String>,
+    pub project_id: Option<String>,
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
@@ -39,7 +41,7 @@ pub struct TodoInput {
     pub assignee_ids: Vec<String>,
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
-    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, done: row.get(4)?, source_entity_type: row.get(5)?, source_entity_id: row.get(6)?, assignee_ids: Vec::new() })
+    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, project_id: row.get(4)?, done: row.get(5)?, source_entity_type: row.get(6)?, source_entity_id: row.get(7)?, assignee_ids: Vec::new() })
 }
 fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
     if entity_type.is_some() != entity_id.is_some() { return Err("Todo and notification anchors require both entity type and entity ID".into()); }
@@ -94,7 +96,7 @@ pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND (t.profile_id=?2 OR a.profile_id=?2))", params![id, profile_id], |row| row.get(0)))
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => { todo.assignee_ids = assignees_on(c, id)?; Ok(Some(todo)) }
         None => Ok(None),
@@ -104,7 +106,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
     // Owned by the profile OR assigned to it.
-    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -122,7 +124,7 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
     let id = input.id.unwrap_or_else(|| new_id("todo"));
     let tx = err(c.transaction())?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.profile_id, input.content.trim(), input.due_date, input.done, input.source_entity_type, input.source_entity_id]))?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![id, input.profile_id, input.content.trim(), input.due_date, input.project_id.filter(|id| !id.trim().is_empty()), input.done, input.source_entity_type, input.source_entity_id]))?;
     replace_assignees(&tx, &id, &input.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
@@ -136,11 +138,20 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     if todo.profile_id.trim().is_empty() || todo.content.trim().is_empty() { return Err("Todo profile and content are required".into()); }
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
     let tx = err(c.transaction())?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,done=?5,source_entity_type=?6,source_entity_id=?7,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, todo.project_id.filter(|id| !id.trim().is_empty()), todo.done, todo.source_entity_type, todo.source_entity_id]))?;
     if updated == 0 { return Err("Todo not found".into()); }
     replace_assignees(&tx, &todo.id, &todo.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_project_todos(project_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE t.project_id=?1 AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut todos = err(statement.query_map(params![project_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    drop(statement);
+    for todo in &mut todos { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
+    Ok(todos)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_todo( id: String) -> Result<()> {
@@ -279,6 +290,32 @@ fn goto_search_on(c: &Connection, query: &str, limit: i64) -> Result<Vec<GotoRes
 pub fn goto_search( query: String, limit: Option<i64>) -> Result<Vec<GotoResult>> { goto_search_on(&db::conn()?, &query, limit.unwrap_or(30)) }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct CalendarItem {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub starts_at: i64,
+    pub ends_at: Option<i64>,
+    pub project_id: Option<String>,
+}
+/// Calendar is derived from session-visible records only: own/assigned todos,
+/// organized/attended meetings, and projects owned by the session profile.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) -> Result<Vec<CalendarItem>> {
+    if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
+    let c = db::conn()?;
+    let mut items = Vec::new();
+    let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3)"))?;
+    for row in err(meetings.query_map(params![range_start, range_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None })))? { items.push(row.map_err(|e| e.to_string())?); }
+    let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR a.profile_id=?3)"))?;
+    for row in err(todos.query_map(params![range_start, range_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id,kind:"task".into(),title,starts_at,ends_at:None,project_id}); }
+    let mut deadlines = err(c.prepare("SELECT id,name,deadline FROM projects WHERE archived=0 AND created_by=?1 AND deadline IS NOT NULL AND unixepoch(deadline)>=?2 AND unixepoch(deadline)<?3"))?;
+    for row in err(deadlines.query_map(params![profile_id, range_start, range_end], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))))? { let (id,name,date)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid project deadline")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id:format!("deadline-{id}"),kind:"deadline".into(),title:format!("{name} deadline"),starts_at,ends_at:None,project_id:Some(id)}); }
+    items.sort_by_key(|item| item.starts_at);
+    Ok(items)
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct AssignedIssue { pub id: String, pub title: String, pub project_id: String, pub number: i64, pub due_date: Option<String> }
 #[derive(Clone, Debug, Serialize)]
 pub struct Dashboard { pub open_todos: Vec<Todo>, pub assigned_issues: Vec<AssignedIssue>, pub meeting_occurrences: Vec<meetings::MeetingOccurrence>, pub unread_notifications: Vec<Notification>, pub current_absences: Vec<Absence> }
@@ -299,23 +336,20 @@ mod tests {
     use super::*;
     fn conn() -> Connection {
         let c = db::open_in_memory().unwrap();
-        c.execute_batch(crate::db::SCHEMA_V1).unwrap();
-        c.execute_batch(crate::db::SCHEMA_V2).unwrap();
-        c.execute_batch(crate::db::SCHEMA_V3).unwrap();
-        c.execute_batch(crate::db::SCHEMA_V4).unwrap();
+        db::migrate(&c).unwrap();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('r','third','Third',1)", []).unwrap();
         c
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT DISTINCT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t LEFT JOIN todo_assignees a ON a.todo_id=t.id WHERE (t.profile_id=?1 OR a.profile_id=?1) AND (?2=1 OR t.done=0) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
         drop(statement);
         for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
         todos
     }
     fn todo_input(id: &str, owner: &str, assignees: &[&str]) -> TodoInput {
-        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
+        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: None, done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
     }
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {

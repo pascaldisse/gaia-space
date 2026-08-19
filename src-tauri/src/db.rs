@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 7;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -109,6 +109,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 4 {
         tx.execute_batch(SCHEMA_V4)?;
     }
+    // V5 repairs the historic V3 collision: databases stamped V3 by the
+    // todo-assignee branch missed users/sessions. Every statement is idempotent.
+    if version < 5 {
+        tx.execute_batch(SCHEMA_V5)?;
+    }
+    if version < 6 {
+        add_column_if_missing(&tx, "todos", "project_id", "TEXT REFERENCES projects(id)")?;
+        tx.execute_batch(SCHEMA_V6)?;
+    }
+    if version < 7 {
+        add_column_if_missing(&tx, "projects", "deadline", "TEXT")?;
+        tx.execute_batch(SCHEMA_V7)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -198,6 +211,29 @@ CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todo
 CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
 "#;
 
+/// Drift repair: replay the split V3/V4 definitions using only IF NOT EXISTS.
+pub(crate) const SCHEMA_V5: &str = r#"
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL CHECK(role IN ('admin','member')), active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
+CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
+"#;
+pub(crate) const SCHEMA_V6: &str = r#"
+CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
+"#;
+pub(crate) const SCHEMA_V7: &str = r#""#;
+
+fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let found = stmt.query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if !found { conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?; }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +265,31 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
         assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn drifted_v4_is_repaired_and_latest_shape_matches_fresh_create() {
+        let drifted = open_in_memory().unwrap();
+        drifted.execute_batch(SCHEMA_V1).unwrap();
+        drifted.execute_batch(SCHEMA_V2).unwrap();
+        // Historical collision: v3 was consumed by V4's todo-assignee schema.
+        drifted.execute_batch(SCHEMA_V4).unwrap();
+        drifted.pragma_update(None, "user_version", 4).unwrap();
+        migrate(&drifted).unwrap();
+        for table in ["users", "sessions", "todo_assignees"] {
+            let exists: i64 = drifted.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |r| r.get(0)).unwrap();
+            assert_eq!(exists, 1, "{table}");
+        }
+        assert!(drifted.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('todo','missing','x','missing')", []).is_err(), "V6 FK holds");
+        migrate(&drifted).unwrap(); // repair + ALTER migrations converge.
+
+        let fresh = open_in_memory().unwrap();
+        migrate(&fresh).unwrap();
+        for (table, column) in [("todos", "project_id"), ("projects", "deadline")] {
+            let columns = |c: &Connection| c.prepare(&format!("PRAGMA table_info({table})")).unwrap().query_map([], |r| r.get::<_, String>(1)).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+            assert_eq!(columns(&drifted), columns(&fresh), "{table} shape");
+            assert!(columns(&fresh).contains(&column.to_string()));
+        }
     }
 
     #[test]
