@@ -1,5 +1,6 @@
 [package]
 name = "gaia-space"
+default-run = "gaia-space"
 version = "0.1.0"
 description = "GAIA Space — agent workspace"
 authors = ["Pascal Disse"]
