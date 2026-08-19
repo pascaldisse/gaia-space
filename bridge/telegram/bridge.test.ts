@@ -8,18 +8,18 @@ afterEach(async () => { for (const file of files.splice(0)) await Bun.file(file)
 
 describe("configuration", () => {
   test("refuses to start without a bot token", () => {
-    expect(() => readConfig({ SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general" })).toThrow(ConfigError);
+    expect(() => readConfig({ SPACE_USERNAME: "telegram-bridge", SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general" })).toThrow(ConfigError);
   });
 
   test("uses only documented non-secret defaults", () => {
-    const config = readConfig({ TELEGRAM_BOT_TOKEN: "token", SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general" });
+    const config = readConfig({ TELEGRAM_BOT_TOKEN: "token", SPACE_USERNAME: "telegram-bridge", SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general" });
     expect(config.spaceServerUrl).toBe("http://127.0.0.1:8090");
-    expect(config.spaceUsername).toBe("admin");
+    expect(config.spaceUsername).toBe("telegram-bridge");
     expect(config.pollIntervalMs).toBe(1_500);
   });
 
   test("rejects invalid polling periods", () => {
-    expect(() => readConfig({ TELEGRAM_BOT_TOKEN: "token", SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general", TELEGRAM_POLL_INTERVAL_MS: "0" })).toThrow("positive integer");
+    expect(() => readConfig({ TELEGRAM_BOT_TOKEN: "token", SPACE_USERNAME: "telegram-bridge", SPACE_PASSWORD: "secret", SPACE_CHANNEL_ID: "general", TELEGRAM_POLL_INTERVAL_MS: "0" })).toThrow("positive integer");
   });
 });
 

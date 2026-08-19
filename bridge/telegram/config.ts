@@ -28,7 +28,7 @@ export function readConfig(env: Record<string, string | undefined> = Bun.env): B
   return {
     telegramToken: required(env, "TELEGRAM_BOT_TOKEN"),
     spaceServerUrl: (env.SPACE_SERVER_URL?.trim() || "http://127.0.0.1:8090").replace(/\/$/, ""),
-    spaceUsername: env.SPACE_USERNAME?.trim() || "admin",
+    spaceUsername: required(env, "SPACE_USERNAME"),
     spacePassword: required(env, "SPACE_PASSWORD"),
     channelId: required(env, "SPACE_CHANNEL_ID"),
     pollIntervalMs: positiveInteger(env.TELEGRAM_POLL_INTERVAL_MS, 1_500, "TELEGRAM_POLL_INTERVAL_MS"),
