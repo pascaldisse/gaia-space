@@ -1,0 +1,44 @@
+.ph-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-max); }
+.ph-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: var(--view-head-gap); }
+.ph-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ph-mark { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border-radius: 11px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 16px; box-shadow: 0 2px 10px rgba(0,194,168,0.28); }
+.ph-title h1 { margin: 0; font-size: 23px; }
+.ph-title p { margin: 4px 0 0; color: var(--text-muted); max-width: 60ch; }
+.ph-muted { color: var(--text-dim); }
+.ph-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 28px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #a3a9b5; border-radius: 12px; max-width: 520px; margin: 24px auto; }
+
+.ph-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 22px; max-width: 1000px; }
+.ph-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; text-align: left; }
+.ph-stat:hover { border-color: var(--accent); }
+.ph-stat-num { font-family: var(--font-head); font-size: 24px; font-weight: 650; color: var(--text-strong); }
+.ph-stat-label { font-size: 12px; color: var(--text-muted); }
+
+.ph-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; max-width: 1000px; }
+.ph-card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 16px 18px; }
+.ph-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ph-card-head h2 { margin: 0; font-size: 15px; }
+.ph-link { background: transparent; border: 0; color: var(--accent-text); padding: 0; font-size: 12px; font-weight: 600; }
+.ph-link:hover { color: var(--accent-hover); }
+.ph-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ph-list li { display: flex; align-items: baseline; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.ph-list li:hover { background: rgba(255,255,255,0.05); }
+.ph-list strong { color: var(--text-strong); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.ph-list small { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.ph-list time { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.ph-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); font-size: 12px; flex: none; }
+
+/* Project deadline banner on the overview — tone by urgency, opens the calendar. */
+.ph-deadline { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--surface-border); border-left-width: 3px; border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
+.ph-deadline:hover { border-color: var(--surface-border-hover); }
+.ph-deadline-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--deadline-blue); flex: none; }
+.ph-deadline-label { font-weight: 600; color: var(--text-strong); }
+.ph-deadline time { color: var(--text-faint); font-size: .86rem; }
+.ph-deadline em { margin-left: auto; font-style: normal; font-size: .82rem; color: var(--text-faint); }
+.ph-deadline.overdue { border-left-color: var(--status-risk-overdue); }
+.ph-deadline.overdue .ph-deadline-dot { background: var(--status-risk-overdue); }
+.ph-deadline.overdue em { color: var(--status-danger-ink); font-weight: 600; }
+.ph-deadline.soon { border-left-color: var(--attn-amber); }
+.ph-deadline.soon .ph-deadline-dot { background: var(--attn-amber); }
+.ph-deadline.soon em { color: var(--attn-amber-text); }
+.ph-deadline.ok { border-left-color: #4fae6a; }
+.ph-deadline.ok .ph-deadline-dot { background: #4fae6a; }

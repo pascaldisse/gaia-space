@@ -1,0 +1,54 @@
+.pf-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); }
+
+/* ── portfolio summary strip ── real project/issue counts, fills the top band ── */
+.pf-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0 0 20px; }
+.pf-metric { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--surface-border); border-radius: 13px; background: var(--surface); text-align: left; }
+.pf-metric-num { font-family: var(--font-head); font-size: 24px; font-weight: 700; line-height: 1; color: var(--text-strong); }
+.pf-metric-num.sm { font-size: 16px; }
+.pf-metric-lbl { font-size: 12px; color: #9297a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-metric-link { cursor: pointer; transition: border-color .14s ease, background .14s ease; }
+.pf-metric-link:hover { border-color: var(--accent); background: var(--surface-hover); }
+.pf-metric-link .pf-metric-num.sm { color: var(--accent-text, var(--accent)); }
+/* Header identity now comes from the shared WorkspaceHeader component. */
+.pf-new { flex: none; }
+.pf-muted { color: var(--text-dim); }
+
+/* ── empty workspace: lead into first-project creation ── */
+.pf-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 48px 26px; border: 1px dashed #3d4a68; border-radius: 12px; color: #92959d; max-width: 560px; margin: 20px auto; }
+.pf-empty-mark { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-size: 24px; box-shadow: 0 4px 16px rgba(0,194,168,0.28); }
+.pf-empty h2 { margin: 6px 0 0; font-family: var(--font-head); font-size: 18px; color: var(--text-strong); }
+.pf-empty p { margin: 0; max-width: 400px; }
+.pf-empty button { margin-top: 8px; }
+
+/* ── create-project form ── */
+.pf-create { display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 8px 0 24px; padding: 22px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; }
+.pf-create h2 { margin: 0; font-family: var(--font-head); font-size: 17px; color: var(--text-strong); }
+.pf-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #aeb1b8; }
+.pf-field span em { font-style: normal; color: #6f7890; }
+.pf-field input, .pf-field textarea { padding: 8px 10px; }
+.pf-field textarea { min-height: 3.5em; resize: vertical; }
+.pf-error { background: var(--status-danger-bg); color: var(--status-danger-ink); padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+.pf-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Projects stay legible at any portfolio size: each real project gets one
+   full-canvas row rather than being compressed into a sparse card grid. */
+.pf-grid { display: grid; gap: 12px; }
+.pf-card { display: grid; grid-template-columns: auto minmax(280px, 1fr) auto auto; align-items: center; gap: 18px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 14px; padding: 17px 18px; transition: border-color .12s ease, background .12s ease, transform .12s ease; }
+.pf-card:hover { background: var(--surface-hover); border-color: var(--accent); transform: translateY(-1px); }
+.pf-card.current { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pf-mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 11px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; font-size: 15px; }
+.pf-card-copy { min-width: 0; display: grid; gap: 5px; }
+.pf-card-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.pf-card strong { font-family: var(--font-head); font-size: 16px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-card p { margin: 0; color: var(--text-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-dim); }
+.pf-card-facts { display: grid; gap: 5px; justify-items: start; min-width: 142px; }
+.pf-open { font-size: 11.5px; color: var(--text-muted); }
+.pf-open b { color: var(--accent-text); font-family: var(--font-head); font-size: 14px; }
+.pf-deadline { font-size: 11.5px; color: var(--text-faint); white-space: nowrap; }
+.pf-card-open { color: var(--accent-text); font-family: var(--font-head); font-size: 12px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 720px) {
+  .pf-card { grid-template-columns: auto minmax(0, 1fr); gap: 12px; }
+  .pf-card-facts, .pf-card-open { grid-column: 2; }
+  .pf-card p { white-space: normal; }
+}

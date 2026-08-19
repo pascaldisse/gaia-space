@@ -1,0 +1,34 @@
+/* ── Avatar: one identity mark for the whole space ───────────────────────
+   Person avatars are monochrome deep-slate circles; project marks keep the
+   distinct teal brand treatment as rounded squares. Size via --avatar-size. */
+.avatar {
+  display: grid; place-items: center; flex: none;
+  width: var(--avatar-size, 26px); height: var(--avatar-size, 26px);
+  font-family: var(--font-head); font-weight: 700;
+  font-size: calc(var(--avatar-size, 26px) * 0.42); letter-spacing: 0.02em;
+  line-height: 1; user-select: none;
+}
+
+/* person — monochrome deep slate, no rainbow hues */
+.avatar.person {
+  border-radius: 50%;
+  background: var(--avatar-person-bg);
+  color: var(--avatar-person-ink);
+  box-shadow: inset 0 0 0 1px var(--avatar-person-ring);
+}
+
+/* project — distinct teal brand mark, rounded square */
+.avatar.project {
+  border-radius: calc(var(--avatar-size, 26px) * 0.26);
+  background: linear-gradient(135deg, var(--brand-teal), #0f9e8b);
+  color: var(--brand-navy);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* "all / any" sentinel — quiet accent, not an identity */
+.avatar.all {
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0, 194, 168, 0.35);
+}

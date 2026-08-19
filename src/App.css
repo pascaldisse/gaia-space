@@ -1,86 +1,791 @@
-@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight:400; font-style:normal; font-display:swap; }
-@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-SemiBold.ttf") format("truetype"); font-weight:600; font-style:normal; font-display:swap; }
-@font-face { font-family:"Gaia Inter"; src:url("./assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight:700 900; font-style:normal; font-display:swap; }
+* {
+  box-sizing: border-box;
+}
 
-* { box-sizing: border-box; }
-
-/* Theme: the sole color source for the Space UI. */
 :root {
-  --canvas: #101817;
-  --chrome: #15201e;
-  --surface: #1b2926;
-  --surface-raised: #22332f;
-  --surface-hover: #293d38;
-  --surface-border: #40554e;
-  --text: #e5eee9;
-  --text-strong: #f5faf7;
-  --text-muted: #aebdb7;
-  --text-faint: #82938c;
-  --accent: #75c9ad;
-  --accent-strong: #9fe2c9;
-  --accent-soft: #25463c;
-  --on-accent: #10211b;
-  --danger: #ffb4a9;
-  --danger-surface: #4b2927;
-  --warning: #e8c77d;
-  --warning-surface: #4a4023;
-  --success: #a7dbaa;
-  --success-surface: #294633;
-  --overlay: rgba(7, 12, 10, .78);
-  --font-body: "Gaia Inter";
-  --font-head: "Gaia Inter";
+  /* ── paloptic brand system ── */
+  --brand-navy: #0F1B33;
+  --brand-teal: #00C2A8;
+  --brand-teal-bright: #14D3B8;
+  --brand-ice: #E9F6F4;
+  --brand-slate: #1A1F26;
+  --brand-cool-gray: #D9DEE3;
+
+  --accent: var(--brand-teal);
+  --accent-hover: var(--brand-teal-bright);
+  --accent-soft: #0d2f35;      /* teal-tinted selection surface */
+  --accent-text: #5fe6d4;      /* teal text on dark */
+  --text: var(--brand-cool-gray);
+  --text-strong: var(--brand-ice);
+  /* secondary text ladder — ONE source for muted copy so the ~20 near-duplicate
+     greys that had drifted across views collapse into three semantic roles. */
+  --text-muted: #9da0a8;  /* purpose lines / descriptions / secondary body */
+  --text-faint: #8b96ad;  /* meta, small print, inline timestamps */
+  --text-dim:   #7f8aa3;  /* tertiary faint labels / crumb chrome */
+  --text-emphasis: #c7cad2; /* bolded words inside muted purpose lines */
+
+  /* ── identity avatars ──────────────────────────────────────
+     Person avatars are monochrome deep slate (no rainbow hues);
+     project marks keep the distinct teal brand treatment. */
+  --avatar-person-bg: #2a3446;
+  --avatar-person-ink: #cdd6e6;
+  --avatar-person-ring: rgba(255,255,255,0.08);
+
+  /* ── central status tokens ─────────────────────────────────
+     Shared semantic states for high-visibility status surfaces
+     (pipelines, reviews, risk, deadlines). Each has a text ink
+     and a soft tinted fill. Persisted per-project custom status
+     colours are NOT governed by these — they stay data-driven. */
+  --status-success-ink: #7cd68a;
+  --status-success-bg: #1e3a2b;
+  --status-info-ink: #5fe6d4;
+  --status-info-bg: #26305c;
+  --status-warning-ink: #e0a05e;
+  --status-warning-bg: #3a2c1a;
+  --status-danger-ink: #ff9a9a;
+  --status-danger-bg: #4a2426;
+  --status-neutral-ink: #9aa4bb;
+  --status-neutral-bg: #2a3140;
+  /* attention amber — the recurring "soon / needs attention" accent used by
+     deadline banners, steering action cards & live dots. One token so the
+     shade stops drifting per-view. */
+  --attn-amber: #f0a742;
+  --attn-amber-text: #f0bd77;
+  /* project-deadline marker */
+  --deadline-blue: #5b78e5;
+  /* risk scale — deadline/risk dots & badges */
+  --status-risk-overdue: #f26d6d;
+  --status-risk-high: #f2a24b;
+  --status-risk-medium: #e6cf5f;
+  --status-risk-low: #5fe6d4;
+
+  /* ── unified bold control system ──────────────────────────
+     ONE control family for buttons, fields, selects & action
+     links: same height, padding, radius, filled surface and a
+     stronger, readable weight. No thin outlined boxes. */
+  --ctl-bg: #1c2e50;            /* filled resting field surface (lifted above canvas) */
+  --ctl-bg-hover: #24375e;      /* lift on hover */
+  --ctl-bg-raised: #26385c;     /* buttons / segmented track (reads pressable) */
+  --ctl-bg-raised-hover: #2f4a75;
+  --ctl-border: #46587e;        /* resting border — visible, not hairline */
+  --ctl-border-hover: #5f74a0;  /* border on hover */
+  --ctl-radius: 9px;            /* standard control radius */
+  --ctl-radius-sm: 7px;         /* dense / inline controls */
+  --ctl-pad-y: 0.55em;          /* shared vertical padding → matched heights */
+  --ctl-pad-x: 0.9em;
+  --ctl-font-size: 13.5px;      /* larger, more legible than 13px body */
+  --ctl-font-weight: 550;       /* fields read solid, not light */
+  --ctl-line: 1.3;
+  --ctl-placeholder: #7182a1;
+  --ctl-focus-ring: 0 0 0 3px rgba(0,194,168,0.18);
+
+  /* ── surface / elevation ladder ───────────────────────────
+     Content cards must read as lifted ABOVE the workspace canvas
+     (#12213d), never sunk below it. One shared ladder so cards,
+     panels and list rows lighten together instead of per-view hacks.
+       chrome (topbar/sidebar/dropdowns) : #0f1b33 (stays deep)
+       workspace canvas                  : #12213d
+       surface (resting card)            : --surface
+       surface-hover / raised            : lifted card states
+       surface-border                    : visible card hairline */
+  --surface: #182a4d;
+  --surface-hover: #1e315a;
+  --surface-raised: #203458;
+  --surface-border: #33456d;
+  --surface-border-hover: #435780;
+
+  /* ── workspace content shell ───────────────────────────────
+     ONE rhythm for every destination body so switching tabs no
+     longer jumps the content origin or padding around. Views set
+     ONLY their internal grids; the outer column geometry (start
+     padding, left-aligned readable cap) comes from these tokens.
+       view-pad-*   : shared top/side/bottom padding of a view body
+       view-max     : standard readable content cap (left-aligned)
+       view-max-wide: wide data/two-column layouts (fills wide monitors)
+       view-head-gap: header → body vertical rhythm
+       rail-w       : width of the context/next-action rail */
+  --view-pad-y: 26px;
+  --view-pad-x: 34px;
+  --view-pad-bottom: 44px;
+  --view-max: 1160px;
+  --view-max-wide: 1280px;
+  --view-max-canvas: 1560px;
+  /* SHARED WORKSPACE CANVAS — every top-nav destination (Overview, My tasks,
+     Time off, Inbox, Projects, Calendar, Knowledge, Organization, Admin…)
+     shares this one width so the WorkspaceHeader's right-aligned actions land
+     on the exact same baseline in every view. Do not cap top-level views with
+     a bespoke width. */
+  --view-canvas: 1560px;
+  --view-head-gap: 22px;
+  --rail-w: 312px;
+
+  --font-head: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
   font-family: var(--font-body);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--text);
-  background: var(--canvas);
+  background-color: var(--brand-navy);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
-html, body, #root { height: 100%; margin: 0; }
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; color: var(--text); background: var(--surface-raised); border: 1px solid var(--surface-border); padding: .5em .8em; }
-button:hover { background: var(--surface-hover); border-color: var(--accent); }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
-button:disabled { opacity: .55; cursor: default; }
-button.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 700; }
-button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
-button.ghost { color: var(--text-muted); background: transparent; border-color: transparent; }
-button.ghost:hover { color: var(--text-strong); background: var(--surface-hover); }
-input, select, textarea { width: 100%; color: var(--text-strong); background: var(--chrome); border: 1px solid var(--surface-border); padding: .55em .7em; }
-input::placeholder, textarea::placeholder { color: var(--text-faint); }
-textarea { min-height: 4.5em; resize: vertical; }
-select { color-scheme: dark; }
 
-.space-shell-loading { height: 100vh; background: var(--canvas); }
-.space-shell { min-height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--canvas); }
-.topbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; min-height: 56px; border-bottom: 1px solid var(--surface-border); background: var(--chrome); padding: 0 18px; gap: 12px; }
-.topbar-brand { display: flex; align-items: center; gap: 9px; white-space: nowrap; font-family: var(--font-head); font-weight: 700; color: var(--text-strong); }
-.space-mark { display: grid; place-items: center; width: 27px; height: 27px; background: var(--accent); color: var(--on-accent); font-weight: 800; }
-.topnav { min-width: 0; display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }.topnav::-webkit-scrollbar { display:none; }
-.topnav-item { display: inline-flex; align-items: center; gap: 5px; min-height: 56px; padding: 0 7px; font-size: 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); white-space: nowrap; }
-.topnav-item:hover { background: var(--surface); color: var(--text-strong); border-color: transparent; }
-.topnav-item.active { color: var(--accent-strong); border-bottom-color: var(--accent); }
-.nav-icon { display: inline-grid; place-items: center; width: 16px; color: currentColor; }
-.topbar-right { position: relative; display: flex; align-items: center; gap: 4px; }
-.topbar-search, .topbar-account { background: transparent; border-color: transparent; color: var(--text-muted); }
-.topbar-search { display: flex; align-items: center; gap: 6px; }
-.account-trigger { display: flex; align-items: center; gap: 7px; }
-.account-avatar { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--accent); color: var(--accent-strong); font-size: 11px; font-weight: 700; }
-.account-dropdown { position: absolute; right: 0; top: calc(100% + 9px); z-index: 10; min-width: 250px; padding: 8px; background: var(--surface); border: 1px solid var(--surface-border); }
-.workspace { min-width: 0; overflow: hidden; background: var(--canvas); }
-.workspace > * { height: 100%; }
+/* headings & product titles use Poppins for the brand voice */
+h1, h2, h3, h4, .brand, .nav header em, .nav-section {
+  font-family: var(--font-head);
+}
+h1 { letter-spacing: -0.01em; color: var(--text-strong); }
 
-/* Legacy three-pane desktop view remains available; its chrome uses the shared theme. */
-.app { display: grid; grid-template-columns: var(--col-side,220px) 5px var(--col-center,340px) 5px minmax(0,1fr); height: 100%; overflow: hidden; }
-.app > .sidebar { grid-column: 1; }.app > .resizer:first-of-type { grid-column: 2; }.app > .center { grid-column: 3; }.app > .resizer:last-of-type { grid-column: 4; }.app > .detail { grid-column: 5; }
-.sidebar, .center { background: var(--chrome); border-right: 1px solid var(--surface-border); }.sidebar { display:flex; flex-direction:column; overflow:auto; padding:.5em 0; }.center,.detail { display:flex; flex-direction:column; overflow:hidden; }.detail { background:var(--canvas); }
-.resizer { background: var(--surface-border); border: 0; padding:0; }.resizer:hover,.resizer:focus-visible,.resizer.dragging { background:var(--accent); outline:0; }
-.brand,.topbar { font-family:var(--font-head); }.brand,.section-label,.hint,.topbar,.commit-box { padding:.7em .9em; }.section-label,.hint { color:var(--text-faint); }.repo-list,.branch-list,.commits,.status-list { list-style:none; margin:0; padding:0; }.repo-list li,.branch-list li,.working-row,.commits li { padding:.5em .9em; border-bottom:1px solid var(--surface-border); }.repo-list li:hover,.branch-list li:hover,.working-row:hover,.commits li:hover { background:var(--surface-hover); }.repo-list li.active,.working-row.active,.commits li.active { background:var(--accent-soft); color:var(--accent-strong); }.topbar { border-bottom:1px solid var(--surface-border); }.branch-chip,.badge,.staged { background:var(--accent-soft); color:var(--accent-strong); border:1px solid var(--surface-border); padding:.1em .5em; }.error-bar { background:var(--danger-surface); color:var(--danger); padding:.6em .9em; }.diff-line.add { background:var(--success-surface); color:var(--success); }.diff-line.del { background:var(--danger-surface); color:var(--danger); }.diff-line.hunk,.diff-line.hdr,.diff-line.meta,.commits .sha,.commits .meta { color:var(--text-faint); }
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
 
-.picker { display:grid; gap:4px; min-width:210px; color:var(--text-muted); font-size:12px; }.picker select { max-width:320px; }
-.nav-footer { color:var(--text); }.nav-footer-row { display:flex; align-items:center; gap:5px; }.nav-footer-user { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.nav-footer-pw { display:grid; gap:6px; margin-top:8px; }.nav-footer-pw .error { background:var(--danger-surface); color:var(--danger); padding:6px; }.nav-footer-pw .ok { background:var(--success-surface); color:var(--success); padding:6px; }
-.resource-view { height:100%; overflow:auto; padding:var(--view-pad-y,28px) var(--view-pad-x,34px); }.resource-view h1 { margin:0; font-size:22px; }.resource-view header p,.resource-view p { color:var(--text-muted); }.resource-list { max-width:1000px; padding:0; margin:0; list-style:none; }.resource-list li,.empty-state { border:1px solid var(--surface-border); background:var(--surface); padding:12px 14px; margin-bottom:7px; }.resource-list li.active { border-color:var(--accent); background:var(--accent-soft); }.row-link { color:inherit; text-decoration:none; }.empty-state { color:var(--text-muted); }
+button {
+  font-family: var(--font-head);
+  font-size: var(--ctl-font-size);
+  font-weight: 600;
+  line-height: var(--ctl-line);
+  cursor: pointer;
+  color: var(--text-strong);
+  background: var(--ctl-bg-raised);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--ctl-radius);
+  padding: var(--ctl-pad-y) var(--ctl-pad-x);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
 
-@media(max-width:800px) { .topbar { grid-template-columns:auto 1fr auto; padding:0 10px; gap:8px; }.topbar-brand em,.topbar-search-hint { display:none; }.topnav-item { padding:0 9px; }.topnav { justify-content:center; }.picker { min-width:0; }.app { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) minmax(0,1fr); }.app > .resizer { display:none; }.app > .sidebar,.app > .center,.app > .detail { grid-column:1; }.app > .sidebar { grid-row:1; }.app > .center { grid-row:2; }.app > .detail { grid-row:3; } }
+button:hover {
+  border-color: var(--accent);
+}
+
+button.ghost {
+  background: transparent;
+  border: none;
+  color: #9a9a9a;
+  padding: 0.1em 0.5em;
+  font-size: 1.1em;
+}
+
+button.ghost:hover {
+  color: #d9dee3;
+}
+
+button.ghost.small {
+  font-size: 0.9em;
+  opacity: 0;
+}
+
+li:hover button.ghost.small,
+li.active button.ghost.small {
+  opacity: 1;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--brand-navy);
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── unified premium control surface ─────────────────────────
+   one coherent look for every text field, select, and textarea.
+   view-level CSS should only adjust layout (width/flex/min-width),
+   never re-skin these — the tokens above are the single source. */
+textarea,
+select,
+input[type="text"], input[type="search"], input[type="email"], input[type="password"],
+input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"],
+input[type="number"], input[type="url"], input[type="tel"], input:not([type]) {
+  font-family: var(--font-body);
+  font-size: var(--ctl-font-size);
+  font-weight: var(--ctl-font-weight);
+  line-height: var(--ctl-line);
+  background: var(--ctl-bg);
+  color: var(--text-strong);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--ctl-radius);
+  padding: var(--ctl-pad-y) var(--ctl-pad-x);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+  color-scheme: dark;
+}
+textarea { resize: vertical; min-height: 4.5em; width: 100%; }
+input::placeholder, textarea::placeholder { color: var(--ctl-placeholder); }
+
+/* selects: drop the cheap native chrome, add a crisp custom chevron */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.2em;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%238b96ad' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7em center;
+  background-size: 12px;
+  cursor: pointer;
+}
+select:hover { background-color: var(--ctl-bg-hover); }
+select option { background: #0f1b33; color: var(--text-strong); }
+
+/* themed checkboxes & radios — teal accent instead of OS blue */
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+input[type="color"] { cursor: pointer; padding: 2px; }
+
+textarea:hover, select:hover,
+input[type="text"]:hover, input[type="search"]:hover, input[type="email"]:hover, input[type="password"]:hover,
+input[type="date"]:hover, input[type="time"]:hover, input[type="datetime-local"]:hover, input[type="month"]:hover,
+input[type="number"]:hover, input[type="url"]:hover, input[type="tel"]:hover, input:not([type]):hover { border-color: var(--ctl-border-hover); }
+
+textarea:disabled, select:disabled,
+input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* stronger, quieter micro-labels — Poppins, uppercase, tracked */
+.field-label, .form-label {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #93a0bb;
+}
+
+/* accessible teal focus ring across interactive elements */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ctl-focus-ring);
+}
+
+/* ── segmented control — coherent premium toggle group ──────── */
+.segmented { display: inline-flex; align-items: stretch; gap: 2px; padding: 3px; background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 9px; }
+.segmented button {
+  background: transparent; border: 1px solid transparent; border-radius: var(--ctl-radius-sm);
+  padding: 5px 12px; color: #9aa4bb; font-family: var(--font-head); font-weight: 500; font-size: 12px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.segmented button:hover { color: var(--text-strong); background: rgba(255,255,255,0.05); border-color: transparent; }
+.segmented button.active { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+
+.app {
+  display: grid;
+  grid-template-columns:
+    var(--col-side, 220px) 5px var(--col-center, 340px) 5px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── drag handles ──────────────────────────────────────────── */
+.app > .sidebar { grid-column: 1; }
+.app > .resizer:first-of-type { grid-column: 2; }
+.app > .center { grid-column: 3; }
+.app > .resizer:last-of-type { grid-column: 4; }
+.app > .detail { grid-column: 5; }
+
+.resizer {
+  cursor: col-resize;
+  background: #243050;
+  border: 0;
+  position: relative;
+  touch-action: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.resizer:hover,
+.resizer:focus-visible,
+.resizer.dragging {
+  background: #00c2a8;
+  outline: none;
+}
+
+.sidebar {
+  background: #0e1626;
+  border-right: 1px solid #243050;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0.5em 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6em 0.9em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.repos-purpose { padding: 0 0.9em 0.4em; margin: 0; line-height: 1.4; max-width: none; }
+.repos-onboard { max-width: 420px; margin: 48px auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 24px; }
+.repos-onboard h2 { margin: 0; font-size: 17px; font-weight: 650; color: var(--text-strong); }
+.repos-onboard p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+.repos-onboard .primary { margin-top: 6px; }
+
+.section-label {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a7a7a;
+  padding: 0.8em 0.9em 0.3em;
+}
+
+.hint {
+  color: #7a7a7a;
+  padding: 0.4em 0.9em;
+}
+
+.hint.pad {
+  padding: 2em;
+  text-align: center;
+}
+
+.repo-list, .branch-list, .commits, .status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repo-list li, .branch-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35em 0.9em;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.repo-list li:hover, .branch-list li:hover {
+  background: #141d30;
+}
+
+.repo-list li.active {
+  background: #0d2f35;
+  color: #5fe6d4;
+}
+
+.repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-list li.head {
+  color: #7cd68a;
+}
+
+.center {
+  border-right: 1px solid #243050;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.6em 0.9em;
+  border-bottom: 1px solid #243050;
+  overflow: hidden;
+}
+
+.topbar .path {
+  color: #7a7a7a;
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-chip {
+  background: #243050;
+  border-radius: 10px;
+  padding: 0.1em 0.6em;
+  font-size: 0.8em;
+  color: #5fe6d4;
+}
+
+.working-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.9em;
+  cursor: pointer;
+  border-bottom: 1px solid #243050;
+}
+
+.working-row:hover {
+  background: #141d30;
+}
+
+.working-row.active {
+  background: #0d2f35;
+}
+
+.working-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--attn-amber);
+}
+
+.working-row .count {
+  margin-left: auto;
+  color: #7a7a7a;
+  font-size: 0.85em;
+}
+
+.commits {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.commits li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.4em 0.9em;
+  cursor: pointer;
+  border-bottom: 1px solid #141d30;
+}
+
+.commits li:hover {
+  background: #141d30;
+}
+
+.commits li.active {
+  background: #0d2f35;
+}
+
+.commits .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #7a7a7a;
+  font-size: 0.85em;
+}
+
+.commits .summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.commits .meta {
+  color: #7a7a7a;
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.error-bar {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-ink);
+  padding: 0.5em 0.9em;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.9em;
+  border-bottom: 1px solid #243050;
+}
+
+.status-list {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.status-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.2em 0;
+}
+
+.status-list .file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 3px;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  background: #243050;
+}
+
+.badge.new { color: #7cd68a; }
+.badge.modified { color: var(--attn-amber); }
+.badge.deleted { color: #e0605e; }
+.badge.renamed { color: #7ab8f5; }
+.badge.conflicted { color: #e0605e; }
+
+.staged {
+  font-size: 0.75em;
+  color: #7cd68a;
+  border: 1px solid #2f5d3f;
+  border-radius: 8px;
+  padding: 0 0.5em;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.diff-view {
+  flex: 1;
+  overflow: auto;
+}
+
+.diff-pre {
+  margin: 0;
+  padding: 0.6em 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  white-space: pre;
+}
+
+.diff-line {
+  padding: 0 0.9em;
+}
+
+.diff-line.add {
+  background: #10321f;
+  color: #9be8ac;
+}
+
+.diff-line.del {
+  background: #3a1616;
+  color: #f5a3a3;
+}
+
+.diff-line.hunk {
+  color: #7ab8f5;
+}
+
+.diff-line.hdr,
+.diff-line.meta {
+  color: #7a7a7a;
+}
+
+.diff-line.ctx {
+  color: #c8c8c8;
+}
+
+.error {
+  color: #e05252;
+}
+
+/* ── web-mode boot: auth check in flight ── */
+.space-shell-loading { height: 100vh; background: #0f1b33; }
+
+/* ── app shell: broad TOP navigation + central workspace ── */
+.space-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.space-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 7px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; box-shadow: 0 2px 8px rgba(0,194,168,0.28); }
+
+/* top bar: brand · primary nav · search + compact menus */
+.topbar { display: flex; align-items: center; gap: 16px; flex: none; height: 54px; padding: 0 16px; background: #0f1b33; border-bottom: 1px solid #2b3550; }
+.topbar-brand { display: flex; align-items: center; gap: 9px; flex: none; }
+.topbar-brand em { font-style: normal; font-weight: 650; font-family: var(--font-head); color: var(--text-strong); white-space: nowrap; }
+
+/* primary nav: broad, always-visible horizontal destinations */
+.topnav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.topnav::-webkit-scrollbar { display: none; }
+.topnav-divider { width: 1px; height: 22px; background: #2b3550; margin: 0 8px; flex: none; }
+.topnav-item { display: flex; align-items: center; gap: 8px; flex: none; background: transparent; border: 0; border-radius: 7px; padding: 8px 12px; color: #b9c2d4; font-family: var(--font-head); font-weight: 500; }
+.topnav-label { white-space: nowrap; }
+.icon { display: block; flex: none; }
+.nav-icon { display: grid; place-items: center; width: 18px; flex: none; color: var(--text-muted); }
+.topnav-item:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+.topnav-item.active { background: var(--accent-soft); color: var(--text-strong); }
+.topnav-item.active .nav-icon { color: var(--accent); }
+/* secondary cluster: the divider is the only grouping cue — icon size, gap,
+   colour, weight and padding stay identical to the primary items so every
+   primary-row destination carries a consistent line icon before its label. */
+.topnav-item.secondary:hover { color: var(--text-strong); }
+.topnav-item.secondary.active { color: var(--text-strong); }
+
+/* right cluster: search, manage menu, account */
+.topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.topbar-search { display: flex; align-items: center; gap: 7px; background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 8px; padding: 7px 12px; color: #9aa4bb; font-family: var(--font-body); }
+.topbar-search:hover { border-color: var(--accent); color: var(--text-strong); }
+.topbar-search .nav-icon { width: auto; }
+.topbar-search-hint { font-size: 12px; }
+.topbar-menu { position: relative; }
+.topbar-icon, .topbar-account { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: #b9c2d4; }
+.topbar-icon:hover, .topbar-account:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+.topbar-icon.active, .topbar-account.active { background: var(--accent-soft); color: var(--text-strong); border-color: var(--accent); }
+/* account avatar visuals come from the shared <Avatar> (person = slate). */
+
+/* compact dropdowns for secondary/admin + account */
+.topbar-dropdown { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; min-width: 200px; background: #0f1b33; border: 1px solid #2b3550; border-radius: 10px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+.dropdown-label { color: var(--text-dim); font-family: var(--font-head); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px 4px; margin: 0; }
+.topbar-dropdown button { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 8px 8px; color: #b9c2d4; font-family: var(--font-head); font-weight: 500; }
+.topbar-dropdown button:hover { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+.topbar-dropdown button.active { background: var(--accent-soft); color: var(--text-strong); }
+.topbar-dropdown button.active .nav-icon { color: var(--accent); }
+.account-dropdown { min-width: 260px; padding: 4px; }
+
+/* ── web-mode account menu (rendered inside the account dropdown) ── */
+.nav-footer { padding: 6px; }
+.nav-footer-row { display: flex; align-items: center; gap: 4px; }
+.nav-footer-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; color: #c9cbd1; padding: 2px 4px; }
+.nav-footer-pw { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.nav-footer-pw input { padding: 6px 8px; }
+.nav-footer-pw .error { background: var(--status-danger-bg); color: var(--status-danger-ink); padding: 5px 7px; border-radius: 5px; font-size: 11px; }
+.nav-footer-pw .ok { background: #1f4a2a; color: #b3ffc0; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
+.workspace { min-width: 0; flex: 1; overflow: hidden; background: #12213d; display: flex; flex-direction: column; }
+.workspace .app { height: 100%; }
+.workspace-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.workspace-body > * { flex: 1; min-height: 0; }
+
+/* ── project context surface: crumb + horizontal tabs + optional sub-nav ── */
+.project-context { background: #0f1b33; border-bottom: 1px solid #2b3550; padding: 12px 20px 0; flex: none; }
+.pc-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.pc-crumb { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pc-back { background: transparent; border: 0; padding: 0; color: var(--text-dim); font-family: var(--font-head); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.pc-back:hover { color: var(--accent-text); border-color: transparent; }
+.pc-sep { color: #4a566f; }
+.pc-crumb strong { font-family: var(--font-head); font-size: 15px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-head .picker { min-width: 0; }
+.pc-head .picker select { max-width: 240px; }
+.pc-tabs { display: flex; gap: 2px; }
+.pc-tabs button { display: flex; align-items: center; gap: 6px; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; color: var(--text-muted); font-family: var(--font-head); font-weight: 500; }
+.pc-tabs button:hover { color: var(--text-strong); }
+.pc-tabs button.active { color: var(--text-strong); border-bottom-color: var(--accent); }
+.pc-tab-icon { color: var(--text-dim); }
+.pc-tabs button.active .pc-tab-icon { color: var(--accent); }
+.pc-sub { display: flex; gap: 6px; padding: 8px 0 10px; }
+.pc-sub button { background: var(--ctl-bg); border: 1px solid var(--ctl-border); border-radius: 999px; padding: 4px 12px; color: #b9c2d4; font-size: 12px; }
+.pc-sub button:hover { border-color: var(--accent); }
+.pc-sub button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.pc-sub-hint { margin: -2px 0 8px; color: var(--text-faint); font-size: 12px; }
+/* ── shared workspace layout contract ──────────────────────────────────────
+   One canvas geometry for every top-level workspace destination: identical
+   scroll region, identical padding, identical max-width. This is what makes
+   the WorkspaceHeader banner (title left / actions right) align on the same
+   baseline across Overview, My tasks, Projects, Calendar, Time off, etc.
+   Views only own their INNER grid — never the outer canvas width or padding. */
+.workspace-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); color: var(--text); }
+
+.resource-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); }
+.resource-view h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.resource-view header p { color: var(--text-muted); margin: 5px 0 24px; }
+.resource-list { padding: 0; margin: 0; list-style: none; max-width: 850px; }
+.resource-list li { padding: 12px 14px; margin-bottom: 7px; border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface); }
+.resource-list code { float: right; color: #83868f; font-size: 11px; }
+.resource-list pre { margin: 8px 0 0; color: #7fb8b0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+/* shared compact empty surface — centered card, never a huge dead block */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 28px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #92959d; border-radius: 12px; max-width: 520px; margin: 24px auto; }
+
+/* ── shared two-column workspace: main content + sticky context rail ──
+   Views that are otherwise a single narrow column adopt .view-cols so wide
+   monitors carry a useful, data-grounded rail (summary / next-action /
+   quick-start) instead of dead horizontal space. All surfaces are built from
+   the view's real data — no invented dashboards. */
+.view-cols { display: grid; grid-template-columns: minmax(0, 1fr) var(--rail-w); gap: 24px; align-items: start; }
+.view-main { min-width: 0; display: grid; gap: 16px; align-content: start; }
+.view-rail { display: grid; gap: 14px; position: sticky; top: 0; align-content: start; }
+.rail-card { border: 1px solid var(--surface-border); border-radius: 14px; background: var(--surface); padding: 15px 16px; }
+.rail-card > h3 { margin: 0 0 12px; font-family: var(--font-head); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); display: flex; align-items: center; gap: 7px; }
+.rail-card > h3 .rail-count { margin-left: auto; color: var(--text-muted); font-size: 11px; letter-spacing: 0; }
+/* metric grid — big numbers pulled from real counts */
+.rail-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rail-metric { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid var(--surface-border); border-radius: 11px; background: var(--surface-2, rgba(255,255,255,0.02)); }
+.rail-metric .rail-num { font-family: var(--font-head); font-size: 21px; font-weight: 700; line-height: 1; color: var(--text-strong); }
+.rail-metric .rail-lbl { font-size: 11px; color: #9297a3; }
+.rail-metric.accent .rail-num { color: var(--accent-text, var(--accent)); }
+.rail-metric.warn .rail-num { color: var(--status-warning-ink); }
+/* labelled key/value breakdown rows */
+.rail-rows { display: grid; gap: 2px; }
+.rail-row { display: flex; align-items: center; gap: 9px; padding: 7px 4px; border-radius: 8px; font-size: 13px; color: var(--text-muted); width: 100%; text-align: left; background: transparent; border: 0; }
+button.rail-row { cursor: pointer; }
+button.rail-row:hover { background: var(--surface-hover); color: var(--text-strong); }
+.rail-row .rail-row-ic { flex: none; display: grid; place-items: center; color: var(--text-dim); }
+.rail-row .rail-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-row .rail-row-val { margin-left: auto; flex: none; color: var(--text-strong); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rail-row.muted .rail-row-val { color: var(--text-faint); font-weight: 500; }
+/* compact next-action items */
+.rail-item { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid var(--surface-border); border-radius: 10px; background: transparent; text-align: left; width: 100%; }
+button.rail-item { cursor: pointer; }
+button.rail-item:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+.rail-item .rail-item-title { font-size: 13px; color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item .rail-item-sub { font-size: 11.5px; color: #9297a3; }
+.rail-empty { font-size: 12.5px; color: var(--text-faint); padding: 4px 2px; }
+.rail-actions { display: grid; gap: 8px; }
+.rail-actions button { justify-content: flex-start; width: 100%; }
+@media (max-width: 1040px) {
+  .view-cols { grid-template-columns: 1fr; }
+  .view-rail { position: static; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}
+
+/* ── responsive ─────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  /* drop the diff pane onto its own row below the commit list */
+  .app {
+    grid-template-columns: var(--col-side, 220px) 5px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+  .app > .resizer:last-of-type { display: none; }
+  .app > .detail { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid #243050; }
+  .center { border-right: 0; }
+}
+
+@media (max-width: 700px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); }
+  .app > .resizer { display: none; }
+  .app > .sidebar { grid-column: 1; grid-row: 1; max-height: 26vh; border-right: 0; border-bottom: 1px solid #243050; }
+  .app > .center { grid-column: 1; grid-row: 2; }
+  .app > .detail { grid-column: 1; grid-row: 3; }
+  .commits .meta { display: none; }
+}
+
+.picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: 210px; }
+.picker select { width: 100%; max-width: 320px; }
