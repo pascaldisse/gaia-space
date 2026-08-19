@@ -60,3 +60,7 @@
 .task-tag.prio-medium { background: #243766; color: #a9bdea; }
 .task-tag.prio-high { background: #4a3320; color: #f0b878; }
 .task-tag.prio-urgent { background: #4a2130; color: #ff9aa8; }
+.issue-card { user-select: none; }
+.issue-card:active { cursor: grabbing; }
+.cards { min-height: 40px; border-radius: 10px; transition: background .12s ease, outline-color .12s ease; outline: 2px dashed transparent; outline-offset: 2px; }
+.cards.drop-target { background: var(--accent-soft); outline-color: var(--accent); }

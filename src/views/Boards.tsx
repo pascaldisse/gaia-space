@@ -91,6 +91,13 @@ export default function Boards() {
     } catch (reason) { setError(humanError(reason)); }
   };
   const move = async (issueId: string, columnId: string) => { const b = board(); if (!b) return; try { await planningApi.move(b.id, issueId, columnId, sprintId()); reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+  // Drag and drop: the card carries its id, the column is the drop target.
+  const [dragOver, setDragOver] = createSignal<string>();
+  const onDrop = (event: DragEvent, column: BoardColumn) => {
+    event.preventDefault(); setDragOver(undefined);
+    const issueId = event.dataTransfer?.getData("text/issue-id");
+    if (issueId) void move(issueId, column.id);
+  };
 
   const cardsOf = (column: BoardColumn) => issues()?.filter(issue => column.status_ids.includes(issue.status_id ?? "")) ?? [];
 
@@ -133,7 +140,10 @@ export default function Boards() {
                 </form>
               </Show>
 
-              <div class="cards">
+              <div class="cards" classList={{ "drop-target": dragOver() === column.id }}
+                   onDragOver={event => { event.preventDefault(); setDragOver(column.id); }}
+                   onDragLeave={() => { if (dragOver() === column.id) setDragOver(undefined); }}
+                   onDrop={event => onDrop(event, column)}>
                 <For each={cardsOf(column)}>{issue =>
                   <IssueCard issue={issue} statuses={statuses()} active={openIssue() === issue.id} onOpen={() => setOpenIssue(issue.id)}
                     targets={columns()?.filter(c => c.id !== column.id) ?? []} onMove={target => move(issue.id, target)} />
@@ -181,6 +191,8 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; 
   const doneCount = () => items()?.filter(i => i.item_done).length ?? 0;
   const overdue = () => !!props.issue.due_date && props.issue.due_date < new Date().toISOString().slice(0, 10);
   return <article classList={{ "issue-card": true, active: props.active }} role="button" tabindex="0"
+      draggable={true}
+      onDragStart={event => { event.dataTransfer?.setData("text/issue-id", props.issue.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}
       onClick={() => props.onOpen()} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onOpen(); } }}>
     <div class="card-top"><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
     <strong class="card-title">{props.issue.title}</strong>

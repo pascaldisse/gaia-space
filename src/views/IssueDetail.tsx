@@ -14,6 +14,18 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const issue = () => draft() ?? detail()?.issue;
   const [checklistTitle, setChecklistTitle] = createSignal("");
   const [minutes, setMinutes] = createSignal("");
+  const [childTitle, setChildTitle] = createSignal("");
+  // A sub-item is a real issue in the same project, linked PARENT_CHILD — so it
+  // can carry its own assignee, date and checklists like any other work.
+  const addChild = async () => {
+    const parent = issue(); const title = childTitle().trim();
+    if (!parent || !title) return;
+    try {
+      const child = await planningApi.createIssue({ project_id: parent.project_id, title, description: null, status_id: parent.status_id, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
+      await planningApi.addChild(parent.id, child.id);
+      setChildTitle(""); await refetch(); props.onChanged?.();
+    } catch (reason) { setError(humanError(reason)); }
+  };
 
   const nameOf = (id: string | null) => { if (!id) return "Unassigned"; const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
   const patch = (change: Partial<Issue>) => { const current = issue(); if (current) setDraft({ ...current, ...change }); };
@@ -78,9 +90,18 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           <div class="inline-form"><input type="number" min="1" placeholder="Minutes" value={minutes()} onInput={e => setMinutes(e.currentTarget.value)} /><button onClick={logTime}>Log</button></div>
         </section>
 
-        <Show when={detail()?.children?.length}>
-          <section class="idp-section"><h3>Sub-items</h3><For each={detail()?.children}>{child => <p class="idp-child">#{child.number} {child.title}</p>}</For></section>
-        </Show>
+        <section class="idp-section">
+          <h3>Sub-items<small>{detail()?.children?.length ?? 0}</small></h3>
+          <For each={detail()?.children}>{child =>
+            <label class="checklist-item" classList={{ done: !!props.statuses?.find(s => s.id === child.status_id)?.resolved }}>
+              <span class="idp-child">#{child.number} {child.title}</span>
+            </label>
+          }</For>
+          <div class="inline-form">
+            <input placeholder="New sub-item" value={childTitle()} onInput={e => setChildTitle(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void addChild(); } }} />
+            <button onClick={addChild}>Add</button>
+          </div>
+        </section>
 
         <p class="idp-owner">Assigned to {nameOf(item().assignee_id)}</p>
       </>
