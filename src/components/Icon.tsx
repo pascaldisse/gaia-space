@@ -21,7 +21,7 @@ import type { JSX } from "solid-js";
 // `org` glyph stole the Organization nav-button icon, leaving it blank).
 // Calling a factory per <Icon> mount yields fresh nodes, so every destination
 // keeps its own visible SVG. This also makes the old `*-nav` alias hack moot.
-const PATHS: Record<string, () => JSX.Element> = {
+const PATHS = {
   home: () => <path d="M4 11.5 12 4l8 7.5M6 10v10h4v-6h4v6h4V10" />,
   check: () => <path d="M5 12.5 10 17 19 7" />,
   inbox: () => <path d="M3 13h5l2 3h4l2-3h5M4 13l2.5-8h11L20 13v6H4z" />,
@@ -112,7 +112,7 @@ const PATHS: Record<string, () => JSX.Element> = {
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,
-};
+} satisfies Record<string, () => JSX.Element>;
 
 export type IconName = keyof typeof PATHS;
 
