@@ -64,7 +64,7 @@ export default function Calendar() {
   const rsvp = async (participant:MeetingParticipant, status:MeetingParticipant["status"]) => { try { await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status); reloadParticipants(); } catch (reason) { setError(humanError(reason)); } };
 
   return <section class="calendar-view">
-    <WorkspaceHeader icon="□" title={route().projectId ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
+    <WorkspaceHeader icon="calendar-nav" title={route().projectId ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
       <button aria-label="Previous range" onClick={()=>shift(-1)}>←</button>
       <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
       <button aria-label="Next range" onClick={()=>shift(1)}>→</button>
