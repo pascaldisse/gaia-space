@@ -713,9 +713,31 @@ macro_rules! dispatch {
 /// role, because only an admin write may reach the `approved` column at all.
 fn absence_update(user: &User, body: &Value) -> axum::response::Response {
     let absence: personal::Absence = match arg(body, "absence") { Ok(v) => v, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
-    let written = if user.role == "admin" { personal::update_absence(absence) } else { personal::update_absence_details(absence) };
-    match written {
-        Ok(v) => Json(json!({"ok":true,"value":v})).into_response(),
+    if user.role == "admin" {
+        return match personal::update_absence(absence) {
+            Ok(v) => Json(json!({"ok":true,"value":v})).into_response(),
+            Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+        };
+    }
+    match personal::update_absence_details(absence, &user.profile_id) {
+        Ok(Some(v)) => Json(json!({"ok":true,"value":v})).into_response(),
+        Ok(None) => err(StatusCode::FORBIDDEN, "absence access denied").into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+    }
+}
+/// Deletes leave the generic dispatch table for the same reason updates do: a member delete
+/// must carry its ownership predicate into the statement, an admin delete must not.
+fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
+    let id: String = match arg(body, "id") { Ok(v) => v, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+    if user.role == "admin" {
+        return match personal::delete_absence(id) {
+            Ok(()) => Json(json!({"ok":true,"value":null})).into_response(),
+            Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+        };
+    }
+    match personal::delete_absence_owned(&id, &user.profile_id) {
+        Ok(true) => Json(json!({"ok":true,"value":null})).into_response(),
+        Ok(false) => err(StatusCode::FORBIDDEN, "absence access denied").into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
     }
 }
@@ -723,6 +745,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
     if let Err(e) = authorize_command(&user, &name, &mut body) { return e.into_response(); }
     if name == "update_absence" { return absence_update(&user, &body); }
+    if name == "delete_absence" { return absence_delete(&user, &body); }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
@@ -769,7 +792,6 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
     "dashboard_aggregate" => personal::dashboard_aggregate(profile_id: String),
-    "delete_absence" => personal::delete_absence(id: String),
     "delete_board" => issues::delete_board(id: String),
     "delete_board_column" => issues::delete_board_column(id: String),
     "delete_checklist" => issues::delete_checklist(id: String),
@@ -1455,6 +1477,47 @@ mod tests {
         let status = absence_update(&member, &body).status();
         assert_eq!(status, StatusCode::OK);
         assert_eq!(stored_absence("absence-race").unwrap().2, true, "a member write must not revoke an approval");
+    }
+
+    /// Ownership is a two-moment problem too. A member update authorized while it still owned
+    /// the row must not land after an admin moved that row to another profile: the write itself
+    /// carries `AND profile_id=?`, so the transferred row is untouched and the answer is 403.
+    #[tokio::test]
+    async fn audit_member_stale_update_cannot_follow_an_admin_owner_transfer() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-transfer", "pa", false);
+        let member = user_by_token(&cookie("ta")).unwrap();
+        let mut body = json!({"absence": absence_payload("absence-transfer", "pa", "vacation", false)});
+        authorize_command(&member, "update_absence", &mut body).expect("a member may edit their own row");
+        // Window: the admin transfers the row to Bob after the member's check passed.
+        let (status, value) = call(cookie("tc"), "update_absence", json!({"absence":absence_payload("absence-transfer", "pb", "admin moved", false)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(stored_absence("absence-transfer"), Some(("pb".into(), "admin moved".into(), false)));
+        // The stale member write now executes and must refuse against the foreign row.
+        let status = absence_update(&member, &body).status();
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stale member write must not reach a transferred row");
+        assert_eq!(stored_absence("absence-transfer"), Some(("pb".into(), "admin moved".into(), false)), "the transferred row must stay byte-identical");
+    }
+
+    /// The same window around a delete: the id a member was authorized for can be destroyed and
+    /// recreated for somebody else inside it. Identity of the id is not identity of the row.
+    #[tokio::test]
+    async fn audit_member_stale_delete_cannot_hit_a_recreated_foreign_row() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-recreated", "pa", false);
+        let member = user_by_token(&cookie("ta")).unwrap();
+        let mut body = json!({"id":"absence-recreated"});
+        authorize_command(&member, "delete_absence", &mut body).expect("a member may delete their own row");
+        // Window: the admin deletes the row and recreates the same id for Bob.
+        let (status, value) = call(cookie("tc"), "delete_absence", json!({"id":"absence-recreated"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        seed_absence("absence-recreated", "pb", true);
+        // The stale member delete now executes against an id that is no longer theirs.
+        let status = absence_delete(&member, &body).status();
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stale member delete must not hit a recreated row");
+        assert_eq!(stored_absence("absence-recreated"), Some(("pb".into(), "vacation".into(), true)), "the recreated foreign row must survive");
     }
 
     #[tokio::test]

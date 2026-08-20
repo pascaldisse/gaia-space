@@ -233,13 +233,25 @@ pub fn update_absence( absence: Absence) -> Result<Absence> {
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))? == 0 { return Err("Absence not found".into()); }
     absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
 }
-/// Update that deliberately omits `approved`: callers without approval rights write the
-/// descriptive columns only, so no read-compare-write window over the flag can exist.
-pub fn update_absence_details(absence: Absence) -> Result<Absence> {
-validate_absence(&absence)?;
-let c = db::conn()?;
-if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to]))? == 0 { return Err("Absence not found".into()); }
-absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
+/// Member update. Two properties are carried by the statement itself, not by a preceding
+/// check: ownership lives in the `WHERE` clause, and neither `approved` nor `profile_id`
+/// appears in the `SET` list. So no window exists between authorization and write — an admin
+/// may approve or transfer the row inside it and the member write simply matches nothing.
+/// `Ok(None)` means zero affected rows, which the caller answers with 403.
+pub fn update_absence_details(absence: Absence, owner: &str) -> Result<Option<Absence>> {
+    validate_absence(&absence)?;
+    let c = db::conn()?;
+    if err(c.execute(
+        "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1 AND profile_id=?2",
+        params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to],
+    ))? == 0 { return Ok(None); }
+    absence_on(&c, &absence.id)
+}
+/// Member delete, conditional for the same reason: an id authorized a moment ago may have
+/// been deleted and recreated for another profile since. `Ok(false)` means nothing matched.
+pub fn delete_absence_owned(id: &str, owner: &str) -> Result<bool> {
+    let c = db::conn()?;
+    Ok(err(c.execute("DELETE FROM absences WHERE id=?1 AND profile_id=?2", params![id, owner]))? > 0)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_absence( id: String) -> Result<()> {
