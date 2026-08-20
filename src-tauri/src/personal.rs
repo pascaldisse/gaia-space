@@ -25,6 +25,8 @@ pub struct Todo {
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
     #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
     pub assignee_ids: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
@@ -38,10 +40,12 @@ pub struct TodoInput {
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
     #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
     pub assignee_ids: Vec<String>,
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
-    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, project_id: row.get(4)?, done: row.get(5)?, source_entity_type: row.get(6)?, source_entity_id: row.get(7)?, assignee_ids: Vec::new() })
+    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, project_id: row.get(4)?, done: row.get(5)?, source_entity_type: row.get(6)?, source_entity_id: row.get(7)?, notes: row.get(8)?, assignee_ids: Vec::new() })
 }
 fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
     if entity_type.is_some() != entity_id.is_some() { return Err("Todo and notification anchors require both entity type and entity ID".into()); }
@@ -124,7 +128,7 @@ pub fn project_member_ids(project_id: String) -> Result<Vec<String>> {
     Ok(ids)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => { todo.assignee_ids = assignees_on(c, id)?; Ok(Some(todo)) }
         None => Ok(None),
@@ -133,7 +137,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -152,7 +156,7 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let id = input.id.unwrap_or_else(|| new_id("todo"));
     let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id]))?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, input.notes.and_then(|notes| (!notes.trim().is_empty()).then(|| notes))]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
@@ -167,7 +171,7 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
     let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, todo.notes.and_then(|notes| (!notes.trim().is_empty()).then(|| notes))]))?;
     if updated == 0 { return Err("Todo not found".into()); }
     replace_assignees(&tx, &todo.id, project_id.as_deref(), &todo.assignee_ids)?;
     err(tx.commit())?;
@@ -176,7 +180,7 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![project_id, profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -397,14 +401,14 @@ mod tests {
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
         drop(statement);
         for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
         todos
     }
     fn todo_input(id: &str, owner: &str, assignees: &[&str]) -> TodoInput {
-        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: Some("project".into()), done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
+        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: Some("project".into()), done: false, source_entity_type: None, source_entity_id: None, notes: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
     }
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {
@@ -430,6 +434,25 @@ mod tests {
         let after = todo_on(&c, "t3").unwrap().unwrap();
         assert_eq!(after.content, "Task");
         assert_eq!(after.assignee_ids, vec!["q".to_string()]);
+    }
+    #[test]
+    fn todo_notes_and_multiple_assignees_roundtrip_through_create_and_update() {
+        let mut c = conn();
+        let mut input = todo_input("notes", "p", &["q", "r"]);
+        input.notes = Some("Discuss handoff\nwith both owners".into());
+        let created = create_todo_on(&mut c, input).unwrap();
+        assert_eq!(created.notes.as_deref(), Some("Discuss handoff\nwith both owners"));
+        assert_eq!(created.assignee_ids, vec!["q", "r"]);
+        let mut updated = created;
+        updated.notes = Some("Updated note".into());
+        updated.assignee_ids = vec!["r".into(), "q".into(), "r".into()];
+        let updated = update_todo_on(&mut c, updated).unwrap();
+        assert_eq!(updated.notes.as_deref(), Some("Updated note"));
+        assert_eq!(updated.assignee_ids, vec!["q", "r"], "junction persistence is distinct and stable");
+        updated.notes.as_deref();
+        let mut cleared = updated;
+        cleared.notes = Some("  ".into());
+        assert_eq!(update_todo_on(&mut c, cleared).unwrap().notes, None, "blank notes normalize to NULL");
     }
     #[test]
     fn deleting_a_todo_leaves_no_orphan_assignee_rows() {

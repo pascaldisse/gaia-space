@@ -149,6 +149,7 @@ export function AssigneeControl(props: { value: string[]; people: Person[]; onTo
       value={summary()} set={props.value.length > 0} menuLabel="Choose assignees">
       {() => (
         <ul class="tm-list" role="listbox" aria-multiselectable="true" aria-label="Assignees">
+          <Show when={props.people.length}><li class="tm-note">Select one or more project members.</li></Show>
           <Show when={!props.people.length}><li class="tm-note">No people yet — add profiles in Members.</li></Show>
           <For each={props.people}>{(p) => {
             const on = () => props.value.includes(p.id);

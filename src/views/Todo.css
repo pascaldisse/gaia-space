@@ -71,3 +71,5 @@
 
 @media(max-width:1040px){.todo-rail{max-width:none}}
 @media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}}
+
+.task-notes-input{width:100%;min-height:72px;resize:vertical}.task-notes{margin:0!important;white-space:pre-wrap;color:var(--text-muted)}.task-editor{margin:0 0 20px;padding:18px 20px;border:1px solid var(--accent);border-radius:14px;background:var(--surface-raised);display:grid;gap:14px}.task-edit{flex:none;margin-top:-2px;font-size:12px}

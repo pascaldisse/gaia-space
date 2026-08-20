@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -132,6 +132,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 10 {
         add_column_if_missing(&tx, "issues", "priority", "TEXT")?;
     }
+    // V11: optional task notes; existing todos keep NULL.
+    if version < 11 {
+        add_column_if_missing(&tx, "todos", "notes", "TEXT")?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -157,7 +161,7 @@ CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 "#;
 
 pub(crate) const SCHEMA_V2: &str = r#"
-CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
+CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, notes TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
 CREATE TABLE IF NOT EXISTS absences (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), reason_type TEXT NOT NULL, date_from TEXT NOT NULL, date_to TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK(date_to >= date_from));
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, entity_type TEXT, entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), read_at INTEGER, CHECK((entity_type IS NULL) = (entity_id IS NULL)));
 CREATE TABLE IF NOT EXISTS subscription_settings (profile_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type));
@@ -346,6 +350,21 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
         assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn v10_database_upgrades_with_nullable_todo_notes() {
+        let conn = open_in_memory().expect("db");
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','p','P',1)", []).unwrap();
+        conn.execute("INSERT INTO todos(id,profile_id,content) VALUES('legacy','p','Legacy')", []).unwrap();
+        conn.pragma_update(None, "user_version", 10).unwrap();
+        migrate(&conn).unwrap();
+        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        assert_eq!(notes, None, "existing todos keep an unset note");
+        conn.execute("UPDATE todos SET notes='Roundtrip' WHERE id='legacy'", []).unwrap();
+        assert_eq!(conn.query_row::<String, _, _>("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap(), "Roundtrip");
     }
 
     #[test]

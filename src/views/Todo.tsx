@@ -7,90 +7,27 @@ import { AssigneeControl, DueDateControl, ProjectControl } from "../components/T
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
 
-const blank = () => ({ content:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[] });
+const blank = () => ({ content:"", due_date:"", project_id:"", notes:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[] });
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
-  const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
+  const [form,setForm]=createSignal(blank()); const [editing,setEditing]=createSignal<TodoItem|null>(null); const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   const [projectMembers]=createResource(()=>form().project_id,id=>id?personalApi.projectMemberIds(id):Promise.resolve([]));
+  const [editMembers]=createResource(()=>editing()?.project_id,id=>id?personalApi.projectMemberIds(id):Promise.resolve([]));
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
-  const personalTodos=()=>todos()?.filter(todo=>!todo.project_id)??[];
-  const groupedTodos=()=>todos()?.filter(todo=>todo.project_id)??[];
-  const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
+  const people=(ids:string[])=>active().filter(p=>ids.includes(p.id)).map(p=>({id:p.id,label:p.display_name||p.username,sub:p.email??undefined}));
+  const toggle=(ids:string[],id:string)=>ids.includes(id)?ids.filter(x=>x!==id):[...ids,id];
   const selectProject=(id:string)=>{ const f=form(); setForm({...f,project_id:id,assignee_ids:id===f.project_id?f.assignee_ids:[]}); };
-  const toggleAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.includes(id)?f.assignee_ids.filter(x=>x!==id):[...f.assignee_ids,id]}); };
-  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,notes:f.notes.trim()||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const beginEdit=(todo:TodoItem)=>setEditing({...todo,notes:todo.notes??null,assignee_ids:[...todo.assignee_ids]});
+  const saveEdit=async(e:SubmitEvent)=>{e.preventDefault();const todo=editing();if(!todo)return;try{if(!todo.content.trim())throw new Error("Task content is required.");await personalApi.updateTodo({...todo,content:todo.content.trim(),notes:todo.notes?.trim()||null});setEditing(null);refetch()}catch(reason){setError(humanError(reason))}};
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
-  const today=()=>new Date().toISOString().slice(0,10);
-  const inDays=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
-  const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
-  const overdue=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<today());
-  const dueSoon=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>=today()&&todo.due_date<=inDays(7));
-  const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
+  const today=()=>new Date().toISOString().slice(0,10); const inDays=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  const personalTodos=()=>todos()?.filter(todo=>!todo.project_id)??[]; const groupedTodos=()=>todos()?.filter(todo=>todo.project_id)??[]; const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
+  const overdue=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<today()); const dueSoon=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>=today()&&todo.due_date<=inDays(7)); const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
   const attention=()=>[...overdue(),...dueSoon()].sort((a,b)=>(a.due_date??"").localeCompare(b.due_date??"")).slice(0,5);
-  const todoRow=(todo:TodoItem)=><article classList={{"task-card":true,done:todo.done}}>
-    <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <div class="task-body">
-      <span class="task-title">{todo.content}</span>
-      <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
-        <div class="task-meta">
-          <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
-          <Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show>
-          <For each={todo.assignee_ids}>{id=><span class="task-tag assignee">{nameOf(id)}</span>}</For>
-          <Show when={todo.source_entity_type}><span class="task-tag source">{todo.source_entity_type}: {todo.source_entity_id}</span></Show>
-        </div>
-      </Show>
-    </div>
-    <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>
-  </article>;
-  return <section class="personal-view todo-view">
-    <WorkspaceHeader icon="✓" title="My tasks" actions={<ProfilePicker locked/>}>Personal tasks and project work, scoped to the people attached to each project.</WorkspaceHeader>
-    <Show when={error()}><p class="personal-error">{error()}</p></Show>
-    <div class="view-cols todo-cols">
-      <div class="view-main">
-        <form class="task-composer" onSubmit={save}>
-          <div class="composer-head"><span class="composer-head-label">New task</span></div>
-          <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
-          <div class="composer-meta">
-            <ProjectControl value={form().project_id} projects={(projects()??[]).filter(project=>!project.archived)} onChange={selectProject}/>
-            <DueDateControl value={form().due_date} onChange={due_date=>setForm({...form(),due_date})}/>
-            <AssigneeControl value={form().assignee_ids} people={form().project_id ? active().filter(p=>(projectMembers()??[]).includes(p.id)).map(p=>({id:p.id,label:p.display_name||p.username,sub:p.email??undefined})) : []} onToggle={toggleAssignee}/>
-          </div>
-          <Show when={form().project_id&&!projectMembers.loading&&!projectMembers()?.length}><p class="hint">This project has no members available for assignment.</p></Show>
-          <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
-          <details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
-          <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
-        </form>
-        <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-        <section class="task-list">
-          <Show when={!personalTodos().length}><p class="personal-empty">No personal tasks.</p></Show>
-          <For each={personalTodos()}>{todoRow}</For>
-        </section>
-        <Show when={groupedTodos().length}>
-          <section class="task-list"><For each={groupedTodos()}>{todoRow}</For></section>
-        </Show>
-      </div>
-      <aside class="view-rail todo-rail">
-        <div class="rail-card">
-          <h3>At a glance</h3>
-          <div class="rail-metrics">
-            <div class="rail-metric accent"><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
-            <div class="rail-metric warn"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
-            <div class="rail-metric"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
-            <div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div>
-          </div>
-        </div>
-        <div class="rail-card">
-          <h3>Needs attention<span class="rail-count">{attention().length}</span></h3>
-          <Show when={attention().length} fallback={<p class="rail-empty">Nothing due in the next seven days.</p>}>
-            <div class="rail-rows">
-              <For each={attention()}>{todo=><div class="rail-item"><span class="rail-item-title">{todo.content}</span><span class="rail-item-sub">Due {todo.due_date}</span></div>}</For>
-            </div>
-          </Show>
-        </div>
-      </aside>
-    </div>
-  </section>;
+  const todoRow=(todo:TodoItem)=><article classList={{"task-card":true,done:todo.done}}><input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/><div class="task-body"><span class="task-title">{todo.content}</span><Show when={todo.notes}><p class="task-notes">{todo.notes}</p></Show><Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}><div class="task-meta"><Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show><Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show><For each={todo.assignee_ids}>{id=><span class="task-tag assignee">{nameOf(id)}</span>}</For><Show when={todo.source_entity_type}><span class="task-tag source">{todo.source_entity_type}: {todo.source_entity_id}</span></Show></div></Show></div><Show when={todo.profile_id===profileId()}><button class="ghost task-edit" onClick={()=>beginEdit(todo)}>Edit</button><button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button></Show></article>;
+  return <section class="personal-view todo-view"><WorkspaceHeader icon="✓" title="My tasks" actions={<ProfilePicker locked/>}>Personal tasks and project work, scoped to the people attached to each project.</WorkspaceHeader><Show when={error()}><p class="personal-error">{error()}</p></Show><div class="view-cols todo-cols"><div class="view-main"><form class="task-composer" onSubmit={save}><div class="composer-head"><span class="composer-head-label">New task</span></div><input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/><textarea class="task-notes-input" placeholder="Notes (optional)" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/><div class="composer-meta"><ProjectControl value={form().project_id} projects={(projects()??[]).filter(project=>!project.archived)} onChange={selectProject}/><DueDateControl value={form().due_date} onChange={due_date=>setForm({...form(),due_date})}/><AssigneeControl value={form().assignee_ids} people={form().project_id?people(projectMembers()??[]):[]} onToggle={id=>setForm({...form(),assignee_ids:toggle(form().assignee_ids,id)})}/></div><Show when={form().project_id}><p class="hint">Select one or more project members as assignees.</p></Show><Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>setForm({...form(),assignee_ids:form().assignee_ids.filter(x=>x!==id)})}>×</button></li>}</For></ul></Show><details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details><div class="composer-actions"><button class="primary composer-submit">Add task</button></div></form><Show when={editing()}>{todo=><form class="task-editor" onSubmit={saveEdit}><div class="composer-head"><span class="composer-head-label">Edit task</span><button type="button" class="ghost" onClick={()=>setEditing(null)}>Cancel</button></div><input class="composer-title" value={todo().content} onInput={e=>setEditing({...todo(),content:e.currentTarget.value})}/><textarea class="task-notes-input" placeholder="Notes (optional)" value={todo().notes??""} onInput={e=>setEditing({...todo(),notes:e.currentTarget.value||null})}/><div class="composer-meta"><ProjectControl value={todo().project_id??""} projects={(projects()??[]).filter(p=>!p.archived)} onChange={project_id=>setEditing({...todo(),project_id:project_id||null,assignee_ids:project_id===todo().project_id?todo().assignee_ids:[]})}/><DueDateControl value={todo().due_date??""} onChange={due_date=>setEditing({...todo(),due_date:due_date||null})}/><AssigneeControl value={todo().assignee_ids} people={todo().project_id?people(editMembers()??[]):[]} onToggle={id=>setEditing({...todo(),assignee_ids:toggle(todo().assignee_ids,id)})}/></div><Show when={todo().project_id}><p class="hint">Select one or more project members as assignees.</p></Show><div class="composer-actions"><button class="primary composer-submit">Save task</button></div></form>}</Show><section class="task-list"><Show when={!personalTodos().length}><p class="personal-empty">No personal tasks.</p></Show><For each={personalTodos()}>{todoRow}</For></section><Show when={groupedTodos().length}><section class="task-list"><For each={groupedTodos()}>{todoRow}</For></section></Show></div><aside class="view-rail todo-rail"><div class="rail-card"><h3>At a glance</h3><div class="rail-metrics"><div class="rail-metric accent"><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div><div class="rail-metric warn"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div><div class="rail-metric"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div><div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div></div></div><div class="rail-card"><h3>Needs attention<span class="rail-count">{attention().length}</span></h3><Show when={attention().length} fallback={<p class="rail-empty">Nothing due in the next seven days.</p>}><div class="rail-rows"><For each={attention()}>{todo=><div class="rail-item"><span class="rail-item-title">{todo.content}</span><span class="rail-item-sub">Due {todo.due_date}</span></div>}</For></div></Show></div></aside></div></section>;
 }

@@ -68,7 +68,7 @@ export default function Calendar() {
         await meetingsApi.create(meeting); setDraft(meeting); setSelected({id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,date:null}); reloadMeetings();
       } else if (kind === "task") {
         const day=composerDay()!; const due_date=dateKey(day);
-        await personalApi.createTodo({profile_id:sessionProfile(),content:f.title.trim(),due_date,project_id:route().projectId ?? null,done:false,source_entity_type:null,source_entity_id:null,assignee_ids:[]});
+        await personalApi.createTodo({profile_id:sessionProfile(),content:f.title.trim(),due_date,project_id:route().projectId ?? null,notes:null,done:false,source_entity_type:null,source_entity_id:null,assignee_ids:[]});
       } else {
         const project=deadlineProjects().find(p=>p.id===deadlineProject()); if (!project) throw new Error("Choose a project for this deadline.");
         if (project.deadline) throw new Error("This project already has a deadline. Edit it from Projects.");

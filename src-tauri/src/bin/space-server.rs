@@ -1033,11 +1033,12 @@ mod tests {
         let c = db::conn().unwrap();
         c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('group','Group','GROUP','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('group','pb');").unwrap();
 
-        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Shared task","due_date":"2030-01-02","project_id":"group","done":false,"source_entity_type":null,"source_entity_id":null,"assignee_ids":["pb"]}})).await;
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Shared task","due_date":"2030-01-02","project_id":"group","done":false,"source_entity_type":null,"source_entity_id":null,"notes":"Owner note","assignee_ids":["pb"]}})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let shared = value["value"].clone();
         let id = shared["id"].as_str().unwrap().to_string();
         assert_eq!(shared["profile_id"], json!("pa"), "owner spoof must be bound to the session");
+        assert_eq!(shared["notes"], json!("Owner note"));
 
         // Legacy personal assignments stay private; the next write will reject them.
         c.execute_batch("INSERT INTO todos(id,profile_id,content) VALUES('legacy-personal','pa','Private legacy'); INSERT INTO todo_assignees(todo_id,profile_id) VALUES('legacy-personal','pb');").unwrap();
@@ -1073,6 +1074,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{value}");
         let mut forged = shared.clone();
         forged["content"] = json!("Bob rewrote this");
+        forged["notes"] = json!("Bob rewrote the private note");
         let (status, _) = call(cookie("tb"), "update_todo", json!({"todo":forged})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
 
