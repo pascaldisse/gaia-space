@@ -572,8 +572,20 @@ fn authorize_command(
             let absence = if name == "create_absence" { body.get("input") } else { body.get("absence") }
                 .and_then(Value::as_object)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence"))?;
-            if absence.get("approved").and_then(Value::as_bool) == Some(true) && user.role != "admin" {
-                return Err(err(StatusCode::FORBIDDEN, "admin required to approve time off"));
+            if user.role != "admin" {
+                let incoming_approved = absence.get("approved").and_then(Value::as_bool).unwrap_or(false);
+                let approval_changed = if name == "update_absence" {
+                    let id = absence.get("id").and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence id"))?;
+                    let conn = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                    let stored_approved: bool = conn.query_row("SELECT approved FROM absences WHERE id=?1", [id], |row| row.get(0))
+                        .map_err(|e| err(StatusCode::FORBIDDEN, &e.to_string()))?;
+                    stored_approved != incoming_approved
+                } else {
+                    incoming_approved
+                };
+                if approval_changed {
+                    return Err(err(StatusCode::FORBIDDEN, "admin required to change time-off approval"));
+                }
             }
             Ok(())
         }
@@ -1307,6 +1319,12 @@ mod tests {
         let (status, value) = call(cookie("tc"), "update_absence", json!({"absence":absence})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["approved"], json!(true));
+
+        absence["approved"] = json!(false);
+        let (status, _) = call(cookie("ta"), "update_absence", json!({"absence":absence})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let approved: bool = db::conn().unwrap().query_row("SELECT approved FROM absences WHERE id=?1", [value["value"]["id"].as_str().unwrap()], |row| row.get(0)).unwrap();
+        assert!(approved, "members cannot revoke an admin approval");
 
         let (status, _) = call(cookie("ta"), "create_absence", json!({"input":{"profile_id":"pa","reason_type":"Sick leave","date_from":"2030-02-01","date_to":"2030-02-01","approved":true}})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
