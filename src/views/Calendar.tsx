@@ -1,14 +1,15 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import { personalApi, type CalendarItem } from "../api/personal";
 import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import CallPanel from "./CallPanel";
-import { humanError, isWeb, profileId, projects, reloadProjects } from "../session";
+import { currentUser, humanError, isWeb, profileId, projects, reloadProjects } from "../session";
 import { platformApi } from "../api/platform";
 import { linkProps, route, useDeepLink } from "../router";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { ProfilePicker } from "../components/Pickers";
 import "./Calendar.css";
 import "./Meetings.css";
+import { dateKey, dateOnlyLocal } from "./calendarDate";
 
 const startOfDay = (date:Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const monthRange = (date:Date) => { const first=new Date(date.getFullYear(),date.getMonth(),1); const start=new Date(first); start.setDate(1-first.getDay()); const end=new Date(start); end.setDate(end.getDate()+42); return [start,end] as const; };
@@ -17,7 +18,7 @@ const labels:Record<CalendarItem["kind"],string>={meeting:"Meeting",task:"Task",
 const localInput = (seconds:number) => new Date(seconds * 1000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const epoch = (value:string) => Date.parse(value) / 1000;
 const atHour = (day:Date, hour:number) => { const at=new Date(day); at.setHours(hour,0,0,0); return Math.floor(at.getTime()/1000); };
-const dayKey = (day:Date) => `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,"0")}-${String(day.getDate()).padStart(2,"0")}`;
+const rangeEpoch = (day:Date) => Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / 1000;
 
 /** One time surface: the calendar shows meetings, task dates and deadlines,
  *  and meetings are created, edited and answered here — there is no second
@@ -34,8 +35,10 @@ export default function Calendar() {
   const [error,setError] = createSignal("");
   const [invitee,setInvitee] = createSignal("");
 
+  // Web requests only run after auth supplies the session-bound profile.
+  const sessionProfile = () => isWeb() ? currentUser()?.profile_id ?? "" : profileId();
   const range = () => view()==="month" ? monthRange(cursor()) : weekRange(cursor());
-  const [items,{refetch}] = createResource(() => [profileId(), range()[0].getTime()/1000, range()[1].getTime()/1000] as const, ([profile,range_start,range_end]) => profile ? personalApi.calendar(profile,range_start,range_end) : Promise.resolve([]));
+  const [items,{refetch}] = createResource(() => [sessionProfile(), rangeEpoch(range()[0]), rangeEpoch(range()[1])] as const, ([profile,range_start,range_end]) => profile ? personalApi.calendar(profile,range_start,range_end) : Promise.resolve([]));
   const [meetings,{refetch:reloadMeetings}] = createResource(() => meetingsApi.list());
   const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===item.id) : undefined;
   const [draft,setDraft] = createSignal<Meeting>();
@@ -44,10 +47,13 @@ export default function Calendar() {
   const scoped = () => { const project=route().projectId; return project ? (items() ?? []).filter(item=>item.project_id===project) : items() ?? []; };
   const shift = (amount:number) => { const next=new Date(cursor()); if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+7*amount); setCursor(next); };
   const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) result.push(new Date(day)); return result; };
-  const events = (day:Date) => scoped().filter(item => { const start=new Date(item.starts_at*1000); return start.getFullYear()===day.getFullYear() && start.getMonth()===day.getMonth() && start.getDate()===day.getDate(); });
+  const itemDay = (item:CalendarItem) => item.date ? dateOnlyLocal(item.date) : new Date(item.starts_at*1000);
+  const events = (day:Date) => scoped().filter(item => dateKey(itemDay(item))===dateKey(day));
+  const deadlineProjects = () => (projects()??[]).filter(project=>!project.archived && !project.deadline && (!isWeb() || currentUser()?.role==="admin" || project.created_by===sessionProfile()));
+  createEffect(() => { const [start,end]=range(); const day=selectedDay(); if (day < start) setSelectedDay(start); else if (day >= end) { const last=new Date(end); last.setDate(last.getDate()-1); setSelectedDay(last); } });
 
   const openComposer = (day:Date, kind:CalendarItem["kind"]="meeting") => { setSelected(undefined); setDraft(undefined); setSelectedDay(day); setQuickKind(kind); setDeadlineProject(route().projectId ?? ""); setComposerDay(day); setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"" }); };
-  const chooseKind = (kind:CalendarItem["kind"]) => { const day=composerDay(); if (day) openComposer(day,kind); };
+  const chooseKind = (kind:CalendarItem["kind"]) => { if (composerDay()) setQuickKind(kind); };
   const openEvent = (item:CalendarItem) => { setComposerDay(undefined); setSelected(item); setDraft(meetingOf(item)); };
   useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
 
@@ -58,14 +64,15 @@ export default function Calendar() {
       if (!f.title.trim() && kind !== "deadline") throw new Error("Enter a title.");
       if (kind === "meeting") {
         if (!Number.isFinite(starts_at) || !Number.isFinite(ends_at) || ends_at <= starts_at) throw new Error("The meeting has to end after it starts.");
-        const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false};
+        const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:sessionProfile()||null,channel_id:null,archived:false};
         await meetingsApi.create(meeting); setDraft(meeting); setSelected({id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null}); reloadMeetings();
       } else if (kind === "task") {
-        const day=composerDay()!; const due_date=dayKey(day);
-        await personalApi.createTodo({profile_id:profileId(),content:f.title.trim(),due_date,project_id:route().projectId ?? null,done:false,source_entity_type:null,source_entity_id:null,assignee_ids:[]});
+        const day=composerDay()!; const due_date=dateKey(day);
+        await personalApi.createTodo({profile_id:sessionProfile(),content:f.title.trim(),due_date,project_id:route().projectId ?? null,done:false,source_entity_type:null,source_entity_id:null,assignee_ids:[]});
       } else {
-        const project=(projects()??[]).find(p=>p.id===deadlineProject()); if (!project) throw new Error("Choose a project for this deadline.");
-        await platformApi.updateProject({...project,deadline:dayKey(composerDay()!)}); await reloadProjects();
+        const project=deadlineProjects().find(p=>p.id===deadlineProject()); if (!project) throw new Error("Choose a project for this deadline.");
+        if (project.deadline) throw new Error("This project already has a deadline. Edit it from Projects.");
+        await platformApi.setProjectDeadline(project.id,dateKey(composerDay()!)); await reloadProjects();
       }
       setComposerDay(undefined); refetch();
     } catch (reason) { setError(humanError(reason)); }
@@ -90,7 +97,7 @@ export default function Calendar() {
     <div class="calendar-legend"><span class="cal-key meeting">Meeting</span><span class="cal-key task">Task due</span><span class="cal-key deadline">Project deadline</span></div>
     <div class="calendar-main"><div classList={{"calendar-grid":true,week:view()==="week"}}>
       <For each={["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]}>{day=><strong class="calendar-weekday">{day}</strong>}</For>
-      <For each={days()}>{day=><article classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),selected:selectedDay().toDateString()===day.toDateString()}} onClick={()=>setSelectedDay(day)} onDblClick={()=>openComposer(day)}>
+      <For each={days()}>{day=><article classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),selected:selectedDay().toDateString()===day.toDateString()}} role="button" tabindex="0" aria-label={`Select ${day.toDateString()}`} onClick={()=>setSelectedDay(day)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setSelectedDay(day);}}} onDblClick={()=>openComposer(day)}>
         <time>{day.getDate()}</time>
         <button class="calendar-day-add" aria-label={`Schedule a meeting on ${day.toDateString()}`} title="Schedule a meeting" onClick={()=>openComposer(day)}>+</button>
         <For each={events(day)}>{event=><button class={`calendar-event ${event.kind}`} onClick={()=>openEvent(event)}><span>{labels[event.kind]}</span> {event.title}</button>}</For>
@@ -108,7 +115,7 @@ export default function Calendar() {
           <Show when={quickKind()!=="deadline"}><input autofocus placeholder={quickKind()==="task"?"What needs doing?":"Meeting title"} value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/></Show>
           <Show when={quickKind()==="meeting"}><label>Start<input type="datetime-local" value={form().starts_at} onInput={e=>setForm({...form(),starts_at:e.currentTarget.value})}/></label><label>End<input type="datetime-local" value={form().ends_at} onInput={e=>setForm({...form(),ends_at:e.currentTarget.value})}/></label><label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label><label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label></Show>
           <Show when={quickKind()==="task"}><p class="hint">Due {day().toLocaleDateString()}{route().projectId?" in this project":""}.</p></Show>
-          <Show when={quickKind()==="deadline"}><label>Project<select value={deadlineProject()} onChange={e=>setDeadlineProject(e.currentTarget.value)}><option value="">Choose a project…</option><For each={(projects()??[]).filter(p=>!p.archived)}>{p=><option value={p.id}>{p.name}</option>}</For></select></label><p class="hint">Sets this project's deadline to this day.</p></Show>
+          <Show when={quickKind()==="deadline"}><label>Project<select value={deadlineProject()} onChange={e=>setDeadlineProject(e.currentTarget.value)}><option value="">Choose a project…</option><For each={deadlineProjects()}>{p=><option value={p.id}>{p.name}</option>}</For></select></label><p class="hint">Only writable projects without a deadline are shown; edit an existing deadline in Projects.</p></Show>
           <div class="detail-actions"><button class="primary">Create {labels[quickKind()].toLowerCase()}</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
         </form>
       </aside>
@@ -116,7 +123,7 @@ export default function Calendar() {
 
     <Show when={composerDay()?undefined:selected()}>{event=>
       <aside class="calendar-detail">
-        <Show when={draft()} fallback={<div><h2>{event().title}</h2><p>{labels[event().kind]} · {new Date(event().starts_at*1000).toLocaleString()}</p><Show when={event().kind!=="meeting"}><p class="hint">Open the owning view to edit this item.</p></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
+        <Show when={draft()} fallback={<div><h2>{event().title}</h2><p>{labels[event().kind]} · {itemDay(event()).toLocaleString()}</p><Show when={event().kind!=="meeting"}><p class="hint">Open the owning view to edit this item.</p></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
           {item=><div class="meeting-detail">
             <div class="detail-actions"><button onClick={save}>Save</button><button class="danger" onClick={archive}>Archive</button><button onClick={()=>{setSelected(undefined);setDraft(undefined)}}>Close</button></div>
             <input class="meeting-title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/>

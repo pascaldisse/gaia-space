@@ -654,6 +654,16 @@ pub fn create_project( project: Project) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_project_deadline(id: String, deadline: String) -> Result<()> {
+    let deadline = deadline.trim();
+    chrono::NaiveDate::parse_from_str(deadline, "%Y-%m-%d").map_err(|_| "Invalid project deadline".to_string())?;
+    let c = db::conn()?;
+    let changed = c.execute("UPDATE projects SET deadline=?2 WHERE id=?1 AND deadline IS NULL", rusqlite::params![id, deadline])
+        .map_err(|e| e.to_string())?;
+    if changed != 1 { return Err("Project deadline already exists or project was not found".into()); }
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_project( project: Project) -> Result<()> {
     let c = db::conn()?;
     c.execute(

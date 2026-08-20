@@ -74,6 +74,8 @@ export const platformApi = {
   updateProject(project: Project) {
     return submitProject("update", project);
   },
+  /** Targeted date-only write; does not overwrite a stale project object. */
+  setProjectDeadline: (id: string, deadline: string) => call<void>("set_project_deadline", { id, deadline }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

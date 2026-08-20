@@ -237,7 +237,7 @@ enum CommandPolicy {
 fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
-        "update_project" => CommandPolicy::ProjectWrite,
+        "update_project" | "set_project_deadline" => CommandPolicy::ProjectWrite,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
@@ -500,8 +500,7 @@ fn authorize_command(
         )),
         CommandPolicy::ProjectCreate => Ok(()),
         CommandPolicy::ProjectWrite => {
-            let (project_id, _) =
-                project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let project_id = if name == "set_project_deadline" { arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))? } else { project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?.0 };
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
@@ -521,7 +520,15 @@ fn authorize_command(
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
         }
-        CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::TodoCreate => {
+            let project_id = body.get("input").and_then(|input| input.get("project_id")).and_then(Value::as_str).filter(|id| !id.trim().is_empty());
+            if let Some(project_id) = project_id {
+                if user.role != "admin" && !personal::project_member_by(project_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? {
+                    return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+                }
+            }
+            Ok(())
+        }
         CommandPolicy::CalendarRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -878,6 +885,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
+    "set_project_deadline" => platform::set_project_deadline(id: String, deadline: String),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
@@ -1021,6 +1029,10 @@ mod tests {
 
         // Legacy personal assignments stay private; the next write will reject them.
         c.execute_batch("INSERT INTO todos(id,profile_id,content) VALUES('legacy-personal','pa','Private legacy'); INSERT INTO todo_assignees(todo_id,profile_id) VALUES('legacy-personal','pb');").unwrap();
+
+        // Non-members cannot create a todo in a project they cannot access.
+        let (status, _) = call(cookie("td"), "create_todo", json!({"input":{"profile_id":"pd","content":"Intrusion","project_id":"group","done":false,"assignee_ids":[]}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
 
         // Non-member: neither a list nor dashboard/calendar aggregate exposes the task.
         let (status, value) = call(cookie("td"), "list_todos", json!({"profile_id":"pa","include_done":true})).await;
@@ -1391,12 +1403,25 @@ mod tests {
         let changed: (String, String, bool) = c.query_row("SELECT name,created_by,archived FROM projects WHERE id='alice-project'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
         assert_eq!(changed, ("Alice renamed".into(), "pa".into(), true));
 
+        // Deadline creation is an owner-only, targeted first-write: a stale client
+        // cannot overwrite a deadline that appeared after it loaded the project.
+        let (status, _) = call(cookie("ta"), "set_project_deadline", json!({"id":"alice-project","deadline":"2030-01-15"})).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = call(cookie("ta"), "set_project_deadline", json!({"id":"alice-project","deadline":"2030-01-16"})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let deadline: String = c.query_row("SELECT deadline FROM projects WHERE id='alice-project'", [], |row| row.get(0)).unwrap();
+        assert_eq!(deadline, "2030-01-15");
+
         // Calendar session identity is injected at the chokepoint; callers cannot
         // enumerate another profile's todos by supplying a forged profile id.
         c.execute("INSERT INTO todos(id,profile_id,content,due_date) VALUES('alice-calendar','pa','Private','2030-01-02')", []).unwrap();
         let (status, value) = call(cookie("tb"), "calendar_aggregate", json!({"profile_id":"pa","range_start":1893456000,"range_end":1893715200})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(cookie("ta"), "calendar_aggregate", json!({"range_start":1893456000,"range_end":1893715200})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let date_only = value["value"].as_array().unwrap().iter().find(|item| item["id"] == "alice-calendar").unwrap();
+        assert_eq!(date_only["date"], json!("2030-01-02"));
         let (status, value) = call(cookie("tb"), "list_project_todos", json!({"project_id":"alice-project","include_done":false})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert!(value["value"].as_array().unwrap().is_empty(), "non-members receive no project todos");
