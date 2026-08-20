@@ -51,10 +51,13 @@ export default function Absences() {
     e.preventDefault();
     try {
       const f = form();
-      if (!f.profile_id.trim() || !f.reason_type.trim() || !f.date_from || !f.date_to)
+      // The session profile may resolve after this form was initialized; retain it
+      // as the save-time fallback rather than submitting an empty person id.
+      const absenceProfile = f.profile_id.trim() || sessionProfile().trim();
+      if (!absenceProfile || !f.reason_type.trim() || !f.date_from || !f.date_to)
         throw new Error("Person, reason, and both dates are required.");
       if (f.date_to < f.date_from) throw new Error("The end date can’t be before the start date.");
-      await personalApi.createAbsence({ ...f, profile_id: f.profile_id.trim(), reason_type: f.reason_type.trim() });
+      await personalApi.createAbsence({ ...f, profile_id: absenceProfile, reason_type: f.reason_type.trim() });
       setForm(blank());
       setShowForm(false);
       setError("");
@@ -74,6 +77,7 @@ export default function Absences() {
     <section class="timeoff-view">
       <WorkspaceHeader icon="clock-nav" title="Time off" actions={<>
         <ProfilePicker label="Show time off for" value={profileId()} onChange={setProfileId} allowAll />
+        <button class="primary" onClick={openForm}><Icon name="plus" size={15} /> Record time off</button>
       </>}>
         Plan and track leave across your organization — who’s <strong>away now</strong>,
         what’s <strong>coming up</strong>, and which requests still need approval.

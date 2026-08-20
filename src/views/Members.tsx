@@ -3,7 +3,7 @@ import { platformApi, type Profile, type Team, type TeamMembership, type Role } 
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
-import { useDeepLink } from "../router";
+import { linkProps, useDeepLink } from "../router";
 import "./Members.css";
 
 const blankProfile = () => ({ id: "", username: "", display_name: "", email: "" });
@@ -51,12 +51,14 @@ export default function Members() {
     } catch (e) { setError(String(e)); }
   };
   const editProfile = (p: Profile) => { setEditingProfile(p); setProfileForm({ id: p.id, username: p.username, display_name: p.display_name, email: p.email ?? "" }); };
-  // Keep master’s profile deep-link behavior even though the premium list is
-  // intentionally less link-heavy than the former admin table.
+  // Apply a profile link once. Resource reloads must not reopen an edit form
+  // that the person deliberately cleared while the URL still points at it.
+  let appliedProfileLink = "";
   useDeepLink("profile", (id) => {
+    if (id === appliedProfileLink) return;
     const found = profiles()?.find((p) => p.id === id);
-    if (found) editProfile(found);
-  }, () => { if (editingProfile()) { setEditingProfile(null); setProfileForm(blankProfile()); } });
+    if (found) { editProfile(found); appliedProfileLink = id; }
+  }, () => { appliedProfileLink = ""; if (editingProfile()) { setEditingProfile(null); setProfileForm(blankProfile()); } });
   const cancelEdit = () => { setEditingProfile(null); setProfileForm(blankProfile()); };
   const toggleArchiveProfile = async (p: Profile) => { try { await platformApi.updateProfile({ ...p, archived: !p.archived }); reloadProfiles(); } catch (e) { setError(String(e)); } };
 
@@ -133,7 +135,7 @@ export default function Members() {
               <li classList={{ archived: p.archived }}>
                 <Avatar name={p.display_name || p.username} size={30} />
                 <div class="org-list-text">
-                  <strong>{p.display_name}</strong>
+                  <strong><a {...linkProps({ view: "Members", entityType: "profile", entityId: p.id })}>{p.display_name}</a></strong>
                   <span class="org-sub"><code>@{p.username}</code><Show when={p.email}><span class="dot">·</span><span class="muted">{p.email}</span></Show></span>
                 </div>
                 <div class="row-buttons hover-actions">

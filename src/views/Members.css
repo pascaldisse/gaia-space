@@ -48,6 +48,9 @@
 .org-list li.archived { opacity: 0.5; }
 .org-list-text { min-width: 0; display: grid; gap: 2px; flex: 1; }
 .org-list-text strong { font-size: 13.5px; color: var(--text-strong); font-weight: 600; }
+.org-list-text strong a { color: inherit; text-decoration: none; }
+.org-list-text strong a:hover { text-decoration: underline; }
+.org-list-text strong a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 .org-sub { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); min-width: 0; }
 .org-sub code { color: #9aa4bb; }
 .org-sub .dot { opacity: 0.5; }

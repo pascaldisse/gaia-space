@@ -4,7 +4,7 @@ import { ProfilePicker } from "../components/Pickers";
 import { Icon, type IconName } from "../components/Icon";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { profileId } from "../session";
-import { navigate } from "../router";
+import { entityView, linkEntity, navigate } from "../router";
 import "./Inbox.css";
 
 // Inbox = the human notification feed (mentions, assignments, review requests…)
@@ -59,13 +59,10 @@ const actionLabel = (eventType: string) => {
 // ── Deep links ── best-effort routing from a notification's anchored entity to
 // the destination that owns it, reusing the app's existing view registry. Every
 // mapped target lands somewhere real and relevant — no invented behaviour.
-const ENTITY_VIEW: Record<string, string> = {
-  profile: "Members", project: "Projects", issue: "Projects", channel: "Chat",
-  document: "Documents", doc: "Documents", review: "Code Reviews", meeting: "Calendar",
-  calendar: "Calendar", todo: "To-Do", task: "To-Do", absence: "Absences",
-};
 const linkFor = (n: Notification) =>
-  n.entity_type ? ENTITY_VIEW[n.entity_type.toLowerCase()] : undefined;
+  n.entity_type && n.entity_id && entityView(n.entity_type.toLowerCase())
+    ? { type: n.entity_type.toLowerCase(), id: n.entity_id }
+    : undefined;
 
 type Scope = "all" | "unread";
 
@@ -96,7 +93,7 @@ export default function Inbox() {
 
   const markRead = async (id: string) => { await personalApi.markRead(id); refetch(); };
   const markAll = async () => { await Promise.all(unreadAll().map((n) => personalApi.markRead(n.id))); refetch(); };
-  const openEntity = (n: Notification) => { const v = linkFor(n); if (v) navigate(v); };
+  const openEntity = (n: Notification) => { const target = linkFor(n); if (target) linkEntity(target.type, target.id); };
 
   const row = (n: Notification, isUnread: boolean) => {
     const c = catOf(n);
@@ -105,7 +102,7 @@ export default function Inbox() {
       <span class="inbox-ic" classList={{ [c.tone]: true }} aria-hidden="true"><Icon name={c.icon} size={16} /></span>
       <div class="inbox-body">
         <div class="inbox-line">
-          <Show when={isUnread}><span class="inbox-dot" aria-label="Unread" /></Show>
+          <Show when={isUnread}><span class="inbox-dot" role="img" aria-label="Unread" /></Show>
           <strong>{n.title}</strong>
         </div>
         <Show when={n.body}><p>{n.body}</p></Show>
@@ -170,8 +167,8 @@ export default function Inbox() {
         {/* ── Filter bar ── scope (all / unread) + data-driven category chips ── */}
         <div class="inbox-filters">
           <div class="inbox-scope">
-            <button classList={{ on: scope() === "all" }} onClick={() => setScope("all")}>All</button>
-            <button classList={{ on: scope() === "unread" }} onClick={() => setScope("unread")}>
+            <button classList={{ on: scope() === "all" }} aria-pressed={scope() === "all"} onClick={() => setScope("all")}>All</button>
+            <button classList={{ on: scope() === "unread" }} aria-pressed={scope() === "unread"} onClick={() => setScope("unread")}>
               Unread<Show when={unreadAll().length}><em>{unreadAll().length}</em></Show>
             </button>
           </div>
@@ -220,13 +217,13 @@ export default function Inbox() {
             <div class="rail-card">
               <h3>By type</h3>
               <div class="rail-rows">
-                <button class="rail-row" classList={{ muted: cat() !== "all" }} onClick={() => setCat("all")}>
+                <button class="rail-row" classList={{ muted: cat() !== "all" }} aria-pressed={cat() === "all"} onClick={() => setCat("all")}>
                   <span class="rail-row-ic"><Icon name="inbox" size={13}/></span>
                   <span class="rail-row-label">All types</span>
                   <span class="rail-row-val">{all().length}</span>
                 </button>
                 <For each={cats()}>{({ cat: c, count }) =>
-                  <button class="rail-row" classList={{ muted: cat() !== "all" && cat() !== c.key }} onClick={() => setCat(cat() === c.key ? "all" : c.key)}>
+                  <button class="rail-row" classList={{ muted: cat() !== "all" && cat() !== c.key }} aria-pressed={cat() === c.key} onClick={() => setCat(cat() === c.key ? "all" : c.key)}>
                     <span class="rail-row-ic"><Icon name={c.icon} size={13}/></span>
                     <span class="rail-row-label">{c.label}</span>
                     <span class="rail-row-val">{count}</span>
