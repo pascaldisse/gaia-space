@@ -3,6 +3,7 @@ import { platformApi, type Profile, type Team, type TeamMembership, type Role } 
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { useDeepLink } from "../router";
 import "./Members.css";
 
 const blankProfile = () => ({ id: "", username: "", display_name: "", email: "" });
@@ -50,6 +51,12 @@ export default function Members() {
     } catch (e) { setError(String(e)); }
   };
   const editProfile = (p: Profile) => { setEditingProfile(p); setProfileForm({ id: p.id, username: p.username, display_name: p.display_name, email: p.email ?? "" }); };
+  // Keep master’s profile deep-link behavior even though the premium list is
+  // intentionally less link-heavy than the former admin table.
+  useDeepLink("profile", (id) => {
+    const found = profiles()?.find((p) => p.id === id);
+    if (found) editProfile(found);
+  }, () => { if (editingProfile()) { setEditingProfile(null); setProfileForm(blankProfile()); } });
   const cancelEdit = () => { setEditingProfile(null); setProfileForm(blankProfile()); };
   const toggleArchiveProfile = async (p: Profile) => { try { await platformApi.updateProfile({ ...p, archived: !p.archived }); reloadProfiles(); } catch (e) { setError(String(e)); } };
 
