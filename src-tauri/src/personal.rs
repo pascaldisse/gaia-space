@@ -223,8 +223,9 @@ pub fn create_absence( input: AbsenceInput) -> Result<Absence> {
     let absence = Absence { id: input.id.unwrap_or_else(|| new_id("absence")), profile_id: input.profile_id, reason_type: input.reason_type, date_from: input.date_from, date_to: input.date_to, approved: input.approved };
     validate_absence(&absence)?;
     let c = db::conn()?;
-    err(c.execute("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES(?1,?2,?3,?4,?5,?6)", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))?;
-    absence_on(&c, &absence.id)?.ok_or_else(|| "Created absence was not found".into())
+    // `RETURNING` answers with the row this statement wrote; a separate `SELECT id=?` could
+    // pick up somebody else's row if the id changed hands in between.
+    err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES(?1,?2,?3,?4,?5,?6) RETURNING id,profile_id,reason_type,date_from,date_to,approved", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved], read_absence))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_absence( absence: Absence) -> Result<Absence> {
@@ -233,19 +234,22 @@ pub fn update_absence( absence: Absence) -> Result<Absence> {
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))? == 0 { return Err("Absence not found".into()); }
     absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
 }
-/// Member update. Two properties are carried by the statement itself, not by a preceding
-/// check: ownership lives in the `WHERE` clause, and neither `approved` nor `profile_id`
-/// appears in the `SET` list. So no window exists between authorization and write — an admin
-/// may approve or transfer the row inside it and the member write simply matches nothing.
-/// `Ok(None)` means zero affected rows, which the caller answers with 403.
+/// Member update. Check, write, and readback are one statement, so the row cannot change
+/// identity between them: ownership lives in the `WHERE` clause, neither `approved` nor
+/// `profile_id` appears in the `SET` list, and `RETURNING` answers with the very row the
+/// statement modified rather than with whatever a later `SELECT id=?` would find. An admin
+/// approving or transferring the row before, during, or after this statement can therefore
+/// neither be overwritten by the member nor disclosed to it.
+/// `Ok(None)` means zero matched rows, which the caller answers with 403.
 pub fn update_absence_details(absence: Absence, owner: &str) -> Result<Option<Absence>> {
     validate_absence(&absence)?;
     let c = db::conn()?;
-    if err(c.execute(
-        "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1 AND profile_id=?2",
+    err(c.query_row(
+        "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1 AND profile_id=?2 \
+         RETURNING id,profile_id,reason_type,date_from,date_to,approved",
         params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to],
-    ))? == 0 { return Ok(None); }
-    absence_on(&c, &absence.id)
+        read_absence,
+    ).optional())
 }
 /// Member delete, conditional for the same reason: an id authorized a moment ago may have
 /// been deleted and recreated for another profile since. `Ok(false)` means nothing matched.

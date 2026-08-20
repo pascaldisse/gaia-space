@@ -1520,6 +1520,31 @@ mod tests {
         assert_eq!(stored_absence("absence-recreated"), Some(("pb".into(), "vacation".into(), true)), "the recreated foreign row must survive");
     }
 
+    /// Third moment: the response. Even an ownership-scoped write leaks if the row it answers
+    /// with is read back by id alone, because an admin transfer can land between write and
+    /// readback. The trigger below is that window made deterministic — it transfers the row to
+    /// Bob the instant the member's UPDATE touches it, with no threads involved. The member
+    /// must still see only its own written data, never the now-foreign row.
+    #[tokio::test]
+    async fn audit_member_update_response_cannot_leak_a_row_transferred_after_the_write() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-readback", "pa", false);
+        db::conn().unwrap().execute(
+            "CREATE TRIGGER absence_readback_race AFTER UPDATE ON absences WHEN NEW.id='absence-readback' AND NEW.profile_id='pa' \
+             BEGIN UPDATE absences SET profile_id='pb',reason_type='bob secret' WHERE id=NEW.id; END",
+            [],
+        ).unwrap();
+        let (status, value) = call(cookie("ta"), "update_absence", json!({"absence":absence_payload("absence-readback", "pa", "member edit", false)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        // The transfer really happened inside the window — the stored row is Bob's now.
+        assert_eq!(stored_absence("absence-readback"), Some(("pb".into(), "bob secret".into(), false)), "the trigger must have transferred the row");
+        // ...but the response may only carry what the member itself wrote.
+        assert_eq!(value["value"]["profile_id"], json!("pa"), "the response must not disclose the new owner");
+        assert_eq!(value["value"]["reason_type"], json!("member edit"), "the response must not disclose foreign row data");
+        assert!(!value.to_string().contains("bob secret"), "no foreign data may reach the member: {value}");
+    }
+
     #[tokio::test]
     async fn admin_approves_a_foreign_absence_without_stealing_its_owner() {
         let _serial = test_lock();
