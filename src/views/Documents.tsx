@@ -3,6 +3,8 @@ import { marked } from "marked";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { profileId } from "../session";
 import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
 import {
   documentsApi,
@@ -33,13 +35,9 @@ export default function Documents() {
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
-  // acting profile — this app has no auth session; also used as created_by/actor on saves.
+  // Document ownership follows the locked web session; it is never selectable here.
+  const actingProfileId = () => profileId() || null;
   const [profiles] = createResource(() => documentsApi.listProfiles());
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
-  createEffect(() => {
-    const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
-  });
 
   const [projects] = createResource(() => documentsApi.listProjects());
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
@@ -222,7 +220,7 @@ export default function Documents() {
     if (!cid) return;
     if (container === "project") setSelectedProjectId(cid);
     else if (container === "kb") setSelectedBookId(cid);
-    else if (container === "my-docs") setActingProfileId(cid);
+    // My Documents is always scoped to the authenticated profile; ignore stale profile route IDs.
   };
   // route -> container switch (direct link / back / forward)
   createEffect(() => {
@@ -403,22 +401,9 @@ export default function Documents() {
         </div>
       </Show>
 
-      <header class="documents-head">
-        <div>
-          <h1>Documents</h1>
-          <p>My Documents, project docs, and the Knowledge Base share one folder/document/version model.</p>
-        </div>
-        <label>
-          Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => {
-            const id = e.currentTarget.value || null;
-            setActingProfileId(id);
-            if (activeContainer() === "my-docs") linkContainer("my-docs", id ?? undefined);
-          }}>
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
-          </select>
-        </label>
-      </header>
+      <WorkspaceHeader class="dk-workspace-head" icon="book" title="Knowledge">
+        Documents, project notes, and the Knowledge Base share one versioned home.
+      </WorkspaceHeader>
 
       <nav class="container-tabs">
         <For each={CONTAINER_TABS}>

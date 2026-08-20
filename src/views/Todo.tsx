@@ -3,6 +3,7 @@ import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
 
@@ -17,9 +18,9 @@ export default function Todo() {
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
   const personalTodos=()=>todos()?.filter(todo=>!todo.project_id)??[];
   const groupedTodos=()=>todos()?.filter(todo=>todo.project_id)??[];
-  const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
-  const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
+  const selectProject=(id:string)=>{ const f=form(); setForm({...f,project_id:id,assignee_ids:id===f.project_id?f.assignee_ids:[]}); };
+  const toggleAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.includes(id)?f.assignee_ids.filter(x=>x!==id):[...f.assignee_ids,id]}); };
   const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const today=()=>new Date().toISOString().slice(0,10);
@@ -53,9 +54,9 @@ export default function Todo() {
           <div class="composer-head"><span class="composer-head-label">New task</span></div>
           <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
           <div class="composer-meta">
-            <label class="todo-field"><span class="field-label">Project</span><select value={form().project_id} onChange={e=>selectProject(e.currentTarget.value)}><option value="">No project — personal</option><For each={(projects()??[]).filter(project=>!project.archived)}>{project=><option value={project.id}>{project.name}</option>}</For></select></label>
-            <label class="todo-field"><span class="field-label">Due date</span><input type="date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/></label>
-            <label class="todo-field"><span class="field-label">Assignees</span><select value="" disabled={!form().project_id} title={!form().project_id?"Select a project before assigning members":undefined} onChange={e=>{addAssignee(e.currentTarget.value);e.currentTarget.value="";}}><option value="">{form().project_id?"Add project member…":"Unassigned"}</option><For each={active().filter(p=>(projectMembers()??[]).includes(p.id)&&!form().assignee_ids.includes(p.id))}>{p=><option value={p.id}>{p.display_name||p.username}</option>}</For></select></label>
+            <ProjectControl value={form().project_id} projects={(projects()??[]).filter(project=>!project.archived)} onChange={selectProject}/>
+            <DueDateControl value={form().due_date} onChange={due_date=>setForm({...form(),due_date})}/>
+            <AssigneeControl value={form().assignee_ids} people={form().project_id ? active().filter(p=>(projectMembers()??[]).includes(p.id)).map(p=>({id:p.id,label:p.display_name||p.username,sub:p.email??undefined})) : []} onToggle={toggleAssignee}/>
           </div>
           <Show when={form().project_id&&!projectMembers.loading&&!projectMembers()?.length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
