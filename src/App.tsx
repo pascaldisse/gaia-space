@@ -14,6 +14,9 @@ import Inbox from "./views/Inbox";
 import Documents from "./views/Documents";
 import Calendar from "./views/Calendar";
 import ProjectTasks from "./views/ProjectTasks";
+import Steering from "./views/Steering";
+import ProjectSettings from "./views/ProjectSettings";
+import { ProjectContext } from "./components/ProjectContext";
 import Packages from "./views/Packages";
 import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
@@ -28,7 +31,7 @@ import ServerConnect from "./components/ServerConnect";
 import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { isMobileSetup } from "./mobile";
-import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, setAvailableViews, setRoutePending } from "./router";
+import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
 import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
@@ -38,6 +41,8 @@ const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
+const projectSteeringView:View={name:"Project Steering",icon:"target",component:Steering};
+const projectSettingsView:View={name:"Project Settings",icon:"settings",component:ProjectSettings};
 
 export default function App() {
   const active=()=>activeView()||defaultView();
@@ -50,12 +55,12 @@ export default function App() {
     if(isWeb()&&currentUser()?.role==="admin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,projectSteeringView,projectSettingsView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // "Meetings" is retained as an alias only: the destination is now Calendar,
     // where meetings are created and answered. Old links must keep resolving.
-    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,settingsView].map(v=>v.name==="Calendar"?{name:v.name,aliases:["meetings"]}:{name:v.name}));
+    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name==="Calendar"?{name:v.name,aliases:["meetings"]}:{name:v.name}));
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
@@ -66,7 +71,7 @@ export default function App() {
   });
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView,settingsView].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
@@ -99,7 +104,7 @@ export default function App() {
         <Show when={navLayout()==="grouped"&&(activeGroup()?.views.length??0)>1}>
           <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
         </Show>
-        <main class="workspace"><Dynamic component={current().component}/></main>
+        <main class="workspace"><Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show></main>
         <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
     </Match>

@@ -1,0 +1,11 @@
+.project-context { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.project-context-head { display: flex; align-items: center; gap: 9px; padding: 14px var(--view-pad-x) 10px; color: var(--text-muted); font-size: 13px; }
+.project-context-head strong { color: var(--text-strong); font-family: var(--font-head); }
+.project-context-head code { color: var(--accent-text); font-size: 11px; }
+.project-context-back { color: var(--accent-text); }
+.project-context-tabs { display: flex; gap: 3px; padding: 0 var(--view-pad-x); border-bottom: 1px solid var(--surface-border); overflow-x: auto; }
+.project-context-tabs a { padding: 9px 11px; color: var(--text-muted); white-space: nowrap; font-size: 13px; border-bottom: 2px solid transparent; }
+.project-context-tabs a:hover { color: var(--text-strong); }
+.project-context-tabs a.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
+.project-context > .resource-view, .project-context > .planning-view, .project-context > .st-view, .project-context > .ps-view { flex: 1; min-height: 0; }
+@media (max-width: 640px) { .project-context-head { padding-inline: 16px; } .project-context-tabs { padding-inline: 16px; } }
