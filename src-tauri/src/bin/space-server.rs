@@ -550,7 +550,19 @@ fn authorize_command(
                 body.get("todo").and_then(|todo| todo.get("id")).and_then(Value::as_str).map(str::to_string)
             } else { arg(body, "id").ok() };
             let Some(todo_id) = todo_id else { return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`")); };
-            if user.role != "admin" && !todo_owned_by(&user.profile_id, &todo_id) { return Err(err(StatusCode::FORBIDDEN, "only the owner can change this todo")); }
+            if user.role != "admin" {
+                if !todo_owned_by(&user.profile_id, &todo_id) { return Err(err(StatusCode::FORBIDDEN, "only the owner can change this todo")); }
+                // Validate both sides of a move. Otherwise an owner could attach a
+                // personal todo to a project they cannot access, or edit a row whose
+                // stored project membership was revoked before the request arrived.
+                let stored_project = personal::todo_project(&todo_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                let requested_project = body.get("todo").and_then(|todo| todo.get("project_id")).and_then(Value::as_str).filter(|id| !id.trim().is_empty());
+                for project_id in stored_project.iter().map(String::as_str).chain(requested_project) {
+                    if !personal::project_member_by(project_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? {
+                        return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+                    }
+                }
+            }
             Ok(())
         }
         CommandPolicy::TodoCompletionWrite => {
@@ -1071,6 +1083,55 @@ mod tests {
         let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pd","content":"Bad assignment","project_id":"group","done":false,"assignee_ids":["pd"]}})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(value["error"].as_str().unwrap_or_default().contains("Assignee must be a project member"));
+    }
+
+    #[tokio::test]
+    async fn calendar_meeting_margin_preserves_date_only_bounds() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        let start = 1_893_456_000i64;
+        let end = start + 86_400;
+        c.execute_batch(&format!("INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('before','Before',{},{},'pa',0),('after','After',{},{},'pa',0); INSERT INTO todos(id,profile_id,content,due_date,done) VALUES('first-day','pa','First','2030-01-01',0),('next-day','pa','Next','2030-01-02',0);", start - 60, start, end + 60, end + 120)).unwrap();
+
+        let (status, value) = call(cookie("ta"), "calendar_aggregate", json!({"range_start":start,"range_end":end})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let ids: Vec<&str> = value["value"].as_array().unwrap().iter().filter_map(|item| item["id"].as_str()).collect();
+        assert!(ids.contains(&"before") && ids.contains(&"after"), "{ids:?}");
+        assert!(ids.contains(&"first-day") && !ids.contains(&"next-day"), "{ids:?}");
+    }
+
+    #[tokio::test]
+    async fn todo_updates_require_access_to_stored_and_requested_projects() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('alice-project','Alice project','ALICE','pa',1),('dora-project','Dora project','DORA','pd',1);").unwrap();
+
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pa","content":"Personal","due_date":null,"project_id":null,"done":false,"source_entity_type":null,"source_entity_id":null,"assignee_ids":[]}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let mut todo = value["value"].clone();
+
+        // An owner cannot inject a personal todo into somebody else's project.
+        todo["project_id"] = json!("dora-project");
+        let (status, _) = call(cookie("ta"), "update_todo", json!({"todo":todo})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let project: Option<String> = c.query_row("SELECT project_id FROM todos WHERE id=?1", [value["value"]["id"].as_str().unwrap()], |row| row.get(0)).unwrap();
+        assert_eq!(project, None);
+
+        // The owner can still move into their own project; admins retain their override.
+        let mut allowed = value["value"].clone();
+        allowed["project_id"] = json!("alice-project");
+        assert_eq!(call(cookie("ta"), "update_todo", json!({"todo":allowed})).await.0, StatusCode::OK);
+        let mut admin = value["value"].clone();
+        admin["project_id"] = json!("dora-project");
+        assert_eq!(call(cookie("tc"), "update_todo", json!({"todo":admin})).await.0, StatusCode::OK);
+
+        // A previously attached project is also checked, even when the request detaches it.
+        c.execute("UPDATE todos SET project_id='dora-project' WHERE id=?1", [value["value"]["id"].as_str().unwrap()]).unwrap();
+        let mut stale = value["value"].clone();
+        stale["project_id"] = Value::Null;
+        assert_eq!(call(cookie("ta"), "update_todo", json!({"todo":stale})).await.0, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

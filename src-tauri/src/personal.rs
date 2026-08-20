@@ -101,6 +101,11 @@ pub fn todo_owner(id: &str) -> Result<Option<String>> {
     let c = db::conn()?;
     err(c.query_row("SELECT profile_id FROM todos WHERE id=?1", [id], |row| row.get::<_, String>(0)).optional())
 }
+/// Current project attachment of a todo, for authorization before an update.
+pub fn todo_project(id: &str) -> Result<Option<String>> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT project_id FROM todos WHERE id=?1", [id], |row| row.get::<_, Option<String>>(0)).optional()).map(|project| project.flatten())
+}
 /// Group todos are readable by their owner, project members, and assignees. Personal
 /// todos stay owner-only, including legacy personal rows that still have assignees.
 pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
@@ -350,8 +355,12 @@ pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) 
     if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
     let c = db::conn()?;
     let mut items = Vec::new();
+    // Date-only rows keep the UTC YYYY-MM-DD range below. Meetings are instants,
+    // so include a timezone margin and let the local grid assign their display day.
+    let meeting_start = range_start.saturating_sub(24 * 60 * 60);
+    let meeting_end = range_end.saturating_add(24 * 60 * 60);
     let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))"))?;
-    for row in err(meetings.query_map(params![range_start, range_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None, date:None })))? { items.push(row.map_err(|e| e.to_string())?); }
+    for row in err(meetings.query_map(params![meeting_start, meeting_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None, date:None })))? { items.push(row.map_err(|e| e.to_string())?); }
     let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?3))))"))?;
     for row in err(todos.query_map(params![range_start, range_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id,kind:"task".into(),title,starts_at,ends_at:None,project_id,date:Some(date)}); }
     let mut deadlines = err(c.prepare("SELECT id,name,deadline FROM projects WHERE archived=0 AND created_by=?1 AND deadline IS NOT NULL AND unixepoch(deadline)>=?2 AND unixepoch(deadline)<?3"))?;

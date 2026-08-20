@@ -55,7 +55,7 @@ export default function Calendar() {
   const openComposer = (day:Date, kind:CalendarItem["kind"]="meeting") => { setSelected(undefined); setDraft(undefined); setSelectedDay(day); setQuickKind(kind); setDeadlineProject(route().projectId ?? ""); setComposerDay(day); setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"" }); };
   const chooseKind = (kind:CalendarItem["kind"]) => { if (composerDay()) setQuickKind(kind); };
   const openEvent = (item:CalendarItem) => { setComposerDay(undefined); setSelected(item); setDraft(meetingOf(item)); };
-  useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
+  useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null,date:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
 
   const create = async (event:SubmitEvent) => {
     event.preventDefault();
@@ -65,7 +65,7 @@ export default function Calendar() {
       if (kind === "meeting") {
         if (!Number.isFinite(starts_at) || !Number.isFinite(ends_at) || ends_at <= starts_at) throw new Error("The meeting has to end after it starts.");
         const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:sessionProfile()||null,channel_id:null,archived:false};
-        await meetingsApi.create(meeting); setDraft(meeting); setSelected({id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null}); reloadMeetings();
+        await meetingsApi.create(meeting); setDraft(meeting); setSelected({id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,date:null}); reloadMeetings();
       } else if (kind === "task") {
         const day=composerDay()!; const due_date=dateKey(day);
         await personalApi.createTodo({profile_id:sessionProfile(),content:f.title.trim(),due_date,project_id:route().projectId ?? null,done:false,source_entity_type:null,source_entity_id:null,assignee_ids:[]});
