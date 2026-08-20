@@ -1,6 +1,7 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { platformApi, type Role, type Right, type RoleAssignment, type ScopeType, type CfDefinition, type CfType } from "../api/platform";
 import "./Admin.css";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
 
 const SCOPE_TYPES: ScopeType[] = ["global", "project", "team", "channel", "document"];
 const CF_ENTITY_TYPES = ["issue", "profile", "team", "membership"];
@@ -107,7 +108,7 @@ export default function Admin() {
   const toggleArchiveCf = async (d: CfDefinition) => { try { await platformApi.archiveCfDefinition(d.id, !d.archived); reloadCfDefs(); } catch (e) { setError(String(e)); } };
 
   return <section class="admin-view">
-    <header class="admin-head"><div><h1>Admin</h1><p>Roles, rights, scoped assignments, and the custom fields engine. Rights catalog seeded: {seeded()} rows.</p></div></header>
+    <WorkspaceHeader icon="settings" title="Admin">Roles, rights, scoped assignments, and the custom fields engine. Rights catalog seeded: {seeded()} rows.</WorkspaceHeader>
     <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
     <div class="admin-grid">
