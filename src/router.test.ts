@@ -102,6 +102,12 @@ describe("grammar", () => {
     expect(parsePath(path)).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
+  test("Board tab href retains the project entity route, not the portfolio", () => {
+    expect(buildPath({ view: "Projects", entityType: "project", entityId: "p-1" })).toBe("projects/p-1");
+    expect(hrefFor({ view: "Projects", entityType: "project", entityId: "p-1" })).toBe("/projects/p-1");
+    expect(hrefFor({ view: "Projects", projectId: "p-1" })).toBe("/projects");
+  });
+
   test("project workspace routes retain their project context", () => {
     expect(buildPath({ view: "Project Steering", projectId: "p-1" })).toBe("projects/p-1/steering");
     expect(parsePath("projects/p-1/steering")).toMatchObject({ view: "Project Steering", projectId: "p-1" });

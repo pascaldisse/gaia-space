@@ -5,11 +5,11 @@ import "./ProjectContext.css";
 
 const projectRoute = () => route().projectId ?? (route().entityType === "project" ? route().entityId : undefined);
 const tabs = [
-  ["Steering", "Project Steering", "steering"],
-  ["Board", "Projects", "board"],
-  ["Tasks", "Project Tasks", "tasks"],
-  ["Calendar", "Calendar", "calendar"],
-  ["Settings", "Project Settings", "settings"],
+  ["Steering", "Project Steering"],
+  ["Board", "Projects"],
+  ["Tasks", "Project Tasks"],
+  ["Calendar", "Calendar"],
+  ["Settings", "Project Settings"],
 ] as const;
 
 export function ProjectContext(props: { children: JSX.Element }) {
@@ -25,7 +25,7 @@ export function ProjectContext(props: { children: JSX.Element }) {
       <Show when={project()?.key}><code>{project()!.key}</code></Show>
     </header>
     <nav class="project-context-tabs" aria-label="Project navigation">
-      {tabs.map(([label, view]) => <a classList={{ active: route().view === view }} {...linkProps({ view, projectId: id() })}>{label}</a>)}
+      {tabs.map(([label, view]) => <a classList={{ active: route().view === view }} {...linkProps(view === "Projects" ? { view, entityType: "project", entityId: id() } : { view, projectId: id() })}>{label}</a>)}
     </nav>
     {props.children}
   </section>;
