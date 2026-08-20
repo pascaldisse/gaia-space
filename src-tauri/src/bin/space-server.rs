@@ -196,6 +196,10 @@ fn notification_owned_by(profile_id: &str, notification_id: &str) -> bool {
     let Ok(c) = db::conn() else { return false };
     c.query_row("SELECT EXISTS(SELECT 1 FROM notifications WHERE id=?1 AND recipient_id=?2)", params![notification_id, profile_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
 }
+fn absence_owned_by(profile_id: &str, absence_id: &str) -> bool {
+    let Ok(c) = db::conn() else { return false };
+    c.query_row("SELECT EXISTS(SELECT 1 FROM absences WHERE id=?1 AND profile_id=?2)", params![absence_id, profile_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
+}
 fn chat_message_channel(message_id: &str) -> Option<String> {
     db::conn().ok()?.query_row("SELECT channel_id FROM messages WHERE id=?1", [message_id], |r| r.get(0)).ok()
 }
@@ -264,7 +268,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => CommandPolicy::Session,
         "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
         | "create_board" => CommandPolicy::Session,
-        "create_absence" | "update_absence" => CommandPolicy::AbsenceWrite,
+        "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_cf_definition"
         | "create_channel"
         | "create_deploy_target"
@@ -284,7 +288,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_sprint"
         | "create_team"
         | "current_absences"
-        | "delete_absence"
         | "delete_board"
         | "delete_board_column" => CommandPolicy::Session,
         "delete_checklist"
@@ -487,7 +490,9 @@ fn authorize_command(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let policy =
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
-    bind_session_identity(body, &user.profile_id);
+    // Absence admins manage cross-profile rows; every other web command remains
+    // session-bound before its policy-specific authorization.
+    if !(user.role == "admin" && matches!(name, "create_absence" | "update_absence" | "delete_absence")) { bind_session_identity(body, &user.profile_id); }
     match policy {
         CommandPolicy::Unavailable => Err(err(
             StatusCode::NOT_IMPLEMENTED,
@@ -566,26 +571,30 @@ fn authorize_command(
         CommandPolicy::MeetingRead => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if meetings::meeting_readable_by(&id,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{put_arg(body,"profile_id",json!(user.profile_id));Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting access denied"))}}
         CommandPolicy::MeetingWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if !meetings::meeting_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{return Err(err(StatusCode::FORBIDDEN,"meeting write denied"));}if name=="update_meeting"{let organizer=meetings::get_meeting(id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?.and_then(|m|m.organizer_id).ok_or_else(||err(StatusCode::FORBIDDEN,"meeting write denied"))?;body.get_mut("meeting").and_then(Value::as_object_mut).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid argument `meeting`"))?.insert("organizer_id".into(),json!(organizer));}Ok(())}
         CommandPolicy::MeetingParticipantWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?;let allowed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)",params![id,user.profile_id],|r|r.get(0)).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()))?;if allowed{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting participant access denied"))}}
-        // Desktop remains the local operator surface. On the web, no member may
-        // create or submit an absence as approved; the approval state is admin-only.
+        // Desktop remains unrestricted. Web members are restricted to their own rows,
+        // with profile identity bound to the session; approval remains admin-only.
         CommandPolicy::AbsenceWrite => {
-            let absence = if name == "create_absence" { body.get("input") } else { body.get("absence") }
-                .and_then(Value::as_object)
-                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence"))?;
+            if name == "delete_absence" {
+                let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if user.role != "admin" && !absence_owned_by(&user.profile_id, &id) { return Err(err(StatusCode::FORBIDDEN, "only the absence owner can delete time off")); }
+                return Ok(());
+            }
+            let object_name = if name == "create_absence" { "input" } else { "absence" };
+            let absence = body.get(object_name).and_then(Value::as_object).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence"))?;
             if user.role != "admin" {
-                let incoming_approved = absence.get("approved").and_then(Value::as_bool).unwrap_or(false);
-                let approval_changed = if name == "update_absence" {
+                if name == "update_absence" {
                     let id = absence.get("id").and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence id"))?;
-                    let conn = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-                    let stored_approved: bool = conn.query_row("SELECT approved FROM absences WHERE id=?1", [id], |row| row.get(0))
-                        .map_err(|e| err(StatusCode::FORBIDDEN, &e.to_string()))?;
-                    stored_approved != incoming_approved
-                } else {
-                    incoming_approved
-                };
-                if approval_changed {
-                    return Err(err(StatusCode::FORBIDDEN, "admin required to change time-off approval"));
+                    if !absence_owned_by(&user.profile_id, id) { return Err(err(StatusCode::FORBIDDEN, "only the absence owner can change time off")); }
                 }
+                bind_required_object_identity(body, object_name, "profile_id", "profileId", &user.profile_id).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let incoming_approved = body.get(object_name).and_then(|value| value.get("approved")).and_then(Value::as_bool).unwrap_or(false);
+                let approval_changed = if name == "update_absence" {
+                    let id = body.get(object_name).and_then(|value| value.get("id")).and_then(Value::as_str).expect("validated absence id");
+                    let conn = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                    let stored_approved: bool = conn.query_row("SELECT approved FROM absences WHERE id=?1", [id], |row| row.get(0)).map_err(|e| err(StatusCode::FORBIDDEN, &e.to_string()))?;
+                    stored_approved != incoming_approved
+                } else { incoming_approved };
+                if approval_changed { return Err(err(StatusCode::FORBIDDEN, "admin required to change time-off approval")); }
             }
             Ok(())
         }
@@ -1328,6 +1337,34 @@ mod tests {
 
         let (status, _) = call(cookie("ta"), "create_absence", json!({"input":{"profile_id":"pa","reason_type":"Sick leave","date_from":"2030-02-01","date_to":"2030-02-01","approved":true}})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn absence_web_commands_bind_members_and_preserve_admin_cross_profile_management() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        let (status, value) = call(cookie("ta"), "create_absence", json!({"input":{"profile_id":"pb","reason_type":"Vacation","date_from":"2030-03-01","date_to":"2030-03-02","approved":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let alice_absence = value["value"].clone();
+        let alice_id = alice_absence["id"].as_str().unwrap();
+        assert_eq!(alice_absence["profile_id"], json!("pa"), "member create is session-bound");
+        let mut mine = alice_absence.clone(); mine["profile_id"] = json!("pb"); mine["reason_type"] = json!("Alice updated");
+        let (status, value) = call(cookie("ta"), "update_absence", json!({"absence":mine})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["profile_id"], json!("pa"), "member update cannot transfer ownership");
+        let mut forged = alice_absence.clone(); forged["profile_id"] = json!("pb"); forged["reason_type"] = json!("Hijacked");
+        assert_eq!(call(cookie("tb"), "update_absence", json!({"absence":forged})).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(cookie("tb"), "delete_absence", json!({"id":alice_id})).await.0, StatusCode::FORBIDDEN);
+        let reason: String = c.query_row("SELECT reason_type FROM absences WHERE id=?1", [alice_id], |row| row.get(0)).unwrap();
+        assert_eq!(reason, "Alice updated");
+        let (status, value) = call(cookie("tc"), "create_absence", json!({"input":{"profile_id":"pb","reason_type":"Sick leave","date_from":"2030-03-03","date_to":"2030-03-03","approved":true}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let mut admin_managed = value["value"].clone();
+        assert_eq!(admin_managed["profile_id"], json!("pb"));
+        admin_managed["reason_type"] = json!("Medical leave");
+        assert_eq!(call(cookie("tc"), "update_absence", json!({"absence":admin_managed.clone()})).await.0, StatusCode::OK);
+        assert_eq!(call(cookie("tc"), "delete_absence", json!({"id":admin_managed["id"]})).await.0, StatusCode::OK);
     }
 
     #[tokio::test]
