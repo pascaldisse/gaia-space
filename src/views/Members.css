@@ -48,16 +48,13 @@
 .org-list li.archived { opacity: 0.5; }
 .org-list-text { min-width: 0; display: grid; gap: 2px; flex: 1; }
 .org-list-text strong { font-size: 13.5px; color: var(--text-strong); font-weight: 600; }
+.org-list-text strong a { color: inherit; text-decoration: none; }
+.org-list-text strong a:hover { text-decoration: underline; }
+.org-list-text strong a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 .org-sub { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); min-width: 0; }
 .org-sub code { color: #9aa4bb; }
 .org-sub .dot { opacity: 0.5; }
 .org-sub .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.avatar {
-  width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px;
-  background: var(--avatar-person-bg); color: var(--avatar-person-ink);
-  font-size: 11px; font-weight: 650; box-shadow: inset 0 0 0 1px var(--avatar-person-ring);
-}
 
 /* hover-reveal secondary actions keep rows calm at rest */
 .hover-actions { opacity: 0; transition: opacity .12s ease; }

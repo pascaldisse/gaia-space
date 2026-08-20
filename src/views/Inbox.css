@@ -66,6 +66,11 @@
 
 /* Row actions — quiet until useful; Open deep-links to the related area */
 .inbox-row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* Deep links are real anchors, so they carry the button styling themselves */
+.inbox-open { text-decoration: none; color: #9a9a9a; font-size: 12.5px; padding: 3px 8px; border-radius: 7px; }
+.inbox-open:hover { color: var(--text-strong); background: var(--surface-hover); }
+/* A failed load reports itself — it never degrades into an empty inbox */
+.inbox-error { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--status-danger-ink, #7a2f2f); background: var(--status-danger-bg, #2a1618); color: var(--status-danger-ink, #e59a9a); font-size: 13px; }
 
 /* Empty & caught-up states */
 .inbox-clear { display: flex; align-items: center; gap: 11px; padding: 16px 18px; border: 1px dashed var(--surface-border); border-radius: 10px; background: var(--surface); }
@@ -77,6 +82,11 @@
 .inbox-blank h2 { margin: 0; font-family: var(--font-head); font-size: 16px; color: var(--text-strong); }
 .inbox-blank p { margin: 4px 0 0; color: #9aa3b8; font-size: 13px; max-width: 52ch; }
 .inbox-blank button { margin-left: auto; flex: none; }
+.inbox-blank-cta { margin-left: auto; flex: none; text-decoration: none; font-size: 13px; padding: 7px 14px; border-radius: 9px; border: 1px solid var(--surface-border); color: var(--text-strong); }
+.inbox-blank-cta:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+.inbox-blank-cta.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); font-weight: 600; }
+.inbox-blank-cta.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.inbox-rail .rail-actions { margin-top: 12px; }
 .inbox-onboarding .view-main { display: grid; align-content: start; }
 .inbox-onboarding .rail-card + .rail-card { margin-top: 12px; }
 

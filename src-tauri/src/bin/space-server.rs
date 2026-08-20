@@ -224,7 +224,7 @@ enum CommandPolicy {
     SessionIdentityWrite,
     DocumentCreate, DocumentReadList, DocumentRead, DocumentWrite,
     DocumentFolderCreate, DocumentFolderReadList, DocumentFolderWrite,
-    MeetingReadList, MeetingRead, MeetingWrite, MeetingParticipantWrite, SearchRead,
+    MeetingReadList, MeetingRead, MeetingWrite, MeetingParticipantWrite, SearchRead, AbsenceWrite,
     Unavailable,
 }
 
@@ -241,6 +241,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
+        "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
         "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
         "create_document" => CommandPolicy::DocumentCreate,
@@ -262,7 +263,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_document" | "delete_document" => CommandPolicy::DocumentWrite,
         "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => CommandPolicy::Session,
-        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint" | "create_absence"
+        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
         | "create_board" => CommandPolicy::Session,
         "create_cf_definition"
         | "create_channel"
@@ -283,7 +284,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_sprint"
         | "create_team"
         | "current_absences"
-        | "delete_absence"
         | "delete_board"
         | "delete_board_column" => CommandPolicy::Session,
         "delete_checklist"
@@ -386,7 +386,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "set_role_rights"
         | "toggle_checklist_item"
         | "transition_deployment"
-        | "update_absence"
         | "update_board" => CommandPolicy::Session,
         "update_cf_definition"
         | "update_channel"
@@ -487,7 +486,7 @@ fn authorize_command(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let policy =
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
-    bind_session_identity(body, &user.profile_id);
+    if !matches!(policy,CommandPolicy::AbsenceWrite) || user.role!="admin" { bind_session_identity(body, &user.profile_id); }
     match policy {
         CommandPolicy::Unavailable => Err(err(
             StatusCode::NOT_IMPLEMENTED,
@@ -550,6 +549,40 @@ fn authorize_command(
         CommandPolicy::NotificationWrite => {
             let notification_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             if notification_owned_by(&user.profile_id, &notification_id) { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "only the recipient can change this notification")) }
+        }
+        CommandPolicy::AbsenceWrite => {
+            // Admins manage any profile's absences, approval included; identity rebinding is
+            // skipped for them upstream so the client-supplied `profile_id` survives.
+            if user.role == "admin" { return Ok(()); }
+            // Members own their rows only, and may never move the `approved` flag.
+            if name == "create_absence" {
+                let input = body.get_mut("input").and_then(Value::as_object_mut).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence"))?;
+                if input.get("approved").and_then(Value::as_bool).unwrap_or(false) {
+                    return Err(err(StatusCode::FORBIDDEN, "members cannot approve absences"));
+                }
+                input.insert("profile_id".into(), json!(user.profile_id));
+                return Ok(());
+            }
+            let id: String = if name == "update_absence" { nested_id(body, "absence") } else { arg(body, "id").ok() }
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence id"))?;
+            // Ownership is read from the database, never from the request payload.
+            let owner = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .query_row("SELECT profile_id FROM absences WHERE id=?1", [&id], |r| r.get::<_, String>(0)).ok();
+            if owner.as_deref() != Some(user.profile_id.as_str()) {
+                return Err(err(StatusCode::FORBIDDEN, "absence access denied"));
+            }
+            if name == "update_absence" {
+                let stored_approval: bool = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                    .query_row("SELECT approved FROM absences WHERE id=?1", [&id], |r| r.get(0))
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+                let absence = body.get_mut("absence").and_then(Value::as_object_mut).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid absence"))?;
+                // Any change of `approved`, in either direction, is an admin-only act.
+                if absence.get("approved").and_then(Value::as_bool).unwrap_or(stored_approval) != stored_approval {
+                    return Err(err(StatusCode::FORBIDDEN, "members cannot change absence approval"));
+                }
+                absence.insert("profile_id".into(), json!(user.profile_id));
+            }
+            Ok(())
         }
         CommandPolicy::SessionIdentityWrite => match name {
             "create_meeting" => bind_required_object_identity(body, "meeting", "organizer_id", "organizerId", &user.profile_id),
@@ -676,9 +709,20 @@ macro_rules! dispatch {
         }
     };
 }
+/// Absence updates leave the generic dispatch table: the write itself depends on the caller's
+/// role, because only an admin write may reach the `approved` column at all.
+fn absence_update(user: &User, body: &Value) -> axum::response::Response {
+    let absence: personal::Absence = match arg(body, "absence") { Ok(v) => v, Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response() };
+    let written = if user.role == "admin" { personal::update_absence(absence) } else { personal::update_absence_details(absence) };
+    match written {
+        Ok(v) => Json(json!({"ok":true,"value":v})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+    }
+}
 async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->impl IntoResponse{
     let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
     if let Err(e) = authorize_command(&user, &name, &mut body) { return e.into_response(); }
+    if name == "update_absence" { return absence_update(&user, &body); }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
@@ -850,7 +894,6 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
-    "update_absence" => personal::update_absence(absence: personal::Absence),
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
@@ -1338,5 +1381,134 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{value}");
         let authors: Vec<Option<String>> = c.prepare("SELECT created_by FROM doc_versions WHERE document_id='identity-document' ORDER BY version").unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
         assert_eq!(authors, vec![Some("pa".into()), Some("pa".into()), Some("pa".into())]);
+    }
+
+    /// Reads the stored row as an independent check: assertions above run through the HTTP
+    /// surface, this one goes straight to SQLite, so a policy bug cannot hide behind the
+    /// same code path twice.
+    fn stored_absence(id: &str) -> Option<(String, String, bool)> {
+        db::conn().unwrap().query_row(
+            "SELECT profile_id,reason_type,approved FROM absences WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional().unwrap()
+    }
+
+    fn seed_absence(id: &str, profile_id: &str, approved: bool) {
+        db::conn().unwrap().execute(
+            "INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES(?1,?2,'vacation','2031-03-01','2031-03-05',?3)",
+            params![id, profile_id, approved],
+        ).unwrap();
+    }
+
+    fn absence_payload(id: &str, profile_id: &str, reason_type: &str, approved: bool) -> Value {
+        json!({"id":id,"profile_id":profile_id,"reason_type":reason_type,"date_from":"2031-03-01","date_to":"2031-03-05","approved":approved})
+    }
+
+    #[tokio::test]
+    async fn member_absence_creation_is_bound_to_the_session_and_lands_unapproved() {
+        let _serial = test_lock();
+        setup();
+        // Alice forges Bob's profile and pre-approval is absent: the row must still be hers.
+        let (status, value) = call(cookie("ta"), "create_absence", json!({"input":absence_payload("absence-alice-own", "pb", "parental leave", false)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["profile_id"], json!("pa"), "client-supplied owner must be replaced by the session profile");
+        assert_eq!(value["value"]["approved"], json!(false));
+        assert_eq!(stored_absence("absence-alice-own"), Some(("pa".into(), "parental leave".into(), false)));
+    }
+
+    #[tokio::test]
+    async fn member_cannot_self_approve_on_create_or_update_and_the_row_is_untouched() {
+        let _serial = test_lock();
+        setup();
+        // Creating an already-approved absence is an approval act, so it is refused outright.
+        let (status, _) = call(cookie("ta"), "create_absence", json!({"input":absence_payload("absence-self-approved", "pa", "sick", true)})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(stored_absence("absence-self-approved"), None, "a refused create must write nothing");
+        // Flipping the flag on an existing own row is refused as well, with the row intact.
+        seed_absence("absence-alice-pending", "pa", false);
+        let (status, _) = call(cookie("ta"), "update_absence", json!({"absence":absence_payload("absence-alice-pending", "pa", "vacation", true)})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(stored_absence("absence-alice-pending"), Some(("pa".into(), "vacation".into(), false)), "database must be unchanged after a refused approval");
+        // The same row remains editable as long as `approved` keeps its stored value.
+        let (status, value) = call(cookie("ta"), "update_absence", json!({"absence":absence_payload("absence-alice-pending", "pa", "unpaid leave", false)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(stored_absence("absence-alice-pending"), Some(("pa".into(), "unpaid leave".into(), false)));
+    }
+
+    /// Check and write are two moments. A member request authorized while the row was still
+    /// pending must not be able to un-approve it when an admin approves inside that window:
+    /// the member write must never touch the `approved` column at all.
+    #[tokio::test]
+    async fn audit_member_stale_update_cannot_revoke_concurrent_admin_approval() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-race", "pa", false);
+        let member = user_by_token(&cookie("ta")).unwrap();
+        let mut body = json!({"absence": absence_payload("absence-race", "pa", "vacation", false)});
+        authorize_command(&member, "update_absence", &mut body).expect("a member may edit their own pending row");
+        // Window: the admin approves after the check passed, before the member write lands.
+        let (status, value) = call(cookie("tc"), "update_absence", json!({"absence":absence_payload("absence-race", "pa", "vacation", true)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(stored_absence("absence-race"), Some(("pa".into(), "vacation".into(), true)));
+        // The already-authorized member write now executes with its stale payload.
+        let status = absence_update(&member, &body).status();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(stored_absence("absence-race").unwrap().2, true, "a member write must not revoke an approval");
+    }
+
+    #[tokio::test]
+    async fn admin_approves_a_foreign_absence_without_stealing_its_owner() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-admin-approves", "pb", false);
+        let (status, value) = call(cookie("tc"), "update_absence", json!({"absence":absence_payload("absence-admin-approves", "pb", "vacation", true)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["approved"], json!(true));
+        assert_eq!(stored_absence("absence-admin-approves"), Some(("pb".into(), "vacation".into(), true)), "admin writes must not rebind the row to the admin profile");
+    }
+
+    #[tokio::test]
+    async fn admin_revokes_an_approval_it_previously_granted() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-admin-revokes", "pd", true);
+        let (status, value) = call(cookie("tc"), "update_absence", json!({"absence":absence_payload("absence-admin-revokes", "pd", "vacation", false)})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(stored_absence("absence-admin-revokes"), Some(("pd".into(), "vacation".into(), false)), "unapproval must reach the stored row");
+        // The owner may not put the approval back.
+        let (status, _) = call(cookie("td"), "update_absence", json!({"absence":absence_payload("absence-admin-revokes", "pd", "vacation", true)})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(stored_absence("absence-admin-revokes"), Some(("pd".into(), "vacation".into(), false)));
+    }
+
+    #[tokio::test]
+    async fn member_writes_against_a_foreign_absence_leave_no_trace() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-bob-private", "pb", false);
+        // Update of somebody else's row: refused, regardless of the payload's claimed owner.
+        let (status, _) = call(cookie("ta"), "update_absence", json!({"absence":absence_payload("absence-bob-private", "pa", "hijacked", false)})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(stored_absence("absence-bob-private"), Some(("pb".into(), "vacation".into(), false)), "a refused update must leave the row byte-identical");
+        // Delete of the same row: refused, row still present.
+        let (status, _) = call(cookie("ta"), "delete_absence", json!({"id":"absence-bob-private"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(stored_absence("absence-bob-private"), Some(("pb".into(), "vacation".into(), false)), "a refused delete must keep the row");
+        // An unknown id answers identically, disclosing nothing about existence.
+        let (status, _) = call(cookie("ta"), "delete_absence", json!({"id":"absence-does-not-exist"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn member_deletes_its_own_absence() {
+        let _serial = test_lock();
+        setup();
+        seed_absence("absence-dora-own", "pd", false);
+        seed_absence("absence-dora-neighbour", "pb", false);
+        let (status, value) = call(cookie("td"), "delete_absence", json!({"id":"absence-dora-own"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(stored_absence("absence-dora-own"), None);
+        assert!(stored_absence("absence-dora-neighbour").is_some(), "the delete must not spill onto neighbouring rows");
     }
 }

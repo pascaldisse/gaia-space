@@ -233,6 +233,14 @@ pub fn update_absence( absence: Absence) -> Result<Absence> {
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))? == 0 { return Err("Absence not found".into()); }
     absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
 }
+/// Update that deliberately omits `approved`: callers without approval rights write the
+/// descriptive columns only, so no read-compare-write window over the flag can exist.
+pub fn update_absence_details(absence: Absence) -> Result<Absence> {
+validate_absence(&absence)?;
+let c = db::conn()?;
+if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to]))? == 0 { return Err("Absence not found".into()); }
+absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_absence( id: String) -> Result<()> {
     let c = db::conn()?;
