@@ -6,7 +6,7 @@ import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
 
-const blank = () => ({ content:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[] });
+const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[] });
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
@@ -20,7 +20,7 @@ export default function Todo() {
   const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
   const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
-  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const today=()=>new Date().toISOString().slice(0,10);
   const inDays=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
@@ -33,7 +33,8 @@ export default function Todo() {
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
     <div class="task-body">
       <span class="task-title">{todo.content}</span>
-      <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
+      <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
+<Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
         <div class="task-meta">
           <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
           <Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show>
@@ -59,7 +60,8 @@ export default function Todo() {
           </div>
           <Show when={form().project_id&&!projectMembers.loading&&!projectMembers()?.length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
-          <details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
+          <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
+<details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
           <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
         </form>
         <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>

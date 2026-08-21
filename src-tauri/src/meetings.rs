@@ -70,6 +70,13 @@ const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,
 /// Meeting read scope: organizer, explicitly invited participant, or a member of
 /// the project attached through the meeting's channel.
 const MEETING_READ_SCOPE: &str = "(m.organizer_id=?1 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))))";
+/// Every meeting read is this one SELECT. `extra` may only *narrow* it, and the
+/// scope predicate always binds `?1` to the acting profile, so no caller can
+/// assemble a parallel reader that forgets it.
+fn visible_meetings_sql(extra: &str) -> String {
+    format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE {MEETING_READ_SCOPE} {extra} ORDER BY m.starts_at")
+}
+
 const MEETING_WRITE_SCOPE: &str = "(m.organizer_id=?1 OR ?2=1 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND p.created_by=?1))";
 
 pub fn meeting_readable_by(id: &str, profile_id: &str) -> Result<bool> {
@@ -94,7 +101,15 @@ pub fn meeting_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result
 
 pub fn list_meetings_scoped(profile_id: String) -> Result<Vec<Meeting>> {
     let c = db::conn()?;
-    let mut s = c.prepare(&format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE {MEETING_READ_SCOPE} ORDER BY m.starts_at")).map_err(|e| e.to_string())?;
+    visible_meetings_on(&c, &profile_id)
+}
+
+/// The single source of truth for meeting read visibility on an explicit
+/// connection: `MEETING_READ_SCOPE`, nothing parallel to it. Every caller that
+/// needs "which meetings may this profile see" — list, calendar aggregate,
+/// occurrence expansion — goes through here, so the predicates cannot drift.
+pub fn visible_meetings_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<Meeting>> {
+    let mut s = c.prepare(&visible_meetings_sql("")).map_err(|e| e.to_string())?;
     let rows = s
         .query_map([profile_id], row_to_meeting)
         .map_err(|e| e.to_string())?
@@ -106,7 +121,7 @@ pub fn list_meetings_scoped(profile_id: String) -> Result<Vec<Meeting>> {
 pub fn get_meeting_scoped(id: String, profile_id: String) -> Result<Option<Meeting>> {
     let c = db::conn()?;
     c.query_row(
-        &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id=?2 AND {MEETING_READ_SCOPE}"),
+        &visible_meetings_sql("AND m.id=?2"),
         rusqlite::params![profile_id, id],
         row_to_meeting,
     )
@@ -114,22 +129,16 @@ pub fn get_meeting_scoped(id: String, profile_id: String) -> Result<Option<Meeti
     .map_err(|e| e.to_string())
 }
 
+/// Desktop transport. It carries the acting profile like every other reader:
+/// there is no unscoped meeting list left to call, on either transport.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_meetings() -> Result<Vec<Meeting>> {
-    let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings ORDER BY starts_at").map_err(|e| e.to_string())?;
-    let rows = s
-        .query_map([], row_to_meeting)
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|e| e.to_string());
-    rows
+pub fn list_meetings(profile_id: String) -> Result<Vec<Meeting>> {
+    list_meetings_scoped(profile_id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_meeting(id: String) -> Result<Option<Meeting>> {
-    let c = db::conn()?;
-    c.query_row("SELECT id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived FROM meetings WHERE id=?1", [&id], row_to_meeting).optional().map_err(|e| e.to_string())
+pub fn get_meeting(id: String, profile_id: String) -> Result<Option<Meeting>> {
+    get_meeting_scoped(id, profile_id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -197,7 +206,7 @@ pub fn list_meeting_participants_scoped(
     profile_id: String,
 ) -> Result<Vec<MeetingParticipant>> {
     let c = db::conn()?;
-    let mut s = c.prepare(&format!("SELECT mp.meeting_id,mp.profile_id,mp.status FROM meeting_participants mp JOIN meetings m ON m.id=mp.meeting_id WHERE mp.meeting_id=?2 AND {MEETING_READ_SCOPE} ORDER BY mp.profile_id")).map_err(|e| e.to_string())?;
+    let mut s = c.prepare(&format!("SELECT mp.meeting_id,mp.profile_id,mp.status FROM meeting_participants mp JOIN meetings m ON m.id=mp.meeting_id WHERE {MEETING_READ_SCOPE} AND mp.meeting_id=?2 ORDER BY mp.profile_id")).map_err(|e| e.to_string())?;
     let rows = s
         .query_map(
             rusqlite::params![profile_id, meeting_id],
@@ -210,15 +219,11 @@ pub fn list_meeting_participants_scoped(
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_meeting_participants(meeting_id: String) -> Result<Vec<MeetingParticipant>> {
-    let c = db::conn()?;
-    let mut s = c.prepare("SELECT meeting_id,profile_id,status FROM meeting_participants WHERE meeting_id=?1 ORDER BY profile_id").map_err(|e| e.to_string())?;
-    let rows = s
-        .query_map([meeting_id], row_to_participant)
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|e| e.to_string());
-    rows
+pub fn list_meeting_participants(
+    meeting_id: String,
+    profile_id: String,
+) -> Result<Vec<MeetingParticipant>> {
+    list_meeting_participants_scoped(meeting_id, profile_id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -332,7 +337,9 @@ fn next_start(start: DateTime<Utc>, rule: &Rule) -> Result<DateTime<Utc>> {
     }
 }
 
-fn expand(meeting: &Meeting, range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
+/// Occurrences of one meeting overlapping `[range_start, range_end)`. Visibility
+/// is the caller's business: this only knows the RRULE and the range.
+pub fn expand(meeting: &Meeting, range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
     let duration = meeting.ends_at - meeting.starts_at;
     let rule = meeting.rrule.as_deref().map(parse_rule).transpose()?;
     let mut start = Utc
@@ -399,19 +406,9 @@ pub fn expand_meeting_occurrences_scoped(
 pub fn expand_meeting_occurrences(
     range_start: i64,
     range_end: i64,
+    profile_id: String,
 ) -> Result<Vec<MeetingOccurrence>> {
-    if range_end <= range_start {
-        return Err("Calendar range end must be after its start".into());
-    }
-    let mut all = Vec::new();
-    for meeting in list_meetings()?
-        .into_iter()
-        .filter(|meeting| !meeting.archived)
-    {
-        all.extend(expand(&meeting, range_start, range_end)?);
-    }
-    all.sort_by_key(|occurrence| occurrence.starts_at);
-    Ok(all)
+    expand_meeting_occurrences_scoped(range_start, range_end, profile_id)
 }
 
 #[cfg(test)]
@@ -448,6 +445,72 @@ mod tests {
             vec![start, start + 86_400, start + 172_800]
         );
     }
+    fn scope_conn() -> rusqlite::Connection {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "gaia-space-meetings-scope-{}-{}.sqlite",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_file(&path);
+        crate::db::migrate_path(&path).expect("migration")
+    }
+
+    /// The leak this closes: `list_meetings`/`get_meeting`/`expand_meeting_occurrences`
+    /// used to read the table with no scope predicate at all, so the desktop
+    /// transport (and `calls::join_meeting_call` through it) handed any caller
+    /// every meeting in the database. Every reader now goes through
+    /// `visible_meetings_sql`, so a stranger sees nothing.
+    #[test]
+    fn no_meeting_reader_escapes_the_read_scope() {
+        let c = scope_conn();
+        for id in ["p-owner", "p-guest", "p-stranger"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,unixepoch())", [id]).unwrap();
+        }
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('m-private','Private planning',1000,4600,'p-owner',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('m-shared','Shared review',2000,5600,'p-owner',0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES('m-shared','p-guest','accepted')", []).unwrap();
+
+        let owner: Vec<String> = visible_meetings_on(&c, "p-owner")
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(owner, vec!["m-private", "m-shared"], "the organizer sees both");
+
+        let guest: Vec<String> = visible_meetings_on(&c, "p-guest")
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(guest, vec!["m-shared"], "an invited guest sees only their meeting");
+
+        assert!(
+            visible_meetings_on(&c, "p-stranger").unwrap().is_empty(),
+            "a stranger sees no meeting through any reader"
+        );
+
+        // The single-row reader is the same SELECT, only narrowed.
+        let one = c
+            .query_row(
+                &visible_meetings_sql("AND m.id=?2"),
+                rusqlite::params!["p-stranger", "m-private"],
+                row_to_meeting,
+            )
+            .optional()
+            .unwrap();
+        assert!(one.is_none(), "get_meeting cannot reach outside the scope either");
+    }
+
     #[test]
     fn participant_status_transitions_from_invited_to_accepted() {
         let conn = crate::db::open_in_memory().unwrap();

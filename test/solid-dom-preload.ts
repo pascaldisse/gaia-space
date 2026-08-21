@@ -16,6 +16,10 @@ import { resolve } from "node:path";
 GlobalRegistrator.register();
 
 const webClient = resolve(import.meta.dir, "../node_modules/solid-js/web/dist/web.js");
+// Solid's *core* also resolves to its SSR build under bun's default conditions,
+// which has no reactive graph (createResource/createMemo throw). Views that load
+// data need the client build for both halves.
+const coreClient = resolve(import.meta.dir, "../node_modules/solid-js/dist/solid.js");
 
 plugin({
   name: "solid-jsx",
@@ -25,6 +29,10 @@ plugin({
     // instead, so render()/insert() drive happy-dom's real DOM.
     build.onLoad({ filter: /solid-js[\\/]web[\\/]dist[\\/]server\.js$/ }, () => ({
       contents: readFileSync(webClient, "utf8"),
+      loader: "js",
+    }));
+    build.onLoad({ filter: /solid-js[\\/]dist[\\/]server\.js$/ }, () => ({
+      contents: readFileSync(coreClient, "utf8"),
       loader: "js",
     }));
     build.onLoad({ filter: /\.[jt]sx$/ }, (args) => {

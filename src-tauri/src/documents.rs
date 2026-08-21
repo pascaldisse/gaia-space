@@ -347,7 +347,13 @@ pub fn restore_doc_version(
     save_document(document_id, title, restored_body, actor)
 }
 
-const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))))";
+/// Read scope for folders. The `kb` branch is deliberately derived, not granted:
+/// a knowledge-base folder becomes navigable only to a profile that already owns a
+/// readable document filed in that exact folder or in the book it belongs to
+/// (`DOCUMENT_READ_SCOPE` admits `created_by`). This closes the invisibility defect
+/// -- a creator could read their own kb article but never see its container -- without
+/// widening anything: a profile with no readable document in the book still sees nothing.
+const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (f.container_type='kb' AND EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.created_by=?1 AND (d.folder_id=f.id OR d.container_id=f.id))))";
 const FOLDER_WRITE_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND p.created_by=?1) OR ?2=1)))";
 
 fn row_to_folder(r: &rusqlite::Row) -> rusqlite::Result<DocumentFolder> {
@@ -669,5 +675,59 @@ mod tests {
             .collect::<std::result::Result<_, _>>()
             .unwrap();
         assert_eq!(children, vec!["child-1".to_string(), "child-2".to_string()]);
+    }
+
+    fn readable_folders(c: &rusqlite::Connection, profile: &str) -> Vec<String> {
+        let sql =
+            format!("SELECT f.id FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY f.id");
+        let mut s = c.prepare(&sql).unwrap();
+        s.query_map([profile], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap()
+    }
+
+    /// A knowledge-base book is navigable to the profile that owns an article inside it,
+    /// and to nobody else. Guards both halves of the contract at once: no invisibility for
+    /// the owner, no broadening for a stranger.
+    #[test]
+    fn kb_book_is_visible_only_to_a_profile_owning_an_article_in_it() {
+        let c = test_conn();
+        for p in ["profile-a", "profile-b"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,0)",
+                rusqlite::params![p],
+            )
+            .unwrap();
+        }
+        for (id, parent) in [
+            ("book-1", None),
+            ("book-chapter", Some("book-1")),
+            ("book-2", None),
+        ] {
+            c.execute(
+                "INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES(?1,'kb',?2,?3,?1)",
+                rusqlite::params![id, if parent.is_some() { "book-1" } else { id }, parent],
+            )
+            .unwrap();
+        }
+        // profile-a authored one article, filed in the chapter of book-1.
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES('kb-art','kb','book-1','book-chapter','text','Article','b',1,0,'profile-a')",
+            [],
+        )
+        .unwrap();
+
+        // owner: sees the chapter it is filed in and the book that owns it — nothing else.
+        assert_eq!(
+            readable_folders(&c, "profile-a"),
+            vec!["book-1".to_string(), "book-chapter".to_string()],
+            "the author of a kb article must be able to navigate its container"
+        );
+        // stranger: the book, the chapter and the unrelated book stay invisible.
+        assert!(
+            readable_folders(&c, "profile-b").is_empty(),
+            "a profile with no readable article in a book must see no kb folder at all"
+        );
     }
 }

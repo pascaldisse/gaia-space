@@ -71,3 +71,7 @@
 
 @media(max-width:1040px){.todo-rail{max-width:none}}
 @media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}}
+
+.task-notes { margin: 2px 0 0; color: var(--text-dim, #7b8194); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+.todo-field-notes { grid-column: 1 / -1; }
+.composer-notes { width: 100%; resize: vertical; font: inherit; }

@@ -569,6 +569,14 @@ fn check_right_on(
     scope_type: &str,
     scope_id: Option<&str>,
 ) -> Result<bool> {
+    // A deactivated account holds nothing. Rights hang off the profile, so without
+    // this the rights model kept handing out authority (including
+    // Global.Superadmin, and therefore admin) to accounts that had been switched
+    // off. A profile with no account at all is untouched: those are desktop-local
+    // identities, which no login can deactivate.
+    if !account_is_live(c, profile_id)? {
+        return Ok(false);
+    }
     let mut s = err(c.prepare(
         "SELECT ra.scope_type, ra.scope_id
          FROM role_assignments ra
@@ -650,6 +658,18 @@ pub fn get_project( id: String) -> Result<Option<Project>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_project( project: Project) -> Result<()> {
     let c = db::conn()?;
+    create_project_on(&c, project)
+}
+/// Ownership law: a project is never created ownerless. Web mints `created_by`
+/// from the session before it gets here; desktop has no session, so the shell
+/// sends the locally selected profile. A missing owner is a bug in the caller,
+/// not a row we silently accept (a NULL owner locks the project out of every
+/// owner-or-admin gate forever).
+pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
+    let owner = project.created_by.as_deref().map(str::trim).filter(|o| !o.is_empty())
+        .ok_or("A project owner is required")?
+        .to_string();
+    let project = Project { created_by: Some(owner), ..project };
     c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty())]).map_err(|e|e.to_string())?;
     Ok(())
 }
@@ -672,6 +692,160 @@ pub fn update_project( project: Project) -> Result<()> {
     Ok(())
 }
 
+/// Narrow deadline write: the only column it can change is `projects.deadline`, so a
+/// stale whole-project payload can never overwrite name/description/ownership (H6).
+/// Authorization (owner or admin, identity bound from the session) lives in the web
+/// command gate; this function refuses anything that is not a valid `YYYY-MM-DD` date
+/// or an explicit clear, and never invents a project row.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>) -> Result<Project> {
+    let c = db::conn()?;
+    // Desktop passes its local identity; web passes none because the HTTP
+    // command gate already authorized the session before dispatch.
+    if let Some(actor) = actor_profile_id.as_deref() {
+        authorize_project_deadline_on(&c, actor, &project_id)?;
+    }
+    set_project_deadline_on(&c, &project_id, deadline.as_deref())
+}
+/// Desktop parity for the web deadline gate. The desktop app has no HTTP
+/// session, so the acting identity is the locally selected profile: the same
+/// owner-or-superadmin rule is applied against the local rights model.
+/// A profile is live unless it owns account rows and every one of them is
+/// deactivated. Profiles without any account (desktop-local identities) are live.
+fn account_is_live(c: &Connection, profile_id: &str) -> Result<bool> {
+    let (accounts, active): (i64, i64) = c
+        .query_row(
+            "SELECT count(*), coalesce(sum(active),0) FROM users WHERE profile_id=?1",
+            [profile_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(accounts == 0 || active > 0)
+}
+
+/// The one meaning of "admin" in this codebase. Two notions existed in parallel and
+/// never mapped onto each other: the web session gate reads `users.role='admin'`,
+/// the rights model reads the `Global.Superadmin` right. Either one makes an admin,
+/// on every transport; a deactivated account confers nothing. Every gate — the HTTP
+/// command gate and the desktop authorizers alike — asks this function.
+pub fn is_admin_on(c: &Connection, profile_id: &str) -> Result<bool> {
+    if profile_id.trim().is_empty() { return Ok(false); }
+    let by_account: bool = c
+        .query_row("SELECT EXISTS(SELECT 1 FROM users WHERE profile_id=?1 AND role='admin' AND active=1)", [profile_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if by_account { return Ok(true); }
+    check_right_on(c, profile_id, "Global.Superadmin", "global", None)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn is_admin(profile_id: String) -> Result<bool> {
+    let c = db::conn()?;
+    is_admin_on(&c, &profile_id)
+}
+
+pub fn authorize_project_deadline_on(c: &Connection, actor_profile_id: &str, project_id: &str) -> Result<()> {
+    if actor_profile_id.trim().is_empty() { return Err("A profile is required".into()); }
+    let owner: Option<Option<String>> = c
+        .query_row("SELECT created_by FROM projects WHERE id=?1", [project_id], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let owner = owner.ok_or_else(|| "project access denied".to_string())?;
+    if owner.as_deref() == Some(actor_profile_id) { return Ok(()); }
+    if is_admin_on(c, actor_profile_id)? { return Ok(()); }
+    Err("only the project owner or an admin can set this deadline".into())
+}
+pub fn set_project_deadline_on(c: &Connection, project_id: &str, deadline: Option<&str>) -> Result<Project> {
+    if project_id.trim().is_empty() { return Err("A project is required".into()); }
+    let normalized = match deadline.map(str::trim).filter(|date| !date.is_empty()) {
+        Some(date) => Some(crate::personal::parse_day_key(date)?),
+        None => None,
+    };
+    // First-write law: a deadline may be written into an empty column, or
+    // cleared, but an existing deadline is never silently overwritten.
+    let changed = c
+        .execute(
+            "UPDATE projects SET deadline=?2 WHERE id=?1 AND (deadline IS NULL OR ?2 IS NULL)",
+            rusqlite::params![project_id, normalized],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        let existing: Option<Option<String>> = c
+            .query_row("SELECT deadline FROM projects WHERE id=?1", [project_id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        return match existing {
+            None => Err("That project does not exist".into()),
+            Some(_) => Err("That project already has a deadline; clear it first".into()),
+        };
+    }
+    project_on(c, project_id)?.ok_or_else(|| "That project does not exist".into())
+}
+/// Narrow *edit* of a deadline that already exists. `set_project_deadline` deliberately
+/// refuses to overwrite (first-write law, so a quick-create from the calendar can never
+/// stomp a date somebody else just chose); editing therefore needs its own door, and that
+/// door is compare-and-set: the caller states the value it was looking at and the write
+/// lands only while the row still holds it. A concurrent edit loses instead of silently
+/// winning, and no other project column is reachable from here (H6).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_project_deadline(
+    project_id: String,
+    expected_deadline: Option<String>,
+    deadline: Option<String>,
+    actor_profile_id: Option<String>,
+) -> Result<Project> {
+    let c = db::conn()?;
+    // Desktop passes its local identity; web passes none because the HTTP command
+    // gate already authorized the session before dispatch.
+    if let Some(actor) = actor_profile_id.as_deref() {
+        authorize_project_deadline_on(&c, actor, &project_id)?;
+    }
+    update_project_deadline_on(&c, &project_id, expected_deadline.as_deref(), deadline.as_deref())
+}
+
+pub fn update_project_deadline_on(
+    c: &Connection,
+    project_id: &str,
+    expected_deadline: Option<&str>,
+    deadline: Option<&str>,
+) -> Result<Project> {
+    if project_id.trim().is_empty() { return Err("A project is required".into()); }
+    let normalize = |value: Option<&str>| -> Result<Option<String>> {
+        match value.map(str::trim).filter(|date| !date.is_empty()) {
+            Some(date) => Ok(Some(crate::personal::parse_day_key(date)?)),
+            None => Ok(None),
+        }
+    };
+    let expected = normalize(expected_deadline)?;
+    let next = normalize(deadline)?;
+    // One statement: the guard and the write cannot drift apart under concurrency.
+    // `IS` compares NULLs, so "it was empty" is expressible without a second query.
+    let changed = c
+        .execute(
+            "UPDATE projects SET deadline=?3 WHERE id=?1 AND deadline IS ?2",
+            rusqlite::params![project_id, expected, next],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        // A missing project and a stale expectation must not be distinguishable by
+        // anything the caller could mine for metadata: the web gate has already refused
+        // unknown ids with the same 403 every non-owner gets.
+        return match project_on(c, project_id)? {
+            None => Err("project access denied".into()),
+            Some(_) => Err("That deadline changed since you loaded it; reload and try again".into()),
+        };
+    }
+    project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
+}
+
+pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
+    c.query_row(
+        "SELECT id,name,key,description,created_by,archived,deadline FROM projects WHERE id=?1",
+        [project_id],
+        |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, key: r.get(2)?, description: r.get(3)?, created_by: r.get(4)?, archived: r.get(5)?, deadline: r.get(6)? }),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
 // ---------------------------------------------------------------------------
 // Custom Fields engine (generic across entity_type: issue/profile/team/membership/...)
 // ---------------------------------------------------------------------------
@@ -1092,5 +1266,180 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn desktop_project_creation_is_never_ownerless() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        let project = |owner: Option<&str>| Project {
+            id: "pr".into(), name: "Project".into(), key: "PR".into(), description: None,
+            created_by: owner.map(str::to_owned), archived: false, deadline: None,
+        };
+        // Desktop used to send no owner at all: the row landed with NULL `created_by`
+        // and no owner-or-admin gate could ever pass for it again.
+        let refused = create_project_on(&c, project(None)).unwrap_err();
+        assert!(refused.contains("owner is required"), "{refused}");
+        assert!(create_project_on(&c, project(Some("   "))).is_err(), "blank owner is no owner");
+        let rows: i64 = c.query_row("SELECT count(*) FROM projects", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 0, "a refused create writes nothing");
+        create_project_on(&c, project(Some("p"))).unwrap();
+        let stored: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored.as_deref(), Some("p"));
+    }
+
+    /// "Admin" had two parallel meanings that never met: the web session gate reads
+    /// `users.role='admin'`, the desktop rights model reads the `Global.Superadmin`
+    /// right. The same person was therefore admin on one transport and a stranger on
+    /// the other. One predicate now answers for both.
+    #[test]
+    fn admin_means_the_same_thing_on_both_transports() {
+        let c = conn();
+        for id in ["webadmin", "deskboss", "plain", "retired"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+        }
+        // A web admin: an account row with role='admin' and no rights grant at all.
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-web','webadmin','x','Web','webadmin','admin',1,1)", []).unwrap();
+        // A desktop admin: the Global.Superadmin right and a plain member account.
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-desk','deskboss','x','Desk','deskboss','member',1,1)", []).unwrap();
+        insert_role_right(&c, "admin-role", "Global.Superadmin", "global");
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('ra','admin-role','deskboss','global')", []).unwrap();
+        // A deactivated admin account confers nothing.
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-old','retired','x','Old','retired','admin',0,1)", []).unwrap();
+
+        assert!(is_admin_on(&c, "webadmin").unwrap(), "an account-level admin is an admin everywhere");
+        assert!(is_admin_on(&c, "deskboss").unwrap(), "a Global.Superadmin is an admin everywhere");
+        assert!(!is_admin_on(&c, "plain").unwrap(), "an ordinary profile is never an admin");
+        assert!(!is_admin_on(&c, "retired").unwrap(), "a deactivated admin account confers nothing");
+        assert!(!is_admin_on(&c, "").unwrap(), "a blank identity is never an admin");
+
+        // ...and the desktop deadline gate accepts the web-minted admin, which is
+        // exactly the mapping that did not exist before.
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','plain',0,1)", []).unwrap();
+        authorize_project_deadline_on(&c, "webadmin", "pr").unwrap();
+        authorize_project_deadline_on(&c, "deskboss", "pr").unwrap();
+        assert!(authorize_project_deadline_on(&c, "retired", "pr").is_err(), "a deactivated admin is refused");
+    }
+
+    /// The hole this closes: `is_admin_on` refused a deactivated *account* admin,
+    /// but fell through to the rights model, which never looked at `users.active`.
+    /// A switched-off account holding Global.Superadmin therefore stayed an admin.
+    #[test]
+    fn a_deactivated_account_holds_no_right_and_no_admin() {
+        let c = conn();
+        for id in ["frozen", "live", "desktoponly"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+        }
+        insert_role_right(&c, "admin-role", "Global.Superadmin", "global");
+        for (n, profile) in ["frozen", "live", "desktoponly"].iter().enumerate() {
+            c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES(?1,'admin-role',?2,'global')", params![format!("ra-{n}"), profile]).unwrap();
+        }
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-frozen','frozen','x','Frozen','frozen','member',0,1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-live','live','x','Live','live','member',1,1)", []).unwrap();
+
+        assert!(!check_right_on(&c, "frozen", "Global.Superadmin", "global", None).unwrap(), "a deactivated account holds no right");
+        assert!(!is_admin_on(&c, "frozen").unwrap(), "and therefore is not an admin by the rights path either");
+        assert!(check_right_on(&c, "live", "Global.Superadmin", "global", None).unwrap(), "an active account still holds its rights");
+        assert!(is_admin_on(&c, "live").unwrap());
+        assert!(
+            check_right_on(&c, "desktoponly", "Global.Superadmin", "global", None).unwrap(),
+            "a profile with no account at all is a desktop-local identity, not a deactivated one"
+        );
+    }
+
+    #[test]
+    fn desktop_deadline_write_is_owner_or_superadmin_only() {
+        let c = conn();
+        for id in ["owner", "stranger", "boss"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+        }
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','owner',0,1)", []).unwrap();
+        insert_role_right(&c, "admin-role", "Global.Superadmin", "global");
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('ra','admin-role','boss','global')", []).unwrap();
+
+        // Owner and local superadmin pass; anybody else is refused by name.
+        authorize_project_deadline_on(&c, "owner", "pr").unwrap();
+        authorize_project_deadline_on(&c, "boss", "pr").unwrap();
+        let refused = authorize_project_deadline_on(&c, "stranger", "pr").unwrap_err();
+        assert!(refused.contains("only the project owner or an admin"), "{refused}");
+        // No identity, and unknown projects, are refused too (never leak existence).
+        assert!(authorize_project_deadline_on(&c, "", "pr").is_err());
+        assert!(authorize_project_deadline_on(&c, "owner", "ghost").is_err());
+
+        // Authorization composes with the first-write law, it does not bypass it.
+        set_project_deadline_on(&c, "pr", Some("2030-03-10")).unwrap();
+        authorize_project_deadline_on(&c, "boss", "pr").unwrap();
+        let occupied = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap_err();
+        assert!(occupied.contains("already has a deadline"), "{occupied}");
+        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        assert_eq!(held.as_deref(), Some("2030-03-10"));
+    }
+
+    #[test]
+    fn project_deadline_write_is_narrow_and_date_only() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at) VALUES('pr','Project','PR','Original','p',0,1)", []).unwrap();
+        // First write sets the deadline and touches nothing else.
+        let project = set_project_deadline_on(&c, "pr", Some("2030-03-10")).unwrap();
+        assert_eq!(project.deadline.as_deref(), Some("2030-03-10"));
+        assert_eq!(project.description.as_deref(), Some("Original"));
+        assert_eq!(project.created_by.as_deref(), Some("p"));
+        // First-write law: an occupied deadline column is never overwritten.
+        let refused = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap_err();
+        assert!(refused.contains("already has a deadline"), "{refused}");
+        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        assert_eq!(held.as_deref(), Some("2030-03-10"), "the stored deadline stands");
+        // Only after an explicit clear does a new first write land.
+        assert_eq!(set_project_deadline_on(&c, "pr", None).unwrap().deadline, None);
+        let project = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap();
+        assert_eq!(project.deadline.as_deref(), Some("2030-04-01"));
+        assert_eq!(project.name, "Project");
+        // Clearing is explicit; blank normalizes to NULL.
+        assert_eq!(set_project_deadline_on(&c, "pr", Some("  ")).unwrap().deadline, None);
+        assert_eq!(set_project_deadline_on(&c, "pr", None).unwrap().deadline, None);
+        // Malformed dates and unknown projects fail loudly, leaving state untouched.
+        assert!(set_project_deadline_on(&c, "pr", Some("10/03/2030")).is_err());
+        assert!(set_project_deadline_on(&c, "pr", Some("2030-13-40")).is_err());
+        assert!(set_project_deadline_on(&c, "ghost", Some("2030-03-10")).is_err());
+        let stored: (String, Option<String>) = c.query_row("SELECT name,deadline FROM projects WHERE id='pr'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("Project".to_string(), None));
+    }
+
+    /// Editing an existing deadline is a *different* door from the first write, and it is
+    /// compare-and-set: the caller says what it was looking at, and a value that moved in
+    /// the meantime refuses the write instead of overwriting it.
+    #[test]
+    fn project_deadline_edit_is_compare_and_set_and_leaves_the_project_alone() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at) VALUES('pr','Project','PR','Original','p',0,1)", []).unwrap();
+        set_project_deadline_on(&c, "pr", Some("2030-03-10")).unwrap();
+
+        // Edit against the value on screen: lands, and only the deadline column moves.
+        let edited = update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2030-04-01")).unwrap();
+        assert_eq!(edited.deadline.as_deref(), Some("2030-04-01"));
+        assert_eq!((edited.name.as_str(), edited.description.as_deref(), edited.created_by.as_deref()), ("Project", Some("Original"), Some("p")));
+
+        // Stale expectation: refused, and the stored date is untouched.
+        let stale = update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2031-01-01")).unwrap_err();
+        assert!(stale.contains("changed since you loaded it"), "{stale}");
+        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        assert_eq!(held.as_deref(), Some("2030-04-01"));
+
+        // Clearing is an edit too, and the cleared column can then be filled again.
+        assert_eq!(update_project_deadline_on(&c, "pr", Some("2030-04-01"), None).unwrap().deadline, None);
+        assert_eq!(update_project_deadline_on(&c, "pr", None, Some("2030-05-05")).unwrap().deadline.as_deref(), Some("2030-05-05"));
+        // Blank means clear, on both sides of the comparison.
+        assert_eq!(update_project_deadline_on(&c, "pr", Some("2030-05-05"), Some("   ")).unwrap().deadline, None);
+
+        // Malformed input never reaches the row; an unknown project is refused in the
+        // same words a non-owner gets, disclosing nothing about existence.
+        assert!(update_project_deadline_on(&c, "pr", None, Some("01/01/2030")).is_err());
+        assert!(update_project_deadline_on(&c, "pr", None, Some("2030-13-40")).is_err());
+        let ghost = update_project_deadline_on(&c, "ghost", None, Some("2030-03-10")).unwrap_err();
+        assert_eq!(ghost, "project access denied");
+        let stored: (String, Option<String>) = c.query_row("SELECT name,deadline FROM projects WHERE id='pr'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("Project".to_string(), None));
     }
 }

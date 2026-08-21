@@ -95,6 +95,8 @@ pub fn run() {
             platform::get_project,
             platform::create_project,
             platform::update_project,
+            platform::set_project_deadline,
+            platform::update_project_deadline,
             platform::list_roles,
             platform::get_role,
             platform::create_role,

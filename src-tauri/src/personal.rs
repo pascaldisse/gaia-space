@@ -24,6 +24,9 @@ pub struct Todo {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    /// Collaboration notes. None = legacy row or explicitly empty; never "".
+    #[serde(default)]
+    pub notes: Option<String>,
     #[serde(default)]
     pub assignee_ids: Vec<String>,
 }
@@ -37,11 +40,21 @@ pub struct TodoInput {
     pub done: bool,
     pub source_entity_type: Option<String>,
     pub source_entity_id: Option<String>,
+    /// Collaboration notes. None = legacy row or explicitly empty; never "".
+    #[serde(default)]
+    pub notes: Option<String>,
     #[serde(default)]
     pub assignee_ids: Vec<String>,
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
-    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, project_id: row.get(4)?, done: row.get(5)?, source_entity_type: row.get(6)?, source_entity_id: row.get(7)?, assignee_ids: Vec::new() })
+    Ok(Todo { id: row.get(0)?, profile_id: row.get(1)?, content: row.get(2)?, due_date: row.get(3)?, project_id: row.get(4)?, done: row.get(5)?, source_entity_type: row.get(6)?, source_entity_id: row.get(7)?, notes: row.get(8)?, assignee_ids: Vec::new() })
+}
+/// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
+fn normalized_notes(notes: Option<String>) -> Option<String> {
+    notes.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
 }
 fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
     if entity_type.is_some() != entity_id.is_some() { return Err("Todo and notification anchors require both entity type and entity ID".into()); }
@@ -119,7 +132,7 @@ pub fn project_member_ids(project_id: String) -> Result<Vec<String>> {
     Ok(ids)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => { todo.assignee_ids = assignees_on(c, id)?; Ok(Some(todo)) }
         None => Ok(None),
@@ -128,7 +141,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos( profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -147,7 +160,7 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let id = input.id.unwrap_or_else(|| new_id("todo"));
     let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id]))?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes)]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
@@ -162,7 +175,7 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
     let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id]))?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone())]))?;
     if updated == 0 { return Err("Todo not found".into()); }
     replace_assignees(&tx, &todo.id, project_id.as_deref(), &todo.assignee_ids)?;
     err(tx.commit())?;
@@ -171,7 +184,7 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(params![project_id, profile_id, include_done.unwrap_or(false)], read_todo))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos { todo.assignee_ids = assignees_on(&c, &todo.id)?; }
@@ -359,25 +372,62 @@ UNION ALL SELECT m.id,'meeting',m.title,m.location,CASE WHEN lower(m.title)=?2 T
 #[derive(Clone, Debug, Serialize)]
 pub struct CalendarItem {
     pub id: String,
+    /// The record this item was derived from: the meeting, todo or project id.
+    /// A recurrence's `id` is decorated to keep occurrences distinct, so the way
+    /// back to the record is carried here and never parsed back out of `id`.
+    pub source_id: String,
     pub kind: String,
     pub title: String,
     pub starts_at: i64,
     pub ends_at: Option<i64>,
     pub project_id: Option<String>,
+    /// Set for date-only kinds (task due date, project deadline); `None` for meetings,
+    /// which are instants. Clients render the calendar day from this string.
+    pub date: Option<String>,
 }
 /// Calendar is derived from session-visible records only: own personal/group todos,
 /// project-member or assignee group todos, organized/attended meetings, and owned projects.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64) -> Result<Vec<CalendarItem>> {
-    if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
+pub fn calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>) -> Result<Vec<CalendarItem>> {
     let c = db::conn()?;
+    calendar_aggregate_on(&c, &profile_id, range_start, range_end, range_start_date.as_deref(), range_end_date.as_deref())
+}
+/// Date-only calendar values (`todos.due_date`, `projects.deadline`) are calendar dates,
+/// not instants: they are compared as `YYYY-MM-DD` strings against the day window the
+/// client derived from its *local* components. `unixepoch(date)` would re-read them as
+/// UTC midnight and shift the day for every session off UTC (H4).
+pub fn parse_day_key(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| format!("Calendar day key must be YYYY-MM-DD, got `{trimmed}`"))?;
+    Ok(trimmed.to_string())
+}
+fn day_window(range_start: i64, range_end: i64, start_date: Option<&str>, end_date: Option<&str>) -> Result<(String, String)> {
+    let from_epoch = |seconds: i64| chrono::DateTime::from_timestamp(seconds, 0).ok_or_else(|| "Calendar range is out of bounds".to_string()).map(|at| at.date_naive().to_string());
+    let start = match start_date { Some(value) => parse_day_key(value)?, None => from_epoch(range_start)? };
+    let end = match end_date { Some(value) => parse_day_key(value)?, None => from_epoch(range_end)? };
+    if end <= start { return Err("Calendar day window must end after it starts".into()); }
+    Ok((start, end))
+}
+pub fn calendar_aggregate_on(c: &Connection, profile_id: &str, range_start: i64, range_end: i64, range_start_date: Option<&str>, range_end_date: Option<&str>) -> Result<Vec<CalendarItem>> {
+    if profile_id.trim().is_empty() || range_end <= range_start { return Err("Calendar range and session profile are required".into()); }
+    let (day_start, day_end) = day_window(range_start, range_end, range_start_date, range_end_date)?;
     let mut items = Vec::new();
-    let mut meetings = err(c.prepare("SELECT DISTINCT m.id,m.title,m.starts_at,m.ends_at FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at>=?1 AND m.starts_at<?2 AND (m.organizer_id=?3 OR mp.profile_id=?3 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))"))?;
-    for row in err(meetings.query_map(params![range_start, range_end, profile_id], |r| Ok(CalendarItem { id:r.get(0)?, kind:"meeting".into(), title:r.get(1)?, starts_at:r.get(2)?, ends_at:Some(r.get(3)?), project_id:None })))? { items.push(row.map_err(|e| e.to_string())?); }
-    let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t WHERE t.done=0 AND t.due_date IS NOT NULL AND unixepoch(t.due_date)>=?1 AND unixepoch(t.due_date)<?2 AND (t.profile_id=?3 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?3))))"))?;
-    for row in err(todos.query_map(params![range_start, range_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id,kind:"task".into(),title,starts_at,ends_at:None,project_id}); }
-    let mut deadlines = err(c.prepare("SELECT id,name,deadline FROM projects WHERE archived=0 AND created_by=?1 AND deadline IS NOT NULL AND unixepoch(deadline)>=?2 AND unixepoch(deadline)<?3"))?;
-    for row in err(deadlines.query_map(params![profile_id, range_start, range_end], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))))? { let (id,name,date)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid project deadline")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id:format!("deadline-{id}"),kind:"deadline".into(),title:format!("{name} deadline"),starts_at,ends_at:None,project_id:Some(id)}); }
+    // Meetings: visibility comes from `meetings::visible_meetings_on` (MEETING_READ_SCOPE)
+    // and nowhere else, so the calendar can never diverge from the meeting list (SPEC:33).
+    // The range filter lives in the expansion, not in SQL: a recurring meeting whose base
+    // row starts before the window still contributes the occurrences falling inside it.
+    for meeting in meetings::visible_meetings_on(c, profile_id)?.into_iter().filter(|m| !m.archived) {
+        for occurrence in meetings::expand(&meeting, range_start, range_end)? {
+            // A one-off (and the base instant of a series) keeps the plain meeting id so
+            // clients resolve it directly; a repeat is `<meeting id>:<instant>`.
+            let id = if occurrence.starts_at == meeting.starts_at { meeting.id.clone() } else { occurrence.id };
+            items.push(CalendarItem { id, source_id: meeting.id.clone(), kind: "meeting".into(), title: occurrence.title, starts_at: occurrence.starts_at, ends_at: Some(occurrence.ends_at), project_id: None, date: None });
+        }
+    }
+    let mut todos = err(c.prepare("SELECT DISTINCT t.id,t.content,t.due_date,t.project_id FROM todos t WHERE t.done=0 AND t.due_date IS NOT NULL AND t.due_date>=?1 AND t.due_date<?2 AND (t.profile_id=?3 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?3))))"))?;
+    for row in err(todos.query_map(params![day_start, day_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{source_id:id.clone(),id,kind:"task".into(),title,starts_at,ends_at:None,project_id,date:Some(date)}); }
+    let mut deadlines = err(c.prepare("SELECT p.id,p.name,p.deadline FROM projects p WHERE p.archived=0 AND p.deadline IS NOT NULL AND p.deadline>=?2 AND p.deadline<?3 AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))"))?;
+    for row in err(deadlines.query_map(params![profile_id, day_start, day_end], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))))? { let (id,name,date)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid project deadline")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id:format!("deadline-{id}"),source_id:id.clone(),kind:"deadline".into(),title:format!("{name} deadline"),starts_at,ends_at:None,project_id:Some(id),date:Some(date)}); }
     items.sort_by_key(|item| item.starts_at);
     Ok(items)
 }
@@ -410,14 +460,14 @@ mod tests {
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement.query_map(params![profile_id, include_done], read_todo).unwrap().map(|t| t.unwrap()).collect();
         drop(statement);
         for todo in todos.iter_mut() { todo.assignee_ids = assignees_on(c, &todo.id).unwrap(); }
         todos
     }
     fn todo_input(id: &str, owner: &str, assignees: &[&str]) -> TodoInput {
-        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), due_date: None, project_id: Some("project".into()), done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
+        TodoInput { id: Some(id.into()), profile_id: owner.into(), content: "Task".into(), notes: None, due_date: None, project_id: Some("project".into()), done: false, source_entity_type: None, source_entity_id: None, assignee_ids: assignees.iter().map(|x| x.to_string()).collect() }
     }
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {
@@ -513,5 +563,133 @@ mod tests {
         let c = conn();
         c.execute("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES('approved','p','Vacation','2026-07-20','2026-07-30',1),('pending','p','Sick','2026-07-20','2026-07-30',0)", []).unwrap();
         assert_eq!(current_absences_on(&c, "2026-07-26").unwrap().iter().map(|absence| absence.id.as_str()).collect::<Vec<_>>(), vec!["approved"]);
+    }
+
+    #[test]
+    fn notes_round_trip_and_blank_notes_persist_as_null() {
+        let mut c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        let mut input = todo_input("t-notes", "p", &["q"]);
+        input.notes = Some("  handover to Q  ".into());
+        let created = create_todo_on(&mut c, input).expect("create with notes");
+        assert_eq!(created.notes.as_deref(), Some("handover to Q"), "notes are trimmed, not lost");
+        let mut blanked = created.clone();
+        blanked.notes = Some("   ".into());
+        let updated = update_todo_on(&mut c, blanked).expect("update");
+        assert_eq!(updated.notes, None, "blank notes normalize to NULL, never an empty string");
+        let stored: Option<String> = c.query_row("SELECT notes FROM todos WHERE id='t-notes'", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored, None);
+        // Legacy rows written before V11 keep NULL notes and still read back.
+        c.execute("INSERT INTO todos(id,profile_id,content,done) VALUES('t-legacy','p','Legacy',0)", []).unwrap();
+        let legacy = todo_on(&c, "t-legacy").unwrap().expect("legacy todo readable");
+        assert_eq!(legacy.notes, None);
+    }
+
+    #[test]
+    fn calendar_date_only_items_follow_the_client_local_day_window() {
+        // A task due 2030-03-10 and a project deadline on the same day must appear for a
+        // client whose local day window is UTC-11..UTC+13 — the epoch range of a local
+        // midnight window never lines up with the UTC instant of a date-only value.
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,content,due_date,done) VALUES('t-due','p','Ship it','2030-03-10',0)", []).unwrap();
+        c.execute("UPDATE projects SET deadline='2030-03-10' WHERE id='project'", []).unwrap();
+        // UTC+13 client: local midnight 2030-03-10 == 2030-03-09T11:00Z.
+        let start = 1899932400i64; // 2030-03-09T11:00:00Z
+        let end = start + 86_400;
+        let items = calendar_aggregate_on(&c, "p", start, end, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert!(items.iter().any(|i| i.id == "t-due" && i.kind == "task"), "date-only task must follow the client day window: {items:?}");
+        assert!(items.iter().any(|i| i.id == "deadline-project" && i.kind == "deadline"), "date-only deadline must follow the client day window: {items:?}");
+        // The day before holds neither.
+        let earlier = calendar_aggregate_on(&c, "p", start - 86_400, start, Some("2030-03-09"), Some("2030-03-10")).unwrap();
+        assert!(earlier.is_empty(), "date-only items must not bleed into the previous local day: {earlier:?}");
+        // Malformed client day keys are refused, never silently coerced.
+        assert!(calendar_aggregate_on(&c, "p", start, end, Some("10/03/2030"), Some("2030-03-11")).is_err());
+    }
+
+    #[test]
+    fn project_deadlines_reach_members_not_strangers() {
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        c.execute("UPDATE projects SET deadline='2030-03-10' WHERE id='project'", []).unwrap();
+        let window = ("2030-03-01", "2030-04-01");
+        let member = calendar_aggregate_on(&c, "q", 1_899_000_000, 1_902_000_000, Some(window.0), Some(window.1)).unwrap();
+        assert!(member.iter().any(|i| i.id == "deadline-project"), "a project member sees the deadline");
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('z','zed','Zed',1)", []).unwrap();
+        let stranger = calendar_aggregate_on(&c, "z", 1_899_000_000, 1_902_000_000, Some(window.0), Some(window.1)).unwrap();
+        assert!(stranger.is_empty(), "a non-member never sees a project deadline: {stranger:?}");
+    }
+
+    #[test]
+    fn calendar_meetings_use_overlap_not_starts_within() {
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        // A meeting that started before the window but runs into it must still appear.
+        let sql = "SELECT DISTINCT m.id FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND m.starts_at<?2 AND m.ends_at>?1 AND (m.organizer_id=?3 OR mp.profile_id=?3)";
+        c.execute("INSERT INTO meetings(id,title,organizer_id,starts_at,ends_at,archived) VALUES('m-long','Long','p',900,1100,0)", []).unwrap();
+        let found: i64 = c.query_row(&format!("SELECT count(*) FROM ({sql})"), params![1000i64, 2000i64, "p"], |r| r.get(0)).unwrap();
+        assert_eq!(found, 1, "a meeting crossing the range start must not be dropped");
+        let outside: i64 = c.query_row(&format!("SELECT count(*) FROM ({sql})"), params![1100i64, 2000i64, "p"], |r| r.get(0)).unwrap();
+        assert_eq!(outside, 0, "a meeting ending exactly on the range start is outside");
+    }
+
+    /// SPEC:33 — recurrence expansion follows the *same* scope and range as the
+    /// aggregate itself. The base row starts long before the window, so only an
+    /// expansion can put occurrences inside it; and the expansion must carry the
+    /// aggregate's own visibility predicate, never a wider one.
+    #[test]
+    fn recurring_meetings_expand_inside_the_calendar_range() {
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        // Daily 10:00-11:00 UTC meeting whose base row is 2030-03-01, organizer p, q invited.
+        let base = 1_898_762_400i64; // 2030-03-01T10:00:00Z
+        c.execute("INSERT INTO meetings(id,title,organizer_id,starts_at,ends_at,rrule,archived) VALUES('m-daily','Standup','p',?1,?2,'FREQ=DAILY',0)", params![base, base + 3600]).unwrap();
+        c.execute("INSERT INTO meeting_participants(meeting_id,profile_id) VALUES('m-daily','q')", []).unwrap();
+        // Window = 2030-03-10 (local UTC), nine days after the base row.
+        let start = base + 9 * 86_400 - 36_000; // 2030-03-10T00:00:00Z
+        let end = start + 86_400;
+        let organizer = calendar_aggregate_on(&c, "p", start, end, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        let occurrences: Vec<_> = organizer.iter().filter(|i| i.kind == "meeting").collect();
+        assert_eq!(occurrences.len(), 1, "exactly the occurrence falling in the window: {organizer:?}");
+        assert_eq!(occurrences[0].starts_at, base + 9 * 86_400, "the expanded occurrence keeps its own instant");
+        assert_eq!(occurrences[0].id, "m-daily:1899540000", "a repeat is identified by base id + instant");
+        // Participants see it too; a stranger to meeting and project never does.
+        let participant = calendar_aggregate_on(&c, "q", start, end, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert_eq!(participant.iter().filter(|i| i.kind == "meeting").count(), 1, "an invited participant sees the repeat");
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('z','zed','Zed',1)", []).unwrap();
+        let stranger = calendar_aggregate_on(&c, "z", start, end, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert!(stranger.iter().all(|i| i.kind != "meeting"), "a non-participant must never see an expanded occurrence: {stranger:?}");
+        // Archived recurrences vanish entirely, expansion or not.
+        c.execute("UPDATE meetings SET archived=1 WHERE id='m-daily'", []).unwrap();
+        let archived = calendar_aggregate_on(&c, "p", start, end, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert!(archived.iter().all(|i| i.kind != "meeting"), "archived recurrences are not expanded: {archived:?}");
+    }
+
+    /// Boundaries, on the expansion path: an occurrence that started before the
+    /// window but runs into it is inside; one ending exactly on the range start is out.
+    #[test]
+    fn expanded_occurrences_honour_the_overlap_boundaries() {
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        let base = 1_898_762_400i64; // 2030-03-01T10:00:00Z, two hours long
+        c.execute("INSERT INTO meetings(id,title,organizer_id,starts_at,ends_at,rrule,archived) VALUES('m-daily','Standup','p',?1,?2,'FREQ=DAILY',0)", params![base, base + 7200]).unwrap();
+        let occurrence = base + 9 * 86_400;
+        // Window opens one hour into the occurrence: overlap, so it must appear.
+        let crossing = calendar_aggregate_on(&c, "p", occurrence + 3600, occurrence + 86_400, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert_eq!(crossing.iter().filter(|i| i.kind == "meeting").count(), 1, "an occurrence crossing the range start stays: {crossing:?}");
+        // Window opens exactly when it ends: outside.
+        let touching = calendar_aggregate_on(&c, "p", occurrence + 7200, occurrence + 86_400, Some("2030-03-10"), Some("2030-03-11")).unwrap();
+        assert_eq!(touching.iter().filter(|i| i.kind == "meeting").count(), 0, "an occurrence ending on the range start is outside: {touching:?}");
+    }
+
+    /// Non-recurring meetings keep their plain meeting id, so the client can still
+    /// resolve them directly.
+    #[test]
+    fn single_meetings_keep_their_plain_id() {
+        let c = conn();
+        crate::db::enforce_foreign_keys(&c).unwrap();
+        c.execute("INSERT INTO meetings(id,title,organizer_id,starts_at,ends_at,archived) VALUES('m-one','One off','p',1000,2000,0)", []).unwrap();
+        let items = calendar_aggregate_on(&c, "p", 500, 3000, Some("1970-01-01"), Some("1970-01-02")).unwrap();
+        assert!(items.iter().any(|i| i.id == "m-one" && i.kind == "meeting"), "one-off meetings are unchanged: {items:?}");
     }
 }

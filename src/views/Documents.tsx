@@ -11,6 +11,7 @@ import {
   type Document,
   type DocumentFolder,
 } from "../api/documents";
+import { profileId as sessionProfileId, profileLocked } from "../session";
 
 const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
   { key: "my-docs", label: "My Documents" },
@@ -33,12 +34,18 @@ export default function Documents() {
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
-  // acting profile — this app has no auth session; also used as created_by/actor on saves.
+  // Identity law: in web mode the personal container is the *session's* profile and
+  // nothing the UI offers can change it (`profileLocked()`), matching the server, which
+  // rebinds `created_by`/`container_id` from the cookie session and ignores client claims.
+  // Desktop (local sqlite, no session) keeps the explicit operator profile choice.
   const [profiles] = createResource(() => documentsApi.listProfiles());
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
+  const [localProfileId, setLocalProfileId] = createSignal<string | null>(null);
+  const actingProfileId = () => (profileLocked() ? sessionProfileId() || null : localProfileId());
+  const setActingProfileId = (id: string | null) => { if (!profileLocked()) setLocalProfileId(id); };
   createEffect(() => {
+    if (profileLocked()) return;
     const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
+    if (list && list.length && !localProfileId()) setLocalProfileId(list[0].id);
   });
 
   const [projects] = createResource(() => documentsApi.listProjects());
@@ -71,6 +78,13 @@ export default function Documents() {
   });
 
   const [showArchived, setShowArchived] = createSignal(false);
+
+  const treeLoading = () => allFolders.loading || allDocuments.loading;
+  const loadFailure = () => {
+    const e = allFolders.error ?? allDocuments.error;
+    return e ? `Documents could not be loaded: ${String(e)}` : null;
+  };
+  const isEmpty = () => !treeLoading() && !loadFailure() && scopedFolders().length === 0 && scopedDocuments().length === 0;
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -190,7 +204,9 @@ export default function Documents() {
       id,
       container_type: activeContainer(),
       container_id: cid,
-      folder_id: selectedFolderId(),
+      // In KB the book row *is* the root, so an unfiled article belongs to the book,
+      // not to `null` — otherwise it would be written where the tree cannot show it.
+      folder_id: selectedFolderId() ?? rootParentId(),
       doc_type: "text",
       title,
       body: "",
@@ -222,6 +238,9 @@ export default function Documents() {
     if (!cid) return;
     if (container === "project") setSelectedProjectId(cid);
     else if (container === "kb") setSelectedBookId(cid);
+    // A `my-docs` URL never re-points the personal container in web mode: the session
+    // owns that identity, so a forged `/documents/my-docs/<someone-else>` link resolves
+    // to your own container instead of theirs.
     else if (container === "my-docs") setActingProfileId(cid);
   };
   // route -> container switch (direct link / back / forward)
@@ -326,20 +345,34 @@ export default function Documents() {
     const isOpen = () => expanded().has(f().id);
     return (
       <>
-        <li class="folder-row" style={{ "padding-left": `${props.depth * 1.1 + 0.4}em` }}>
-          <span class="folder-toggle" onClick={() => toggleExpand(f().id)}>
+        <li
+          class="folder-row"
+          role="treeitem"
+          aria-expanded={isOpen()}
+          aria-selected={selectedFolderId() === f().id}
+          style={{ "padding-left": `${props.depth * 1.1 + 0.4}em` }}
+        >
+          {/* A real button: Enter/Space expand the folder with no key handler of our own. */}
+          <button
+            type="button"
+            class="folder-toggle"
+            aria-expanded={isOpen()}
+            aria-label={`${isOpen() ? "Collapse" : "Expand"} ${f().name}`}
+            onClick={() => toggleExpand(f().id)}
+          >
             {isOpen() ? "▾" : "▸"}
-          </span>
+          </button>
           <Show
             when={renamingFolderId() === f().id}
             fallback={
-              <span
+              <button
+                type="button"
                 class="folder-name"
                 classList={{ active: selectedFolderId() === f().id, archived: f().archived }}
                 onClick={() => setSelectedFolderId(f().id)}
               >
                 {f().name}
-              </span>
+              </button>
             }
           >
             <input
@@ -398,7 +431,7 @@ export default function Documents() {
   return (
     <section class="documents-view">
       <Show when={error()}>
-        <div class="error-bar" onClick={() => setError(null)}>
+        <div class="error-bar" role="alert" onClick={() => setError(null)}>
           {error()}
         </div>
       </Show>
@@ -408,6 +441,7 @@ export default function Documents() {
           <h1>Documents</h1>
           <p>My Documents, project docs, and the Knowledge Base share one folder/document/version model.</p>
         </div>
+        <Show when={!profileLocked()}>
         <label>
           Acting as
           <select value={actingProfileId() ?? ""} onChange={(e) => {
@@ -418,6 +452,7 @@ export default function Documents() {
             <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
           </select>
         </label>
+        </Show>
       </header>
 
       <nav class="container-tabs">
@@ -473,15 +508,24 @@ export default function Documents() {
 
       <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
         <aside class="documents-tree">
+          {/* Three states stay distinct: a fetch in flight is not emptiness, and a failed
+              fetch is never rendered as an empty tree (H7). */}
+          <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
+          <Show when={!treeLoading()} fallback={<p class="hint pad" role="status">Loading…</p>}>
           <Show
             when={containerId()}
-            fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "Loading…"}</p>}
+            fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
           >
-            <div class="tree-root" classList={{ active: selectedFolderId() === null }} onClick={() => setSelectedFolderId(null)}>
+            <button
+              type="button"
+              class="tree-root"
+              classList={{ active: selectedFolderId() === null }}
+              onClick={() => setSelectedFolderId(null)}
+            >
               (root)
-            </div>
-            <ul class="folder-tree">
-              <For each={scopedDocuments().filter((d) => d.folder_id === null)}>
+            </button>
+            <ul class="folder-tree" role="tree" aria-label="Document folders">
+              <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
                 {(d) => (
                   <li style={{ "padding-left": "0.4em" }}>
                     <a
@@ -500,6 +544,9 @@ export default function Documents() {
                 {(f) => <FolderRow folder={f} depth={0} />}
               </For>
             </ul>
+            <Show when={isEmpty()}>
+              <p class="empty-state">This container has no folders or documents yet.</p>
+            </Show>
             <div class="new-item-forms">
               <div class="new-item-row">
                 <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
@@ -517,6 +564,8 @@ export default function Documents() {
                 Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
               </p>
             </div>
+          </Show>
+          </Show>
           </Show>
         </aside>
 

@@ -1,6 +1,6 @@
 /* Project cards: the whole card is the target, not the title text. */
 .project-cards { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.project-card { display: grid; gap: 8px; padding: 15px 16px; border: 1px solid var(--surface-border); border-left: 3px solid #3a4f80; border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .14s ease, background .14s ease, transform .06s ease; }
+.project-card { display: grid; gap: 8px; padding: 15px 16px; border: 1px solid var(--surface-border); border-left: 3px solid var(--surface-border); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .14s ease, background .14s ease, transform .06s ease; }
 .project-card:hover { border-color: var(--surface-border-hover); border-left-color: var(--accent); background: var(--surface-hover); }
 .project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .project-card.active { border-color: var(--accent); border-left-color: var(--accent); background: var(--surface-hover); }
@@ -13,6 +13,14 @@
 .project-card-foot label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
 .project-card .row-actions { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .project-card .row-actions a { color: var(--accent-text, var(--accent)); }
+
+/* Deadline control: the editable field, the clear button and the write's own status live
+   together, so the feedback is where the action was. Non-owners get the value as text. */
+.project-deadline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.project-deadline .deadline-readonly { margin: 0; color: var(--text-faint); display: flex; gap: 7px; }
+.project-deadline .deadline-readonly span { color: var(--text-emphasis); }
+.project-deadline .hint { color: var(--text-dim); }
+.project-deadline .error { margin: 0; color: var(--status-danger-ink); }
 
 /* Opened project: the board surface lives inside the project, not in a sibling tab. */
 .project-open { margin-top: 26px; border-top: 1px solid var(--surface-border); padding-top: 18px; }

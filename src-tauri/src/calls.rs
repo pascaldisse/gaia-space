@@ -129,7 +129,10 @@ pub struct CallJoin { pub url: String, pub room: String, pub token: String }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_meeting_call(app: AppHandle, meeting_id: String, participant_id: String, display_name: String, config: Option<LivekitConfig>) -> Result<CallJoin> {
     if participant_id.trim().is_empty() || display_name.trim().is_empty() { return Err("Call participant identity and display name are required".into()); }
-    let meeting = meetings::get_meeting(meeting_id.clone())?.ok_or("Meeting not found")?;
+    // Read the meeting *as the joining participant*: a stranger cannot even learn
+    // that the meeting exists, let alone reach the RSVP check below.
+    let meeting = meetings::get_meeting_scoped(meeting_id.clone(), participant_id.clone())?
+        .ok_or("Meeting not found")?;
     if meeting.archived { return Err("Cannot join an archived meeting".into()); }
     let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection.query_row("SELECT status FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2", rusqlite::params![meeting_id, participant_id], |row| row.get(0)).optional().map_err(|e| e.to_string())?;

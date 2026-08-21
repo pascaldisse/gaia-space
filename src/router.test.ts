@@ -121,6 +121,25 @@ describe("grammar", () => {
     expect(parsePath("documents/kb")).toMatchObject({ view: "Documents", entityType: "document", entityId: "kb" });
   });
 
+  test("an unknown container type or an unusable container id never survives the grammar", () => {
+    // Unknown types fall back, in either arity, and case is not a container type.
+    expect(parsePath("documents/not-a-container/id")).toEqual({ view: "Dashboard" });
+    expect(parsePath("documents/not-a-container/id/d-1")).toEqual({ view: "Dashboard" });
+    expect(parsePath("documents/My-Docs/prof-1")).toEqual({ view: "Dashboard" });
+    // A blank / whitespace-only container id is not an id.
+    expect(parsePath("documents/kb/%20")).toEqual({ view: "Dashboard" });
+    expect(parsePath("documents/kb/%20/d-1")).toEqual({ view: "Dashboard" });
+    // buildPath is canonical too: a forged container type is dropped, not echoed back.
+    expect(buildPath({ view: "Documents", containerType: "not-a-container", containerId: "x" })).toBe("documents");
+    expect(buildPath({ view: "Documents", entityType: "document", entityId: "d-1", containerType: "evil", containerId: "x" }))
+      .toBe("documents/d-1");
+    // A container type with a blank id degrades to the null-container placeholder.
+    expect(buildPath({ view: "Documents", containerType: "kb", containerId: "   " })).toBe("documents/kb/-");
+    // Round trip stays stable.
+    expect(parsePath(buildPath({ view: "Documents", containerType: "kb", containerId: "book-9" })))
+      .toMatchObject({ view: "Documents", containerType: "kb", containerId: "book-9" });
+  });
+
   test("container selection writes its active context URL", () => {
     const env = stackAdapter("documents/my-docs/profile-1");
     initRouter(env.adapter);

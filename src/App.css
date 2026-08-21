@@ -101,6 +101,136 @@
   --surface-raised: #203458;
   --surface-border: #33456d;
   --surface-border-hover: #435780;
+  --surface-sunken: #101d38;    /* recessed track/tile behind a control */
+  --surface-line: #2b3550;      /* hairline on sunken surfaces */
+  --surface-line-dashed: #3d4a68; /* dashed "add" affordance border */
+
+  /* ── calendar typed items (harvest DESIGN.md §design tokens) ── */
+  --cal-task: #e0a83a;
+  --cal-task-bg: rgba(224,168,58,.14);
+  --cal-task-chip-bg: rgba(224,168,58,.18);
+  --cal-deadline: #e0607a;
+  --cal-deadline-bg: rgba(224,96,122,.16);
+  --cal-deadline-chip-bg: rgba(224,96,122,.2);
+  --cal-deadline-ink: #f0a3b3;
+
+  /* ── radii (harvest: chip 999 · control 12 · option 8 · event 3) ── */
+  --radius-chip: 999px;
+  --radius-control: 12px;
+  --radius-option: 8px;
+  --radius-event: 3px;
+  /* Calendar metric scale. Calendar.css carries no raw length: every step, type
+     size, radius and fixed dimension is decided here. The two breakpoints stay
+     in Calendar.css in em, because a media query cannot read a custom property. */
+  --cal-hairline: 1px;          /* every cell/panel rule */
+  --cal-ring-w: 1.5px;          /* inset ring on the selected day */
+  --cal-bar-w: 3px;             /* left kind-bar on events and agenda rows */
+  --cal-space-3xs: 2px;
+  --cal-space-2xs: 4px;
+  --cal-space-xs: 5px;
+  --cal-space-sm: 6px;
+  --cal-space-md: 7px;
+  --cal-space-lg: 8px;
+  --cal-space-xl: 9px;
+  --cal-space-2xl: 10px;
+  --cal-space-3xl: 11px;
+  --cal-space-4xl: 12px;
+  --cal-space-5xl: 14px;
+  --cal-space-6xl: 16px;
+  --cal-fs-2xs: 10.5px;         /* agenda kind/time caption */
+  --cal-fs-xs: 11px;
+  --cal-fs-sm: 12px;
+  --cal-fs-md: 13px;
+  --cal-fs-lg: 14px;
+  --cal-radius-grid: 10px;      /* month grid and detail panel */
+  --cal-radius-agenda: 9px;     /* agenda row */
+  --cal-radius-toggle: 6px;     /* month/week toggle button */
+  --cal-radius-key: 2px;        /* legend swatch */
+  --cal-key-dot: 10px;          /* legend swatch size */
+  --cal-side-w: 300px;          /* agenda column */
+  --cal-cell-min-h-compact: 80px;      /* day cell below the narrow breakpoint */
+  --cal-week-cell-min-h-compact: 260px;
+  --cal-day-add-size: 20px;     /* in-cell quick-create button */
+  --cal-notice-pad-y: 9px;
+  --cal-notice-pad-x: 12px;
+
+  /* ── calendar grid surfaces (were raw literals inside Calendar.css) ── */
+  --cal-grid-bg: #0e1626;       /* the grid itself, behind the day cells */
+  --cal-weekday-bg: #141d30;    /* weekday header strip */
+  --cal-cell-line: #202a44;     /* hairline between day cells */
+  --cal-cell-muted-bg: #0b1220; /* day outside the displayed month */
+  --cal-cell-muted-ink: #5a647d;
+  --cal-detail-bg: #161d2e;     /* selected-item detail panel */
+  --cal-controls-label: 150px;  /* month/week label, fixed so it never jumps */
+  --cal-cell-min-h: 112px;
+  --cal-week-cell-min-h: 420px;
+  --cal-cell-hover-bg: #12203c;
+  --cal-side-rule: #223052;     /* rule under the agenda header */
+  --cal-side-count-ink: #7fb8b0;
+  --cal-side-count-bg: #1f2740;
+  --cal-agenda-border: #23324f;
+  --cal-agenda-bg: #0f1c34;
+  --cal-agenda-hover-bg: #122240;
+
+  /* ── documents / knowledge workspace (src/views/Documents.css) ──
+     The workspace carries its own darker tree/editor palette; the
+     literals live here so the view file holds no raw values. */
+  --dk-line: #243050;             /* pane hairline + version chip surface */
+  --dk-row-hover-bg: #141d30;     /* tree/list row hover, preview code surface */
+  --dk-row-active-ink: #dce4ff;
+  --dk-field-bg: #0e1626;
+  --dk-field-border: #33405e;
+  --dk-meta-ink: #7a7a7a;         /* toggles, version numbers, timestamps */
+  --dk-title-ink: #e6e8ee;
+  --dk-caption-ink: #8f93a0;
+  --dk-tab-ink: #b9c2d4;
+  --dk-snippet-ink: #b6b8bd;
+  --dk-danger-ink: #ffd7d7;       /* archived chip ink on --status-danger-bg */
+  --dk-editor-bg: #1b1c1e;
+  --dk-version-current-bg: #1a2033;
+  --dk-mark-grad-end: #0f9e8b;
+  --dk-mark-shadow: 0 2px 10px rgba(0,194,168,0.28);
+  --dk-icon-bg: rgba(0,194,168,0.10);
+  --dk-icon-border: rgba(0,194,168,0.28);
+  --dk-hairline: 1px;
+  --dk-space-3xs: 2px;
+  --dk-space-2xs: 4px;
+  --dk-space-xs: 5px;
+  --dk-space-sm: 6px;
+  --dk-space-md: 7px;
+  --dk-space-lg: 8px;
+  --dk-space-xl: 10px;
+  --dk-space-2xl: 14px;
+  --dk-space-3xl: 16px;
+  --dk-space-4xl: 18px;
+  --dk-space-5xl: 20px;
+  --dk-space-6xl: 24px;
+  --dk-space-7xl: 30px;
+  --dk-space-8xl: 34px;
+  --dk-fs-xs: 11px;
+  --dk-fs-sm: 11.5px;
+  --dk-fs-md: 13px;
+  --dk-fs-lg: 15px;
+  --dk-fs-xl: 17px;
+  --dk-fs-2xl: 21px;
+  --dk-radius-xs: 3px;
+  --dk-radius-sm: 4px;
+  --dk-radius-md: 6px;
+  --dk-radius-lg: 8px;
+  --dk-radius-xl: 10px;
+  --dk-radius-2xl: 11px;
+  --dk-radius-3xl: 14px;
+  --dk-radius-4xl: 16px;
+  --dk-mark-size: 44px;
+  --dk-icon-size: 58px;
+  --dk-tree-w: 260px;             /* default tree column (resizable) */
+  --dk-resizer-w: 5px;
+  --dk-title-min-w: 160px;
+  --dk-empty-min-h: 300px;
+  --dk-measure-head: 620px;       /* readable line lengths */
+  --dk-measure-body: 600px;
+  --dk-measure-inline: 460px;
+  --dk-measure-field: 380px;
 
   /* ── workspace content shell ───────────────────────────────
      ONE rhythm for every destination body so switching tabs no

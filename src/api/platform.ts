@@ -20,7 +20,10 @@ export type CfValueEntry = CfDefinition & { value_json: string | null };
 
 const call = <T>(command: string, args: Record<string, unknown> = {}) => invoke<T>(command, args);
 
-const submitProject = (operation: "create" | "update", value: Project) =>
+// A new project carries no owner: the server mints `created_by` from the
+// session identity, so the client can never name someone else as owner.
+export type NewProject = Omit<Project, "created_by">;
+const submitProject = (operation: "create" | "update", value: Project | NewProject) =>
   call<void>(`${operation}_project`, { project: value });
 
 export const platformApi = {
@@ -68,12 +71,28 @@ export const platformApi = {
 
   // Projects (read-mostly here; Projects.tsx owns its own view)
   projects: () => call<Project[]>("list_projects"),
-  createProject(project: Project) {
-    return submitProject("create", project);
+  // `owner` is the desktop-only escape hatch: local sqlite has no session to
+  // mint `created_by` from, so the shell binds its local identity here. Web
+  // passes nothing and the server stamps the session profile (and would
+  // overwrite anything sent anyway).
+  createProject(project: NewProject, owner?: string | null) {
+    return submitProject("create", owner ? { ...project, created_by: owner } : project);
   },
   updateProject(project: Project) {
     return submitProject("update", project);
   },
+  /** Narrow deadline write: sends only the project id and the date, so a stale
+   *  project object in a view can never overwrite unrelated fields (H6). */
+  /** `actor` is desktop-only: with no HTTP session, the local profile is the
+   *  identity the owner-or-admin gate runs against. Web sends none — the server
+   *  gate authorized the session before dispatch and ignores client claims. */
+  setProjectDeadline: (project_id: string, deadline: string | null, actor?: string | null) =>
+    call<Project>("set_project_deadline", { projectId: project_id, deadline, actorProfileId: actor ?? null }),
+  /** Narrow *edit* of a deadline that is already there. Compare-and-set: `expected` is the
+   *  value the view was showing, so an edit made elsewhere in the meantime refuses this one
+   *  instead of being overwritten. Clearing is `deadline: null`. */
+  updateProjectDeadline: (project_id: string, expected: string | null, deadline: string | null, actor?: string | null) =>
+    call<Project>("update_project_deadline", { projectId: project_id, expectedDeadline: expected, deadline, actorProfileId: actor ?? null }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

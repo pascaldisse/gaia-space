@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -131,6 +131,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V10: issues carry a priority (NULL = unset, then LOW/MEDIUM/HIGH/URGENT).
     if version < 10 {
         add_column_if_missing(&tx, "issues", "priority", "TEXT")?;
+    }
+    // V11: todos carry collaboration notes (NULL = legacy row / no notes).
+    if version < 11 {
+        add_column_if_missing(&tx, "todos", "notes", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -294,6 +298,28 @@ mod tests {
             ))).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap()
         }).collect()
     }
+    #[test]
+    fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
+        let temp = TempDb::new("gaia-space-v11-notes");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO todos(id,profile_id,content,done) VALUES('legacy','default-org','Legacy row',0)", []).unwrap();
+        conn.execute("UPDATE todos SET notes=NULL WHERE id='legacy'", []).unwrap();
+        // Simulate a database stamped at V10 and migrate forward again.
+        conn.pragma_update(None, "user_version", 10).unwrap();
+        migrate(&conn).expect("v11");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
+        assert_eq!(SCHEMA_VERSION, 11);
+        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        assert_eq!(notes, None, "legacy rows keep NULL notes");
+        let content: String = conn.query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        assert_eq!(content, "Legacy row", "migration never rewrites existing rows");
+        // Re-running is idempotent: no duplicate column, no error.
+        migrate(&conn).expect("idempotent");
+    }
+
     #[test]
     fn v9_rebinds_users_off_the_organization_profile() {
         let temp = TempDb::new("gaia-space-v9-identity");

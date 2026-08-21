@@ -26,7 +26,12 @@ fn login_source_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
     if peer.ip().is_loopback() { if let Some(ip)=headers.get("x-forwarded-for").and_then(|v|v.to_str().ok()).and_then(|v|v.split(',').next()).and_then(|v|v.trim().parse().ok()) { return ip; } }
     peer.ip()
 }
-#[derive(Serialize)] struct User { id:String, username:String, display_name:String, profile_id:String, role:String }
+#[derive(Serialize)] struct User { id:String, username:String, display_name:String, profile_id:String, role:String,
+    /// True only when `users.role='admin'` on this account. `role` above may have
+    /// been widened to "admin" by the rights model; minting or promoting an admin
+    /// account is gated on *this* flag, so the Superadmin right cannot mint the
+    /// account role that grants it.
+    #[serde(skip)] account_admin:bool }
 #[derive(Deserialize)] struct Login { username:String, password:String }
 #[derive(Deserialize)] struct Password { current:String, next:String }
 #[derive(Deserialize)] struct CreateUser { username:String, password:String, display_name:String, role:String, profile_id:Option<String> }
@@ -34,7 +39,13 @@ fn login_source_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
 fn err(code:StatusCode, s:&str)->(StatusCode,Json<Value>){(code,Json(json!({"ok":false,"error":s})))}
 fn hash(password:&str)->Result<String,String>{ let salt=SaltString::generate(&mut OsRng); Argon2::default().hash_password(password.as_bytes(),&salt).map(|x|x.to_string()).map_err(|e|e.to_string()) }
 fn token()->String { let mut b=[0u8;32]; rand::thread_rng().fill_bytes(&mut b); hex::encode(b) }
-fn user_by_token(headers:&HeaderMap)->Result<User, (StatusCode,Json<Value>)> { let t=headers.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))).ok_or_else(||err(StatusCode::UNAUTHORIZED,"unauthorized"))?; let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,role:r.get(4)?})).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized")) }
+fn user_by_token(headers:&HeaderMap)->Result<User, (StatusCode,Json<Value>)> { let t=headers.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))).ok_or_else(||err(StatusCode::UNAUTHORIZED,"unauthorized"))?; let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
+// Every `user.role=="admin"` test below is the *unified* admin predicate
+// (platform::is_admin_on): the account role or the Global.Superadmin right, one
+// meaning on both transports. The raw column alone would leave a rights-model
+// admin powerless over HTTP.
+if user.role!="admin" && platform::is_admin_on(&c,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { user.role="admin".into(); }
+Ok(user) }
 fn admin(h:&HeaderMap)->Result<User,(StatusCode,Json<Value>)>{let u=user_by_token(h)?;if u.role=="admin" {Ok(u)}else{Err(err(StatusCode::FORBIDDEN,"admin required"))}}
 async fn login(State(app): State<App>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(x): Json<Login>) -> impl IntoResponse {
     let account=x.username.trim().to_string(); let source_ip=login_source_ip(&headers,peer);
@@ -45,7 +56,7 @@ async fn login(State(app): State<App>, ConnectInfo(peer): ConnectInfo<SocketAddr
     let ok=PasswordHash::new(&ph).ok().and_then(|p|Argon2::default().verify_password(x.password.as_bytes(),&p).ok()).is_some();
     if !ok { let locked=app.login_limiter.lock().map(|mut limiter|limiter.record_failure(&account,source_ip)).unwrap_or(true); eprintln!("SECURITY: failed login username={account:?} source_ip={source_ip} locked={locked}"); return err(if locked{StatusCode::TOO_MANY_REQUESTS}else{StatusCode::UNAUTHORIZED},if locked{"too many failed login attempts; retry later"}else{"invalid username or password"}).into_response() }
     if app.login_limiter.lock().map(|mut limiter|limiter.reset(&account,source_ip)).is_err() { return err(StatusCode::INTERNAL_SERVER_ERROR,"login limiter unavailable").into_response(); }
-    let t=token(); let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]); let mut resp=Json(json!({"user":User{id,username,display_name,profile_id,role}})).into_response(); resp.headers_mut().insert(header::SET_COOKIE,match HeaderValue::from_str(&format!("space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000")){Ok(v)=>v,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response()});resp
+    let t=token(); let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]); let mut resp=Json(json!({"user":User{id,username,display_name,profile_id,account_admin:role=="admin",role}})).into_response(); resp.headers_mut().insert(header::SET_COOKIE,match HeaderValue::from_str(&format!("space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000")){Ok(v)=>v,Err(_)=>return err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response()});resp
 }
 async fn me(h:HeaderMap)->impl IntoResponse{match user_by_token(&h){Ok(u)=>Json(json!({"user":u})).into_response(),Err(e)=>e.into_response()}}
 async fn logout(h:HeaderMap)->impl IntoResponse{if let Some(t)=h.get(header::COOKIE).and_then(|v|v.to_str().ok()).and_then(|s|s.split(';').find_map(|x|x.trim().strip_prefix("space_session="))){if let Ok(c)=db::conn(){let _=c.execute("DELETE FROM sessions WHERE token=?1",[t]);}}let mut r=Json(json!({"ok":true})).into_response();r.headers_mut().insert(header::SET_COOKIE,HeaderValue::from_static("space_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"));r}
@@ -82,12 +93,13 @@ async fn directory(h: HeaderMap) -> impl IntoResponse {
     Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response()
 }
 async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoResponse {
-    if let Err(e) = admin(&h) { return e.into_response(); }
+    let me = match admin(&h) { Ok(u) => u, Err(e) => return e.into_response() };
     let username = x.username.trim();
     let display_name = x.display_name.trim();
     if username.is_empty() || display_name.is_empty() { return err(StatusCode::BAD_REQUEST, "username and display name are required").into_response(); }
     if x.password.len() < 8 { return err(StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response(); }
     if !matches!(x.role.as_str(), "admin" | "member") { return err(StatusCode::BAD_REQUEST, "invalid role").into_response(); }
+    if x.role == "admin" && !me.account_admin { return err(StatusCode::FORBIDDEN, "only an account admin can grant the admin role").into_response(); }
     let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
     let id = token();
     let pid = x.profile_id.unwrap_or_else(|| format!("profile-{}", &id[..12]));
@@ -136,6 +148,11 @@ async fn patch_user(h: HeaderMap, Path(id): Path<String>, Json(x): Json<PatchUse
     let me = match admin(&h) { Ok(u) => u, Err(e) => return e.into_response() };
     if let Some(role) = x.role.as_deref() {
         if !matches!(role, "admin" | "member") { return err(StatusCode::BAD_REQUEST, "invalid role").into_response(); }
+        // Promotion gate: the account role is the thing that mints admins, so only
+        // an account admin may hand it out. A Global.Superadmin is an admin
+        // everywhere it matters, but it cannot promote itself into the column that
+        // grants it — the rights model would otherwise be its own escalation path.
+        if role == "admin" && !me.account_admin { return err(StatusCode::FORBIDDEN, "only an account admin can grant the admin role").into_response(); }
     }
     if x.password.as_ref().is_some_and(|p| p.len() < 8) { return err(StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response(); }
     let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
@@ -223,6 +240,7 @@ enum CommandPolicy {
     ProjectMemberWrite,
     BoardRead,
     IssueRead,
+    ProjectDeadlineWrite,
     CalendarRead,
     ProjectTodoRead,
     SessionIdentityWrite,
@@ -240,6 +258,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_project" => CommandPolicy::ProjectWrite,
         "create_board" | "create_issue" | "create_issue_status" => CommandPolicy::ProjectMemberWrite,
         "get_project" | "list_boards" | "list_issue_statuses" => CommandPolicy::ProjectRead,
+        "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
@@ -407,6 +426,30 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     })
 }
 
+/// Stamp the session's profile onto every `created_by`-shaped field of a
+/// create payload, inserting it when the client omitted it entirely.
+fn force_session_owner(value: &mut Value, profile_id: &str) {
+    match value {
+        Value::Object(object) => {
+            for alias in ["createdBy", "owner", "owner_id", "ownerId"] {
+                object.remove(alias);
+            }
+            if object.contains_key("project") {
+                if let Some(child) = object.get_mut("project") {
+                    force_session_owner(child, profile_id);
+                }
+            } else {
+                object.insert("created_by".into(), Value::String(profile_id.to_string()));
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                force_session_owner(item, profile_id);
+            }
+        }
+        _ => {}
+    }
+}
 fn bind_session_identity(value: &mut Value, profile_id: &str) {
     match value {
         Value::Object(object) => {
@@ -494,7 +537,27 @@ fn authorize_command(
             StatusCode::NOT_IMPLEMENTED,
             "not available in web mode",
         )),
-        CommandPolicy::ProjectCreate => Ok(()),
+        CommandPolicy::ProjectCreate => {
+            // Ownership is minted from the session, never from the payload: any
+            // client-supplied owner field on the new project is overwritten
+            // (defence in depth behind `bind_session_identity`).
+            force_session_owner(body, &user.profile_id);
+            Ok(())
+        }
+        CommandPolicy::ProjectDeadlineWrite => {
+            // Narrow deadline path: owner or admin only, project taken from the request
+            // itself, and no other project column is reachable from this command.
+            let project_id: String = arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let owner = project_owner(&project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            // One refusal for both halves: an id that does not exist and one you may not
+            // touch must be indistinguishable, or the error text becomes an existence oracle.
+            if user.role != "admin" && owner != user.profile_id {
+                return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+            }
+            Ok(())
+        }
         CommandPolicy::ProjectWrite => {
             let (project_id, _) =
                 project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -603,7 +666,7 @@ CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|
         CommandPolicy::DocumentFolderWrite => {let id=if name=="update_document_folder"{nested_id(body,"folder")}else{arg(body,"id").ok()}.ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid folder id"))?;if documents::document_folder_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"document folder write denied"))}}
         CommandPolicy::MeetingReadList => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
         CommandPolicy::MeetingRead => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if meetings::meeting_readable_by(&id,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{put_arg(body,"profile_id",json!(user.profile_id));Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting access denied"))}}
-        CommandPolicy::MeetingWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if !meetings::meeting_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{return Err(err(StatusCode::FORBIDDEN,"meeting write denied"));}if name=="update_meeting"{let organizer=meetings::get_meeting(id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?.and_then(|m|m.organizer_id).ok_or_else(||err(StatusCode::FORBIDDEN,"meeting write denied"))?;body.get_mut("meeting").and_then(Value::as_object_mut).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid argument `meeting`"))?.insert("organizer_id".into(),json!(organizer));}Ok(())}
+        CommandPolicy::MeetingWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if !meetings::meeting_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{return Err(err(StatusCode::FORBIDDEN,"meeting write denied"));}if name=="update_meeting"{let organizer=meetings::get_meeting_scoped(id,user.profile_id.clone()).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?.and_then(|m|m.organizer_id).ok_or_else(||err(StatusCode::FORBIDDEN,"meeting write denied"))?;body.get_mut("meeting").and_then(Value::as_object_mut).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid argument `meeting`"))?.insert("organizer_id".into(),json!(organizer));}Ok(())}
         CommandPolicy::MeetingParticipantWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?;let allowed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)",params![id,user.profile_id],|r|r.get(0)).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()))?;if allowed{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting participant access denied"))}}
         CommandPolicy::SearchRead => {put_arg(body,"profile_id",json!(user.profile_id));put_arg(body,"allow_all",json!(user.role=="admin"));Ok(())}
         CommandPolicy::Session => {
@@ -889,7 +952,7 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
-    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64),
+    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
     "mark_notification_read" => personal::mark_notification_read(id: String),
@@ -937,6 +1000,8 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "update_pipeline_script" => pipelines::update_pipeline_script(script: pipelines::PipelineScript),
     "update_profile" => platform::update_profile(profile: platform::Profile),
     "update_project" => platform::update_project(project: platform::Project),
+    "set_project_deadline" => platform::set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>),
+    "update_project_deadline" => platform::update_project_deadline(project_id: String, expected_deadline: Option<String>, deadline: Option<String>, actor_profile_id: Option<String>),
     "update_quality_gate_rule" => review::update_quality_gate_rule(rule: review::QualityGateRule),
     "update_review" => review::update_review(review: review::Review),
     "update_role" => platform::update_role(role: platform::Role),
@@ -992,6 +1057,47 @@ mod tests {
     async fn successful_login_resets_login_limiter() { let _serial=test_lock(); setup(); set_password("alice","correct-password"); let app=App::new(); for _ in 0..2 { assert_eq!(login_call(app.clone(),"198.51.100.11","alice","wrong-password").await.0,StatusCode::UNAUTHORIZED); } assert_eq!(login_call(app.clone(),"198.51.100.11","alice","correct-password").await.0,StatusCode::OK); for _ in 0..(LOGIN_MAX_FAILED_ATTEMPTS-1) { assert_eq!(login_call(app.clone(),"198.51.100.11","alice","wrong-password").await.0,StatusCode::UNAUTHORIZED); } assert_eq!(login_call(app,"198.51.100.11","alice","wrong-password").await.0,StatusCode::TOO_MANY_REQUESTS); }
     #[tokio::test]
     async fn login_limiter_enforces_each_key_without_locking_other_account_and_ip() { let _serial=test_lock(); setup(); set_password("alice","alice-password"); set_password("bob","bob-password"); let app=App::new(); for _ in 0..LOGIN_MAX_FAILED_ATTEMPTS { let _=login_call(app.clone(),"198.51.100.12","alice","wrong-password").await; } assert_eq!(login_call(app.clone(),"198.51.100.13","alice","alice-password").await.0,StatusCode::TOO_MANY_REQUESTS, "account lock must survive an IP change"); assert_eq!(login_call(app.clone(),"198.51.100.12","bob","bob-password").await.0,StatusCode::TOO_MANY_REQUESTS, "source IP lock must span accounts"); assert_eq!(login_call(app,"198.51.100.13","bob","bob-password").await.0,StatusCode::OK, "different account and IP must remain available"); }
+
+    /// The rights model and the account role are one admin notion, over HTTP too:
+    /// a member account holding `Global.Superadmin` reaches the admin-only surface,
+    /// and an ordinary member still does not.
+    #[tokio::test]
+    async fn superadmin_right_is_admin_over_http_as_well() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        // Bob is a plain `member` account, granted the global superadmin right.
+        c.execute("INSERT INTO roles(id,name) VALUES('r-super','Superadmin')", []).unwrap();
+        c.execute("INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES('right-super','Global.Superadmin','Superadmin','Global')", []).unwrap();
+        c.execute("INSERT INTO role_rights(role_id,right_id) SELECT 'r-super',id FROM rights WHERE code='Global.Superadmin'", []).unwrap();
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('ra-super','r-super','pb','global')", []).unwrap();
+        let role: String = c.query_row("SELECT role FROM users WHERE id='ub'", [], |r| r.get(0)).unwrap();
+        assert_eq!(role, "member", "the account column stays a plain member");
+
+        let (status, _) = status_and_body(users(cookie("tb")).await.into_response()).await;
+        assert_eq!(status, StatusCode::OK, "a Global.Superadmin is an admin on the HTTP path too");
+        // Alice holds no right and no admin role: still refused.
+        let (status, _) = status_and_body(users(cookie("ta")).await.into_response()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an ordinary member is never promoted");
+
+        // ...but being an admin is not the same as being allowed to mint one. The
+        // account role is what grants the Superadmin right in the first place, so a
+        // rights-only admin promoting an account would be its own escalation path.
+        let (status, body) = status_and_body(patch_user(cookie("tb"), Path("ud".into()), Json(PatchUser { display_name: None, role: Some("admin".into()), active: None, password: None })).await.into_response()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a rights-only admin cannot promote an account to admin: {body}");
+        let (status, _) = status_and_body(create_user(cookie("tb"), Json(CreateUser { username: "mole".into(), password: "mole-password".into(), display_name: "Mole".into(), role: "admin".into(), profile_id: None })).await.into_response()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "nor create one");
+        let role: String = c.query_row("SELECT role FROM users WHERE id='ud'", [], |r| r.get(0)).unwrap();
+        assert_eq!(role, "member", "dora was not promoted");
+
+        // A rights-only admin keeps every other admin power, including member writes.
+        let (status, _) = status_and_body(patch_user(cookie("tb"), Path("ud".into()), Json(PatchUser { display_name: Some("Dora Renamed".into()), role: Some("member".into()), active: None, password: None })).await.into_response()).await;
+        assert_eq!(status, StatusCode::OK, "non-promoting admin writes still pass");
+
+        // An account admin mints admins as before.
+        let (status, _) = status_and_body(patch_user(cookie("tc"), Path("ud".into()), Json(PatchUser { display_name: None, role: Some("admin".into()), active: None, password: None })).await.into_response()).await;
+        assert_eq!(status, StatusCode::OK, "an account admin may still grant the role");
+    }
 
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
@@ -1389,6 +1495,185 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn created_projects_are_owned_by_the_session_never_by_the_payload() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+
+        // Bob forges Alice as owner; the server mints ownership from his session.
+        let (status, value) = call(cookie("tb"), "create_project", json!({"project":{"id":"forged-p","name":"Forged","key":"FRG","description":null,"created_by":"pa","archived":false,"deadline":null}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='forged-p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner.as_deref(), Some("pb"), "the session owns the project, not the payload");
+
+        // A payload with no owner at all is still owned by its creator.
+        let (status, value) = call(cookie("tb"), "create_project", json!({"project":{"id":"plain-p","name":"Plain","key":"PLN","description":null,"archived":false,"deadline":null}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='plain-p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner.as_deref(), Some("pb"));
+
+        // And the forged owner cannot then drive the narrow deadline path.
+        let (status, _) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"forged-p","deadline":"2030-01-01"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// The other half of the forgery: whoever actually created the row owns it,
+    /// and ownership is what the narrow deadline gate reads. A member who claims
+    /// the admin as owner keeps the first write; the named admin gains nothing.
+    #[tokio::test]
+    async fn the_forging_creator_keeps_the_first_deadline_write_and_the_named_owner_gains_nothing() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+
+        // Bob (member) creates, naming Alice (another member) as owner.
+        let (status, value) = call(cookie("tb"), "create_project", json!({"project":{"id":"claimed-p","name":"Claimed","key":"CLM","description":null,"created_by":"pa","archived":false,"deadline":null}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+
+        // 2. The real creator drives the deadline path he could not have reached
+        //    had the payload owner been believed.
+        let (status, value) = call(cookie("tb"), "set_project_deadline", json!({"project_id":"claimed-p","deadline":"2030-05-05"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!("2030-05-05"));
+
+        // 3. The impersonated profile owns nothing: not this project, not any.
+        let owned: i64 = c.query_row("SELECT count(*) FROM projects WHERE created_by='pa'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owned, 0, "the named owner was never made an owner");
+        let (status, _) = call(cookie("ta"), "update_project", json!({"project":{"id":"claimed-p","name":"Stolen","key":"CLM","description":null,"created_by":"pa","archived":false}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an impersonated owner cannot write the project");
+        let name: String = c.query_row("SELECT name FROM projects WHERE id='claimed-p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(name, "Claimed");
+    }
+
+    /// 4. The admin route, stated separately: an admin's own creations are minted
+    /// from the admin session exactly like anyone else's — the role widens what
+    /// may be *written*, never who is recorded as the *creator*.
+    #[tokio::test]
+    async fn the_admin_route_mints_ownership_from_the_admin_session_too() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+
+        let (status, value) = call(cookie("tc"), "create_project", json!({"project":{"id":"admin-made","name":"Admin made","key":"AMD","description":null,"created_by":"pb","archived":false,"deadline":null}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='admin-made'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner.as_deref(), Some("pc"), "the admin session owns it, not the payload's member");
+
+        // The member named in the payload is not an owner and cannot write it.
+        let (status, _) = call(cookie("tb"), "update_project", json!({"project":{"id":"admin-made","name":"Taken","key":"AMD","description":null,"created_by":"pb","archived":false}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // The admin reaches a member's project by role, not by ownership.
+        let (status, value) = call(cookie("tb"), "create_project", json!({"project":{"id":"bob-made","name":"Bob made","key":"BMD","description":null,"archived":false,"deadline":null}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, value) = call(cookie("tc"), "set_project_deadline", json!({"project_id":"bob-made","deadline":"2031-01-01"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='bob-made'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner.as_deref(), Some("pb"), "an admin write does not transfer ownership");
+    }
+    #[tokio::test]
+    async fn project_deadline_writes_are_owner_or_admin_only_and_never_overwrite_the_project() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at) VALUES('alice-p','Alice project','ALICE','Keep me','pa',0,1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('alice-p','pb')", []).unwrap();
+
+        // First write: the owner sets a deadline that was never set before.
+        let (status, value) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2030-03-10"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!("2030-03-10"));
+
+        // A project member is not an owner: refused, and the stored row is untouched.
+        let (status, _) = call(cookie("tb"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2031-01-01"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("td"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2031-01-01"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let stored: (String, Option<String>, String) = c.query_row("SELECT name,deadline,created_by FROM projects WHERE id='alice-p'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(stored, ("Alice project".into(), Some("2030-03-10".into()), "pa".into()));
+
+        // Malformed dates never reach the column.
+        let (status, _) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"10/03/2030"})).await;
+        assert_ne!(status, StatusCode::OK);
+
+        // First-write law: an existing deadline is never overwritten, not even by
+        // the owner, and a stale payload cannot ride other columns along with it.
+        let (status, value) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2030-04-02","name":"Hijacked","created_by":"pb","description":null})).await;
+        assert_ne!(status, StatusCode::OK, "overwriting an existing deadline must be refused: {value}");
+        let after: (String, Option<String>, Option<String>, String) = c.query_row("SELECT name,description,deadline,created_by FROM projects WHERE id='alice-p'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
+        assert_eq!(after, ("Alice project".into(), Some("Keep me".into()), Some("2030-03-10".into()), "pa".into()), "only the deadline column may move, and only into an empty one");
+
+        // Not even the admin may overwrite a deadline that is already there.
+        let (status, value) = call(cookie("tc"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2030-04-03"})).await;
+        assert_ne!(status, StatusCode::OK, "admins obey the first-write law too: {value}");
+
+        // The member sees the owner's deadline on the calendar.
+        let (status, value) = call(cookie("tb"), "calendar_aggregate", json!({"profile_id":"pb","range_start":1900000000,"range_end":1902000000,"range_start_date":"2030-03-01","range_end_date":"2030-04-01"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().iter().any(|item| item["id"] == json!("deadline-alice-p") && item["kind"] == json!("deadline")), "member calendar shows the project deadline: {value}");
+
+        // Clearing is explicit and allowed for the owner, and only after clearing
+        // does the column accept a new first write.
+        let (status, value) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"alice-p","deadline":null})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!(null));
+        let (status, value) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"alice-p","deadline":"2030-04-02"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!("2030-04-02"));
+    }
+
+    /// Editing an existing deadline over HTTP: same owner-or-admin gate, compare-and-set
+    /// body, and an unknown project answers exactly like a project you may not touch.
+    #[tokio::test]
+    async fn project_deadline_edits_are_owner_or_admin_only_and_refuse_stale_expectations() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,created_at) VALUES('edit-p','Edit project','EDT','Keep me','pa',0,1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('edit-p','pb')", []).unwrap();
+        let (status, _) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"edit-p","deadline":"2030-03-10"})).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // The owner edits against what the screen showed: it lands, nothing else moves.
+        let (status, value) = call(cookie("ta"), "update_project_deadline", json!({"project_id":"edit-p","expected_deadline":"2030-03-10","deadline":"2030-06-01","name":"Hijacked","created_by":"pb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!("2030-06-01"));
+        let row: (String, Option<String>, String) = c.query_row("SELECT name,description,created_by FROM projects WHERE id='edit-p'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(row, ("Edit project".into(), Some("Keep me".into()), "pa".into()), "a stale payload rides nothing along");
+
+        // A member and a stranger are both refused, and the row stands.
+        for who in ["tb", "td"] {
+            let (status, value) = call(cookie(who), "update_project_deadline", json!({"project_id":"edit-p","expected_deadline":"2030-06-01","deadline":"2031-01-01"})).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{who} may not edit this deadline: {value}");
+        }
+        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='edit-p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(held.as_deref(), Some("2030-06-01"));
+
+        // A stale expectation is refused for the owner too — the concurrent value wins.
+        let (status, value) = call(cookie("ta"), "update_project_deadline", json!({"project_id":"edit-p","expected_deadline":"2030-03-10","deadline":"2031-02-02"})).await;
+        assert_ne!(status, StatusCode::OK, "a stale edit must not win: {value}");
+        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='edit-p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(held.as_deref(), Some("2030-06-01"));
+
+        // An unknown project is indistinguishable from one you may not touch: same 403,
+        // same words, no hint about whether the row exists.
+        let (ghost_status, ghost_value) = call(cookie("ta"), "update_project_deadline", json!({"project_id":"no-such-project","expected_deadline":null,"deadline":"2030-01-01"})).await;
+        let (foreign_status, foreign_value) = call(cookie("tb"), "update_project_deadline", json!({"project_id":"edit-p","expected_deadline":null,"deadline":"2030-01-01"})).await;
+        assert_eq!(ghost_status, StatusCode::FORBIDDEN);
+        assert_eq!(ghost_status, foreign_status);
+        assert_eq!(ghost_value["error"], foreign_value["error"], "an unknown id must not read differently from a forbidden one");
+
+        // The admin may edit, and clearing is an edit like any other.
+        let (status, value) = call(cookie("tc"), "update_project_deadline", json!({"project_id":"edit-p","expected_deadline":"2030-06-01","deadline":null})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!(null));
+        // The first-write law still holds on the other door after a clear.
+        let (status, value) = call(cookie("ta"), "set_project_deadline", json!({"project_id":"edit-p","deadline":"2030-07-07"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["deadline"], json!("2030-07-07"));
+    }
+
+    #[tokio::test]
     async fn meeting_and_document_identity_writes_rebind_the_session_profile() {
         let _serial = test_lock();
         setup();
@@ -1623,4 +1908,101 @@ mod tests {
     #[tokio::test]
     async fn project_reads_are_centrally_scoped_for_owner_member_and_nonmember() { let _serial=test_lock(); setup(); let c=db::conn().unwrap(); c.execute("INSERT INTO projects(id,name,key,description,created_by,created_at) VALUES('private','Private','PRIVATE','confidential','pa',1)",[]).unwrap(); c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('private','pb')",[]).unwrap(); let (status,value)=call(cookie("td"),"list_projects",json!({})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(!value["value"].as_array().unwrap().iter().any(|p|p["id"]=="private")); let (status,value)=call(cookie("td"),"get_project",json!({"id":"private"})).await; assert_eq!(status,StatusCode::FORBIDDEN); assert!(value.get("value").is_none(),"{value}"); for token in ["ta","tb"] { assert_eq!(call(cookie(token),"get_project",json!({"id":"private"})).await.0,StatusCode::OK); } assert_eq!(call(cookie("td"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::FORBIDDEN); assert_eq!(call(cookie("tb"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::OK); }
 
+    /// Document *folders* are a second container surface, and the create binder is the
+    /// only thing standing between a client and somebody else's personal tree. Forged
+    /// `container_type` / `container_id` on create, and every read/write on a foreign
+    /// private folder, are checked here directly (SPEC §Knowledge workspace).
+    #[tokio::test]
+    async fn document_folder_containers_are_bound_to_the_session_and_foreign_trees_stay_shut() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+
+        // 1 · a forged personal container id is overwritten with the session profile.
+        let (status, value) = call(cookie("ta"), "create_document_folder", json!({"folder":{"id":"alice-folder","container_type":"my-docs","container_id":"pb","parent_id":null,"name":"Alice private","description":null,"archived":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let owner: Option<String> = c.query_row("SELECT container_id FROM document_folders WHERE id='alice-folder'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner.as_deref(), Some("pa"), "the client-supplied personal container must be ignored");
+
+        // 2 · a project container the caller is not a member of is refused outright,
+        //     and a kb folder has no web-mode creation path at all.
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('folder-proj','Folder Project','FP','pa',1);").unwrap();
+        let (status, value) = call(cookie("tb"), "create_document_folder", json!({"folder":{"id":"forged-project-folder","container_type":"project","container_id":"folder-proj","parent_id":null,"name":"Trespass","description":null,"archived":false}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a non-member may not create in a project container: {value}");
+        let (status, value) = call(cookie("tb"), "create_document_folder", json!({"folder":{"id":"forged-kb-folder","container_type":"kb","container_id":"book","parent_id":null,"name":"Trespass","description":null,"archived":false}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "kb folders are not creatable over the web transport: {value}");
+        let leaked: i64 = c.query_row("SELECT count(*) FROM document_folders WHERE id IN('forged-project-folder','forged-kb-folder')", [], |r| r.get(0)).unwrap();
+        assert_eq!(leaked, 0, "a refused create writes nothing");
+
+        // 3 · Bob cannot see Alice's private folder, by list or by forged profile id.
+        for body in [json!({}), json!({"profile_id":"pa"})] {
+            let (status, value) = call(cookie("tb"), "list_document_folders", body).await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+            assert!(value["value"].as_array().unwrap().is_empty(), "a foreign personal tree is invisible: {value}");
+        }
+
+        // 4 · nor write it: rename, re-parent, or re-point its container.
+        for (command, body) in [
+            ("update_document_folder", json!({"folder":{"id":"alice-folder","container_type":"my-docs","container_id":"pb","parent_id":null,"name":"Stolen","description":null,"archived":true}})),
+            ("move_document_folder", json!({"id":"alice-folder","parent_id":null})),
+        ] {
+            let (status, value) = call(cookie("tb"), command, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{command} must be refused: {value}");
+        }
+        // Independent check: the row on disk never moved.
+        let (name, container, archived): (String, Option<String>, bool) = c.query_row("SELECT name,container_id,archived FROM document_folders WHERE id='alice-folder'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((name.as_str(), container.as_deref(), archived), ("Alice private", Some("pa"), false));
+
+        // 5 · the owner still reaches her own tree.
+        let (status, value) = call(cookie("ta"), "list_document_folders", json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["value"][0]["id"], json!("alice-folder"), "{value}");
+    }
+
+    /// The knowledge base is write-through-documents only: books are seeded (or made on the
+    /// desktop), never created from the web. The contract under test is that authoring an
+    /// article makes its book *navigable to its author and to nobody else* -- the creator must
+    /// not own a document it cannot reach, and the visibility must not spill one row wider.
+    #[tokio::test]
+    async fn a_kb_book_becomes_navigable_to_the_author_of_an_article_and_to_no_one_else() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch(
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book-handbook','kb','book-handbook',NULL,'Handbook');\
+             INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book-secret','kb','book-secret',NULL,'Secret book');",
+        )
+        .unwrap();
+
+        // Before authoring anything, the books are invisible to everyone on the web.
+        for who in ["ta", "tb"] {
+            let (status, value) = call(cookie(who), "list_document_folders", json!({})).await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+            assert!(value["value"].as_array().unwrap().iter().all(|f| f["container_type"] != json!("kb")), "an unrelated profile must see no kb folder: {value}");
+        }
+
+        // Alice authors an article in the handbook; `created_by` is minted from her session.
+        let (status, value) = call(cookie("ta"), "create_document", json!({"document":{"id":"kb-article","container_type":"kb","container_id":"book-handbook","folder_id":"book-handbook","doc_type":"text","title":"House rules","body":"body","version":1,"archived":false,"created_by":"pb"}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let author: Option<String> = c.query_row("SELECT created_by FROM documents WHERE id='kb-article'", [], |r| r.get(0)).unwrap();
+        assert_eq!(author.as_deref(), Some("pa"), "the payload author must be overwritten by the session");
+
+        // Alice can now navigate the book that holds her article -- and only that one.
+        let (status, value) = call(cookie("ta"), "list_document_folders", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let kb: Vec<String> = value["value"].as_array().unwrap().iter().filter(|f| f["container_type"] == json!("kb")).map(|f| f["id"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(kb, vec!["book-handbook".to_string()], "the author must reach her article's container, and no further: {value}");
+
+        // Bob authored nothing: both books stay invisible, by list and by forged profile id.
+        for body in [json!({}), json!({"profile_id":"pa"})] {
+            let (status, value) = call(cookie("tb"), "list_document_folders", body).await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+            assert!(value["value"].as_array().unwrap().iter().all(|f| f["container_type"] != json!("kb")), "a stranger must see no kb folder: {value}");
+            let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+            assert!(value["value"].as_array().unwrap().iter().all(|d| d["id"] != json!("kb-article")), "a stranger must not see the article either: {value}");
+        }
+        let (status, _) = call(cookie("tb"), "get_document", json!({"id":"kb-article"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger may not fetch the article by id");
+    }
 }

@@ -42,6 +42,8 @@ const NO_CONTAINER = "-"; // placeholder for a document container with a null co
 export const documentContainers = ["my-docs", "project", "kb"] as const;
 const isDocumentContainer = (value: string): value is typeof documentContainers[number] =>
   documentContainers.includes(value as typeof documentContainers[number]);
+/** A blank container id is no id: it degrades to the null-container placeholder. */
+const containerSeg = (id: string | undefined) => (id && id.trim() ? id : NO_CONTAINER);
 
 // --- registry ---------------------------------------------------------------
 // App owns the view list; the router only knows slugs. `available` is the subset the current
@@ -114,7 +116,7 @@ if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks
   if (head === "documents" && rest.length) {
     if (rest.length === 1) return norm({ view: "Documents", entityType: "document", entityId: rest[0] });
     const containerType = rest[0];
-    if (!isDocumentContainer(containerType) || !rest[1]) return { view: FALLBACK_VIEW };
+    if (!isDocumentContainer(containerType) || !rest[1].trim()) return { view: FALLBACK_VIEW };
     const containerId = rest[1] === NO_CONTAINER ? undefined : rest[1];
     const entityId = rest.length > 2 ? rest.slice(2).join("/") : undefined;
     return norm({ view: "Documents", containerType, containerId, ...(entityId ? { entityType: "document", entityId } : {}) });
@@ -143,12 +145,12 @@ if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectI
   if (desc && r.entityId) {
     if (desc.parent === "project" && r.projectId)
       return `projects/${enc(r.projectId)}/${desc.segment}/${enc(r.entityId)}`;
-    if (desc.container && r.containerType)
-      return `documents/${enc(r.containerType)}/${enc(r.containerId ?? NO_CONTAINER)}/${enc(r.entityId)}`;
+    if (desc.container && isDocumentContainer(r.containerType ?? ""))
+      return `documents/${enc(r.containerType!)}/${enc(containerSeg(r.containerId))}/${enc(r.entityId)}`;
     return `${desc.segment}/${enc(r.entityId)}`;
   }
-  if (r.view === "Documents" && r.containerType)
-    return `documents/${enc(r.containerType)}/${enc(r.containerId ?? NO_CONTAINER)}`;
+  if (r.view === "Documents" && isDocumentContainer(r.containerType ?? ""))
+    return `documents/${enc(r.containerType!)}/${enc(containerSeg(r.containerId))}`;
   return slug;
 }
 
