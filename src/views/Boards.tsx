@@ -3,7 +3,7 @@ import { planningApi, type Board, type BoardColumn, type Issue, type Status } fr
 import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
-import { projectId as sessionProject, setProjectId as setSessionProject, humanError, profiles } from "../session";
+import { projectId as sessionProject, setProjectId as setSessionProject, humanError, profiles, reloadProfiles } from "../session";
 
 /** Board templates — a new board is usable immediately, Trello-shaped. */
 const TEMPLATES: Record<string, { label: string; columns: string[] }> = {
@@ -24,6 +24,8 @@ export default function Boards() {
   const [newSprint, setNewSprint] = createSignal("");
   const [openIssue, setOpenIssue] = createSignal<string>();
   const [menu, setMenu] = createSignal<{ column: BoardColumn; x: number; y: number }>();
+  // Cards name their assignee — without the directory a card shows a raw profile id.
+  if (!profiles()) void reloadProfiles().catch(() => undefined);
 
   const [boards, { refetch: reloadBoards }] = createResource(projectId, id => id ? planningApi.boards(id) : Promise.resolve([]));
   const [statuses, { refetch: reloadStatuses }] = createResource(projectId, id => id ? planningApi.statuses(id) : Promise.resolve([]));
@@ -83,14 +85,27 @@ export default function Boards() {
     const project = projectId(); const b = board(); const title = cardTitle().trim();
     if (!project || !b || !title) return;
     try {
-      let statusId = column.status_ids[0];
-      if (!statusId) { statusId = await statusFor(column.name) ?? ""; if (statusId) await planningApi.saveColumn({ ...column, status_ids: [statusId] }); }
+      const statusId = (await ensureMapped(column)).status_ids[0] ?? "";
       const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
       await planningApi.move(b.id, issue.id, column.id, sprintId());
       setCardTitle(""); setComposeIn(undefined); await reloadStatuses(); reloadColumns(); reloadIssues(); setOpenIssue(issue.id);
     } catch (reason) { setError(humanError(reason)); }
   };
-  const move = async (issueId: string, columnId: string) => { const b = board(); if (!b) return; try { await planningApi.move(b.id, issueId, columnId, sprintId()); reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+  /** A column with no mapped status cannot hold work — give it one named after
+   *  itself before the move, instead of failing the drop. */
+  const ensureMapped = async (column: BoardColumn): Promise<BoardColumn> => {
+    if (column.status_ids.length) return column;
+    const statusId = await statusFor(column.name);
+    if (!statusId) return column;
+    const saved = await planningApi.saveColumn({ ...column, status_ids: [statusId] });
+    await reloadStatuses(); await reloadColumns();
+    return saved ?? { ...column, status_ids: [statusId] };
+  };
+  const move = async (issueId: string, columnId: string) => {
+    const b = board(); const column = columns()?.find(c => c.id === columnId); if (!b || !column) return;
+    try { await ensureMapped(column); await planningApi.move(b.id, issueId, columnId, sprintId()); await reloadIssues(); }
+    catch (reason) { setError(humanError(reason)); }
+  };
   // Drag and drop: the card carries its id, the column is the drop target.
   const [dragOver, setDragOver] = createSignal<string>();
   const onDrop = (event: DragEvent, column: BoardColumn) => {
@@ -176,7 +191,7 @@ export default function Boards() {
         }</Show>
 
         <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
-        <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} sprintId={sprintId()} moved={reloadIssues} /></section>
+        <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} onAdd={issueId => move(issueId, (columns() ?? [])[0]?.id ?? "")} moved={reloadIssues} /></section>
       </div>
     }</Show>
   </section>;
@@ -209,9 +224,9 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; 
   </article>;
 }
 
-function Backlog(props: { boardId: string; columns: BoardColumn[]; sprintId?: string; moved: () => unknown }) {
+function Backlog(props: { boardId: string; columns: BoardColumn[]; onAdd: (issueId: string) => unknown; moved: () => unknown }) {
   const [items, { refetch }] = createResource(() => planningApi.backlog(props.boardId));
-  const add = async (id: string) => { const target = props.columns[0]; if (!target) return; await planningApi.move(props.boardId, id, target.id, props.sprintId); refetch(); props.moved(); };
+  const add = async (id: string) => { if (!props.columns[0]) return; await props.onAdd(id); refetch(); props.moved(); };
   return <>
     <Show when={!items()?.length}><p class="hint">Nothing in the backlog.</p></Show>
     <For each={items()}>{issue => <div class="backlog-row"><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => add(issue.id)}>Add to board</button></div>}</For>
