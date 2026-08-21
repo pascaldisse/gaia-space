@@ -1,17 +1,57 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type Project } from "../api/platform";
+import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, projectId as sessionProject, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
 import "./Projects.css";
+import "./Portfolio.css";
 
 const newId = () => `project-${crypto.randomUUID()}`;
 const empty = () => ({ name: "", key: "", description: "", deadline: "" });
+// The key follows the name until somebody edits the key by hand; from then on the
+// field is theirs. Length is a parameter, not a magic number scattered in the view.
+export const KEY_LENGTH = 5;
+export const deriveKey = (name: string, length = KEY_LENGTH) =>
+  name.replace(/[^a-zA-Z0-9]/g, "").slice(0, length).toUpperCase();
+const todayISO = () => new Date().toISOString().slice(0, 10);
 export default function Projects() {
   // One destination: the project list IS the entry point, and an opened project
   // shows its boards (whose cards are its issues). No separate Issues/Boards tabs.
   const [form, setForm] = createSignal(empty()); const [error, setError] = createSignal("");
+  const [keyTouched, setKeyTouched] = createSignal(false);
   const [items, { refetch }] = createResource(platformApi.projects);
+  // Open-issue counts for EVERY card come from one issue read plus one status read,
+  // grouped client-side. A per-card fetch would be N round trips for N projects.
+  // The refusal is carried as a value, not as a thrown resource: a denied read has to
+  // reach the screen as an error, while the rest of the list keeps working.
+  const [counts] = createResource<{ open: Map<string, number> } | { failed: string }>(async () => {
+    try {
+      const [issues, statuses] = await Promise.all([planningApi.issues({}), planningApi.statuses()]);
+      const resolved = new Set(statuses.filter(status => status.resolved).map(status => status.id));
+      const open = new Map<string, number>();
+      for (const issue of issues) {
+        if (issue.archived || resolved.has(issue.status_id ?? "")) continue;
+        open.set(issue.project_id, (open.get(issue.project_id) ?? 0) + 1);
+      }
+      return { open };
+    } catch (reason) { return { failed: humanError(reason) }; }
+  });
+  const countsFailed = () => { const value = counts(); return value && "failed" in value ? value.failed : ""; };
+  const openMap = () => { const value = counts(); return value && "open" in value ? value.open : undefined; };
+  const openCount = (id: string) => openMap()?.get(id) ?? 0;
+  // Summary strip: every number is read off the project/issue data already loaded,
+  // so the strip can never disagree with the cards below it.
+  const live = createMemo(() => (items() ?? []).filter(project => !project.archived));
+  const openTotal = createMemo(() => {
+    let sum = 0; const by = openMap();
+    if (by) for (const value of by.values()) sum += value;
+    return sum;
+  });
+  const withDeadline = createMemo(() => live().filter(project => project.deadline).length);
+  const nextDeadline = createMemo(() => live()
+    .filter(project => project.deadline && project.deadline >= todayISO())
+    .sort((a, b) => (a.deadline ?? "").localeCompare(b.deadline ?? ""))[0]);
   const save = async (event: SubmitEvent) => {
     event.preventDefault(); const input = form();
     try {
@@ -25,7 +65,7 @@ export default function Projects() {
       await platformApi.createProject({ id, name:input.name.trim(), key:input.key.trim().toUpperCase(), description:input.description.trim() || null, deadline:input.deadline || null, archived:false }, owner);
       // A freshly created project opens where its work begins, and the selection
       // follows so desktop (which has no URL) lands on the same project.
-      setForm(empty()); await refetch(); setProjectId(id); navigate({ view: "Project Steering", projectId: id });
+      setForm(empty()); setKeyTouched(false); await refetch(); setProjectId(id); navigate({ view: "Project Steering", projectId: id });
     } catch (reason) { setError(humanError(reason)); }
   };
   const update = async (project: Project, patch: Partial<Project>) => { try { await platformApi.updateProject({ ...project, ...patch }); await refetch(); } catch (reason) { setError(humanError(reason)); } };
@@ -66,7 +106,21 @@ export default function Projects() {
   };
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
-  return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" value={form().name} onInput={e=>setForm({...form(),name:e.currentTarget.value})}/><input placeholder="KEY" value={form().key} onInput={e=>setForm({...form(),key:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form><ul class="project-cards"><For each={items()}>{project=>{
+  return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
+    <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-issue counts are unavailable: {reason()}</p>}</Show>
+    <Show when={live().length}>
+      <div class="pf-summary">
+        <div class="pf-metric"><span class="pf-metric-num">{live().length}</span><span class="pf-metric-lbl">Active projects</span></div>
+        <div class="pf-metric"><span class="pf-metric-num">{countsFailed() ? "—" : openTotal()}</span><span class="pf-metric-lbl">Open issues</span></div>
+        <div class="pf-metric"><span class="pf-metric-num">{withDeadline()}</span><span class="pf-metric-lbl">Carrying a deadline</span></div>
+        <Show when={nextDeadline()} fallback={<div class="pf-metric"><span class="pf-metric-num">—</span><span class="pf-metric-lbl">Next deadline</span></div>}>{next=>{
+          const target=()=>({view:"Projects",entityType:"project",entityId:next().id});
+          return <a class="pf-metric pf-metric-link" href={linkProps(target()).href} onClick={event=>{linkProps(target()).onClick(event);setProjectId(next().id);}}>
+            <span class="pf-metric-num sm">{next().deadline}</span><span class="pf-metric-lbl">Next: {next().name}</span>
+          </a>;
+        }}</Show>
+      </div>
+    </Show><ul class="project-cards"><For each={items()}>{project=>{
       const open=(event:MouseEvent)=>{
         // The whole card selects the project — except where a real control lives
         // (deadline field, archive button, the per-project links).
@@ -81,6 +135,9 @@ export default function Projects() {
             onKeyDown={event=>{ if(event.key==="Enter"||event.key===" "){ event.preventDefault(); open(event as unknown as MouseEvent); } }}>
         <div class="project-card-head"><strong>{project.name}</strong><code>{project.key}</code></div>
         <Show when={project.description}><p>{project.description}</p></Show>
+        <Show when={!counts.loading && !countsFailed()}>
+          <p class="pf-open"><b>{openCount(project.id)}</b> open issues</p>
+        </Show>
         <div class="project-card-foot">
           <div class="project-deadline">
             <Show
