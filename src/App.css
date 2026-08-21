@@ -762,10 +762,12 @@ textarea:focus {
 }
 
 /* ── web-mode boot: auth check in flight ── */
-.space-shell-loading { height: 100vh; background: #0f1b33; }
+.space-shell-loading { height: 100vh; height: 100dvh; background: #0f1b33; }
 
 /* ── app shell: broad TOP navigation + central workspace ── */
-.space-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+/* 100dvh, not 100vh: on phones the URL bar shrinks the viewport, and 100vh
+   keeps the old taller value — the last rows sit under the browser chrome. */
+.space-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
 .space-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 7px; background: linear-gradient(135deg, var(--brand-teal), #0f9e8b); color: var(--brand-navy); font-family: var(--font-head); font-weight: 700; box-shadow: 0 2px 8px rgba(0,194,168,0.28); }
 
 /* top bar: brand · primary nav · search + compact menus */
@@ -858,7 +860,12 @@ a:hover { color: var(--text-strong); }
 .nav-footer-pw input { padding: 6px 8px; }
 .nav-footer-pw .error { background: var(--status-danger-bg); color: var(--status-danger-ink); padding: 5px 7px; border-radius: 5px; font-size: 11px; }
 .nav-footer-pw .ok { background: #1f4a2a; color: #b3ffc0; padding: 5px 7px; border-radius: 5px; font-size: 11px; }
-.workspace { min-width: 0; flex: 1; overflow: hidden; background: #12213d; display: flex; flex-direction: column; }
+.workspace { min-width: 0; flex: 1; min-height: 0; overflow: hidden; background: #12213d; display: flex; flex-direction: column; }
+/* Every view is a scroll container by default. Views that declare their own
+   height/overflow keep doing so; the ones that never did (calendar, documents,
+   meetings, metadata) used to be clipped by .workspace's overflow:hidden with
+   no way to reach their lower half. */
+.workspace > * { flex: 1 1 auto; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
 .workspace .app { height: 100%; }
 .workspace-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .workspace-body > * { flex: 1; min-height: 0; }
