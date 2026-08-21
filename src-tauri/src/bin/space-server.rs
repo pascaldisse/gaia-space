@@ -219,6 +219,10 @@ enum CommandPolicy {
     NotificationWrite,
     ProjectCreate,
     ProjectWrite,
+    ProjectRead,
+    ProjectMemberWrite,
+    BoardRead,
+    IssueRead,
     CalendarRead,
     ProjectTodoRead,
     SessionIdentityWrite,
@@ -234,6 +238,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
+        "create_board" | "create_issue" | "create_issue_status" => CommandPolicy::ProjectMemberWrite,
+        "get_project" | "list_boards" | "list_issue_statuses" => CommandPolicy::ProjectRead,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
@@ -263,16 +269,13 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_document" | "delete_document" => CommandPolicy::DocumentWrite,
         "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => CommandPolicy::Session,
-        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
-        | "create_board" => CommandPolicy::Session,
+        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint" => CommandPolicy::Session,
         "create_cf_definition"
         | "create_channel"
         | "create_deploy_target"
         | "create_entity_channel" => CommandPolicy::Session,
         "create_document_folder" => CommandPolicy::DocumentFolderCreate,
-        "create_issue"
-        | "create_issue_status"
-        | "create_message"
+        "create_message"
         | "create_package_repository"
         | "create_pipeline_script" => CommandPolicy::Session,
         "create_profile"
@@ -304,10 +307,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "emit_notification"
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
-        "get_channel" | "get_channel_by_entity" | "get_issue" | "get_issue_detail" => CommandPolicy::Session,
+        "get_channel" | "get_channel_by_entity" => CommandPolicy::Session,
+        "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
-        "get_profile" | "get_project" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
+        "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
         "goto_search" => CommandPolicy::SearchRead,
         "issue_time_total"
         | "join_channel"
@@ -315,12 +319,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
         "invite_meeting_participant" => CommandPolicy::MeetingWrite,
-        "list_backlog_issues"
-        | "list_board_columns"
-        | "list_board_issues"
-        | "list_boards"
-        | "list_cf_definitions"
-        | "list_channel_members" => CommandPolicy::Session,
+        "list_backlog_issues" | "list_board_columns" | "list_board_issues" => CommandPolicy::BoardRead,
+        "list_cf_definitions" | "list_channel_members" => CommandPolicy::Session,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -328,9 +328,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_deployments_for_target" => CommandPolicy::Session,
         "list_document_folders" => CommandPolicy::DocumentFolderReadList,
         "list_documents" => CommandPolicy::DocumentReadList,
-        "list_issue_statuses"
-        | "list_issues"
-        | "list_job_runs"
+        "list_job_runs"
         | "list_job_runs_for_script" => CommandPolicy::Session,
         "list_jobs"
         | "list_jobs_for_script"
@@ -341,8 +339,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_package_versions"
         | "list_pipeline_scripts"
         | "list_planning_tags"
-        | "list_profiles"
-        | "list_projects" => CommandPolicy::Session,
+        | "list_profiles" => CommandPolicy::Session,
+        "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
         | "list_review_discussions"
         | "list_review_participants"
@@ -467,6 +465,10 @@ fn project_owner(project_id: &str) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+fn issue_project(issue_id:&str)->Result<Option<String>,String>{db::conn().map_err(|e|e.to_string())?.query_row("SELECT project_id FROM issues WHERE id=?1",[issue_id],|r|r.get(0)).optional().map_err(|e|e.to_string())}
+fn board_project(board_id:&str)->Result<Option<String>,String>{db::conn().map_err(|e|e.to_string())?.query_row("SELECT project_id FROM boards WHERE id=?1",[board_id],|r|r.get(0)).optional().map_err(|e|e.to_string())}
+fn project_readable(user:&User,project_id:&str)->Result<bool,String>{Ok(user.role=="admin"||project_owner(project_id)?.is_some_and(|owner|owner==user.profile_id)||personal::project_member_by(project_id,&user.profile_id)?)}
+fn issue_id(body:&Value)->Option<String>{arg(body,"id").ok()}
 fn project_from_body(body: &Value) -> Result<(String, Option<String>), String> {
     let project = body.get("project").ok_or("invalid argument `project`")?;
     Ok((arg(project, "id")?, arg(project, "created_by")?))
@@ -511,6 +513,10 @@ fn authorize_command(
             }
             Ok(())
         }
+        CommandPolicy::ProjectRead => { let project_id: Option<String> = arg(body, "id").ok().or_else(|| arg(body, "project_id").ok().flatten()); let Some(project_id)=project_id else { return Err(err(StatusCode::FORBIDDEN,"project access denied")); }; if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
+        CommandPolicy::ProjectMemberWrite => { let project_id = body.get("input").and_then(|input| input.get("project_id").or_else(|| input.get("projectId"))).and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST,"project_id is required"))?; if project_readable(user,project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
+        CommandPolicy::IssueRead => { let project_id=if name=="list_issues" {arg(body,"project_id").ok().flatten()} else {issue_id(body).and_then(|id|issue_project(&id).ok().flatten())}; let Some(project_id)=project_id else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
+CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?;let Some(project_id)=board_project(&board_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
         CommandPolicy::TodoRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -599,7 +605,7 @@ fn authorize_command(
         CommandPolicy::MeetingRead => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if meetings::meeting_readable_by(&id,&user.profile_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{put_arg(body,"profile_id",json!(user.profile_id));Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting access denied"))}}
         CommandPolicy::MeetingWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;if !meetings::meeting_writable_by(&id,&user.profile_id,user.role=="admin").map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{return Err(err(StatusCode::FORBIDDEN,"meeting write denied"));}if name=="update_meeting"{let organizer=meetings::get_meeting(id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?.and_then(|m|m.organizer_id).ok_or_else(||err(StatusCode::FORBIDDEN,"meeting write denied"))?;body.get_mut("meeting").and_then(Value::as_object_mut).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid argument `meeting`"))?.insert("organizer_id".into(),json!(organizer));}Ok(())}
         CommandPolicy::MeetingParticipantWrite => {let id=meeting_id(body,name).ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid meeting id"))?;let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?;let allowed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)",params![id,user.profile_id],|r|r.get(0)).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()))?;if allowed{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"meeting participant access denied"))}}
-        CommandPolicy::SearchRead => {put_arg(body,"profile_id",json!(user.profile_id));Ok(())}
+        CommandPolicy::SearchRead => {put_arg(body,"profile_id",json!(user.profile_id));put_arg(body,"allow_all",json!(user.role=="admin"));Ok(())}
         CommandPolicy::Session => {
             if matches!(
                 name,
@@ -744,7 +750,8 @@ fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
 async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->impl IntoResponse{
     let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
     if let Err(e) = authorize_command(&user, &name, &mut body) { return e.into_response(); }
-    if name == "update_absence" { return absence_update(&user, &body); }
+    if name == "list_projects" { return match platform::list_projects() { Ok(projects) => Json(json!({"ok":true,"value":projects.into_iter().filter(|project| project_readable(&user,&project.id).unwrap_or(false)).collect::<Vec<_>>() })).into_response(), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response() }; }
+if name == "update_absence" { return absence_update(&user, &body); }
     if name == "delete_absence" { return absence_delete(&user, &body); }
     dispatch!(name.as_str(), body, {
     "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
@@ -825,7 +832,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     "get_review" => review::get_review(id: String),
     "get_role" => platform::get_role(id: String),
     "get_team" => platform::get_team(id: String),
-    "goto_search" => personal::goto_search_scoped(query: String, limit: Option<i64>, profile_id: String),
+    "goto_search" => personal::goto_search_scoped(query: String, limit: Option<i64>, profile_id: String, allow_all: bool),
     "invite_meeting_participant" => meetings::invite_meeting_participant(meeting_id: String, profile_id: String),
     "issue_time_total" => issues::issue_time_total(issue_id: String),
     "join_channel" => chat::join_channel(channel_id: String, profile_id: String),
@@ -1599,4 +1606,21 @@ mod tests {
         assert_eq!(stored_absence("absence-dora-own"), None);
         assert!(stored_absence("absence-dora-neighbour").is_some(), "the delete must not spill onto neighbouring rows");
     }
+
+    #[tokio::test]
+    async fn issue_reads_deny_nonmembers_and_allow_owner() {
+        let _serial = test_lock(); setup(); let c=db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('private','Private','PRIVATE','pa',1)",[]).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('secret','private',1,'Confidential',0)",[]).unwrap();
+        assert_eq!(call(cookie("tb"),"list_issues",json!({"project_id":"private"})).await.0,StatusCode::FORBIDDEN);
+        assert_eq!(call(cookie("tb"),"get_issue_detail",json!({"id":"secret"})).await.0,StatusCode::FORBIDDEN);
+        let (status,value)=call(cookie("ta"),"list_issues",json!({"project_id":"private"})).await; assert_eq!(status,StatusCode::OK,"{value}");
+    }
+
+    #[tokio::test]
+    async fn board_and_search_reads_do_not_leak_private_project_metadata() { let _serial=test_lock(); setup(); let c=db::conn().unwrap(); c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('private-board','Private board','PRIVATEBOARD','pa',1)",[]).unwrap(); c.execute("INSERT INTO boards(id,project_id,name,backlog_type,archived) VALUES('private-board-id','private-board','Private board','NONE',0)",[]).unwrap(); c.execute("INSERT INTO issues(id,project_id,number,title,description,archived) VALUES('private-board-issue','private-board',1,'BOARD-SECRET','board secret body',0)",[]).unwrap(); c.execute("INSERT INTO issue_board_positions(issue_id,board_id,position) VALUES('private-board-issue','private-board-id',0)",[]).unwrap(); for command in ["list_backlog_issues","list_board_columns","list_board_issues"] { let (status,value)=call(cookie("td"),command,json!({"board_id":"private-board-id"})).await; assert_eq!(status,StatusCode::FORBIDDEN,"{command}: {value}"); assert!(value.get("value").is_none(),"{command}: {value}"); } assert_eq!(call(cookie("ta"),"list_board_issues",json!({"board_id":"private-board-id"})).await.0,StatusCode::OK); let (status,value)=call(cookie("td"),"goto_search",json!({"query":"BOARD-SECRET","limit":10})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(value["value"].as_array().unwrap().is_empty(),"private issue leaked through search: {value}"); let (status,value)=call(cookie("ta"),"goto_search",json!({"query":"BOARD-SECRET","limit":10})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(value["value"].as_array().unwrap().iter().any(|hit|hit["id"]=="private-board-issue")); }
+
+    #[tokio::test]
+    async fn project_reads_are_centrally_scoped_for_owner_member_and_nonmember() { let _serial=test_lock(); setup(); let c=db::conn().unwrap(); c.execute("INSERT INTO projects(id,name,key,description,created_by,created_at) VALUES('private','Private','PRIVATE','confidential','pa',1)",[]).unwrap(); c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('private','pb')",[]).unwrap(); let (status,value)=call(cookie("td"),"list_projects",json!({})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(!value["value"].as_array().unwrap().iter().any(|p|p["id"]=="private")); let (status,value)=call(cookie("td"),"get_project",json!({"id":"private"})).await; assert_eq!(status,StatusCode::FORBIDDEN); assert!(value.get("value").is_none(),"{value}"); for token in ["ta","tb"] { assert_eq!(call(cookie(token),"get_project",json!({"id":"private"})).await.0,StatusCode::OK); } assert_eq!(call(cookie("td"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::FORBIDDEN); assert_eq!(call(cookie("tb"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::OK); }
+
 }

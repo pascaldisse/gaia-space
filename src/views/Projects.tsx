@@ -1,7 +1,7 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type Project } from "../api/platform";
-import { humanError, profileId, projectId as sessionProject, setProjectId } from "../session";
-import { linkProps, route } from "../router";
+import { humanError, profileId, setProjectId } from "../session";
+import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
 import "./Projects.css";
 
@@ -16,12 +16,12 @@ export default function Projects() {
     event.preventDefault(); const input = form();
     try {
       if (!input.name.trim() || !input.key.trim()) throw new Error("Project name and key are required.");
-      await platformApi.createProject({ id:newId(), name:input.name.trim(), key:input.key.trim().toUpperCase(), description:input.description.trim() || null, deadline:input.deadline || null, created_by:profileId() || null, archived:false });
-      setForm(empty()); await refetch();
+      const id=newId(); await platformApi.createProject({ id, name:input.name.trim(), key:input.key.trim().toUpperCase(), description:input.description.trim() || null, deadline:input.deadline || null, created_by:profileId() || null, archived:false });
+      setForm(empty()); await refetch(); setProjectId(id); navigate({view:"Project Steering",projectId:id});
     } catch (reason) { setError(humanError(reason)); }
   };
   const update = async (project: Project, patch: Partial<Project>) => { try { await platformApi.updateProject({ ...project, ...patch }); await refetch(); } catch (reason) { setError(humanError(reason)); } };
-  const openId = () => route().entityId || sessionProject();
+  const openId = () => route().entityId;
   const openProject = () => items()?.find(p => p.id === openId());
   return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" value={form().name} onInput={e=>setForm({...form(),name:e.currentTarget.value})}/><input placeholder="KEY" value={form().key} onInput={e=>setForm({...form(),key:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form><ul class="project-cards"><For each={items()}>{project=>{
       const open=(event:MouseEvent)=>{
@@ -44,7 +44,7 @@ export default function Projects() {
         </div>
       </li>;
     }}</For></ul>
-    <Show when={openProject()}>{project=>
+    <Show when={route().entityId && !openProject()}><p class="error" role="alert">This project does not exist or is unavailable.</p></Show><Show when={openProject()}>{project=>
       <section class="project-open">
         <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><a {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</a></header>
         <Boards/>

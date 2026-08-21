@@ -4,7 +4,7 @@ import {
   createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Projects", "Project Tasks", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
+const VIEWS = ["Dashboard", "To-Do", "Projects", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -265,5 +265,14 @@ describe("links", () => {
     const href = hrefFor({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
     expect(href).toBe("/space/projects/p-1/issues/i-1");
     expect(href).not.toContain("#");
+  });
+});
+
+describe("project workspace routes", () => {
+  test("steering and settings keep canonical project context", () => {
+    expect(buildPath({ view: "Project Steering", projectId: "p-1" })).toBe("projects/p-1/steering");
+    expect(parsePath("projects/p-1/steering")).toMatchObject({ view: "Project Steering", projectId: "p-1" });
+    expect(buildPath({ view: "Project Settings", projectId: "p-1" })).toBe("projects/p-1/settings");
+    expect(parsePath("projects/p-1/settings")).toMatchObject({ view: "Project Settings", projectId: "p-1" });
   });
 });

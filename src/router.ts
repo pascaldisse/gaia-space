@@ -1,4 +1,4 @@
-import { createEffect, createSignal } from "solid-js";
+import { createEffect, createSignal, untrack } from "solid-js";
 
 // ---------------------------------------------------------------------------
 // Semantic path routing.
@@ -102,7 +102,9 @@ export function parsePath(path: string): Route {
     const projectId = rest[0];
     if (rest[1] === "issues" && rest[2])
       return norm({ view: "Issues", entityType: "issue", entityId: rest.slice(2).join("/"), projectId });
-    if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks", projectId });
+    if (rest.length === 2 && rest[1] === "steering") return norm({ view: "Project Steering", projectId });
+if (rest.length === 2 && rest[1] === "settings") return norm({ view: "Project Settings", projectId });
+if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks", projectId });
     if (rest.length === 2 && rest[1] === "calendar") return norm({ view: "Calendar", projectId });
     if (rest.length === 1)
       return norm({ view: "Projects", entityType: "project", entityId: projectId });
@@ -134,7 +136,9 @@ export function buildPath(r: Route): string {
   const slug = viewToSlug[view] ?? toSlug(view);
   const desc = r.entityType ? entityRoutes[r.entityType] : undefined;
 
-  if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
+  if (r.view === "Project Steering" && r.projectId) return `projects/${enc(r.projectId)}/steering`;
+if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
+if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
   if (desc && r.entityId) {
     if (desc.parent === "project" && r.projectId)
@@ -251,12 +255,16 @@ export function linkProps(r: Route) {
   };
 }
 
-/** Deep-link consumer: open(id) when the route targets this entity type, clear() when it drops it. */
+/** Deep-link consumer: open(id) when the route targets this entity type, clear() when it drops it.
+ *  The handler runs untracked: a deep link reacts to the URL and to nothing else.
+ *  Tracking whatever the handler happens to read (resources, session project, the
+ *  selection it writes itself) turns any failing read — e.g. a 403 on a project the
+ *  session may not see — into an unbounded open/refetch/open loop against the server. */
 export function useDeepLink(entityType: string, open: (id: string) => void, clear?: () => void) {
   createEffect(() => {
     const r = route();
-    if (r.entityType === entityType && r.entityId) open(r.entityId);
-    else clear?.();
+    if (r.entityType === entityType && r.entityId) untrack(() => open(r.entityId!));
+    else untrack(() => clear?.());
   });
 }
 
