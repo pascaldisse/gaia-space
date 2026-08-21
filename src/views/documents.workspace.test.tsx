@@ -3,7 +3,7 @@ import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Documents from "./Documents";
-import { setProfileId } from "../session";
+import { setProfileId, setProjectId } from "../session";
 import { navigate, registerViews } from "../router";
 
 // The Documents workspace is session-locked in web mode: the personal container is the
@@ -18,6 +18,8 @@ afterEach(() => {
   document.body.innerHTML = "";
   globalThis.fetch = realFetch;
   delete (window as any).__TAURI_INTERNALS__;
+  // Session state is process-global: hand it back the way you found it.
+  setProjectId(""); setProfileId("");
   window.history.replaceState({}, "", "/");
 });
 

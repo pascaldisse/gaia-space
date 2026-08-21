@@ -3,7 +3,7 @@ import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Projects from "./Projects";
-import { setProfileId } from "../session";
+import { setProfileId, setProjectId } from "../session";
 
 // Desktop (Tauri, local sqlite) has no server session to mint an owner from:
 // the only identity that exists there is the locally selected profile. If the
@@ -26,6 +26,8 @@ afterEach(() => {
   document.body.innerHTML = ""; calls.length = 0;
   globalThis.fetch = realFetch;
   delete (window as any).__TAURI_INTERNALS__;
+  // Session state is process-global: hand it back the way you found it.
+  setProjectId(""); setProfileId("");
 });
 
 // Desktop transport: the real Tauri IPC hook the shell installs on `window`.

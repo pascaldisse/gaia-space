@@ -3,7 +3,7 @@ import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Projects, { deriveKey } from "./Projects";
-import { setProfileId } from "../session";
+import { setProfileId, setProjectId } from "../session";
 
 // The portfolio strip and the per-card open-issue count are read off ONE issue
 // read plus ONE status read, whatever the number of projects. A failed count is
@@ -28,6 +28,8 @@ afterEach(() => {
   document.body.innerHTML = ""; calls.length = 0;
   reply = () => [];
   delete (window as any).__TAURI_INTERNALS__;
+  // Session state is process-global: hand it back the way you found it.
+  setProjectId(""); setProfileId("");
 });
 
 const settle = () => new Promise((done) => setTimeout(done, 40));

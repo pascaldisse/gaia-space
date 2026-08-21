@@ -3,7 +3,7 @@ import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Projects from "./Projects";
-import { setProfileId } from "../session";
+import { setProfileId, setProjectId } from "../session";
 
 // Editing a deadline that already exists is a different write from the first one: it goes
 // through the narrow compare-and-set command, it is offered only to the owner (or an admin),
@@ -29,6 +29,8 @@ afterEach(() => {
   document.body.innerHTML = ""; calls.length = 0;
   reply = () => [];
   delete (window as any).__TAURI_INTERNALS__;
+  // Session state is process-global: hand it back the way you found it.
+  setProjectId(""); setProfileId("");
 });
 
 const settle = () => new Promise((done) => setTimeout(done, 40));

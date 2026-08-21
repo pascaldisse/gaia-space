@@ -3,7 +3,7 @@ import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Boards from "./Boards";
-import { setProjectId } from "../session";
+import { setProfileId, setProjectId } from "../session";
 
 // A column with no mapped status silently refused every issue — the server answers
 // "Column needs at least one mapped status before moving issues" (src-tauri/src/issues.rs).
@@ -12,7 +12,10 @@ import { setProjectId } from "../session";
 const realFetch = globalThis.fetch;
 let dispose: (() => void) | undefined;
 let calls: { cmd: string; body: any }[] = [];
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; globalThis.fetch = realFetch; calls = []; });
+// The session is process-global and localStorage-backed: a test that sets it and
+// walks away decides what the NEXT file renders (a leaked project id made the
+// projects view mount a whole board and the deadline control vanished).
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; globalThis.fetch = realFetch; calls = []; setProjectId(""); setProfileId(""); });
 
 const open = { id: "c-open", board_id: "b1", name: "open", ordering: 0, status_ids: ["s-open"] };
 const progress = { id: "c-prog", board_id: "b1", name: "in progress", ordering: 1, status_ids: [] as string[] };
