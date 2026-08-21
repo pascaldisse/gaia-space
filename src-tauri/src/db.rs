@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 12;
+pub const SCHEMA_VERSION: i64 = 13;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -142,6 +142,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 12 {
         tx.execute_batch(SCHEMA_V12)?;
     }
+    // V13: read-only external calendar feeds (calendar_feeds.rs) — a sealed
+    // iCal URL per profile, and a derived cache of the events it last parsed
+    // to. The cache is a projection (delete+reinsert on every sync); the feed
+    // row and its sealed URL are the only durable state.
+    if version < 13 {
+        tx.execute_batch(SCHEMA_V13)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -244,6 +251,12 @@ CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES is
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
 "#;
+pub(crate) const SCHEMA_V13: &str = r#"
+CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS calendar_feeds_profile ON calendar_feeds(profile_id);
+CREATE TABLE IF NOT EXISTS calendar_feed_events (feed_id TEXT NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE, uid TEXT NOT NULL, occurrence_key TEXT NOT NULL, title TEXT NOT NULL, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day_date TEXT, PRIMARY KEY(feed_id, uid, occurrence_key));
+CREATE INDEX IF NOT EXISTS calendar_feed_events_range ON calendar_feed_events(feed_id, starts_at);
+"#;
 pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
@@ -339,6 +352,26 @@ mod tests {
     }
 
     #[test]
+    fn v13_adds_calendar_feeds_and_cascades_their_cached_events() {
+        let temp = TempDb::new("gaia-space-v13-calendar-feeds");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)", []).unwrap();
+        // Simulate a database stamped at V12 and migrate forward again.
+        conn.pragma_update(None, "user_version", 12).unwrap();
+        migrate(&conn).expect("v13");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        conn.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count) VALUES('f1','pa','Mine','sealed',0,0)", []).unwrap();
+        conn.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f1','u1','1','x',0,NULL,NULL)", []).unwrap();
+        conn.execute("DELETE FROM calendar_feeds WHERE id='f1'", []).unwrap();
+        let orphans: i64 = conn.query_row("SELECT count(*) FROM calendar_feed_events WHERE feed_id='f1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphans, 0, "junction-shaped cache rows never survive their feed");
+        migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -351,7 +384,7 @@ mod tests {
         migrate(&conn).expect("v11");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
-        assert_eq!(SCHEMA_VERSION, 12);
+        assert_eq!(SCHEMA_VERSION, 13);
         let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn.query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();

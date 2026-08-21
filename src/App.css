@@ -113,6 +113,10 @@
   --cal-deadline-bg: rgba(224,96,122,.16);
   --cal-deadline-chip-bg: rgba(224,96,122,.2);
   --cal-deadline-ink: #f0a3b3;
+  --cal-external: #a98add;
+  --cal-external-bg: rgba(169,138,221,.16);
+  --cal-external-chip-bg: rgba(169,138,221,.2);
+  --cal-external-ink: #cbb3f0;
 
   /* ── radii (harvest: chip 999 · control 12 · option 8 · event 3) ── */
   --radius-chip: 999px;

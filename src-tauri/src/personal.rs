@@ -1,5 +1,5 @@
 //! Personal productivity, organization availability, notifications, and Goto search.
-use crate::{db, meetings};
+use crate::{calendar_feeds, db, meetings};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -451,6 +451,9 @@ pub fn calendar_aggregate_on(c: &Connection, profile_id: &str, range_start: i64,
     for row in err(todos.query_map(params![day_start, day_end, profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))))? { let (id,title,date,project_id)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid todo due date")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{source_id:id.clone(),id,kind:"task".into(),title,starts_at,ends_at:None,project_id,date:Some(date)}); }
     let mut deadlines = err(c.prepare("SELECT p.id,p.name,p.deadline FROM projects p WHERE p.archived=0 AND p.deadline IS NOT NULL AND p.deadline>=?2 AND p.deadline<?3 AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))"))?;
     for row in err(deadlines.query_map(params![profile_id, day_start, day_end], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))))? { let (id,name,date)=row.map_err(|e|e.to_string())?; let starts_at=chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").map_err(|_|"Invalid project deadline")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp(); items.push(CalendarItem{id:format!("deadline-{id}"),source_id:id.clone(),kind:"deadline".into(),title:format!("{name} deadline"),starts_at,ends_at:None,project_id:Some(id),date:Some(date)}); }
+    // Read-only synced feeds (Settings → Connected calendars): own subscriptions only,
+    // same overlap/day-window rules as meetings and tasks/deadlines above.
+    items.extend(calendar_feeds::external_items_on(c, profile_id, range_start, range_end, &day_start, &day_end)?);
     items.sort_by_key(|item| item.starts_at);
     Ok(items)
 }

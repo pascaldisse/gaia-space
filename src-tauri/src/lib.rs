@@ -21,6 +21,10 @@ pub mod meetings;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calendar_feeds;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod ics;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod platform;
@@ -277,6 +281,10 @@ pub fn run() {
             personal::delete_subscription_setting,
             personal::goto_search,
             personal::dashboard_aggregate,
+            calendar_feeds::list_calendar_feeds,
+            calendar_feeds::save_calendar_feed,
+            calendar_feeds::delete_calendar_feed,
+            calendar_feeds::sync_calendar_feed,
         ])
         .setup(|app| {
             let conn = db::connection(app.handle()).map_err(|e| std::io::Error::other(e))?;

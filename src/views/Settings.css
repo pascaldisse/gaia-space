@@ -6,3 +6,11 @@
 .settings-groups{display:grid;gap:2px}
 .settings-sub{display:block;color:var(--text-faint);font-style:normal;font-size:12px;margin-top:2px}
 .settings-view select{min-width:220px}
+.feed-list{margin:0 0 12px}
+.feed-row{justify-content:space-between;border-bottom:1px solid var(--surface-line,var(--surface-border));padding:10px 0}
+.feed-row:last-child{border-bottom:0}
+.feed-info{display:flex;flex-direction:column;gap:2px}
+.feed-error{color:var(--cal-deadline-ink,#f0a3b3)}
+.feed-actions{display:flex;gap:8px;flex-shrink:0}
+.feed-connect{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.feed-connect input{flex:1 1 220px;min-width:180px}

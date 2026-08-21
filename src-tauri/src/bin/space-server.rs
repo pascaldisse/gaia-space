@@ -1,7 +1,7 @@
 use axum::{extract::{ConnectInfo, Path, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::IntoResponse, routing::{get, patch, post}, Json, Router};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
-use gaia_space_lib::{db, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
+use gaia_space_lib::{db, calendar_feeds, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -209,6 +209,9 @@ fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
 fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
     personal::todo_owner(todo_id).ok().flatten().is_some_and(|owner| owner == profile_id)
 }
+fn calendar_feed_owned_by(profile_id: &str, feed_id: &str) -> bool {
+    calendar_feeds::feed_owner(feed_id).ok().flatten().is_some_and(|owner| owner == profile_id)
+}
 fn notification_owned_by(profile_id: &str, notification_id: &str) -> bool {
     let Ok(c) = db::conn() else { return false };
     c.query_row("SELECT EXISTS(SELECT 1 FROM notifications WHERE id=?1 AND recipient_id=?2)", params![notification_id, profile_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
@@ -249,6 +252,7 @@ enum CommandPolicy {
     DocumentCreate, DocumentReadList, DocumentRead, DocumentWrite,
     DocumentFolderCreate, DocumentFolderReadList, DocumentFolderWrite,
     MeetingReadList, MeetingRead, MeetingWrite, MeetingParticipantWrite, SearchRead, AbsenceWrite,
+    CalendarFeedRead, CalendarFeedUpsert, CalendarFeedOwnerAction,
     Unavailable,
 }
 
@@ -263,6 +267,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
         "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
+        "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
+        "save_calendar_feed" => CommandPolicy::CalendarFeedUpsert,
+        "delete_calendar_feed" | "sync_calendar_feed" => CommandPolicy::CalendarFeedOwnerAction,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
         "create_todo" => CommandPolicy::TodoCreate,
         "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
@@ -625,6 +632,30 @@ CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|
         CommandPolicy::TodoCreate => Ok(()),
         CommandPolicy::CalendarRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        // List: same shape as CalendarRead. `id` present in `input` (an existing
+        // feed) is checked against the DB-recorded owner before profile_id is
+        // stamped on — admin bypasses ownership but never authorship.
+        CommandPolicy::CalendarFeedRead => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::CalendarFeedUpsert => {
+            let input = body.get_mut("input").and_then(Value::as_object_mut).ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
+            if let Some(id) = input.get("id").and_then(Value::as_str).map(str::to_owned) {
+                if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+                    return Err(err(StatusCode::FORBIDDEN, "only the owner can change this calendar feed"));
+                }
+            }
+            input.insert("profile_id".into(), json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::CalendarFeedOwnerAction => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+                return Err(err(StatusCode::FORBIDDEN, "only the owner can change this calendar feed"));
+            }
             Ok(())
         }
         CommandPolicy::ProjectTodoRead => {
@@ -1018,6 +1049,10 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>),
+    "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
+    "save_calendar_feed" => calendar_feeds::save_calendar_feed(input: calendar_feeds::CalendarFeedInput),
+    "delete_calendar_feed" => calendar_feeds::delete_calendar_feed(id: String),
+    "sync_calendar_feed" => calendar_feeds::sync_calendar_feed(id: String),
     "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
     "mark_notification_read" => personal::mark_notification_read(id: String),
@@ -1168,6 +1203,55 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "an account admin may still grant the role");
     }
 
+    #[tokio::test]
+    async fn calendar_feed_endpoints_bind_the_session_profile_and_refuse_foreign_feeds() {
+        let _serial = test_lock();
+        setup();
+        // A real key is required to seal anything; a test-only constant is fine
+        // here — this process' test binary never runs `secretbox::tests` (that
+        // module lives in the separate `--lib` test binary), so there is no
+        // cross-test race on the env var.
+        std::env::set_var(gaia_space_lib::secretbox::KEY_ENV, "11".repeat(32));
+        // Unauthenticated access is rejected before any command runs.
+        let (status, _) = call(HeaderMap::new(), "list_calendar_feeds", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        // A malformed address is refused before anything is stored.
+        let (status, value) = call(cookie("ta"), "save_calendar_feed", json!({"input":{"label":"Mine","ics_url":"not-a-url"}})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{value}");
+        // Alice creates a feed; the server binds it to her own profile regardless
+        // of what the client sends, and syncs it immediately. The address is
+        // guaranteed (RFC 2606) never to resolve, so the fetch fails
+        // deterministically — which must surface as a loud `last_error` on the
+        // still-created row, never a hard command failure and never a silent one.
+        let (status, value) = call(cookie("ta"), "save_calendar_feed", json!({"input":{"profile_id":"pb","label":"Mine","ics_url":"https://calendar.example.invalid/basic.ics"}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let feed = value["value"].clone();
+        assert_eq!(feed["profile_id"], json!("pa"), "client-supplied owner must be ignored");
+        assert!(feed["last_error"].as_str().is_some(), "an unreachable address must fail loudly, not silently: {feed}");
+        let feed_id = feed["id"].as_str().unwrap().to_string();
+        // The URL itself is never handed back to any client, sealed or otherwise.
+        assert!(feed.get("ics_url").is_none());
+        assert!(feed.get("ics_url_sealed").is_none());
+        // Another profile cannot see, sync, or delete Alice's feed.
+        let (status, value) = call(cookie("tb"), "list_calendar_feeds", json!({"profile_id":"pa"})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty(), "a forged profile_id must not reveal another profile's feeds");
+        let (status, _) = call(cookie("tb"), "sync_calendar_feed", json!({"id":feed_id})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("tb"), "delete_calendar_feed", json!({"id":feed_id})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Unknown ids are answered identically, disclosing nothing.
+        let (status, _) = call(cookie("tb"), "delete_calendar_feed", json!({"id":"no-such-feed"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // The owner may sync and delete her own feed.
+        let (status, value) = call(cookie("ta"), "sync_calendar_feed", json!({"id":feed_id})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, _) = call(cookie("ta"), "delete_calendar_feed", json!({"id":feed_id})).await;
+        assert_eq!(status, StatusCode::OK);
+        let c = db::conn().unwrap();
+        let left: i64 = c.query_row("SELECT count(*) FROM calendar_feeds WHERE id=?1", [&feed_id], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+    }
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
         let _serial = test_lock();

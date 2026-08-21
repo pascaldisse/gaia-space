@@ -153,7 +153,7 @@ return <section class="calendar-view">
 <span class="cal-agenda-time">{kindLabels[item.kind]}{item.kind==="meeting" ? ` · ${new Date(item.starts_at*1000).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})}` : item.date ? ` · ${item.date}` : ""}</span>
 <strong>{item.title}</strong>
 </button>
-<a class="cal-agenda-link" {...itemHref(item)}>Open</a>
+<Show when={item.kind!=="external"}><a class="cal-agenda-link" {...itemHref(item)}>Open</a></Show>
 </li>}</For>
 </ul>
 </Show>
@@ -202,7 +202,7 @@ return <section class="calendar-view">
 }</Show>
 <Show when={composerDay()?undefined:selected()}>{event=>
 <aside class="calendar-detail">
-<Show when={draft()} fallback={<div><h2>{event().title}</h2><p><span class={`cal-tag ${event().kind}`}>{kindLabels[event().kind]}</span> {event().date ?? new Date(event().starts_at*1000).toLocaleString()}</p><Show when={event().kind!=="meeting"}><p class="hint">Open the owning view to edit this item.</p></Show><a {...itemHref(event())}>Open this item</a><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
+<Show when={draft()} fallback={<div><h2>{event().title}</h2><p><span class={`cal-tag ${event().kind}`}>{kindLabels[event().kind]}</span> {event().date ?? new Date(event().starts_at*1000).toLocaleString()}</p><Show when={event().kind==="external"}><p class="hint">Synced from a connected calendar (read-only) — edit it at the source; see Settings to manage the connection.</p></Show><Show when={event().kind!=="meeting"&&event().kind!=="external"}><p class="hint">Open the owning view to edit this item.</p></Show><Show when={event().kind!=="external"}><a {...itemHref(event())}>Open this item</a></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
 {item=><div class="meeting-detail">
 <div class="detail-actions"><button onClick={save}>Save</button><button class="danger" onClick={archive}>Archive</button><button onClick={()=>{setSelected(undefined);setDraft(undefined)}}>Close</button></div>
 <input class="meeting-title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/>
