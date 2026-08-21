@@ -201,7 +201,8 @@ export default function Boards() {
 function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; onOpen: () => void; targets: BoardColumn[]; onMove: (columnId: string) => void }) {
   const [detail] = createResource(() => props.issue.id, id => planningApi.issue(id));
   const [items] = createResource(() => detail()?.checklists?.[0]?.id, id => id ? planningApi.items(id) : Promise.resolve([]));
-  const assignee = () => { const id = props.issue.assignee_id; if (!id) return undefined; const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
+  const nameOf = (id: string) => { const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
+  const people = () => props.issue.assignee_ids?.length ? props.issue.assignee_ids : (props.issue.assignee_id ? [props.issue.assignee_id] : []);
   const status = () => props.statuses?.find(s => s.id === props.issue.status_id);
   const doneCount = () => items()?.filter(i => i.item_done).length ?? 0;
   const overdue = () => !!props.issue.due_date && props.issue.due_date < new Date().toISOString().slice(0, 10);
@@ -214,7 +215,7 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; 
     <div class="card-meta">
       <Show when={props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
       <Show when={props.issue.due_date}>{due => <span classList={{ "task-tag": true, due: true, overdue: overdue() }}>{due()}</span>}</Show>
-      <Show when={assignee()}>{name => <span class="task-tag assignee">{name()}</span>}</Show>
+      <For each={people()}>{id => <span class="task-tag assignee">{nameOf(id)}</span>}</For>
       <Show when={items()?.length}><span class="task-tag checklist">☑ {doneCount()}/{items()!.length}</span></Show>
       <Show when={detail()?.children?.length}><span class="task-tag sub">⊞ {detail()!.children.length}</span></Show>
     </div>

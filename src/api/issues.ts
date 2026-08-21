@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; priority:string|null; archived:boolean };
+// `assignee_ids` is the truth (an issue is worked by people); `assignee_id` is the
+// first of them and stays for legacy filters.
+export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; priority:string|null; archived:boolean; assignee_ids:string[] };
 export type Status = { id:string; project_id:string; name:string; resolved:boolean; color:string; ordering:number };
 export type Board = { id:string; project_id:string; name:string; backlog_type:string; archived:boolean };
 export type BoardColumn = { id:string; board_id:string; name:string; ordering:number; status_ids:string[] };
@@ -21,7 +23,9 @@ export const planningApi = {
     const issue = (raw.issue ?? raw) as Issue;
     return { issue, tags: (raw.tags as PlanningTag[]) ?? [], checklists: (raw.checklists as Checklist[]) ?? [], time_total_minutes: (raw.time_total_minutes as number) ?? 0, children: (raw.children as Issue[]) ?? [] };
   },
-  createIssue: (input: Omit<Issue,"id"|"number"> & { id?:string }) => call<Issue>("create_issue", { input }),
+  createIssue: (input: Omit<Issue,"id"|"number"|"assignee_ids"> & { id?:string; assignee_ids?:string[] }) => call<Issue>("create_issue", { input }),
+  assignees: (issue_id:string) => call<string[]>("list_issue_assignees", { issueId: issue_id }),
+  setAssignees: (issue_id:string, profile_ids:string[]) => call<string[]>("set_issue_assignees", { issueId: issue_id, profileIds: profile_ids }),
   updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),
   statuses: (project_id?:string) => call<Status[]>("list_issue_statuses", {projectId:project_id}),
   createStatus: (input: Omit<Status,"id"|"ordering"> & {id?:string;ordering?:number}) => call<Status>("create_issue_status", {input}),

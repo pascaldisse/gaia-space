@@ -22,3 +22,14 @@
 .checklist-item.done span { text-decoration: line-through; color: var(--text-faint); }
 .checklist .inline-form { display: flex; gap: 6px; margin-top: 4px; }
 .checklist .inline-form input { flex: 1; min-width: 0; font-size: 12.5px; }
+
+/* A sub-item is an issue: it opens, and it shows who works it. */
+.idp-back { margin-right: auto; font-size: 12px; }
+.idp-child-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.idp-child.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 13px; text-align: left; }
+.idp-child.link:hover { text-decoration: underline; }
+.idp-child-people { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+.assignee-chips { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-hover); color: #c9d6f0; border: 1px solid #3a4f80; border-radius: 12px; padding: 3px 8px 3px 11px; font-size: 12px; }
+.assignee-chip button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; width: auto; }
+.assignee-chip button:hover { color: #fff; }

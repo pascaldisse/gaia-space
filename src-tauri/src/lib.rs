@@ -120,6 +120,8 @@ pub fn run() {
             issues::get_issue,
             issues::create_issue,
             issues::update_issue,
+            issues::set_issue_assignees,
+            issues::list_issue_assignees,
             issues::list_issue_statuses,
             issues::list_boards,
             issues::list_sprints,

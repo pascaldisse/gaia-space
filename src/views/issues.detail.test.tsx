@@ -4,6 +4,7 @@ mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import IssueDetail from "./IssueDetail";
 import { planningApi } from "../api/issues";
+import { reloadProfiles } from "../session";
 
 // `get_issue_detail` serialises the issue FLATTENED into the detail object
 // (`#[serde(flatten)]` in src-tauri/src/issues.rs). The client used to read
@@ -16,16 +17,25 @@ afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""
 
 const flat = {
   id: "i1", project_id: "p1", number: 3, title: "test issue", description: "the body",
-  status_id: "s1", assignee_id: "pa", created_by: "pa", due_date: "2026-08-30", priority: "HIGH", archived: false,
+  status_id: "s1", assignee_id: "pa", assignee_ids: ["pa", "pb"], created_by: "pa", due_date: "2026-08-30", priority: "HIGH", archived: false,
   tags: [{ id: "t1", project_id: "p1", parent_id: null, name: "bug", archived: false }],
   checklists: [{ id: "c1", issue_id: "i1", title: "Acceptance", ordering: 0 }],
   time_total_minutes: 45,
-  children: [{ id: "i2", project_id: "p1", number: 4, title: "sub work", description: null, status_id: null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false }],
+  children: [{ id: "i2", project_id: "p1", number: 4, title: "sub work", description: null, status_id: null, assignee_id: "pb", assignee_ids: ["pb"], created_by: null, due_date: "2026-09-01", priority: null, archived: false }],
 };
+const child = { ...flat.children[0], tags: [], checklists: [], time_total_minutes: 0, children: [] };
+const people = [
+  { id: "pa", username: "alice", display_name: "Alice", archived: false, created_at: 0 },
+  { id: "pb", username: "bob", display_name: "Bob", archived: false, created_at: 0 },
+  { id: "pd", username: "dora", display_name: "Dora", archived: false, created_at: 0 },
+];
 
+let sent: { cmd: string; body: any }[] = [];
 const serve = (table: Record<string, unknown>) => {
-  globalThis.fetch = (async (url: any) => {
+  sent = [];
+  globalThis.fetch = (async (url: any, init: any) => {
     const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+    sent.push({ cmd, body: init?.body ? JSON.parse(init.body) : {} });
     return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
   }) as any;
 };
@@ -67,5 +77,59 @@ describe("issue detail contract", () => {
     expect(host.textContent).toContain("bug");
     const priority = [...host.querySelectorAll("select")].find(s => [...s.options].some(o => o.value === "URGENT"))!;
     expect(priority.value).toBe("HIGH");
+  });
+
+  test("an issue carries several people, and only project members can be added", async () => {
+    serve({ get_issue_detail: flat, list_profiles: people, list_project_member_ids: ["pa", "pb"], set_issue_assignees: ["pa", "pb", "pd"] });
+    await reloadProfiles();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <IssueDetail issueId="i1" />, host);
+    await settle();
+
+    // Both assignees are shown as removable chips — not one dropdown value.
+    const chips = [...host.querySelectorAll(".assignee-chip")].map(c => c.textContent);
+    expect(chips.length).toBe(2);
+    expect(chips.join(" ")).toContain("Alice");
+    expect(chips.join(" ")).toContain("Bob");
+    expect(host.textContent).toContain("Assigned to Alice, Bob");
+
+    // The add list offers project members who are not already on the issue — never outsiders.
+    const add = host.querySelector('select[aria-label="Add assignee"]') as HTMLSelectElement;
+    const offered = [...add.options].map(o => o.textContent);
+    expect(offered).not.toContain("Alice");
+    expect(offered).not.toContain("Dora");
+
+    // Removing one writes the remaining list, never a single id.
+    (host.querySelector('.assignee-chip button[aria-label="Remove Alice"]') as HTMLButtonElement).click();
+    await settle();
+    const write = sent.find(c => c.cmd === "set_issue_assignees");
+    expect(write?.body.profileIds).toEqual(["pb"]);
+  });
+
+  test("a sub-issue opens as the issue it is, with its own people, and comes back", async () => {
+    serve({ get_issue_detail: flat, list_profiles: people, list_project_member_ids: ["pa", "pb"] });
+    await reloadProfiles();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <IssueDetail issueId="i1" />, host);
+    await settle();
+
+    // The sub-item shows who works it before you even open it.
+    expect(host.querySelector(".idp-child-people")?.textContent).toContain("Bob");
+
+    serve({ get_issue_detail: child, list_profiles: people, list_project_member_ids: ["pa", "pb"] });
+    (host.querySelector(".idp-child.link") as HTMLButtonElement).click();
+    await settle();
+
+    // It is a full issue surface: its own number, description, dates, assignees.
+    expect((host.querySelector(".idp-title") as HTMLInputElement).value).toBe("sub work");
+    expect((host.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-09-01");
+    expect([...host.querySelectorAll(".assignee-chip")].map(c => c.textContent).join(" ")).toContain("Bob");
+
+    serve({ get_issue_detail: flat, list_profiles: people, list_project_member_ids: ["pa", "pb"] });
+    (host.querySelector(".idp-back") as HTMLButtonElement).click();
+    await settle();
+    expect((host.querySelector(".idp-title") as HTMLInputElement).value).toBe("test issue");
   });
 });

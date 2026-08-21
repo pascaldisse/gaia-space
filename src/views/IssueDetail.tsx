@@ -1,6 +1,6 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Checklist, type ChecklistItem, type Issue, type Status } from "../api/issues";
-import { ProfilePicker } from "../components/Pickers";
+import { personalApi } from "../api/personal";
 import { humanError, profiles } from "../session";
 import "./IssueDetail.css";
 
@@ -9,9 +9,23 @@ import "./IssueDetail.css";
  *  used by the board and by any other view that opens an issue. */
 export default function IssueDetail(props: { issueId: string; statuses?: Status[]; onChanged?: () => void; onClose?: () => void }) {
   const [error, setError] = createSignal("");
-  const [detail, { refetch }] = createResource(() => props.issueId, id => id ? planningApi.issue(id) : Promise.resolve(null));
+  // A sub-item IS an issue: opening one shows this same surface, with a way back.
+  const [openId, setOpenId] = createSignal<string>();
+  const [trail, setTrail] = createSignal<{ id: string; label: string }[]>([]);
+  const currentId = () => openId() ?? props.issueId;
+  const [detail, { refetch }] = createResource(currentId, id => id ? planningApi.issue(id) : Promise.resolve(null));
   const [draft, setDraft] = createSignal<Issue>();
   const issue = () => draft() ?? detail()?.issue;
+  const [members] = createResource(() => issue()?.project_id, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
+  const assignees = () => issue()?.assignee_ids ?? [];
+  const setAssignees = async (ids: string[]) => {
+    const current = issue(); if (!current) return;
+    setDraft({ ...current, assignee_ids: ids, assignee_id: ids[0] ?? null });
+    try { await planningApi.setAssignees(current.id, ids); setDraft(undefined); await refetch(); props.onChanged?.(); }
+    catch (reason) { setError(humanError(reason)); setDraft(undefined); await refetch(); }
+  };
+  const openChild = (child: Issue) => { const from = issue(); if (from) setTrail([...trail(), { id: from.id, label: `#${from.number} ${from.title}` }]); setDraft(undefined); setOpenId(child.id); };
+  const back = () => { const path = trail(); const previous = path[path.length - 1]; if (!previous) return; setTrail(path.slice(0, -1)); setDraft(undefined); setOpenId(path.length === 1 ? undefined : previous.id); };
   const [checklistTitle, setChecklistTitle] = createSignal("");
   const [minutes, setMinutes] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
@@ -21,7 +35,7 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
     const parent = issue(); const title = childTitle().trim();
     if (!parent || !title) return;
     try {
-      const child = await planningApi.createIssue({ project_id: parent.project_id, title, description: null, status_id: parent.status_id, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
+      const child = await planningApi.createIssue({ project_id: parent.project_id, title, description: null, status_id: parent.status_id, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false, assignee_ids: [] });
       await planningApi.addChild(parent.id, child.id);
       setChildTitle(""); await refetch(); props.onChanged?.();
     } catch (reason) { setError(humanError(reason)); }
@@ -38,6 +52,7 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
     <Show when={issue()} fallback={<p class="hint pad">Loading issue…</p>}>{item =>
       <>
         <header class="idp-head">
+          <Show when={trail().length}><button class="ghost idp-back" onClick={back}>← {trail()[trail().length - 1].label}</button></Show>
           <span class="idp-number">#{item().number}</span>
           <div class="idp-head-actions">
             <button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
@@ -55,8 +70,17 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
               <For each={props.statuses}>{status => <option value={status.id}>{status.name}</option>}</For>
             </select>
           </label>
-          <div class="idp-field"><span class="field-label">Assignee</span>
-            <ProfilePicker label="" value={item().assignee_id ?? ""} allowAll onChange={id => { patch({ assignee_id: id || null }); void save(); }} />
+          <div class="idp-field"><span class="field-label">Assignees</span>
+            <select value="" aria-label="Add assignee" onChange={e => { const id = e.currentTarget.value; e.currentTarget.value = ""; if (id) void setAssignees([...assignees(), id]); }}>
+              <option value="">Add project member…</option>
+              <For each={(profiles() ?? []).filter(p => !p.archived && (members() ?? []).includes(p.id) && !assignees().includes(p.id))}>{p => <option value={p.id}>{p.display_name || p.username}</option>}</For>
+            </select>
+            <Show when={assignees().length} fallback={<p class="hint">Nobody assigned yet.</p>}>
+              <ul class="assignee-chips"><For each={assignees()}>{id =>
+                <li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={() => void setAssignees(assignees().filter(x => x !== id))}>×</button></li>
+              }</For></ul>
+            </Show>
+            <Show when={!members.loading && !(members() ?? []).length}><p class="hint">This project has no members available for assignment.</p></Show>
           </div>
           <label>Due date
             <input type="date" value={item().due_date ?? ""} onChange={e => { patch({ due_date: e.currentTarget.value || null }); void save(); }} />
@@ -93,9 +117,15 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
         <section class="idp-section">
           <h3>Sub-items<small>{detail()?.children?.length ?? 0}</small></h3>
           <For each={detail()?.children}>{child =>
-            <label class="checklist-item" classList={{ done: !!props.statuses?.find(s => s.id === child.status_id)?.resolved }}>
-              <span class="idp-child">#{child.number} {child.title}</span>
-            </label>
+            <div class="checklist-item idp-child-row" classList={{ done: !!props.statuses?.find(s => s.id === child.status_id)?.resolved }}>
+              <button type="button" class="idp-child link" onClick={() => openChild(child)}>#{child.number} {child.title}</button>
+              <span class="idp-child-people">
+                <Show when={child.assignee_ids?.length} fallback={<span class="task-tag">Unassigned</span>}>
+                  <For each={child.assignee_ids}>{id => <span class="task-tag assignee">{nameOf(id)}</span>}</For>
+                </Show>
+                <Show when={child.due_date}>{due => <span class="task-tag due">{due()}</span>}</Show>
+              </span>
+            </div>
           }</For>
           <div class="inline-form">
             <input placeholder="New sub-item" value={childTitle()} onInput={e => setChildTitle(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void addChild(); } }} />
@@ -103,7 +133,7 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           </div>
         </section>
 
-        <p class="idp-owner">Assigned to {nameOf(item().assignee_id)}</p>
+        <p class="idp-owner">Assigned to {assignees().length ? assignees().map(nameOf).join(", ") : "nobody"}</p>
       </>
     }</Show>
   </aside>;

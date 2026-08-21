@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -136,6 +136,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 11 {
         add_column_if_missing(&tx, "todos", "notes", "TEXT")?;
     }
+    // V12: an issue is worked by PEOPLE, not by one person — same shape tasks
+    // already had. `issues.assignee_id` stays as the first/primary assignee so
+    // every legacy filter keeps working; the junction is the truth.
+    if version < 12 {
+        tx.execute_batch(SCHEMA_V12)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -233,6 +239,11 @@ CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
 CREATE INDEX IF NOT EXISTS todo_assignees_profile ON todo_assignees(profile_id);
 "#;
+pub(crate) const SCHEMA_V12: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
+CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
+INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
 pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
@@ -299,6 +310,35 @@ mod tests {
         }).collect()
     }
     #[test]
+    fn v12_gives_issues_many_assignees_and_carries_the_single_one_over() {
+        let temp = TempDb::new("gaia-space-v12-assignees");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)", []).unwrap();
+        conn.execute("INSERT INTO issues(id,project_id,number,title,description,assignee_id,archived) VALUES('legacy-issue','demo-project',99,'Legacy',NULL,'pa',0)", []).unwrap();
+        conn.execute("DELETE FROM issue_assignees", []).unwrap();
+        // Simulate a database stamped at V11 and migrate forward again.
+        conn.pragma_update(None, "user_version", 11).unwrap();
+        migrate(&conn).expect("v12");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        // The single assignee that existed before is now a row in the junction.
+        let carried: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue' AND profile_id='pa'", [], |r| r.get(0)).unwrap();
+        assert_eq!(carried, 1, "the existing assignee survives the migration");
+        // A second person can now work the same issue.
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pb','pb','Pb',0)", []).unwrap();
+        conn.execute("INSERT INTO issue_assignees(issue_id,profile_id) VALUES('legacy-issue','pb')", []).unwrap();
+        let people: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'", [], |r| r.get(0)).unwrap();
+        assert_eq!(people, 2);
+        // Deleting the issue takes its assignment rows with it.
+        conn.execute("DELETE FROM issues WHERE id='legacy-issue'", []).unwrap();
+        let orphans: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphans, 0, "junction rows never survive their issue");
+        migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -311,7 +351,7 @@ mod tests {
         migrate(&conn).expect("v11");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
-        assert_eq!(SCHEMA_VERSION, 11);
+        assert_eq!(SCHEMA_VERSION, 12);
         let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn.query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();

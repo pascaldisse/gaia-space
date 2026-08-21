@@ -240,6 +240,7 @@ enum CommandPolicy {
     ProjectMemberWrite,
     BoardRead,
     IssueRead,
+    IssueAssign,
     ProjectDeadlineWrite,
     CalendarRead,
     ProjectTodoRead,
@@ -328,6 +329,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
         "get_channel" | "get_channel_by_entity" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
+        "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
         "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
@@ -578,6 +580,20 @@ fn authorize_command(
         }
         CommandPolicy::ProjectRead => { let project_id: Option<String> = arg(body, "id").ok().or_else(|| arg(body, "project_id").ok().flatten()); let Some(project_id)=project_id else { return Err(err(StatusCode::FORBIDDEN,"project access denied")); }; if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
         CommandPolicy::ProjectMemberWrite => { let project_id = body.get("input").and_then(|input| input.get("project_id").or_else(|| input.get("projectId"))).and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST,"project_id is required"))?; if project_readable(user,project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
+        // Assigning people is an issue write scoped to the project, and every
+        // person named must belong to that project — no assigning outsiders.
+        CommandPolicy::IssueAssign => {
+            let issue: String = arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let project_id = issue_project(&issue).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if !project_readable(user, &project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
+            let people: Vec<String> = arg(body, "profile_ids").unwrap_or_default();
+            for profile in &people {
+                let member = project_owner(&project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.is_some_and(|owner| &owner == profile)
+                    || personal::project_member_by(&project_id, profile).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                if !member { return Err(err(StatusCode::FORBIDDEN, "only project members can be assigned")); }
+            }
+            Ok(())
+        }
         CommandPolicy::IssueRead => { let project_id=if name=="list_issues" {arg(body,"project_id").ok().flatten()} else {issue_id(body).and_then(|id|issue_project(&id).ok().flatten())}; let Some(project_id)=project_id else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
 CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?;let Some(project_id)=board_project(&board_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
         CommandPolicy::TodoRead => {
@@ -992,6 +1008,8 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "update_deploy_target" => pipelines::update_deploy_target(target: pipelines::DeployTarget),
     "update_document" => documents::update_document(document: documents::Document),
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),
+    "set_issue_assignees" => issues::set_issue_assignees(issue_id: String, profile_ids: Vec<String>),
+    "list_issue_assignees" => issues::list_issue_assignees(issue_id: String),
     "update_issue" => issues::update_issue(issue: issues::Issue),
     "update_issue_status" => issues::update_issue_status(status: issues::IssueStatus),
     "update_meeting" => meetings::update_meeting(meeting: meetings::Meeting),
@@ -1900,6 +1918,45 @@ mod tests {
         assert_eq!(call(cookie("tb"),"list_issues",json!({"project_id":"private"})).await.0,StatusCode::FORBIDDEN);
         assert_eq!(call(cookie("tb"),"get_issue_detail",json!({"id":"secret"})).await.0,StatusCode::FORBIDDEN);
         let (status,value)=call(cookie("ta"),"list_issues",json!({"project_id":"private"})).await; assert_eq!(status,StatusCode::OK,"{value}");
+    }
+
+    /// An issue is worked by PEOPLE: several at once, sub-issues included, and only
+    /// people who belong to the project. Outsiders can neither read nor assign.
+    #[tokio::test]
+    async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
+        let _serial = test_lock(); setup(); let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('team','Team','TEAM','pa',1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('team','pb')", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('team-issue','team',1,'Shared work',0)", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('team-child','team',2,'Sub work',0)", []).unwrap();
+        c.execute("INSERT INTO issue_links(id,issue_id,linked_issue_id,link_type) VALUES('l1','team-issue','team-child','PARENT_CHILD')", []).unwrap();
+
+        // Two people on one issue — the owner and a member.
+        let (status, value) = call(cookie("ta"), "set_issue_assignees", json!({"issue_id":"team-issue","profile_ids":["pa","pb"]})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"].as_array().unwrap().len(), 2, "{value}");
+        // A sub-issue is just an issue: it takes its own people.
+        let (status, value) = call(cookie("ta"), "set_issue_assignees", json!({"issue_id":"team-child","profile_ids":["pb"]})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        // Reads carry the whole list, and the parent's child carries its own.
+        let (status, value) = call(cookie("ta"), "get_issue_detail", json!({"id":"team-issue"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["assignee_ids"].as_array().unwrap().len(), 2, "{value}");
+        assert_eq!(value["value"]["children"][0]["assignee_ids"][0], "pb", "{value}");
+        // `assignee_id` still points at the first person, so legacy filters keep working.
+        assert_eq!(value["value"]["assignee_id"], "pa", "{value}");
+
+        // Somebody outside the project can never be put on its work …
+        let (status, _) = call(cookie("ta"), "set_issue_assignees", json!({"issue_id":"team-issue","profile_ids":["pd"]})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // … and the refused write leaves the existing people untouched.
+        let people: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='team-issue'", [], |r| r.get(0)).unwrap();
+        assert_eq!(people, 2);
+        // An outsider cannot assign on the project at all.
+        let (status, _) = call(cookie("td"), "set_issue_assignees", json!({"issue_id":"team-issue","profile_ids":["pd"]})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("td"), "list_issue_assignees", json!({"issue_id":"team-issue"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
