@@ -3,6 +3,7 @@ import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { humanError } from "../session";
 
@@ -18,6 +19,12 @@ export default function Todo() {
   const personalTodos=()=>todos()?.filter(todo=>!todo.project_id)??[];
   const groupedTodos=()=>todos()?.filter(todo=>todo.project_id)??[];
   const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
+  // A person is on or off this task; the popover stays open so several can be picked.
+  const toggleAssignee=(id:string)=>{ form().assignee_ids.includes(id) ? removeAssignee(id) : addAssignee(id); };
+  // Assignable people are the project's members: the project decides who may carry
+  // its work, and the server refuses anybody else.
+  const assignable=()=>active().filter(person=>(projectMembers()??[]).includes(person.id)).map(person=>({id:person.id,label:person.display_name||person.username,sub:person.username}));
+  const selectableProjects=()=>(projects()??[]).filter(project=>!project.archived).map(project=>({id:project.id,name:project.name,key:project.key}));
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
   const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
   const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
@@ -53,10 +60,12 @@ export default function Todo() {
         <form class="task-composer" onSubmit={save}>
           <div class="composer-head"><span class="composer-head-label">New task</span></div>
           <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
-          <div class="composer-meta">
-            <label class="todo-field"><span class="field-label">Project</span><select value={form().project_id} onChange={e=>selectProject(e.currentTarget.value)}><option value="">No project — personal</option><For each={(projects()??[]).filter(project=>!project.archived)}>{project=><option value={project.id}>{project.name}</option>}</For></select></label>
-            <label class="todo-field"><span class="field-label">Due date</span><input type="date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/></label>
-            <label class="todo-field"><span class="field-label">Assignees</span><select value="" disabled={!form().project_id} title={!form().project_id?"Select a project before assigning members":undefined} onChange={e=>{addAssignee(e.currentTarget.value);e.currentTarget.value="";}}><option value="">{form().project_id?"Add project member…":"Unassigned"}</option><For each={active().filter(p=>(projectMembers()??[]).includes(p.id)&&!form().assignee_ids.includes(p.id))}>{p=><option value={p.id}>{p.display_name||p.username}</option>}</For></select></label>
+          <div class="composer-meta tm-row">
+            <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject}/>
+            <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
+            <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee}
+              disabled={!form().project_id} disabledReason="Select a project before assigning members"
+              emptyNote="This project has no members available for assignment."/>
           </div>
           <Show when={form().project_id&&!projectMembers.loading&&!projectMembers()?.length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
