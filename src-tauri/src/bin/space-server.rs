@@ -867,8 +867,14 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
         };
     }
     if name == "list_issues" && arg::<Option<String>>(&body, "project_id").ok().flatten().is_none() {
+        // Every OTHER filter of the request still applies — dropping them here would
+        // answer a search for "needle" with the whole haystack, silently.
         let include_archived = arg::<Option<bool>>(&body, "include_archived").ok().flatten();
-        return match issues::list_issues(None, None, None, None, None, include_archived) {
+        let text = arg::<Option<String>>(&body, "text").ok().flatten();
+        let status_id = arg::<Option<String>>(&body, "status_id").ok().flatten();
+        let assignee_id = arg::<Option<String>>(&body, "assignee_id").ok().flatten();
+        let tag_id = arg::<Option<String>>(&body, "tag_id").ok().flatten();
+        return match issues::list_issues(None, text, status_id, assignee_id, tag_id, include_archived) {
             Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|issue| project_readable(&user,&issue.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
         };
@@ -2072,6 +2078,19 @@ mod tests {
             // Naming somebody else's project is still a refusal, not a filtered empty list.
             assert_eq!(call(cookie("ta"), command, json!({"project_id":"theirs"})).await.0, StatusCode::FORBIDDEN, "{command}");
         }
+
+        // Scoping by readability must not swallow the REST of the request: a text,
+        // status, assignee or tag filter still selects, or a search answers with rows
+        // it was never asked for.
+        c.execute("INSERT INTO issues(id,project_id,number,title,status_id,archived) VALUES('i-needle','mine',2,'needle here','s-mine',0)", []).unwrap();
+        let (status, value) = call(cookie("ta"), "list_issues", json!({"text":"needle"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let titles: Vec<String> = value["value"].as_array().unwrap().iter().map(|row| row["title"].as_str().unwrap_or_default().to_owned()).collect();
+        assert_eq!(titles, vec!["needle here".to_string()], "an unscoped list must still honour its own filters");
+        let (_, value) = call(cookie("ta"), "list_issues", json!({"status_id":"s-mine"})).await;
+        assert_eq!(value["value"].as_array().unwrap().len(), 2, "status filter must select, not be dropped");
+        let (_, value) = call(cookie("ta"), "list_issues", json!({"status_id":"s-theirs"})).await;
+        assert!(value["value"].as_array().unwrap().is_empty(), "a foreign status must select nothing readable: {value}");
     }
 
     #[tokio::test]
