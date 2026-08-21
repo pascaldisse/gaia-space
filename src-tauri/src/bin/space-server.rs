@@ -580,7 +580,9 @@ fn authorize_command(
             }
             Ok(())
         }
-        CommandPolicy::ProjectRead => { let project_id: Option<String> = arg(body, "id").ok().or_else(|| arg(body, "project_id").ok().flatten()); let Some(project_id)=project_id else { return Err(err(StatusCode::FORBIDDEN,"project access denied")); }; if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
+        // Same rule as the issue list: naming no project is a "what may I see" read,
+        // answered per project below; naming one is checked against that project here.
+        CommandPolicy::ProjectRead => { if matches!(name,"list_issue_statuses"|"list_boards") && arg::<Option<String>>(body,"project_id").ok().flatten().is_none() { return Ok(()); } let project_id: Option<String> = arg(body, "id").ok().or_else(|| arg(body, "project_id").ok().flatten()); let Some(project_id)=project_id else { return Err(err(StatusCode::FORBIDDEN,"project access denied")); }; if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
         CommandPolicy::ProjectMemberWrite => { let project_id = body.get("input").and_then(|input| input.get("project_id").or_else(|| input.get("projectId"))).and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST,"project_id is required"))?; if project_readable(user,project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
         // Only the owner or an admin decides who belongs to a project.
         CommandPolicy::ProjectMemberAdmin => {
@@ -610,7 +612,11 @@ fn authorize_command(
             }
             Ok(())
         }
-        CommandPolicy::IssueRead => { let project_id=if name=="list_issues" {arg(body,"project_id").ok().flatten()} else {issue_id(body).and_then(|id|issue_project(&id).ok().flatten())}; let Some(project_id)=project_id else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
+        // A list read without a project names no project, so it cannot be refused for one:
+        // it is the caller asking "what may I see", and the answer is filtered per project
+        // below (the same shape `list_projects` already uses). A list read that DOES name a
+        // project is still refused outright when that project is not the caller's.
+        CommandPolicy::IssueRead => { if name=="list_issues" && arg::<Option<String>>(body,"project_id").ok().flatten().is_none() { return Ok(()); } let project_id=if name=="list_issues" {arg(body,"project_id").ok().flatten()} else {issue_id(body).and_then(|id|issue_project(&id).ok().flatten())}; let Some(project_id)=project_id else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
 CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?;let Some(project_id)=board_project(&board_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? else{return Err(err(StatusCode::FORBIDDEN,"project access denied"));};if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?{Ok(())}else{Err(err(StatusCode::FORBIDDEN,"project access denied"))} }
         CommandPolicy::TodoRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
@@ -846,6 +852,27 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
     let user = match user_by_token(&h) { Ok(user) => user, Err(e) => return e.into_response() };
     if let Err(e) = authorize_command(&user, &name, &mut body) { return e.into_response(); }
     if name == "list_projects" { return match platform::list_projects() { Ok(projects) => Json(json!({"ok":true,"value":projects.into_iter().filter(|project| project_readable(&user,&project.id).unwrap_or(false)).collect::<Vec<_>>() })).into_response(), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response() }; }
+    // An unscoped issue list is answered per project the caller may read: one round trip
+    // for a whole portfolio, and never a row from a project that is not theirs.
+    if name == "list_issue_statuses" && arg::<Option<String>>(&body, "project_id").ok().flatten().is_none() {
+        return match issues::list_issue_statuses(None) {
+            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|status| project_readable(&user,&status.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
+        };
+    }
+    if name == "list_boards" && arg::<Option<String>>(&body, "project_id").ok().flatten().is_none() {
+        return match issues::list_boards(None) {
+            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|board| project_readable(&user,&board.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
+        };
+    }
+    if name == "list_issues" && arg::<Option<String>>(&body, "project_id").ok().flatten().is_none() {
+        let include_archived = arg::<Option<bool>>(&body, "include_archived").ok().flatten();
+        return match issues::list_issues(None, None, None, None, None, include_archived) {
+            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|issue| project_readable(&user,&issue.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
+        };
+    }
 if name == "update_absence" { return absence_update(&user, &body); }
     if name == "delete_absence" { return absence_delete(&user, &body); }
     dispatch!(name.as_str(), body, {
@@ -2023,6 +2050,29 @@ mod tests {
 
     #[tokio::test]
     async fn board_and_search_reads_do_not_leak_private_project_metadata() { let _serial=test_lock(); setup(); let c=db::conn().unwrap(); c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('private-board','Private board','PRIVATEBOARD','pa',1)",[]).unwrap(); c.execute("INSERT INTO boards(id,project_id,name,backlog_type,archived) VALUES('private-board-id','private-board','Private board','NONE',0)",[]).unwrap(); c.execute("INSERT INTO issues(id,project_id,number,title,description,archived) VALUES('private-board-issue','private-board',1,'BOARD-SECRET','board secret body',0)",[]).unwrap(); c.execute("INSERT INTO issue_board_positions(issue_id,board_id,position) VALUES('private-board-issue','private-board-id',0)",[]).unwrap(); for command in ["list_backlog_issues","list_board_columns","list_board_issues"] { let (status,value)=call(cookie("td"),command,json!({"board_id":"private-board-id"})).await; assert_eq!(status,StatusCode::FORBIDDEN,"{command}: {value}"); assert!(value.get("value").is_none(),"{command}: {value}"); } assert_eq!(call(cookie("ta"),"list_board_issues",json!({"board_id":"private-board-id"})).await.0,StatusCode::OK); let (status,value)=call(cookie("td"),"goto_search",json!({"query":"BOARD-SECRET","limit":10})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(value["value"].as_array().unwrap().is_empty(),"private issue leaked through search: {value}"); let (status,value)=call(cookie("ta"),"goto_search",json!({"query":"BOARD-SECRET","limit":10})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(value["value"].as_array().unwrap().iter().any(|hit|hit["id"]=="private-board-issue")); }
+
+    /// A portfolio shows the open-issue count of every project at once, so it asks for
+    /// issues without naming a project. That read must stay a peephole into the caller's
+    /// own projects: it answers with their rows only, while naming a foreign project is
+    /// still refused outright.
+    #[tokio::test]
+    async fn unscoped_list_reads_answer_with_readable_projects_only() {
+        let _serial = test_lock(); setup(); let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('mine','Mine','MINE','pa',1),('theirs','Theirs','THEIRS','pb',1)", []).unwrap();
+        c.execute("INSERT INTO issue_statuses(id,project_id,name,resolved,color,ordering) VALUES('s-mine','mine','Open',0,'#fff',0),('s-theirs','theirs','Open',0,'#fff',0)", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,status_id,archived) VALUES('i-mine','mine',1,'Mine','s-mine',0),('i-theirs','theirs',1,'Theirs','s-theirs',0)", []).unwrap();
+        c.execute("INSERT INTO boards(id,project_id,name,backlog_type,archived) VALUES('b-mine','mine','Mine','MANUAL',0),('b-theirs','theirs','Theirs','MANUAL',0)", []).unwrap();
+
+        for (command, own, foreign) in [("list_issues", "i-mine", "i-theirs"), ("list_issue_statuses", "s-mine", "s-theirs"), ("list_boards", "b-mine", "b-theirs")] {
+            let (status, value) = call(cookie("ta"), command, json!({})).await;
+            assert_eq!(status, StatusCode::OK, "{command}: {value}");
+            let rows = value["value"].as_array().unwrap();
+            assert!(rows.iter().any(|row| row["id"] == own), "{command} hides the caller's own row: {value}");
+            assert!(!rows.iter().any(|row| row["id"] == foreign), "{command} leaked a foreign row: {value}");
+            // Naming somebody else's project is still a refusal, not a filtered empty list.
+            assert_eq!(call(cookie("ta"), command, json!({"project_id":"theirs"})).await.0, StatusCode::FORBIDDEN, "{command}");
+        }
+    }
 
     #[tokio::test]
     async fn project_reads_are_centrally_scoped_for_owner_member_and_nonmember() { let _serial=test_lock(); setup(); let c=db::conn().unwrap(); c.execute("INSERT INTO projects(id,name,key,description,created_by,created_at) VALUES('private','Private','PRIVATE','confidential','pa',1)",[]).unwrap(); c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('private','pb')",[]).unwrap(); let (status,value)=call(cookie("td"),"list_projects",json!({})).await; assert_eq!(status,StatusCode::OK,"{value}"); assert!(!value["value"].as_array().unwrap().iter().any(|p|p["id"]=="private")); let (status,value)=call(cookie("td"),"get_project",json!({"id":"private"})).await; assert_eq!(status,StatusCode::FORBIDDEN); assert!(value.get("value").is_none(),"{value}"); for token in ["ta","tb"] { assert_eq!(call(cookie(token),"get_project",json!({"id":"private"})).await.0,StatusCode::OK); } assert_eq!(call(cookie("td"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::FORBIDDEN); assert_eq!(call(cookie("tb"),"list_issue_statuses",json!({"project_id":"private"})).await.0,StatusCode::OK); }

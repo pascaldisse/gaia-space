@@ -12,7 +12,15 @@ export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
-  const [projectMembers]=createResource(()=>form().project_id,id=>id?personalApi.projectMemberIds(id):Promise.resolve([]));
+  // A refused member read is carried as a value: the composer must say the list could
+  // not be loaded, never quietly offer "nobody" as if the project were empty.
+  const [projectMembers]=createResource(()=>form().project_id,async id=>{
+    if(!id) return { ids: [] as string[] };
+    try { return { ids: await personalApi.projectMemberIds(id) }; }
+    catch(reason){ return { failed: humanError(reason) }; }
+  });
+  const memberIds=()=>{const value=projectMembers();return value&&"ids" in value?value.ids??[]:[];};
+  const membersFailed=()=>{const value=projectMembers();return value&&"failed" in value?value.failed??"":"";};
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
@@ -23,7 +31,7 @@ export default function Todo() {
   const toggleAssignee=(id:string)=>{ form().assignee_ids.includes(id) ? removeAssignee(id) : addAssignee(id); };
   // Assignable people are the project's members: the project decides who may carry
   // its work, and the server refuses anybody else.
-  const assignable=()=>active().filter(person=>(projectMembers()??[]).includes(person.id)).map(person=>({id:person.id,label:person.display_name||person.username,sub:person.username}));
+  const assignable=()=>active().filter(person=>memberIds().includes(person.id)).map(person=>({id:person.id,label:person.display_name||person.username,sub:person.username}));
   const selectableProjects=()=>(projects()??[]).filter(project=>!project.archived).map(project=>({id:project.id,name:project.name,key:project.key}));
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
   const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
@@ -65,9 +73,10 @@ export default function Todo() {
             <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
             <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee}
               disabled={!form().project_id} disabledReason="Select a project before assigning members"
-              emptyNote="This project has no members available for assignment."/>
+              emptyNote={membersFailed()?`The project's members could not be loaded: ${membersFailed()}`:"This project has no members available for assignment."}/>
           </div>
-          <Show when={form().project_id&&!projectMembers.loading&&!projectMembers()?.length}><p class="hint">This project has no members available for assignment.</p></Show>
+          <Show when={membersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
+          <Show when={form().project_id&&!projectMembers.loading&&!membersFailed()&&!memberIds().length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
           <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
 <details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
