@@ -136,7 +136,9 @@ jobs:
           test "$(code https://paloptic.com/space/settings)" = 200
           test "$(code https://paloptic.com/space/boards)" = 200
           echo "served bundle:"
-          curl -s https://paloptic.com/space/ | grep -o 'index-[A-Za-z0-9]*\.js'
+          # Vite hashes are base64url: they contain - and _ too. The old class
+          # matched none of `index-Ct--NSRP.js` and failed a healthy deploy.
+          curl -s https://paloptic.com/space/ | grep -o 'index-[A-Za-z0-9_-]*\.js'
 
       - name: Result
         run: |
