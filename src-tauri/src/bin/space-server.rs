@@ -241,6 +241,7 @@ enum CommandPolicy {
     BoardRead,
     IssueRead,
     IssueAssign,
+    ProjectMemberAdmin,
     ProjectDeadlineWrite,
     CalendarRead,
     ProjectTodoRead,
@@ -330,6 +331,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_channel" | "get_channel_by_entity" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
+        "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
         "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
         "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
@@ -580,17 +582,31 @@ fn authorize_command(
         }
         CommandPolicy::ProjectRead => { let project_id: Option<String> = arg(body, "id").ok().or_else(|| arg(body, "project_id").ok().flatten()); let Some(project_id)=project_id else { return Err(err(StatusCode::FORBIDDEN,"project access denied")); }; if project_readable(user,&project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
         CommandPolicy::ProjectMemberWrite => { let project_id = body.get("input").and_then(|input| input.get("project_id").or_else(|| input.get("projectId"))).and_then(Value::as_str).ok_or_else(|| err(StatusCode::BAD_REQUEST,"project_id is required"))?; if project_readable(user,project_id).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN,"project access denied")) } }
-        // Assigning people is an issue write scoped to the project, and every
-        // person named must belong to that project — no assigning outsiders.
+        // Only the owner or an admin decides who belongs to a project.
+        CommandPolicy::ProjectMemberAdmin => {
+            let project_id: String = arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let owner = project_owner(&project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            // `member_id` deliberately escapes bind_session_identity: naming somebody
+            // else is the whole point here, and the right to do it is checked below.
+            if user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str()) { Ok(()) }
+            else { Err(err(StatusCode::FORBIDDEN, "only the project owner or an administrator can change project members")) }
+        }
+        // Assigning people is an issue write scoped to the project. Whoever may
+        // change the project's membership (owner/admin) also brings somebody new
+        // onto it by assigning them; everybody else can only pick existing members.
         CommandPolicy::IssueAssign => {
             let issue: String = arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             let project_id = issue_project(&issue).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
             if !project_readable(user, &project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
+            let owner = project_owner(&project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            let may_admit = user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str());
             let people: Vec<String> = arg(body, "profile_ids").unwrap_or_default();
             for profile in &people {
-                let member = project_owner(&project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.is_some_and(|owner| &owner == profile)
+                let member = owner.as_deref() == Some(profile.as_str())
                     || personal::project_member_by(&project_id, profile).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-                if !member { return Err(err(StatusCode::FORBIDDEN, "only project members can be assigned")); }
+                if member { continue; }
+                if !may_admit { return Err(err(StatusCode::FORBIDDEN, "only project members can be assigned")); }
+                personal::add_project_member(project_id.clone(), profile.clone()).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             }
             Ok(())
         }
@@ -758,7 +774,7 @@ CommandPolicy::BoardRead => { let board_id:String=arg(body,"board_id").map_err(|
                 let channel_id: String =
                     arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
                 let target: String =
-                    arg(body, "profile_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                    arg(body, "member_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
                 let removing_self = name == "remove_channel_member" && target == user.profile_id;
                 if chat_channel_type(&channel_id).as_deref() == Some("dm")
                     || (!removing_self && !chat_can_manage(&user.profile_id, &channel_id))
@@ -833,7 +849,7 @@ async fn cmd(h:HeaderMap,Path(name):Path<String>,Json(mut body):Json<Value>)->im
 if name == "update_absence" { return absence_update(&user, &body); }
     if name == "delete_absence" { return absence_delete(&user, &body); }
     dispatch!(name.as_str(), body, {
-    "add_channel_member" => chat::add_channel_member(channel_id: String, profile_id: String, administrator: bool),
+    "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),
     "add_review_participant" => review::add_review_participant(participant: review::ReviewParticipant),
@@ -977,7 +993,7 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>),
-    "remove_channel_member" => chat::remove_channel_member(channel_id: String, profile_id: String),
+    "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
     "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
     "remove_issue_link" => issues::remove_issue_link(id: String),
     "remove_reaction" => chat::remove_reaction(message_id: String, profile_id: String, emoji: String),
@@ -1008,6 +1024,8 @@ if name == "update_absence" { return absence_update(&user, &body); }
     "update_deploy_target" => pipelines::update_deploy_target(target: pipelines::DeployTarget),
     "update_document" => documents::update_document(document: documents::Document),
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),
+    "add_project_member" => personal::add_project_member(project_id: String, member_id: String),
+    "remove_project_member" => personal::remove_project_member(project_id: String, member_id: String),
     "set_issue_assignees" => issues::set_issue_assignees(issue_id: String, profile_ids: Vec<String>),
     "list_issue_assignees" => issues::list_issue_assignees(issue_id: String),
     "update_issue" => issues::update_issue(issue: issues::Issue),
@@ -1946,9 +1964,11 @@ mod tests {
         // `assignee_id` still points at the first person, so legacy filters keep working.
         assert_eq!(value["value"]["assignee_id"], "pa", "{value}");
 
-        // Somebody outside the project can never be put on its work …
-        let (status, _) = call(cookie("ta"), "set_issue_assignees", json!({"issue_id":"team-issue","profile_ids":["pd"]})).await;
+        // A plain member cannot put an outsider on the project's work …
+        let (status, _) = call(cookie("tb"), "set_issue_assignees", json!({"issue_id":"team-issue","profile_ids":["pd"]})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        let smuggled: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM project_members WHERE project_id='team' AND profile_id='pd'", [], |r| r.get(0)).unwrap();
+        assert_eq!(smuggled, 0, "a refused assignment must not create membership");
         // … and the refused write leaves the existing people untouched.
         let people: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='team-issue'", [], |r| r.get(0)).unwrap();
         assert_eq!(people, 2);
@@ -1957,6 +1977,48 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(cookie("td"), "list_issue_assignees", json!({"issue_id":"team-issue"})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// A project used to be stuck with whoever was inserted by hand: nothing in
+    /// the app could add a member, so nobody else could ever be assigned.
+    #[tokio::test]
+    async fn project_membership_is_editable_and_the_owner_can_assign_anybody() {
+        let _serial = test_lock(); setup(); let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('crew','Crew','CREW','pa',1)", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('crew-issue','crew',1,'Work',0)", []).unwrap();
+
+        // The owner puts somebody on the project, and the directory says so.
+        let (status, value) = call(cookie("ta"), "add_project_member", json!({"project_id":"crew","member_id":"pb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value["value"].as_array().unwrap().iter().any(|id| id == "pb"), "{value}");
+
+        // A member cannot change who belongs to the project.
+        let (status, _) = call(cookie("tb"), "add_project_member", json!({"project_id":"crew","member_id":"pd"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // … and cannot smuggle an outsider in by assigning them either.
+        let (status, _) = call(cookie("tb"), "set_issue_assignees", json!({"issue_id":"crew-issue","profile_ids":["pd"]})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let outsiders: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM project_members WHERE project_id='crew' AND profile_id='pd'", [], |r| r.get(0)).unwrap();
+        assert_eq!(outsiders, 0, "a refused assignment must not create membership");
+
+        // The owner assigning a non-member brings that person onto the project.
+        let (status, value) = call(cookie("ta"), "set_issue_assignees", json!({"issue_id":"crew-issue","profile_ids":["pa","pd"]})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let admitted: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM project_members WHERE project_id='crew' AND profile_id='pd'", [], |r| r.get(0)).unwrap();
+        assert_eq!(admitted, 1, "assigning somebody puts them on the project");
+
+        // Removing works, except for the owner — a project without its owner is unreachable.
+        let (status, value) = call(cookie("ta"), "remove_project_member", json!({"project_id":"crew","member_id":"pd"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(!value["value"].as_array().unwrap().iter().any(|id| id == "pd"), "{value}");
+        let (status, _) = call(cookie("ta"), "remove_project_member", json!({"project_id":"crew","member_id":"pa"})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // An admin governs any project's membership.
+        assert_eq!(call(cookie("tc"), "add_project_member", json!({"project_id":"crew","member_id":"pd"})).await.0, StatusCode::OK);
+        // The named person is honoured verbatim: `member_id` must not be rewritten
+        // to the caller by the session-identity bind (that silently added *me* before).
+        let self_add: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM project_members WHERE project_id='crew' AND profile_id='pc'", [], |r| r.get(0)).unwrap();
+        assert_eq!(self_add, 0, "adding somebody else must not add the caller instead");
     }
 
     #[tokio::test]

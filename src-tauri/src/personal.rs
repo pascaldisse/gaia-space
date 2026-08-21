@@ -131,6 +131,29 @@ pub fn project_member_ids(project_id: String) -> Result<Vec<String>> {
     let ids = err(statement.query_map([project_id], |row| row.get::<_, String>(0)))?.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(ids)
 }
+/// Put a person into a project. The owner is a member by construction, so
+/// adding them again is a no-op rather than an error.
+#[cfg_attr(feature = "desktop", tauri::command)]
+/// The person is `member_id`, NOT `profile_id`: the web transport rewrites every
+/// `profile_id` in a request to the caller's own profile (identity law), which
+/// would silently turn "add Charles" into "add myself".
+pub fn add_project_member(project_id: String, member_id: String) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let known: bool = err(c.query_row("SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1 AND archived=0)", [&member_id], |r| r.get(0)))?;
+    if !known { return Err("that person does not exist".into()); }
+    err(c.execute("INSERT OR IGNORE INTO project_members(project_id,profile_id) VALUES(?1,?2)", params![project_id, member_id]))?;
+    project_member_ids(project_id)
+}
+/// Take a person out of a project. The owner cannot be removed — a project
+/// without its owner is unreachable.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_project_member(project_id: String, member_id: String) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let owner: Option<String> = err(c.query_row("SELECT created_by FROM projects WHERE id=?1", [&project_id], |r| r.get(0)).optional())?.flatten();
+    if owner.as_deref() == Some(member_id.as_str()) { return Err("the project owner stays a member".into()); }
+    err(c.execute("DELETE FROM project_members WHERE project_id=?1 AND profile_id=?2", params![project_id, member_id]))?;
+    project_member_ids(project_id)
+}
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {

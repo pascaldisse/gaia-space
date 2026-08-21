@@ -1,7 +1,7 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Checklist, type ChecklistItem, type Issue, type Status } from "../api/issues";
 import { personalApi } from "../api/personal";
-import { humanError, profiles } from "../session";
+import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import "./IssueDetail.css";
 
 /** An issue IS the card: title, description, assignee, due date, status,
@@ -17,6 +17,11 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const [draft, setDraft] = createSignal<Issue>();
   const issue = () => draft() ?? detail()?.issue;
   const [members] = createResource(() => issue()?.project_id, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
+  if (!profiles()) void reloadProfiles().catch(() => undefined);
+  // The owner (or an admin) may bring somebody onto the project by assigning
+  // them; everybody else picks from the people already on it.
+  const mayAdmit = () => { const p = projects()?.find(x => x.id === issue()?.project_id); return currentUser()?.role === "admin" || (!!p && p.created_by === profileId()); };
+  const candidates = () => (profiles() ?? []).filter(p => !p.archived && !assignees().includes(p.id) && (mayAdmit() || (members() ?? []).includes(p.id)));
   const assignees = () => issue()?.assignee_ids ?? [];
   const setAssignees = async (ids: string[]) => {
     const current = issue(); if (!current) return;
@@ -72,15 +77,15 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           </label>
           <div class="idp-field"><span class="field-label">Assignees</span>
             <select value="" aria-label="Add assignee" onChange={e => { const id = e.currentTarget.value; e.currentTarget.value = ""; if (id) void setAssignees([...assignees(), id]); }}>
-              <option value="">Add project member…</option>
-              <For each={(profiles() ?? []).filter(p => !p.archived && (members() ?? []).includes(p.id) && !assignees().includes(p.id))}>{p => <option value={p.id}>{p.display_name || p.username}</option>}</For>
+              <option value="">{mayAdmit() ? "Add anybody…" : "Add project member…"}</option>
+              <For each={candidates()}>{p => <option value={p.id}>{p.display_name || p.username}{(members() ?? []).includes(p.id) ? "" : " — joins the project"}</option>}</For>
             </select>
             <Show when={assignees().length} fallback={<p class="hint">Nobody assigned yet.</p>}>
               <ul class="assignee-chips"><For each={assignees()}>{id =>
                 <li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={() => void setAssignees(assignees().filter(x => x !== id))}>×</button></li>
               }</For></ul>
             </Show>
-            <Show when={!members.loading && !(members() ?? []).length}><p class="hint">This project has no members available for assignment.</p></Show>
+            <Show when={!members.loading && !candidates().length && !mayAdmit()}><p class="hint">Only project members can be assigned — the project owner adds people in Project settings.</p></Show>
           </div>
           <label>Due date
             <input type="date" value={item().due_date ?? ""} onChange={e => { patch({ due_date: e.currentTarget.value || null }); void save(); }} />

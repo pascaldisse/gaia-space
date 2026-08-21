@@ -121,6 +121,8 @@ pub fn run() {
             issues::create_issue,
             issues::update_issue,
             issues::set_issue_assignees,
+            personal::add_project_member,
+            personal::remove_project_member,
             issues::list_issue_assignees,
             issues::list_issue_statuses,
             issues::list_boards,

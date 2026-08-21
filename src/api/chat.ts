@@ -67,10 +67,12 @@ export const chatApi = {
     invoke<void>("join_channel", { channelId, profileId }),
   leaveChannel: (channelId: string, profileId: string) =>
     invoke<void>("leave_channel", { channelId, profileId }),
-  addChannelMember: (channelId: string, profileId: string, administrator: boolean) =>
-    invoke<void>("add_channel_member", { channelId, profileId, administrator }),
-  removeChannelMember: (channelId: string, profileId: string) =>
-    invoke<void>("remove_channel_member", { channelId, profileId }),
+  // `memberId`, not `profileId`: the web transport rewrites any profile id in a
+  // request to the caller's own, so naming somebody else needs a different key.
+  addChannelMember: (channelId: string, memberId: string, administrator: boolean) =>
+    invoke<void>("add_channel_member", { channelId, memberId, administrator }),
+  removeChannelMember: (channelId: string, memberId: string) =>
+    invoke<void>("remove_channel_member", { channelId, memberId }),
   listChannelMembers: (channelId: string) =>
     invoke<ChannelMember[]>("list_channel_members", { channelId }),
   createEntityChannel: (entityType: string, entityId: string, name?: string | null) =>
