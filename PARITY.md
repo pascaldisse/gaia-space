@@ -32,6 +32,7 @@ TOTALS (8/8 audited, 356 rows): done 52 · partial 172 · stub 4 · missing 128.
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
+MANUAL-ONLY UNVERIFIED (owner): production ticker delivery to an external receiver, real public DNS/egress, and visible Tauri desktop window startup require owner-operated environment/UI verification. In-process real-socket tests and `space-server` HTTP checks do not verify those deployment/UI facts.
 
 ## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md; Varuna-III stage 3)
 52 rows — done 3 · partial 21 · stub 1 · missing 27.
