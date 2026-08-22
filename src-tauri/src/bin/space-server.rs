@@ -1166,7 +1166,13 @@ fn nested_id(body: &Value, key: &str) -> Option<String> {
 fn document_id(body: &Value, name: &str) -> Option<String> {
     if name == "update_document" {
         nested_id(body, "document")
-    } else if matches!(name, "restore_doc_version" | "list_doc_versions" | "list_document_access" | "update_document_access") {
+    } else if matches!(
+        name,
+        "restore_doc_version"
+            | "list_doc_versions"
+            | "list_document_access"
+            | "update_document_access"
+    ) {
         arg(body, "document_id").ok()
     } else {
         arg(body, "id").ok()
@@ -1239,7 +1245,16 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
-fn require_catalog_right(user: &User, right: gaia_space_lib::rights::Right, scope_type: &str, scope_id: Option<&str>) -> Result<(), (StatusCode, Json<Value>)> { let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; platform::require_right_on(&c,&user.profile_id,right,scope_type,scope_id).map_err(|_|err(StatusCode::FORBIDDEN,"right required")) }
+fn require_catalog_right(
+    user: &User,
+    right: gaia_space_lib::rights::Right,
+    scope_type: &str,
+    scope_id: Option<&str>,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    platform::require_right_on(&c, &user.profile_id, right, scope_type, scope_id)
+        .map_err(|_| err(StatusCode::FORBIDDEN, "right required"))
+}
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
 fn authorize_command(
@@ -1332,8 +1347,19 @@ fn authorize_command(
                 .and_then(|input| input.get("project_id").or_else(|| input.get("projectId")))
                 .and_then(Value::as_str)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "project_id is required"))?;
-            if !project_readable(user, project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
-            if name == "create_issue" { require_catalog_right(user, gaia_space_lib::rights::Right::CreateIssue, "project", Some(project_id))?; }
+            if !project_readable(user, project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+            }
+            if name == "create_issue" {
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::CreateIssue,
+                    "project",
+                    Some(project_id),
+                )?;
+            }
             Ok(())
         }
         // Only the owner or an admin decides who belongs to a project.
@@ -1620,7 +1646,15 @@ fn authorize_command(
             _ => unreachable!("identity-write policy must name an identity-write command"),
         }
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
-        CommandPolicy::DocumentCreate => { bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?; require_catalog_right(user, gaia_space_lib::rights::Right::CreateDocument, "global", None) }
+        CommandPolicy::DocumentCreate => {
+            bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?;
+            require_catalog_right(
+                user,
+                gaia_space_lib::rights::Right::CreateDocument,
+                "global",
+                None,
+            )
+        }
         CommandPolicy::DocumentReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -1751,7 +1785,22 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::Session => {
-            if name == "create_message" { let message=body.get("message").ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid message"))?; let channel_id:String=arg(message,"channel_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?; if !chat_channel_access(&user.profile_id,&channel_id){return Err(err(StatusCode::FORBIDDEN,"channel access denied"));} require_catalog_right(user,gaia_space_lib::rights::Right::PostMessage,"channel",Some(&channel_id))?; }
+            if name == "create_message" {
+                let message = body
+                    .get("message")
+                    .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid message"))?;
+                let channel_id: String =
+                    arg(message, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
             if matches!(
                 name,
                 "list_messages"
@@ -2981,10 +3030,16 @@ mod tests {
         let _serial = test_lock();
         setup();
         let c = db::conn().unwrap();
-        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", []).unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", [])
+            .unwrap();
         c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('design-dora','pd','design')", []).unwrap();
         let document = json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pa","folder_id":null,"doc_type":"text","title":"Shared plan","body":"first","version":1,"archived":false,"created_by":"pa"});
-        let (status, value) = call(cookie("ta"), "create_document", json!({"document":document})).await;
+        let (status, value) = call(
+            cookie("ta"),
+            "create_document",
+            json!({"document":document}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
 
         let grants = json!({"document_id":"shared-private-doc","permissions":[
@@ -2993,28 +3048,76 @@ mod tests {
         ]});
         let (status, value) = call(cookie("ta"), "update_document_access", grants).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        let grant_count: i64 = c.query_row("SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'", [], |row| row.get(0)).unwrap();
+        let grant_count: i64 = c
+            .query_row(
+                "SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(grant_count, 2, "shares persisted");
         let (stored_container, stored_creator, grant_profile): (String, String, String) = c.query_row("SELECT d.container_type,d.created_by,dp.recipient_id FROM documents d JOIN document_permissions dp ON dp.document_id=d.id WHERE d.id='shared-private-doc' AND dp.recipient_type='profile'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-        assert_eq!((stored_container.as_str(), stored_creator.as_str(), grant_profile.as_str()), ("my-docs", "pa", "pb"));
-        assert!(documents::document_readable_by("shared-private-doc", "pb").unwrap(), "direct viewer grant resolves");
+        assert_eq!(
+            (
+                stored_container.as_str(),
+                stored_creator.as_str(),
+                grant_profile.as_str()
+            ),
+            ("my-docs", "pa", "pb")
+        );
+        assert!(
+            documents::document_readable_by("shared-private-doc", "pb").unwrap(),
+            "direct viewer grant resolves"
+        );
 
         let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(value["value"][0]["id"], json!("shared-private-doc"), "{value}");
-        let (status, value) = call(cookie("tb"), "list_document_access", json!({"document_id":"shared-private-doc"})).await;
+        assert_eq!(
+            value["value"][0]["id"],
+            json!("shared-private-doc"),
+            "{value}"
+        );
+        let (status, value) = call(
+            cookie("tb"),
+            "list_document_access",
+            json!({"document_id":"shared-private-doc"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"].as_array().unwrap().len(), 2);
-        let (status, _) = call(cookie("tb"), "save_document", json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"})).await;
+        let (status, _) = call(
+            cookie("tb"),
+            "save_document",
+            json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot edit");
-        let (status, _) = call(cookie("tb"), "update_document_access", json!({"document_id":"shared-private-doc","permissions":[]})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an editor/viewer cannot delegate sharing");
+        let (status, _) = call(
+            cookie("tb"),
+            "update_document_access",
+            json!({"document_id":"shared-private-doc","permissions":[]}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an editor/viewer cannot delegate sharing"
+        );
 
-        let (status, value) = call(cookie("td"), "save_document", json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"})).await;
+        let (status, value) = call(
+            cookie("td"),
+            "save_document",
+            json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["body"], json!("edited"));
         let (status, _) = call(cookie("td"), "move_document", json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pd","folder_id":null})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an editor cannot move a shared document");
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an editor cannot move a shared document"
+        );
         let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='shared-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
         assert_eq!(actor, "pd", "the web gateway binds the editor identity");
     }
