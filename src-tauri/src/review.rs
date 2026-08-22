@@ -128,17 +128,17 @@ pub fn list_reviews() -> Result<Vec<Review>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_review( id: String) -> Result<Option<Review>> {
+pub fn get_review(id: String) -> Result<Option<Review>> {
     Ok(list_reviews()?.into_iter().find(|v| v.id == id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_review( review: Review) -> Result<()> {
+pub fn create_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params![review.id,review.project_id,review.number,review.kind,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_review( review: Review) -> Result<()> {
+pub fn update_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE reviews SET state=?2,source_branch=?3,target_branch=?4,title=?5,turn_based=?6,channel_id=?7 WHERE id=?1",rusqlite::params![review.id,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
     Ok(())
@@ -147,12 +147,18 @@ pub fn update_review( review: Review) -> Result<()> {
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_review_participants( review_id: String) -> Result<Vec<ReviewParticipant>> {
+pub fn list_review_participants(review_id: String) -> Result<Vec<ReviewParticipant>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT review_id,profile_id,role,state,their_turn FROM review_participants WHERE review_id=?1 ORDER BY role").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
-            Ok(ReviewParticipant { review_id: r.get(0)?, profile_id: r.get(1)?, role: r.get(2)?, state: r.get(3)?, their_turn: r.get(4)? })
+            Ok(ReviewParticipant {
+                review_id: r.get(0)?,
+                profile_id: r.get(1)?,
+                role: r.get(2)?,
+                state: r.get(3)?,
+                their_turn: r.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -160,7 +166,7 @@ pub fn list_review_participants( review_id: String) -> Result<Vec<ReviewParticip
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn add_review_participant( participant: ReviewParticipant) -> Result<()> {
+pub fn add_review_participant(participant: ReviewParticipant) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "INSERT OR REPLACE INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES(?1,?2,?3,?4,?5)",
@@ -171,22 +177,55 @@ pub fn add_review_participant( participant: ReviewParticipant) -> Result<()> {
 }
 /// Reviewer accept/reject flips the turn to the author (`ResumeReview`/`WaitAuthorResponse`
 /// in KB §2 terms); an author resuming work flips it back to every reviewer.
-fn set_participant_state_tx(conn: &Connection, review_id: &str, profile_id: &str, state: Option<&str>) -> Result<()> {
+fn set_participant_state_tx(
+    conn: &Connection,
+    review_id: &str,
+    profile_id: &str,
+    state: Option<&str>,
+) -> Result<()> {
     let role: String = conn
-        .query_row("SELECT role FROM review_participants WHERE review_id=?1 AND profile_id=?2", rusqlite::params![review_id, profile_id], |r| r.get(0))
+        .query_row(
+            "SELECT role FROM review_participants WHERE review_id=?1 AND profile_id=?2",
+            rusqlite::params![review_id, profile_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
-    conn.execute("UPDATE review_participants SET state=?3 WHERE review_id=?1 AND profile_id=?2", rusqlite::params![review_id, profile_id, state]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE review_participants SET state=?3 WHERE review_id=?1 AND profile_id=?2",
+        rusqlite::params![review_id, profile_id, state],
+    )
+    .map_err(|e| e.to_string())?;
     if role == "Reviewer" {
-        conn.execute("UPDATE review_participants SET their_turn=0 WHERE review_id=?1 AND profile_id=?2", rusqlite::params![review_id, profile_id]).map_err(|e| e.to_string())?;
-        conn.execute("UPDATE review_participants SET their_turn=1 WHERE review_id=?1 AND role='Author'", rusqlite::params![review_id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE review_participants SET their_turn=0 WHERE review_id=?1 AND profile_id=?2",
+            rusqlite::params![review_id, profile_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE review_participants SET their_turn=1 WHERE review_id=?1 AND role='Author'",
+            rusqlite::params![review_id],
+        )
+        .map_err(|e| e.to_string())?;
     } else {
-        conn.execute("UPDATE review_participants SET their_turn=0 WHERE review_id=?1 AND role='Author'", rusqlite::params![review_id]).map_err(|e| e.to_string())?;
-        conn.execute("UPDATE review_participants SET their_turn=1 WHERE review_id=?1 AND role='Reviewer'", rusqlite::params![review_id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE review_participants SET their_turn=0 WHERE review_id=?1 AND role='Author'",
+            rusqlite::params![review_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE review_participants SET their_turn=1 WHERE review_id=?1 AND role='Reviewer'",
+            rusqlite::params![review_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn set_participant_state( review_id: String, profile_id: String, state: Option<String>) -> Result<()> {
+pub fn set_participant_state(
+    review_id: String,
+    profile_id: String,
+    state: Option<String>,
+) -> Result<()> {
     let c = db::conn()?;
     set_participant_state_tx(&c, &review_id, &profile_id, state.as_deref())
 }
@@ -194,8 +233,12 @@ pub fn set_participant_state( review_id: String, profile_id: String, state: Opti
 // ---------- create a review from a registered repo's real branches ----------
 
 fn next_review_number_tx(conn: &Connection, project_id: &str) -> Result<i64> {
-    conn.query_row("SELECT COALESCE(MAX(number),0)+1 FROM reviews WHERE project_id=?1", rusqlite::params![project_id], |r| r.get(0))
-        .map_err(|e| e.to_string())
+    conn.query_row(
+        "SELECT COALESCE(MAX(number),0)+1 FROM reviews WHERE project_id=?1",
+        rusqlite::params![project_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 /// DB half of opening a merge request (real-branch validation happens in the command
 /// wrapper via `git::repo_branches`, which is why this takes a plain `&Connection` and is
@@ -205,7 +248,11 @@ fn open_merge_request_tx(conn: &Connection, req: &NewMergeRequest) -> Result<Rev
     // Discussion/feed channel for this review — direct insert (chat.rs untouched, per file ownership).
     conn.execute(
         "INSERT INTO channels(id,content_type,name,project_id) VALUES(?1,'entity-bound',?2,?3)",
-        rusqlite::params![req.channel_id, format!("review #{number}: {}", req.title), req.project_id],
+        rusqlite::params![
+            req.channel_id,
+            format!("review #{number}: {}", req.title),
+            req.project_id
+        ],
     )
     .map_err(|e| e.to_string())?;
     let review = Review {
@@ -243,16 +290,22 @@ fn open_merge_request_tx(conn: &Connection, req: &NewMergeRequest) -> Result<Rev
 }
 /// Create a review (kind=MR) from a registered repo's real branches, project-scoped numbering.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn open_merge_request( req: NewMergeRequest) -> Result<Review> {
+pub fn open_merge_request(req: NewMergeRequest) -> Result<Review> {
     if req.source_branch == req.target_branch {
         return Err("source and target branch must differ".into());
     }
     let branches = crate::git::repo_branches(req.repo_path.clone())?;
     if !branches.iter().any(|b| b.name == req.source_branch) {
-        return Err(format!("source branch '{}' not found in repo", req.source_branch));
+        return Err(format!(
+            "source branch '{}' not found in repo",
+            req.source_branch
+        ));
     }
     if !branches.iter().any(|b| b.name == req.target_branch) {
-        return Err(format!("target branch '{}' not found in repo", req.target_branch));
+        return Err(format!(
+            "target branch '{}' not found in repo",
+            req.target_branch
+        ));
     }
     let c = db::conn()?;
     open_merge_request_tx(&c, &req)
@@ -261,15 +314,27 @@ pub fn open_merge_request( req: NewMergeRequest) -> Result<Review> {
 /// Unified diff for the review: merge-base(target,source) tree vs. source tip tree —
 /// i.e. exactly the changes the MR would introduce, same git2 plumbing style as git.rs.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn review_diff(repo_path: String, source_branch: String, target_branch: String) -> Result<String> {
+pub fn review_diff(
+    repo_path: String,
+    source_branch: String,
+    target_branch: String,
+) -> Result<String> {
     let repo = open(&repo_path)?;
     let source = branch_commit(&repo, &source_branch)?;
     let target = branch_commit(&repo, &target_branch)?;
-    let base_oid = repo.merge_base(target.id(), source.id()).map_err(|e| e.to_string())?;
-    let base_tree = repo.find_commit(base_oid).map_err(|e| e.to_string())?.tree().map_err(|e| e.to_string())?;
+    let base_oid = repo
+        .merge_base(target.id(), source.id())
+        .map_err(|e| e.to_string())?;
+    let base_tree = repo
+        .find_commit(base_oid)
+        .map_err(|e| e.to_string())?
+        .tree()
+        .map_err(|e| e.to_string())?;
     let source_tree = source.tree().map_err(|e| e.to_string())?;
     let mut opts = DiffOptions::new();
-    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&source_tree), Some(&mut opts)).map_err(|e| e.to_string())?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&base_tree), Some(&source_tree), Some(&mut opts))
+        .map_err(|e| e.to_string())?;
     let mut buf = String::new();
     diff.print(git2::DiffFormat::Patch, |_d, _h, line| {
         match line.origin() {
@@ -286,19 +351,32 @@ pub fn review_diff(repo_path: String, source_branch: String, target_branch: Stri
 // ---------- inline discussions (anchored file/line/revision, backed by a channel) ----------
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_review_discussions( review_id: String) -> Result<Vec<ReviewDiscussion>> {
+pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
-            Ok(ReviewDiscussion { id: r.get(0)?, review_id: r.get(1)?, file_path: r.get(2)?, line_start: r.get(3)?, line_end: r.get(4)?, revision: r.get(5)?, resolved: r.get(6)?, channel_id: r.get(7)? })
+            Ok(ReviewDiscussion {
+                id: r.get(0)?,
+                review_id: r.get(1)?,
+                file_path: r.get(2)?,
+                line_start: r.get(3)?,
+                line_end: r.get(4)?,
+                revision: r.get(5)?,
+                resolved: r.get(6)?,
+                channel_id: r.get(7)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
 }
-fn create_review_discussion_tx(conn: &Connection, d: &NewDiscussion, now: i64) -> Result<ReviewDiscussion> {
+fn create_review_discussion_tx(
+    conn: &Connection,
+    d: &NewDiscussion,
+    now: i64,
+) -> Result<ReviewDiscussion> {
     conn.execute(
         "INSERT INTO channels(id,content_type,name) VALUES(?1,'entity-bound',?2)",
         rusqlite::params![d.channel_id, format!("discussion: {}", d.file_path)],
@@ -312,36 +390,65 @@ fn create_review_discussion_tx(conn: &Connection, d: &NewDiscussion, now: i64) -
     if !d.message.trim().is_empty() {
         conn.execute(
             "INSERT INTO messages(id,channel_id,author_id,text,created_at) VALUES(?1,?2,?3,?4,?5)",
-            rusqlite::params![format!("{}-msg0", d.id), d.channel_id, d.author_id, d.message, now],
+            rusqlite::params![
+                format!("{}-msg0", d.id),
+                d.channel_id,
+                d.author_id,
+                d.message,
+                now
+            ],
         )
         .map_err(|e| e.to_string())?;
     }
-    Ok(ReviewDiscussion { id: d.id.clone(), review_id: d.review_id.clone(), file_path: d.file_path.clone(), line_start: d.line_start, line_end: d.line_end, revision: d.revision.clone(), resolved: false, channel_id: Some(d.channel_id.clone()) })
+    Ok(ReviewDiscussion {
+        id: d.id.clone(),
+        review_id: d.review_id.clone(),
+        file_path: d.file_path.clone(),
+        line_start: d.line_start,
+        line_end: d.line_end,
+        revision: d.revision.clone(),
+        resolved: false,
+        channel_id: Some(d.channel_id.clone()),
+    })
 }
 /// Anchored inline discussion on the real diff; backing channel row is a direct insert
 /// (chat.rs untouched — chat's own commands remain available for reading/posting later).
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_review_discussion( discussion: NewDiscussion) -> Result<ReviewDiscussion> {
+pub fn create_review_discussion(discussion: NewDiscussion) -> Result<ReviewDiscussion> {
     let c = db::conn()?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     create_review_discussion_tx(&c, &discussion, now)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn set_discussion_resolved( id: String, resolved: bool) -> Result<()> {
+pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
     let c = db::conn()?;
-    c.execute("UPDATE review_discussions SET resolved=?2 WHERE id=?1", rusqlite::params![id, resolved]).map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE review_discussions SET resolved=?2 WHERE id=?1",
+        rusqlite::params![id, resolved],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 // ---------- quality gates: rules CRUD + live evaluation ----------
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_quality_gate_rules( project_id: String) -> Result<Vec<QualityGateRule>> {
+pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![project_id], |r| {
-            Ok(QualityGateRule { id: r.get(0)?, project_id: r.get(1)?, branch_pattern: r.get(2)?, min_approvals: r.get(3)?, required_reviewers_json: r.get(4)?, codeowners_required: r.get(5)? })
+            Ok(QualityGateRule {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                branch_pattern: r.get(2)?,
+                min_approvals: r.get(3)?,
+                required_reviewers_json: r.get(4)?,
+                codeowners_required: r.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -349,7 +456,7 @@ pub fn list_quality_gate_rules( project_id: String) -> Result<Vec<QualityGateRul
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
+pub fn create_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required) VALUES(?1,?2,?3,?4,?5,?6)",
@@ -359,7 +466,7 @@ pub fn create_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
+pub fn update_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE quality_gate_rules SET branch_pattern=?2,min_approvals=?3,required_reviewers_json=?4,codeowners_required=?5 WHERE id=?1",
@@ -369,9 +476,13 @@ pub fn update_quality_gate_rule( rule: QualityGateRule) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_quality_gate_rule( id: String) -> Result<()> {
+pub fn delete_quality_gate_rule(id: String) -> Result<()> {
     let c = db::conn()?;
-    c.execute("DELETE FROM quality_gate_rules WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    c.execute(
+        "DELETE FROM quality_gate_rules WHERE id=?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 /// `*`-suffix glob only (e.g. "main", "release/*") — deliberately not full gitignore-style
@@ -387,7 +498,11 @@ fn branch_matches(pattern: &str, branch: &str) -> bool {
 }
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
     let (project_id, target_branch): (String, Option<String>) = conn
-        .query_row("SELECT project_id,target_branch FROM reviews WHERE id=?1", rusqlite::params![review_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row(
+            "SELECT project_id,target_branch FROM reviews WHERE id=?1",
+            rusqlite::params![review_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|e| e.to_string())?;
     let target = target_branch.unwrap_or_default();
 
@@ -396,15 +511,31 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         .map_err(|e| e.to_string())?;
     let rules: Vec<QualityGateRule> = s
         .query_map(rusqlite::params![project_id], |r| {
-            Ok(QualityGateRule { id: r.get(0)?, project_id: r.get(1)?, branch_pattern: r.get(2)?, min_approvals: r.get(3)?, required_reviewers_json: r.get(4)?, codeowners_required: r.get(5)? })
+            Ok(QualityGateRule {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                branch_pattern: r.get(2)?,
+                min_approvals: r.get(3)?,
+                required_reviewers_json: r.get(4)?,
+                codeowners_required: r.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let matched: Vec<&QualityGateRule> = rules.iter().filter(|r| branch_matches(&r.branch_pattern, &target)).collect();
+    let matched: Vec<&QualityGateRule> = rules
+        .iter()
+        .filter(|r| branch_matches(&r.branch_pattern, &target))
+        .collect();
     if matched.is_empty() {
-        return Ok(QualityGateEvaluation { satisfied: true, reasons: vec!["no quality gate rule matches this target branch".into()], approvals: 0, min_approvals: 0, matched_rules: 0 });
+        return Ok(QualityGateEvaluation {
+            satisfied: true,
+            reasons: vec!["no quality gate rule matches this target branch".into()],
+            approvals: 0,
+            min_approvals: 0,
+            matched_rules: 0,
+        });
     }
 
     let min_approvals = matched.iter().map(|r| r.min_approvals).max().unwrap_or(0);
@@ -425,7 +556,9 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
     let mut accepted_ids: std::collections::HashSet<String> = Default::default();
     {
         let mut s2 = conn.prepare("SELECT profile_id FROM review_participants WHERE review_id=?1 AND state='accepted'").map_err(|e| e.to_string())?;
-        let mut rows = s2.query(rusqlite::params![review_id]).map_err(|e| e.to_string())?;
+        let mut rows = s2
+            .query(rusqlite::params![review_id])
+            .map_err(|e| e.to_string())?;
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
             accepted_ids.insert(row.get::<_, String>(0).map_err(|e| e.to_string())?);
         }
@@ -433,11 +566,23 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
 
     let mut reasons = Vec::new();
     if approvals < min_approvals {
-        reasons.push(format!("needs {} more approval(s) ({}/{})", min_approvals - approvals, approvals, min_approvals));
+        reasons.push(format!(
+            "needs {} more approval(s) ({}/{})",
+            min_approvals - approvals,
+            approvals,
+            min_approvals
+        ));
     }
-    let missing_reviewers: Vec<String> = required_reviewers.iter().filter(|id| !accepted_ids.contains(*id)).cloned().collect();
+    let missing_reviewers: Vec<String> = required_reviewers
+        .iter()
+        .filter(|id| !accepted_ids.contains(*id))
+        .cloned()
+        .collect();
     if !missing_reviewers.is_empty() {
-        reasons.push(format!("missing approval from required reviewer(s): {}", missing_reviewers.join(", ")));
+        reasons.push(format!(
+            "missing approval from required reviewer(s): {}",
+            missing_reviewers.join(", ")
+        ));
     }
     // Simplified: no CODEOWNERS file parsing (KB §4 gap). codeowners_required is treated as
     // "at least one reviewer approval" until real CODEOWNERS-file matching is implemented.
@@ -445,11 +590,17 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         reasons.push("requires at least one reviewer approval (CODEOWNERS gate)".into());
     }
 
-    Ok(QualityGateEvaluation { satisfied: reasons.is_empty(), reasons, approvals, min_approvals, matched_rules: matched.len() as i64 })
+    Ok(QualityGateEvaluation {
+        satisfied: reasons.is_empty(),
+        reasons,
+        approvals,
+        min_approvals,
+        matched_rules: matched.len() as i64,
+    })
 }
 /// Live gate evaluation banner: satisfied/blocking reasons for a review's target branch.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn evaluate_quality_gate( review_id: String) -> Result<QualityGateEvaluation> {
+pub fn evaluate_quality_gate(review_id: String) -> Result<QualityGateEvaluation> {
     let c = db::conn()?;
     evaluate_quality_gate_tx(&c, &review_id)
 }
@@ -469,11 +620,17 @@ fn branch_commit<'a>(repo: &'a Repository, name: &str) -> Result<git2::Commit<'a
 /// In-memory merge preview only: `merge_commits` builds a result `Index` without ever
 /// touching the working directory, the on-disk index, or any ref. Safe against a
 /// user-registered repo. Never add a checkout/write call to this function.
-fn merge_preview(repo_path: &str, source_branch: &str, target_branch: &str) -> Result<(bool, Vec<String>)> {
+fn merge_preview(
+    repo_path: &str,
+    source_branch: &str,
+    target_branch: &str,
+) -> Result<(bool, Vec<String>)> {
     let repo = open(repo_path)?;
     let source = branch_commit(&repo, source_branch)?;
     let target = branch_commit(&repo, target_branch)?;
-    let idx = repo.merge_commits(&target, &source, None).map_err(|e| e.to_string())?;
+    let idx = repo
+        .merge_commits(&target, &source, None)
+        .map_err(|e| e.to_string())?;
     let mut conflicts = Vec::new();
     if idx.has_conflicts() {
         for entry in idx.conflicts().map_err(|e| e.to_string())? {
@@ -485,7 +642,14 @@ fn merge_preview(repo_path: &str, source_branch: &str, target_branch: &str) -> R
     }
     Ok((!conflicts.is_empty(), conflicts))
 }
-fn record_merge_run_tx(conn: &Connection, id: &str, review_id: &str, conflicted: bool, conflicts: &[String], note: &str) -> Result<SafeMergeRun> {
+fn record_merge_run_tx(
+    conn: &Connection,
+    id: &str,
+    review_id: &str,
+    conflicted: bool,
+    conflicts: &[String],
+    note: &str,
+) -> Result<SafeMergeRun> {
     let state = if conflicted { "FAILING" } else { "SUCCEEDED" };
     let log = if conflicted {
         format!("{note} — conflicts in: {}", conflicts.join(", "))
@@ -497,14 +661,28 @@ fn record_merge_run_tx(conn: &Connection, id: &str, review_id: &str, conflicted:
         rusqlite::params![id, review_id, state, log],
     )
     .map_err(|e| e.to_string())?;
-    Ok(SafeMergeRun { id: id.to_string(), review_id: review_id.to_string(), state: state.to_string(), is_dry_run: true, log: Some(log) })
+    Ok(SafeMergeRun {
+        id: id.to_string(),
+        review_id: review_id.to_string(),
+        state: state.to_string(),
+        is_dry_run: true,
+        log: Some(log),
+    })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_safe_merge_runs( review_id: String) -> Result<Vec<SafeMergeRun>> {
+pub fn list_safe_merge_runs(review_id: String) -> Result<Vec<SafeMergeRun>> {
     let c = db::conn()?;
     let mut s = c.prepare("SELECT id,review_id,state,is_dry_run,log FROM safe_merge_runs WHERE review_id=?1 ORDER BY started_at DESC").map_err(|e| e.to_string())?;
     let rows = s
-        .query_map(rusqlite::params![review_id], |r| Ok(SafeMergeRun { id: r.get(0)?, review_id: r.get(1)?, state: r.get(2)?, is_dry_run: r.get(3)?, log: r.get(4)? }))
+        .query_map(rusqlite::params![review_id], |r| {
+            Ok(SafeMergeRun {
+                id: r.get(0)?,
+                review_id: r.get(1)?,
+                state: r.get(2)?,
+                is_dry_run: r.get(3)?,
+                log: r.get(4)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -513,7 +691,13 @@ pub fn list_safe_merge_runs( review_id: String) -> Result<Vec<SafeMergeRun>> {
 /// Explicit Dry Run button: in-memory merge check (see `merge_preview`), recorded to
 /// `safe_merge_runs` with `is_dry_run=1`.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn dry_run_merge( id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String) -> Result<SafeMergeRun> {
+pub fn dry_run_merge(
+    id: String,
+    repo_path: String,
+    review_id: String,
+    source_branch: String,
+    target_branch: String,
+) -> Result<SafeMergeRun> {
     let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
     record_merge_run_tx(&c, &id, &review_id, conflicted, &conflicts, "dry run")
@@ -524,10 +708,23 @@ pub fn dry_run_merge( id: String, repo_path: String, review_id: String, source_b
 /// exists under `#[cfg(test)]` (see `tests::execute_real_merge_in_test`) against throwaway
 /// repos. The UI must show an "execution disabled (safety)" notice next to this result.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn attempt_merge( id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String) -> Result<SafeMergeRun> {
+pub fn attempt_merge(
+    id: String,
+    repo_path: String,
+    review_id: String,
+    source_branch: String,
+    target_branch: String,
+) -> Result<SafeMergeRun> {
     let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
-    record_merge_run_tx(&c, &id, &review_id, conflicted, &conflicts, "merge (execution disabled — safety: dry-run verdict only)")
+    record_merge_run_tx(
+        &c,
+        &id,
+        &review_id,
+        conflicted,
+        &conflicts,
+        "merge (execution disabled — safety: dry-run verdict only)",
+    )
 }
 
 #[cfg(test)]
@@ -538,7 +735,9 @@ mod tests {
     /// Fresh dir under src-tauri/target/test-repos/ — never a user-registered repo, swept
     /// at both the start (stale runs) and end of each test.
     fn throwaway_dir(name: &str) -> PathBuf {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-repos").join(format!("{name}-{}", std::process::id()));
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-repos")
+            .join(format!("{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -554,7 +753,13 @@ mod tests {
 
     /// Builds a commit via plumbing only (blob + treebuilder) — no working-directory
     /// checkout needed, so both branches can be constructed in one repo without switching HEAD.
-    fn plumb_commit(repo: &Repository, branch_ref: &str, parent: Option<git2::Oid>, filename: &str, content: &str) -> git2::Oid {
+    fn plumb_commit(
+        repo: &Repository,
+        branch_ref: &str,
+        parent: Option<git2::Oid>,
+        filename: &str,
+        content: &str,
+    ) -> git2::Oid {
         let blob_oid = repo.blob(content.as_bytes()).unwrap();
         let mut builder = match parent {
             Some(p) => {
@@ -567,9 +772,12 @@ mod tests {
         let tree_oid = builder.write().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = git2::Signature::now("Test", "test@example.com").unwrap();
-        let parents: Vec<git2::Commit> = parent.map(|p| vec![repo.find_commit(p).unwrap()]).unwrap_or_default();
+        let parents: Vec<git2::Commit> = parent
+            .map(|p| vec![repo.find_commit(p).unwrap()])
+            .unwrap_or_default();
         let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-        repo.commit(Some(branch_ref), &sig, &sig, "msg", &tree, &parent_refs).unwrap()
+        repo.commit(Some(branch_ref), &sig, &sig, "msg", &tree, &parent_refs)
+            .unwrap()
     }
 
     /// main: base.txt -> "base". feature branches off main, adds extra.txt (no conflict).
@@ -577,8 +785,15 @@ mod tests {
         let dir = throwaway_dir(name);
         let repo = Repository::init(&dir).unwrap();
         let base = plumb_commit(&repo, "refs/heads/main", None, "base.txt", "base\n");
-        repo.reference("refs/heads/feature", base, false, "create feature").unwrap();
-        plumb_commit(&repo, "refs/heads/feature", Some(base), "extra.txt", "extra\n");
+        repo.reference("refs/heads/feature", base, false, "create feature")
+            .unwrap();
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(base),
+            "extra.txt",
+            "extra\n",
+        );
         (dir, repo)
     }
 
@@ -587,9 +802,22 @@ mod tests {
         let dir = throwaway_dir(name);
         let repo = Repository::init(&dir).unwrap();
         let base = plumb_commit(&repo, "refs/heads/main", None, "conflict.txt", "base\n");
-        repo.reference("refs/heads/feature", base, false, "create feature").unwrap();
-        plumb_commit(&repo, "refs/heads/feature", Some(base), "conflict.txt", "feature-change\n");
-        plumb_commit(&repo, "refs/heads/main", Some(base), "conflict.txt", "main-change\n");
+        repo.reference("refs/heads/feature", base, false, "create feature")
+            .unwrap();
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(base),
+            "conflict.txt",
+            "feature-change\n",
+        );
+        plumb_commit(
+            &repo,
+            "refs/heads/main",
+            Some(base),
+            "conflict.txt",
+            "main-change\n",
+        );
         (dir, repo)
     }
 
@@ -622,9 +850,21 @@ mod tests {
         assert_eq!(review.state, "Opened");
         assert_eq!(review.kind, "MR");
 
-        let participants: i64 = conn.query_row("SELECT COUNT(*) FROM review_participants WHERE review_id='mr-1'", [], |r| r.get(0)).unwrap();
+        let participants: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_participants WHERE review_id='mr-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(participants, 2, "author + 1 reviewer");
-        let channels: i64 = conn.query_row("SELECT COUNT(*) FROM channels WHERE id='mr-1-channel'", [], |r| r.get(0)).unwrap();
+        let channels: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM channels WHERE id='mr-1-channel'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(channels, 1);
 
         drop(db_path);
@@ -667,14 +907,19 @@ mod tests {
         let (dir, _repo) = conflicting_repo("dry-run-conflict");
         let path = dir.to_string_lossy().to_string();
 
-        let (conflicted, conflicts) = merge_preview(&path, "feature", "main").expect("merge_preview");
+        let (conflicted, conflicts) =
+            merge_preview(&path, "feature", "main").expect("merge_preview");
         assert!(conflicted);
-        assert!(conflicts.iter().any(|f| f == "conflict.txt"), "conflicts: {conflicts:?}");
+        assert!(
+            conflicts.iter().any(|f| f == "conflict.txt"),
+            "conflicts: {conflicts:?}"
+        );
 
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('r3','demo-project',3,'MR','Opened','T')", []).unwrap();
-        let run = record_merge_run_tx(&conn, "run-1", "r3", conflicted, &conflicts, "dry run").expect("record");
+        let run = record_merge_run_tx(&conn, "run-1", "r3", conflicted, &conflicts, "dry run")
+            .expect("record");
         assert_eq!(run.state, "FAILING");
         assert!(run.log.unwrap().contains("conflict.txt"));
 
@@ -685,19 +930,28 @@ mod tests {
     /// Real git2 merge + branch-ref update. `#[cfg(test)]`-gated: this code path does not
     /// exist in the shipped binary. Only ever runs here, against a throwaway repo.
     #[cfg(test)]
-    fn execute_real_merge_in_test(repo_path: &str, source_branch: &str, target_branch: &str) -> Result<String> {
+    fn execute_real_merge_in_test(
+        repo_path: &str,
+        source_branch: &str,
+        target_branch: &str,
+    ) -> Result<String> {
         let repo = open(repo_path)?;
         let source = branch_commit(&repo, source_branch)?;
         let target = branch_commit(&repo, target_branch)?;
-        let mut idx = repo.merge_commits(&target, &source, None).map_err(|e| e.to_string())?;
+        let mut idx = repo
+            .merge_commits(&target, &source, None)
+            .map_err(|e| e.to_string())?;
         if idx.has_conflicts() {
             return Err("merge has conflicts".into());
         }
         let tree_oid = idx.write_tree_to(&repo).map_err(|e| e.to_string())?;
         let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
         let sig = git2::Signature::now("Test", "test@example.com").map_err(|e| e.to_string())?;
-        let oid = repo.commit(None, &sig, &sig, "merge", &tree, &[&target, &source]).map_err(|e| e.to_string())?;
-        repo.reference(&format!("refs/heads/{target_branch}"), oid, true, "merge").map_err(|e| e.to_string())?;
+        let oid = repo
+            .commit(None, &sig, &sig, "merge", &tree, &[&target, &source])
+            .map_err(|e| e.to_string())?;
+        repo.reference(&format!("refs/heads/{target_branch}"), oid, true, "merge")
+            .map_err(|e| e.to_string())?;
         Ok(oid.to_string())
     }
 
@@ -709,11 +963,25 @@ mod tests {
         let oid = execute_real_merge_in_test(&path, "feature", "main").expect("real merge");
 
         let repo = Repository::open(&path).unwrap();
-        let main_tip = repo.find_reference("refs/heads/main").unwrap().target().unwrap();
-        assert_eq!(main_tip.to_string(), oid, "main branch ref must now point at the merge commit");
+        let main_tip = repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap();
+        assert_eq!(
+            main_tip.to_string(),
+            oid,
+            "main branch ref must now point at the merge commit"
+        );
         let tree = repo.find_commit(main_tip).unwrap().tree().unwrap();
-        assert!(tree.get_name("extra.txt").is_some(), "merged tree must contain feature's file");
-        assert!(tree.get_name("base.txt").is_some(), "merged tree must keep main's file");
+        assert!(
+            tree.get_name("extra.txt").is_some(),
+            "merged tree must contain feature's file"
+        );
+        assert!(
+            tree.get_name("base.txt").is_some(),
+            "merged tree must keep main's file"
+        );
 
         sweep(&dir);
     }

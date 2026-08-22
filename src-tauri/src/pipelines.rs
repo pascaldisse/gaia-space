@@ -41,14 +41,29 @@ pub const MAX_STEPS_PER_JOB: usize = 50;
 pub const MAX_JOB_TIMEOUT_SECS: u64 = 7200; // 2h — also the max, per docs
 pub const DEFAULT_JOB_TIMEOUT_SECS: u64 = 7200;
 
-const PACKAGE_FORMATS: [&str; 8] = ["maven", "npm", "nuget", "pypi", "dart", "container", "composer", "file"];
+const PACKAGE_FORMATS: [&str; 8] = [
+    "maven",
+    "npm",
+    "nuget",
+    "pypi",
+    "dart",
+    "container",
+    "composer",
+    "file",
+];
 const REPO_MODES: [&str; 2] = ["HOSTING", "PROXY"];
 
 fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 fn now_nanos() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,9 +164,13 @@ pub struct ScriptDef {
 
 /// Parses `source` as a `ScriptDef` and enforces Space's real Automation limits.
 pub fn parse_and_validate_script(source: &str) -> Result<ScriptDef> {
-    let def: ScriptDef = serde_json::from_str(source).map_err(|e| format!("invalid pipeline script JSON: {e}"))?;
+    let def: ScriptDef =
+        serde_json::from_str(source).map_err(|e| format!("invalid pipeline script JSON: {e}"))?;
     if def.jobs.len() > MAX_JOBS_PER_SCRIPT {
-        return Err(format!("script exceeds max {MAX_JOBS_PER_SCRIPT} jobs/script (has {})", def.jobs.len()));
+        return Err(format!(
+            "script exceeds max {MAX_JOBS_PER_SCRIPT} jobs/script (has {})",
+            def.jobs.len()
+        ));
     }
     let mut seen = HashSet::new();
     for job in &def.jobs {
@@ -165,7 +184,11 @@ pub fn parse_and_validate_script(source: &str) -> Result<ScriptDef> {
             return Err(format!("job '{}' needs at least one step", job.name));
         }
         if job.steps.len() > MAX_STEPS_PER_JOB {
-            return Err(format!("job '{}' exceeds max {MAX_STEPS_PER_JOB} steps/job (has {})", job.name, job.steps.len()));
+            return Err(format!(
+                "job '{}' exceeds max {MAX_STEPS_PER_JOB} steps/job (has {})",
+                job.name,
+                job.steps.len()
+            ));
         }
         if let Some(t) = job.timeout_secs {
             if t == 0 || t > MAX_JOB_TIMEOUT_SECS {
@@ -183,7 +206,9 @@ fn job_id_for(script_id: &str, name: &str) -> String {
 /// Resyncs the `jobs` index table from a validated script def: upserts current jobs,
 /// archives ones no longer present (soft-delete, same convention as the rest of the schema).
 fn sync_jobs_tx(conn: &Connection, script_id: &str, def: &ScriptDef) -> Result<()> {
-    let mut stmt = conn.prepare("SELECT id FROM jobs WHERE script_id=?1").map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id FROM jobs WHERE script_id=?1")
+        .map_err(|e| e.to_string())?;
     let existing: HashSet<String> = stmt
         .query_map(params![script_id], |r| r.get::<_, String>(0))
         .map_err(|e| e.to_string())?
@@ -202,7 +227,8 @@ fn sync_jobs_tx(conn: &Connection, script_id: &str, def: &ScriptDef) -> Result<(
         kept.insert(id);
     }
     for id in existing.difference(&kept) {
-        conn.execute("UPDATE jobs SET archived=1 WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+        conn.execute("UPDATE jobs SET archived=1 WHERE id=?1", params![id])
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -232,7 +258,14 @@ pub fn list_pipeline_scripts() -> Result<Vec<PipelineScript>> {
     let mut s = c.prepare("SELECT id,project_id,repository,path,source,archived FROM pipeline_scripts ORDER BY path").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(PipelineScript { id: r.get(0)?, project_id: r.get(1)?, repository: r.get(2)?, path: r.get(3)?, source: r.get(4)?, archived: r.get(5)? })
+            Ok(PipelineScript {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                repository: r.get(2)?,
+                path: r.get(3)?,
+                source: r.get(4)?,
+                archived: r.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -240,47 +273,67 @@ pub fn list_pipeline_scripts() -> Result<Vec<PipelineScript>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_pipeline_script( script: PipelineScript) -> Result<()> {
+pub fn create_pipeline_script(script: PipelineScript) -> Result<()> {
     let c = db::conn()?;
     create_pipeline_script_tx(&c, &script)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_pipeline_script( script: PipelineScript) -> Result<()> {
+pub fn update_pipeline_script(script: PipelineScript) -> Result<()> {
     let c = db::conn()?;
     update_pipeline_script_tx(&c, &script)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_pipeline_script( id: String) -> Result<()> {
+pub fn delete_pipeline_script(id: String) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "DELETE FROM job_runs WHERE job_id IN (SELECT id FROM jobs WHERE script_id=?1)",
         params![id],
     )
     .map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM jobs WHERE script_id=?1", params![id]).map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM pipeline_scripts WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM jobs WHERE script_id=?1", params![id])
+        .map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM pipeline_scripts WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_jobs() -> Result<Vec<Job>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs ORDER BY name").map_err(|e| e.to_string())?;
+    let mut s = c
+        .prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs ORDER BY name")
+        .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| Ok(Job { id: r.get(0)?, script_id: r.get(1)?, name: r.get(2)?, trigger_type: r.get(3)?, archived: r.get(4)? }))
+        .query_map([], |r| {
+            Ok(Job {
+                id: r.get(0)?,
+                script_id: r.get(1)?,
+                name: r.get(2)?,
+                trigger_type: r.get(3)?,
+                archived: r.get(4)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_jobs_for_script( script_id: String) -> Result<Vec<Job>> {
+pub fn list_jobs_for_script(script_id: String) -> Result<Vec<Job>> {
     let c = db::conn()?;
     let mut s = c
         .prepare("SELECT id,script_id,name,trigger_type,archived FROM jobs WHERE script_id=?1 ORDER BY name")
         .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map(params![script_id], |r| Ok(Job { id: r.get(0)?, script_id: r.get(1)?, name: r.get(2)?, trigger_type: r.get(3)?, archived: r.get(4)? }))
+        .query_map(params![script_id], |r| {
+            Ok(Job {
+                id: r.get(0)?,
+                script_id: r.get(1)?,
+                name: r.get(2)?,
+                trigger_type: r.get(3)?,
+                archived: r.get(4)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -293,7 +346,15 @@ pub fn list_job_runs() -> Result<Vec<JobRun>> {
     let mut s = c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at FROM job_runs ORDER BY triggered_at DESC").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(JobRun { id: r.get(0)?, job_id: r.get(1)?, status: r.get(2)?, log: r.get(3)?, triggered_at: r.get(4)?, started_at: r.get(5)?, finished_at: r.get(6)? })
+            Ok(JobRun {
+                id: r.get(0)?,
+                job_id: r.get(1)?,
+                status: r.get(2)?,
+                log: r.get(3)?,
+                triggered_at: r.get(4)?,
+                started_at: r.get(5)?,
+                finished_at: r.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -301,7 +362,7 @@ pub fn list_job_runs() -> Result<Vec<JobRun>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_job_runs_for_script( script_id: String) -> Result<Vec<JobRun>> {
+pub fn list_job_runs_for_script(script_id: String) -> Result<Vec<JobRun>> {
     let c = db::conn()?;
     let mut s = c
         .prepare(
@@ -311,7 +372,15 @@ pub fn list_job_runs_for_script( script_id: String) -> Result<Vec<JobRun>> {
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map(params![script_id], |r| {
-            Ok(JobRun { id: r.get(0)?, job_id: r.get(1)?, status: r.get(2)?, log: r.get(3)?, triggered_at: r.get(4)?, started_at: r.get(5)?, finished_at: r.get(6)? })
+            Ok(JobRun {
+                id: r.get(0)?,
+                job_id: r.get(1)?,
+                status: r.get(2)?,
+                log: r.get(3)?,
+                triggered_at: r.get(4)?,
+                started_at: r.get(5)?,
+                finished_at: r.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -369,23 +438,44 @@ fn run_step(cmd: &str, cwd: &Path, deadline: Instant) -> Result<(bool, String)> 
 
 fn set_run_running(conn: &Arc<Mutex<Connection>>, run_id: &str, started_at: i64) {
     if let Ok(c) = conn.lock() {
-        let _ = c.execute("UPDATE job_runs SET status='RUNNING', started_at=?2 WHERE id=?1", params![run_id, started_at]);
+        let _ = c.execute(
+            "UPDATE job_runs SET status='RUNNING', started_at=?2 WHERE id=?1",
+            params![run_id, started_at],
+        );
     }
 }
 fn set_run_log(conn: &Arc<Mutex<Connection>>, run_id: &str, log: &str) {
     if let Ok(c) = conn.lock() {
-        let _ = c.execute("UPDATE job_runs SET log=?2 WHERE id=?1", params![run_id, log]);
+        let _ = c.execute(
+            "UPDATE job_runs SET log=?2 WHERE id=?1",
+            params![run_id, log],
+        );
     }
 }
-fn finish_run(conn: &Arc<Mutex<Connection>>, run_id: &str, status: &str, log: &str, finished_at: i64) {
+fn finish_run(
+    conn: &Arc<Mutex<Connection>>,
+    run_id: &str,
+    status: &str,
+    log: &str,
+    finished_at: i64,
+) {
     if let Ok(c) = conn.lock() {
-        let _ = c.execute("UPDATE job_runs SET status=?2, log=?3, finished_at=?4 WHERE id=?1", params![run_id, status, log, finished_at]);
+        let _ = c.execute(
+            "UPDATE job_runs SET status=?2, log=?3, finished_at=?4 WHERE id=?1",
+            params![run_id, status, log, finished_at],
+        );
     }
 }
 
 /// Executes one job run's steps sequentially against a per-run workdir. Runs on its own
 /// thread; jobs of the same script never wait on each other (no dependency graph, by design).
-fn execute_job_run(conn: Arc<Mutex<Connection>>, run_dir: PathBuf, run_id: String, steps: Vec<String>, timeout_secs: u64) {
+fn execute_job_run(
+    conn: Arc<Mutex<Connection>>,
+    run_dir: PathBuf,
+    run_id: String,
+    steps: Vec<String>,
+    timeout_secs: u64,
+) {
     let _ = fs::create_dir_all(&run_dir);
     set_run_running(&conn, &run_id, now_secs());
     let deadline = Instant::now() + Duration::from_secs(timeout_secs.max(1));
@@ -417,7 +507,13 @@ fn execute_job_run(conn: Arc<Mutex<Connection>>, run_dir: PathBuf, run_id: Strin
             }
         }
     }
-    finish_run(&conn, &run_id, if failed { "FAILED" } else { "FINISHED" }, &log, now_secs());
+    finish_run(
+        &conn,
+        &run_id,
+        if failed { "FAILED" } else { "FINISHED" },
+        &log,
+        now_secs(),
+    );
 }
 
 /// Inserts `SCHEDULED` run rows for every (non-archived-in-current-source) job of a script
@@ -425,11 +521,21 @@ fn execute_job_run(conn: Arc<Mutex<Connection>>, run_dir: PathBuf, run_id: Strin
 /// contract. Returns the initial rows immediately; callers that need to await completion
 /// (tests) can join the returned handles, production code (the tauri command) drops them,
 /// which detaches the threads to keep running without blocking the IPC call.
-fn spawn_script_jobs(conn: Arc<Mutex<Connection>>, workdir_root: PathBuf, script_id: &str) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
+fn spawn_script_jobs(
+    conn: Arc<Mutex<Connection>>,
+    workdir_root: PathBuf,
+    script_id: &str,
+) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
     let def = {
-        let c = conn.lock().map_err(|_| "pipeline db lock poisoned".to_string())?;
+        let c = conn
+            .lock()
+            .map_err(|_| "pipeline db lock poisoned".to_string())?;
         let source: String = c
-            .query_row("SELECT source FROM pipeline_scripts WHERE id=?1", params![script_id], |r| r.get(0))
+            .query_row(
+                "SELECT source FROM pipeline_scripts WHERE id=?1",
+                params![script_id],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         parse_and_validate_script(&source)?
     };
@@ -440,20 +546,32 @@ fn spawn_script_jobs(conn: Arc<Mutex<Connection>>, workdir_root: PathBuf, script
         let run_id = format!("{job_id}::run-{}", now_nanos());
         let triggered_at = now_secs();
         {
-            let c = conn.lock().map_err(|_| "pipeline db lock poisoned".to_string())?;
+            let c = conn
+                .lock()
+                .map_err(|_| "pipeline db lock poisoned".to_string())?;
             c.execute(
                 "INSERT INTO job_runs(id,job_id,status,log,triggered_at) VALUES(?1,?2,'SCHEDULED',NULL,?3)",
                 params![run_id, job_id, triggered_at],
             )
             .map_err(|e| e.to_string())?;
         }
-        runs.push(JobRun { id: run_id.clone(), job_id: job_id.clone(), status: "SCHEDULED".into(), log: None, triggered_at, started_at: None, finished_at: None });
+        runs.push(JobRun {
+            id: run_id.clone(),
+            job_id: job_id.clone(),
+            status: "SCHEDULED".into(),
+            log: None,
+            triggered_at,
+            started_at: None,
+            finished_at: None,
+        });
         let conn2 = conn.clone();
         let run_dir = workdir_root.join(&run_id);
         let run_id2 = run_id.clone();
         let steps = job.steps.clone();
         let timeout = job.timeout_secs.unwrap_or(DEFAULT_JOB_TIMEOUT_SECS);
-        handles.push(thread::spawn(move || execute_job_run(conn2, run_dir, run_id2, steps, timeout)));
+        handles.push(thread::spawn(move || {
+            execute_job_run(conn2, run_dir, run_id2, steps, timeout)
+        }));
     }
     Ok((runs, handles))
 }
@@ -462,9 +580,10 @@ fn spawn_script_jobs(conn: Arc<Mutex<Connection>>, workdir_root: PathBuf, script
 /// triggers, but this desktop build has no daemon watching repos, so triggers are manual-only
 /// (surfaced as such in Pipelines.tsx).
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn trigger_pipeline_script( script_id: String) -> Result<Vec<JobRun>> {
+pub fn trigger_pipeline_script(script_id: String) -> Result<Vec<JobRun>> {
     let conn = db::conn()?;
-    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
     let workdir_root = std::env::temp_dir().join("pipeline-runs");
     let shared = Arc::new(Mutex::new(conn));
     let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id)?;
@@ -479,7 +598,15 @@ pub fn list_deploy_targets() -> Result<Vec<DeployTarget>> {
     let mut s = c.prepare("SELECT id,project_id,name,target_key,description,manual_control,archived FROM deploy_targets ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(DeployTarget { id: r.get(0)?, project_id: r.get(1)?, name: r.get(2)?, target_key: r.get(3)?, description: r.get(4)?, manual_control: r.get(5)?, archived: r.get(6)? })
+            Ok(DeployTarget {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                name: r.get(2)?,
+                target_key: r.get(3)?,
+                description: r.get(4)?,
+                manual_control: r.get(5)?,
+                archived: r.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -487,7 +614,7 @@ pub fn list_deploy_targets() -> Result<Vec<DeployTarget>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_deploy_target( target: DeployTarget) -> Result<()> {
+pub fn create_deploy_target(target: DeployTarget) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "INSERT INTO deploy_targets(id,project_id,name,target_key,description,manual_control,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
@@ -497,7 +624,7 @@ pub fn create_deploy_target( target: DeployTarget) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_deploy_target( target: DeployTarget) -> Result<()> {
+pub fn update_deploy_target(target: DeployTarget) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE deploy_targets SET name=?2,target_key=?3,description=?4,manual_control=?5,archived=?6 WHERE id=?1",
@@ -507,10 +634,12 @@ pub fn update_deploy_target( target: DeployTarget) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_deploy_target( id: String) -> Result<()> {
+pub fn delete_deploy_target(id: String) -> Result<()> {
     let c = db::conn()?;
-    c.execute("DELETE FROM deployments WHERE target_id=?1", params![id]).map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM deploy_targets WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM deployments WHERE target_id=?1", params![id])
+        .map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM deploy_targets WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -527,10 +656,11 @@ fn deployment_from_row(r: &rusqlite::Row) -> rusqlite::Result<Deployment> {
         finished_at: r.get(8)?,
     })
 }
-const DEPLOYMENT_COLUMNS: &str = "id,target_id,version,status,description,job_run_id,scheduled_at,started_at,finished_at";
+const DEPLOYMENT_COLUMNS: &str =
+    "id,target_id,version,status,description,job_run_id,scheduled_at,started_at,finished_at";
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_deployments_for_target( target_id: String) -> Result<Vec<Deployment>> {
+pub fn list_deployments_for_target(target_id: String) -> Result<Vec<Deployment>> {
     let c = db::conn()?;
     let mut s = c
         .prepare(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE target_id=?1 ORDER BY scheduled_at DESC"))
@@ -543,17 +673,30 @@ pub fn list_deployments_for_target( target_id: String) -> Result<Vec<Deployment>
     rows
 }
 
-fn schedule_deployment_tx(conn: &Connection, req: &ScheduleDeploymentRequest) -> Result<Deployment> {
+fn schedule_deployment_tx(
+    conn: &Connection,
+    req: &ScheduleDeploymentRequest,
+) -> Result<Deployment> {
     let now = now_secs();
     conn.execute(
         "INSERT INTO deployments(id,target_id,version,status,description,scheduled_at) VALUES(?1,?2,?3,'SCHEDULED',?4,?5)",
         params![req.id, req.target_id, req.version, req.description, now],
     )
     .map_err(|e| e.to_string())?;
-    Ok(Deployment { id: req.id.clone(), target_id: req.target_id.clone(), version: req.version.clone(), status: "SCHEDULED".into(), description: req.description.clone(), job_run_id: None, scheduled_at: Some(now), started_at: None, finished_at: None })
+    Ok(Deployment {
+        id: req.id.clone(),
+        target_id: req.target_id.clone(),
+        version: req.version.clone(),
+        status: "SCHEDULED".into(),
+        description: req.description.clone(),
+        job_run_id: None,
+        scheduled_at: Some(now),
+        started_at: None,
+        finished_at: None,
+    })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn schedule_deployment( req: ScheduleDeploymentRequest) -> Result<Deployment> {
+pub fn schedule_deployment(req: ScheduleDeploymentRequest) -> Result<Deployment> {
     let c = db::conn()?;
     schedule_deployment_tx(&c, &req)
 }
@@ -578,7 +721,11 @@ fn allowed_deployment_transition(from: &str, to: &str) -> bool {
 }
 fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Deployment> {
     let (target_id, from): (String, String) = conn
-        .query_row("SELECT target_id,status FROM deployments WHERE id=?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row(
+            "SELECT target_id,status FROM deployments WHERE id=?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|e| e.to_string())?;
     if !allowed_deployment_transition(&from, to) {
         return Err(format!("illegal deployment transition {from} -> {to}"));
@@ -586,7 +733,11 @@ fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Dep
     let now = now_secs();
     match to {
         "DEPLOYING" => {
-            conn.execute("UPDATE deployments SET status=?2, started_at=?3 WHERE id=?1", params![id, to, now]).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE deployments SET status=?2, started_at=?3 WHERE id=?1",
+                params![id, to, now],
+            )
+            .map_err(|e| e.to_string())?;
         }
         "CURRENT" => {
             // Only one CURRENT per target: whichever deployment held it becomes OBSOLETE ("completed").
@@ -595,16 +746,29 @@ fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Dep
                 params![target_id, now],
             )
             .map_err(|e| e.to_string())?;
-            conn.execute("UPDATE deployments SET status=?2 WHERE id=?1", params![id, to]).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE deployments SET status=?2 WHERE id=?1",
+                params![id, to],
+            )
+            .map_err(|e| e.to_string())?;
         }
         _ => {
-            conn.execute("UPDATE deployments SET status=?2, finished_at=?3 WHERE id=?1", params![id, to, now]).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE deployments SET status=?2, finished_at=?3 WHERE id=?1",
+                params![id, to, now],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
-    conn.query_row(&format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE id=?1"), params![id], deployment_from_row).map_err(|e| e.to_string())
+    conn.query_row(
+        &format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE id=?1"),
+        params![id],
+        deployment_from_row,
+    )
+    .map_err(|e| e.to_string())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn transition_deployment( id: String, status: String) -> Result<Deployment> {
+pub fn transition_deployment(id: String, status: String) -> Result<Deployment> {
     let c = db::conn()?;
     transition_deployment_tx(&c, &id, &status)
 }
@@ -615,30 +779,49 @@ fn validate_package_format(format: &str) -> Result<()> {
     if PACKAGE_FORMATS.contains(&format) {
         Ok(())
     } else {
-        Err(format!("unsupported package format '{format}' (must be one of {PACKAGE_FORMATS:?})"))
+        Err(format!(
+            "unsupported package format '{format}' (must be one of {PACKAGE_FORMATS:?})"
+        ))
     }
 }
 fn validate_repo_mode(mode: &str) -> Result<()> {
     if REPO_MODES.contains(&mode) {
         Ok(())
     } else {
-        Err(format!("repository mode must be one of {REPO_MODES:?} (got '{mode}')"))
+        Err(format!(
+            "repository mode must be one of {REPO_MODES:?} (got '{mode}')"
+        ))
     }
 }
 
 /// A registry path segment must be one portable filename, never a path expression.
 fn validate_package_path_component(value: &str, field: &str) -> Result<()> {
-    if value.is_empty() || matches!(value, "." | "..") || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
-        return Err(format!("invalid package {field}: expected non-empty [A-Za-z0-9._-]+ path component"));
+    if value.is_empty()
+        || matches!(value, "." | "..")
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(format!(
+            "invalid package {field}: expected non-empty [A-Za-z0-9._-]+ path component"
+        ));
     }
     Ok(())
 }
-fn package_base_dir() -> PathBuf { std::env::temp_dir().join("packages") }
+fn package_base_dir() -> PathBuf {
+    std::env::temp_dir().join("packages")
+}
 /// Independently resolve the filesystem path; lexical validation alone never authorizes a write.
 fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
-    let canonical_base = fs::canonicalize(base_dir).map_err(|e| format!("cannot canonicalize package root: {e}"))?;
-    let canonical_path = fs::canonicalize(path).map_err(|e| format!("cannot canonicalize package path: {e}"))?;
-    if canonical_path.starts_with(&canonical_base) { Ok(canonical_path) } else { Err("package path resolves outside package root".into()) }
+    let canonical_base =
+        fs::canonicalize(base_dir).map_err(|e| format!("cannot canonicalize package root: {e}"))?;
+    let canonical_path =
+        fs::canonicalize(path).map_err(|e| format!("cannot canonicalize package path: {e}"))?;
+    if canonical_path.starts_with(&canonical_base) {
+        Ok(canonical_path)
+    } else {
+        Err("package path resolves outside package root".into())
+    }
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -647,7 +830,15 @@ pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
     let mut s = c.prepare("SELECT id,project_id,name,format,mode,description,archived FROM package_repositories ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
-            Ok(PackageRepository { id: r.get(0)?, project_id: r.get(1)?, name: r.get(2)?, format: r.get(3)?, mode: r.get(4)?, description: r.get(5)?, archived: r.get(6)? })
+            Ok(PackageRepository {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                name: r.get(2)?,
+                format: r.get(3)?,
+                mode: r.get(4)?,
+                description: r.get(5)?,
+                archived: r.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -655,7 +846,7 @@ pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_package_repository( repo: PackageRepository) -> Result<()> {
+pub fn create_package_repository(repo: PackageRepository) -> Result<()> {
     validate_package_path_component(&repo.id, "repository id")?;
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
@@ -668,7 +859,7 @@ pub fn create_package_repository( repo: PackageRepository) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_package_repository( repo: PackageRepository) -> Result<()> {
+pub fn update_package_repository(repo: PackageRepository) -> Result<()> {
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
     let c = db::conn()?;
@@ -680,15 +871,23 @@ pub fn update_package_repository( repo: PackageRepository) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_package_repository( id: String) -> Result<()> {
+pub fn delete_package_repository(id: String) -> Result<()> {
     let c = db::conn()?;
-    c.execute("DELETE FROM package_versions WHERE repository_id=?1", params![id]).map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM package_repositories WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute(
+        "DELETE FROM package_versions WHERE repository_id=?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM package_repositories WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_package_versions( repository_id: String, query: Option<String>) -> Result<Vec<PackageVersion>> {
+pub fn list_package_versions(
+    repository_id: String,
+    query: Option<String>,
+) -> Result<Vec<PackageVersion>> {
     let c = db::conn()?;
     let like = format!("%{}%", query.unwrap_or_default());
     let mut s = c
@@ -696,7 +895,14 @@ pub fn list_package_versions( repository_id: String, query: Option<String>) -> R
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map(params![repository_id, like], |r| {
-            Ok(PackageVersion { id: r.get(0)?, repository_id: r.get(1)?, package_name: r.get(2)?, version: r.get(3)?, metadata_json: r.get(4)?, created_at: r.get(5)? })
+            Ok(PackageVersion {
+                id: r.get(0)?,
+                repository_id: r.get(1)?,
+                package_name: r.get(2)?,
+                version: r.get(3)?,
+                metadata_json: r.get(4)?,
+                created_at: r.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
@@ -723,19 +929,38 @@ fn publish_package_version_tx(
     validate_package_path_component(repository_id, "repository id")?;
     validate_package_path_component(package_name, "name")?;
     validate_package_path_component(version, "version")?;
-    if let Some(filename) = payload_filename { validate_package_path_component(filename, "payload filename")?; }
-    if payload_filename.is_some() != payload_content.is_some() { return Err("payload filename and content must be supplied together".into()); }
-    let format: String = conn.query_row("SELECT format FROM package_repositories WHERE id=?1", params![repository_id], |r| r.get(0)).map_err(|_| format!("unknown package repository '{repository_id}'"))?;
+    if let Some(filename) = payload_filename {
+        validate_package_path_component(filename, "payload filename")?;
+    }
+    if payload_filename.is_some() != payload_content.is_some() {
+        return Err("payload filename and content must be supplied together".into());
+    }
+    let format: String = conn
+        .query_row(
+            "SELECT format FROM package_repositories WHERE id=?1",
+            params![repository_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| format!("unknown package repository '{repository_id}'"))?;
     let mut meta: serde_json::Value = match metadata_json {
-        Some(s) if !s.trim().is_empty() => serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?,
+        Some(s) if !s.trim().is_empty() => {
+            serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?
+        }
         _ => serde_json::json!({}),
     };
-    let Some(meta_object) = meta.as_object_mut() else { return Err("metadata must be a JSON object".into()); };
+    let Some(meta_object) = meta.as_object_mut() else {
+        return Err("metadata must be a JSON object".into());
+    };
     // Server-owned fields cannot be supplied to seed a deletion path.
-    meta_object.remove("_file_path"); meta_object.remove("_file_size"); meta_object.remove("_format");
+    meta_object.remove("_file_path");
+    meta_object.remove("_file_size");
+    meta_object.remove("_format");
     if let (Some(filename), Some(content)) = (payload_filename, payload_content) {
         fs::create_dir_all(base_dir).map_err(|e| e.to_string())?;
-        let dir = base_dir.join(repository_id).join(package_name).join(version);
+        let dir = base_dir
+            .join(repository_id)
+            .join(package_name)
+            .join(version);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         canonical_path_within(base_dir, &dir)?;
         let file_path = dir.join(filename);
@@ -748,8 +973,21 @@ fn publish_package_version_tx(
     let id = format!("{repository_id}::{package_name}::{version}");
     conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json) VALUES(?1,?2,?3,?4,?5)
          ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json", params![id, repository_id, package_name, version, meta.to_string()]).map_err(|e| e.to_string())?;
-    let created_at: i64 = conn.query_row("SELECT created_at FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
-    Ok(PackageVersion { id, repository_id: repository_id.into(), package_name: package_name.into(), version: version.into(), metadata_json: Some(meta.to_string()), created_at })
+    let created_at: i64 = conn
+        .query_row(
+            "SELECT created_at FROM package_versions WHERE id=?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(PackageVersion {
+        id,
+        repository_id: repository_id.into(),
+        package_name: package_name.into(),
+        version: version.into(),
+        metadata_json: Some(meta.to_string()),
+        created_at,
+    })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 #[allow(clippy::too_many_arguments)]
@@ -763,23 +1001,43 @@ pub fn publish_package_version(
 ) -> Result<PackageVersion> {
     let c = db::conn()?;
     let base_dir = package_base_dir();
-    publish_package_version_tx(&c, &base_dir, &repository_id, &package_name, &version, metadata_json.as_deref(), payload_filename.as_deref(), payload_content.as_deref())
+    publish_package_version_tx(
+        &c,
+        &base_dir,
+        &repository_id,
+        &package_name,
+        &version,
+        metadata_json.as_deref(),
+        payload_filename.as_deref(),
+        payload_content.as_deref(),
+    )
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_package_version( id: String) -> Result<()> {
+pub fn delete_package_version(id: String) -> Result<()> {
     let c = db::conn()?;
-    let meta: Option<String> = c.query_row("SELECT metadata_json FROM package_versions WHERE id=?1", params![id], |r| r.get(0)).ok();
+    let meta: Option<String> = c
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE id=?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .ok();
     if let Some(m) = meta {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
             if let Some(p) = v.get("_file_path").and_then(|p| p.as_str()) {
                 match canonical_path_within(&package_base_dir(), Path::new(p)) {
-                    Ok(path) => { let _ = fs::remove_file(path); }
-                    Err(e) => eprintln!("SECURITY: refusing package payload deletion for {id}: {e}"),
+                    Ok(path) => {
+                        let _ = fs::remove_file(path);
+                    }
+                    Err(e) => {
+                        eprintln!("SECURITY: refusing package payload deletion for {id}: {e}")
+                    }
                 }
             }
         }
     }
-    c.execute("DELETE FROM package_versions WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM package_versions WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -796,10 +1054,16 @@ mod tests {
         format!("{}-{}-{n}", std::process::id(), now_nanos())
     }
     fn temp_db() -> PathBuf {
-        std::env::temp_dir().join(format!("gaia-space-pipelines-test-{}.sqlite", unique_suffix()))
+        std::env::temp_dir().join(format!(
+            "gaia-space-pipelines-test-{}.sqlite",
+            unique_suffix()
+        ))
     }
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("gaia-space-pipelines-test-{name}-{}", unique_suffix()));
+        let dir = std::env::temp_dir().join(format!(
+            "gaia-space-pipelines-test-{name}-{}",
+            unique_suffix()
+        ));
         let _ = fs::create_dir_all(&dir);
         dir
     }
@@ -811,7 +1075,12 @@ mod tests {
     fn script_source(jobs: &[(&str, &[&str])]) -> String {
         let defs: Vec<ScriptJobDef> = jobs
             .iter()
-            .map(|(name, steps)| ScriptJobDef { name: name.to_string(), trigger_type: "MANUAL".into(), timeout_secs: None, steps: steps.iter().map(|s| s.to_string()).collect() })
+            .map(|(name, steps)| ScriptJobDef {
+                name: name.to_string(),
+                trigger_type: "MANUAL".into(),
+                timeout_secs: None,
+                steps: steps.iter().map(|s| s.to_string()).collect(),
+            })
             .collect();
         serde_json::to_string(&ScriptDef { jobs: defs }).unwrap()
     }
@@ -826,14 +1095,21 @@ mod tests {
         sync_jobs_tx(&conn, "script-a", &parse_and_validate_script(&src).unwrap()).unwrap();
         let workdir = temp_dir("runs-a");
         let shared = Arc::new(Mutex::new(conn));
-        let (runs, handles) = spawn_script_jobs(shared.clone(), workdir.clone(), "script-a").expect("spawn");
+        let (runs, handles) =
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a").expect("spawn");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "SCHEDULED");
         for h in handles {
             h.join().unwrap();
         }
         let c = shared.lock().unwrap();
-        let (status, log): (String, Option<String>) = c.query_row("SELECT status,log FROM job_runs WHERE id=?1", params![runs[0].id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let (status, log): (String, Option<String>) = c
+            .query_row(
+                "SELECT status,log FROM job_runs WHERE id=?1",
+                params![runs[0].id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(status, "FINISHED");
         assert!(log.unwrap().contains("hello-marker-42"));
         drop(c);
@@ -850,12 +1126,16 @@ mod tests {
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         let ts = "python3 -c \"import time; print('TS:' + repr(time.time()))\"";
-        let src = script_source(&[("job-one", &[ts, "sleep 0.5", ts]), ("job-two", &[ts, "sleep 0.5", ts])]);
+        let src = script_source(&[
+            ("job-one", &[ts, "sleep 0.5", ts]),
+            ("job-two", &[ts, "sleep 0.5", ts]),
+        ]);
         conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script-b','demo-project',?1)", params![src]).unwrap();
         sync_jobs_tx(&conn, "script-b", &parse_and_validate_script(&src).unwrap()).unwrap();
         let workdir = temp_dir("runs-b");
         let shared = Arc::new(Mutex::new(conn));
-        let (runs, handles) = spawn_script_jobs(shared.clone(), workdir.clone(), "script-b").expect("spawn");
+        let (runs, handles) =
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b").expect("spawn");
         assert_eq!(runs.len(), 2);
         for h in handles {
             h.join().unwrap();
@@ -864,16 +1144,36 @@ mod tests {
         let mut begins = Vec::new();
         let mut ends = Vec::new();
         for run in &runs {
-            let (status, log): (String, String) =
-                c.query_row("SELECT status,log FROM job_runs WHERE id=?1", params![run.id], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default()))).unwrap();
+            let (status, log): (String, String) = c
+                .query_row(
+                    "SELECT status,log FROM job_runs WHERE id=?1",
+                    params![run.id],
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        ))
+                    },
+                )
+                .unwrap();
             assert_eq!(status, "FINISHED");
-            let stamps: Vec<f64> = log.lines().filter_map(|l| l.strip_prefix("TS:").and_then(|s| s.parse::<f64>().ok())).collect();
-            assert_eq!(stamps.len(), 2, "expected begin+end timestamps in log: {log}");
+            let stamps: Vec<f64> = log
+                .lines()
+                .filter_map(|l| l.strip_prefix("TS:").and_then(|s| s.parse::<f64>().ok()))
+                .collect();
+            assert_eq!(
+                stamps.len(),
+                2,
+                "expected begin+end timestamps in log: {log}"
+            );
             begins.push(stamps[0]);
             ends.push(stamps[1]);
         }
         drop(c);
-        assert!(begins[1] < ends[0] && begins[0] < ends[1], "jobs did not overlap (ran serially): begins={begins:?} ends={ends:?}");
+        assert!(
+            begins[1] < ends[0] && begins[0] < ends[1],
+            "jobs did not overlap (ran serially): begins={begins:?} ends={ends:?}"
+        );
         sweep(&db_path);
         sweep(&workdir);
     }
@@ -881,13 +1181,21 @@ mod tests {
     /// Space's real limits: >100 jobs/script and >50 steps/job must be rejected up front.
     #[test]
     fn limit_validation_rejects_oversize_scripts() {
-        let too_many_jobs: Vec<(String, Vec<&str>)> = (0..(MAX_JOBS_PER_SCRIPT + 1)).map(|i| (format!("job-{i}"), vec!["echo hi"])).collect();
-        let jobs_ref: Vec<(&str, &[&str])> = too_many_jobs.iter().map(|(n, s)| (n.as_str(), s.as_slice())).collect();
+        let too_many_jobs: Vec<(String, Vec<&str>)> = (0..(MAX_JOBS_PER_SCRIPT + 1))
+            .map(|i| (format!("job-{i}"), vec!["echo hi"]))
+            .collect();
+        let jobs_ref: Vec<(&str, &[&str])> = too_many_jobs
+            .iter()
+            .map(|(n, s)| (n.as_str(), s.as_slice()))
+            .collect();
         let err = parse_and_validate_script(&script_source(&jobs_ref)).unwrap_err();
         assert!(err.contains("100 jobs"), "unexpected error: {err}");
 
-        let too_many_steps: Vec<&str> = std::iter::repeat("echo hi").take(MAX_STEPS_PER_JOB + 1).collect();
-        let err2 = parse_and_validate_script(&script_source(&[("build", &too_many_steps)])).unwrap_err();
+        let too_many_steps: Vec<&str> = std::iter::repeat("echo hi")
+            .take(MAX_STEPS_PER_JOB + 1)
+            .collect();
+        let err2 =
+            parse_and_validate_script(&script_source(&[("build", &too_many_steps)])).unwrap_err();
         assert!(err2.contains("50 steps"), "unexpected error: {err2}");
 
         // sanity: a script within limits validates fine.
@@ -902,23 +1210,53 @@ mod tests {
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO deploy_targets(id,project_id,name,target_key) VALUES('target-1','demo-project','Staging','staging')", []).unwrap();
-        let d1 = schedule_deployment_tx(&conn, &ScheduleDeploymentRequest { id: "deploy-1".into(), target_id: "target-1".into(), version: "1.0.0".into(), description: None }).unwrap();
+        let d1 = schedule_deployment_tx(
+            &conn,
+            &ScheduleDeploymentRequest {
+                id: "deploy-1".into(),
+                target_id: "target-1".into(),
+                version: "1.0.0".into(),
+                description: None,
+            },
+        )
+        .unwrap();
         assert_eq!(d1.status, "SCHEDULED");
 
-        assert!(transition_deployment_tx(&conn, "deploy-1", "CURRENT").is_err(), "SCHEDULED -> CURRENT must be illegal");
+        assert!(
+            transition_deployment_tx(&conn, "deploy-1", "CURRENT").is_err(),
+            "SCHEDULED -> CURRENT must be illegal"
+        );
 
         let d1 = transition_deployment_tx(&conn, "deploy-1", "DEPLOYING").unwrap();
         assert_eq!(d1.status, "DEPLOYING");
         let d1 = transition_deployment_tx(&conn, "deploy-1", "CURRENT").unwrap();
         assert_eq!(d1.status, "CURRENT");
 
-        let d2 = schedule_deployment_tx(&conn, &ScheduleDeploymentRequest { id: "deploy-2".into(), target_id: "target-1".into(), version: "1.0.1".into(), description: None }).unwrap();
+        let d2 = schedule_deployment_tx(
+            &conn,
+            &ScheduleDeploymentRequest {
+                id: "deploy-2".into(),
+                target_id: "target-1".into(),
+                version: "1.0.1".into(),
+                description: None,
+            },
+        )
+        .unwrap();
         transition_deployment_tx(&conn, &d2.id, "DEPLOYING").unwrap();
         let d2 = transition_deployment_tx(&conn, &d2.id, "CURRENT").unwrap();
         assert_eq!(d2.status, "CURRENT");
 
-        let d1_after: String = conn.query_row("SELECT status FROM deployments WHERE id='deploy-1'", [], |r| r.get(0)).unwrap();
-        assert_eq!(d1_after, "OBSOLETE", "promoting deploy-2 to CURRENT must supersede deploy-1");
+        let d1_after: String = conn
+            .query_row(
+                "SELECT status FROM deployments WHERE id='deploy-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            d1_after, "OBSOLETE",
+            "promoting deploy-2 to CURRENT must supersede deploy-1"
+        );
         sweep(&db_path);
     }
 
@@ -930,44 +1268,151 @@ mod tests {
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-1','demo-npm','npm','HOSTING')", []).unwrap();
         let base_dir = temp_dir("packages");
-        let pv = publish_package_version_tx(&conn, &base_dir, "repo-1", "left-pad", "1.2.3", Some(r#"{"license":"MIT"}"#), Some("left-pad-1.2.3.tgz"), Some("fake package payload bytes")).unwrap();
+        let pv = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-1",
+            "left-pad",
+            "1.2.3",
+            Some(r#"{"license":"MIT"}"#),
+            Some("left-pad-1.2.3.tgz"),
+            Some("fake package payload bytes"),
+        )
+        .unwrap();
         assert_eq!(pv.package_name, "left-pad");
         let meta: serde_json::Value = serde_json::from_str(&pv.metadata_json.unwrap()).unwrap();
         assert_eq!(meta["license"], "MIT");
         assert_eq!(meta["_format"], "npm");
         let file_path = meta["_file_path"].as_str().unwrap();
-        assert!(Path::new(file_path).exists(), "payload file should exist at {file_path}");
-        assert_eq!(fs::read_to_string(file_path).unwrap(), "fake package payload bytes");
-        assert!(Path::new(file_path).canonicalize().unwrap().starts_with(base_dir.canonicalize().unwrap()), "payload must resolve inside package base dir");
+        assert!(
+            Path::new(file_path).exists(),
+            "payload file should exist at {file_path}"
+        );
+        assert_eq!(
+            fs::read_to_string(file_path).unwrap(),
+            "fake package payload bytes"
+        );
+        assert!(
+            Path::new(file_path)
+                .canonicalize()
+                .unwrap()
+                .starts_with(base_dir.canonicalize().unwrap()),
+            "payload must resolve inside package base dir"
+        );
 
         // oversized/unsupported format rejected before touching disk.
         conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-2','demo-x','npm','HOSTING')", []).unwrap();
-        assert!(publish_package_version_tx(&conn, &base_dir, "repo-2", "x", "1.0.0", Some("not json"), None, None).is_err());
+        assert!(publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-2",
+            "x",
+            "1.0.0",
+            Some("not json"),
+            None,
+            None
+        )
+        .is_err());
         sweep(&db_path);
         sweep(&base_dir);
     }
     #[test]
     fn package_publish_rejects_unsafe_repository_ids() {
-        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); let base_dir=temp_dir("unsafe-repo");
-        for repository_id in ["..", "..%2f", "/tmp/package-escape", "repo/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,repository_id,"pkg","1.0.0",None,Some("pkg.tgz"),Some("payload")).is_err(), "repository id {repository_id:?}"); }
-        sweep(&db_path); sweep(&base_dir);
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        let base_dir = temp_dir("unsafe-repo");
+        for repository_id in ["..", "..%2f", "/tmp/package-escape", "repo/nested"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    repository_id,
+                    "pkg",
+                    "1.0.0",
+                    None,
+                    Some("pkg.tgz"),
+                    Some("payload")
+                )
+                .is_err(),
+                "repository id {repository_id:?}"
+            );
+        }
+        sweep(&db_path);
+        sweep(&base_dir);
     }
     #[test]
     fn package_publish_rejects_unsafe_package_names() {
-        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-name");
-        for package_name in ["..", "..%2f", "/tmp/package-escape", "pkg/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe",package_name,"1.0.0",None,Some("pkg.tgz"),Some("payload")).is_err(), "package name {package_name:?}"); }
-        sweep(&db_path); sweep(&base_dir);
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap();
+        let base_dir = temp_dir("unsafe-name");
+        for package_name in ["..", "..%2f", "/tmp/package-escape", "pkg/nested"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    "repo-safe",
+                    package_name,
+                    "1.0.0",
+                    None,
+                    Some("pkg.tgz"),
+                    Some("payload")
+                )
+                .is_err(),
+                "package name {package_name:?}"
+            );
+        }
+        sweep(&db_path);
+        sweep(&base_dir);
     }
     #[test]
     fn package_publish_rejects_unsafe_versions() {
-        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-version");
-        for version in ["..", "..%2f", "/tmp/package-escape", "1.0/nested"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe","pkg",version,None,Some("pkg.tgz"),Some("payload")).is_err(), "version {version:?}"); }
-        sweep(&db_path); sweep(&base_dir);
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap();
+        let base_dir = temp_dir("unsafe-version");
+        for version in ["..", "..%2f", "/tmp/package-escape", "1.0/nested"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    "repo-safe",
+                    "pkg",
+                    version,
+                    None,
+                    Some("pkg.tgz"),
+                    Some("payload")
+                )
+                .is_err(),
+                "version {version:?}"
+            );
+        }
+        sweep(&db_path);
+        sweep(&base_dir);
     }
     #[test]
     fn package_publish_rejects_unsafe_payload_filenames() {
-        let db_path=temp_db(); let conn=db::migrate_path(&db_path).unwrap(); conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap(); let base_dir=temp_dir("unsafe-filename");
-        for filename in ["..", "..%2f", "/tmp/package-escape", "payload/nested.tgz"] { assert!(publish_package_version_tx(&conn,&base_dir,"repo-safe","pkg","1.0.0",None,Some(filename),Some("payload")).is_err(), "payload filename {filename:?}"); }
-        sweep(&db_path); sweep(&base_dir);
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap();
+        let base_dir = temp_dir("unsafe-filename");
+        for filename in ["..", "..%2f", "/tmp/package-escape", "payload/nested.tgz"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    "repo-safe",
+                    "pkg",
+                    "1.0.0",
+                    None,
+                    Some(filename),
+                    Some("payload")
+                )
+                .is_err(),
+                "payload filename {filename:?}"
+            );
+        }
+        sweep(&db_path);
+        sweep(&base_dir);
     }
 }
