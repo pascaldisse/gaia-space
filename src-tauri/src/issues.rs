@@ -292,6 +292,9 @@ pub fn set_issue_assignees(issue_id: String, profile_ids: Vec<String>) -> Result
 pub fn list_issue_assignees(issue_id: String) -> Result<Vec<String>> {
     assignees_on(&db::conn()?, &issue_id)
 }
+// Argument list mirrors the `list_issues` tauri command 1:1 (it is the filter set the
+// front-end sends). Grouping into a struct would change the IPC contract.
+#[allow(clippy::too_many_arguments)]
 fn list_issues_on(
     c: &Connection,
     project_id: Option<&str>,
@@ -326,6 +329,9 @@ fn list_issues_on(
     Ok(rows)
 }
 
+// tauri `#[command]`: the signature IS the IPC contract consumed by the front-end.
+// Collapsing the filters into one argument object would break every caller.
+#[allow(clippy::too_many_arguments)]
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issues(
     project_id: Option<String>,

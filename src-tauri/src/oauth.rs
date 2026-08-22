@@ -52,6 +52,10 @@ impl OAuthConfig {
     }
 }
 
+/// One `oauth_auth_codes` row as selected during the token exchange:
+/// `(code_hash, application_id, user_id, redirect_uri, scope, code_challenge, expires_at)`.
+type AuthCodeRow = (String, String, String, String, String, Option<String>, i64);
+
 fn secret(bytes: usize) -> String {
     let mut raw = vec![0u8; bytes];
     rand::thread_rng().fill_bytes(&mut raw);
@@ -361,7 +365,7 @@ pub fn exchange_code(
         .split_once('.')
         .ok_or_else(|| TokenError::new("invalid_grant", "invalid authorization code"))?;
     let c = db::conn()?;
-    let row: Option<(String, String, String, String, String, Option<String>, i64)> = c
+    let row: Option<AuthCodeRow> = c
         .query_row(
             "SELECT code_hash,application_id,user_id,redirect_uri,scope,code_challenge,expires_at FROM oauth_auth_codes WHERE id=?1 AND consumed_at IS NULL",
             [code_id],

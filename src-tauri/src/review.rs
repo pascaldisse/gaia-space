@@ -1378,6 +1378,9 @@ fn ci_status_tx(conn: &Connection, project_id: &str) -> Result<(bool, Vec<String
     }
     Ok((reasons.is_empty(), reasons))
 }
+// Writes one safe-merge audit row; the arguments are exactly the columns of that row
+// as supplied by the merge tauri command. Bundling them would only move the arity.
+#[allow(clippy::too_many_arguments)]
 fn record_merge_run_tx(
     conn: &Connection,
     id: &str,

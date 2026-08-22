@@ -1325,6 +1325,9 @@ fn typed_format_metadata(
 /// — never a fixed/guessed location). Payload is stored as UTF-8 text (this local registry
 /// has no upload transport for arbitrary binaries yet; real Space's binary artifact storage is
 /// future work — noted here rather than faked).
+// Transactional core of the `publish_package_version` tauri command; its arguments are
+// that command's IPC parameters plus the connection/base-dir it must run inside.
+#[allow(clippy::too_many_arguments)]
 fn publish_package_version_tx(
     conn: &Connection,
     base_dir: &Path,

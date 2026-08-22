@@ -366,6 +366,9 @@ impl Write for PrependStream {
     }
 }
 
+// The handshake closure's `Result<Response, ErrorResponse>` type is imposed by
+// tungstenite's `accept_hdr` callback trait; we cannot box the `Err` variant.
+#[allow(clippy::result_large_err)]
 fn handle_cdp_connection(
     stream: TcpStream,
     request_head: Vec<u8>,
