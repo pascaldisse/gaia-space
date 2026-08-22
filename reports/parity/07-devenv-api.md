@@ -63,12 +63,3 @@ WIP:☀ `feat/tree-devenv-api` — devfile/deep-link + apps UI + webhook deliver
 3. No app OAuth/credential/key model or external HTTP application API; app installation/marketplace/ownership also absent.
 4. No executable webhook system: generic persisted subscription fields lack domain events, payload/signing, external delivery, history, and retry.
 5. Native chat and generic rights are functional foundations, but no slash-command/app callback contract or app required-rights/context-approval layer connects to them.
-
-## Crown implementation note — 2026-08-22
-- WIP:☀ completed · commits `b0dc34c` → `8e3a220`.
-- Devfile/open-IDE: SQLite V14 + Rust IPC/web dispatch → `src/api/applications.ts` → `src/views/Applications.tsx`; no cloud VM lifecycle.
-- Apps/webhooks/chatbots/UI extensions: registry + CRUD reachable in Applications view; Tauri handler and `/api/cmd/*` dispatch wired.
-- Webhook delivery/retry: SQLite V15 history; manual JSON POST, 10s timeout/no redirects, response/error capture, exponential retry schedule + UI retry.
-- Evidence: `src-tauri/src/applications.rs`; `src-tauri/src/db.rs`; `src-tauri/src/bin/space-server.rs`; `src/api/applications.ts`; `src/views/Applications.tsx`.
-- Verification: `applications::delivery_tests::webhook_delivery_posts_then_retries_after_an_http_failure` sends real localhost HTTP POST → 500 → retry → 204.
-- Remaining: app OAuth/keys/marketplace/app-rights; native chatbot payload dispatch; automatic domain event emission; cloud dev environments.

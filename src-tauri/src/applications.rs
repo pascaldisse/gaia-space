@@ -114,19 +114,6 @@ pub struct WebhookSubscription {
     pub enabled: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct WebhookDelivery {
-    pub id: String,
-    pub webhook_id: String,
-    pub payload_json: String,
-    pub status: String,
-    pub attempts: i64,
-    pub response_status: Option<i64>,
-    pub last_error: Option<String>,
-    pub created_at: i64,
-    pub delivered_at: Option<i64>,
-    pub next_attempt_at: Option<i64>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChatbotRegistration {
     pub id: String,
     pub application_id: String,
@@ -265,92 +252,6 @@ pub fn delete_webhook(id: String) -> Result<()> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
-fn read_delivery(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookDelivery> {
-    Ok(WebhookDelivery {
-        id: r.get(0)?,
-        webhook_id: r.get(1)?,
-        payload_json: r.get(2)?,
-        status: r.get(3)?,
-        attempts: r.get(4)?,
-        response_status: r.get(5)?,
-        last_error: r.get(6)?,
-        created_at: r.get(7)?,
-        delivered_at: r.get(8)?,
-        next_attempt_at: r.get(9)?,
-    })
-}
-fn delivery_backoff(attempts: i64) -> i64 {
-    30 * (1_i64 << attempts.clamp(0, 5))
-}
-fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
-    let c = db::conn()?;
-    let (webhook_id, endpoint_uri, enabled, payload): (String,String,bool,String) = c.query_row("SELECT d.webhook_id,w.endpoint_uri,w.enabled,d.payload_json FROM webhook_deliveries d JOIN webhook_subscriptions w ON w.id=d.webhook_id WHERE d.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|_|"webhook delivery not found".to_string())?;
-    if !enabled {
-        return Err("webhook is disabled".into());
-    }
-    let attempt: i64 = c
-        .query_row(
-            "SELECT attempts FROM webhook_deliveries WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    let result = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())?
-        .post(&endpoint_uri)
-        .header("content-type", "application/json")
-        .header("x-gaia-space-webhook", &webhook_id)
-        .body(payload)
-        .send();
-    match result {
-        Ok(response) if response.status().is_success() => {
-            c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',attempts=?2,response_status=?3,last_error=NULL,delivered_at=unixepoch(),next_attempt_at=NULL WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16())]).map_err(|e|e.to_string())?;
-        }
-        Ok(response) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=?3,last_error=?4,next_attempt_at=unixepoch()+?5 WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16()),format!("HTTP {}",response.status()),next]).map_err(|e|e.to_string())?;
-        }
-        Err(error) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=NULL,last_error=?3,next_attempt_at=unixepoch()+?4 WHERE id=?1",params![id,attempt+1,error.to_string(),next]).map_err(|e|e.to_string())?;
-        }
-    }
-    c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[id],read_delivery).map_err(|e|e.to_string())
-}
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<WebhookDelivery> {
-    serde_json::from_str::<serde_json::Value>(&payload_json)
-        .map_err(|_| "webhook payload must be JSON".to_string())?;
-    let id = format!(
-        "delivery-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_nanos()
-    );
-    let c = db::conn()?;
-    c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status) VALUES(?1,?2,?3,'PENDING')",params![id,webhook_id,payload_json]).map_err(|e|e.to_string())?;
-    drop(c);
-    deliver_delivery(&id)
-}
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn retry_webhook_delivery(id: String) -> Result<WebhookDelivery> {
-    deliver_delivery(&id)
-}
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_webhook_deliveries(webhook_id: String) -> Result<Vec<WebhookDelivery>> {
-    let c = db::conn()?;
-    let mut q=c.prepare("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE webhook_id=?1 ORDER BY created_at DESC").map_err(|e|e.to_string())?;
-    let rows = q
-        .query_map([webhook_id], read_delivery)
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
 fn bot(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChatbotRegistration> {
     Ok(ChatbotRegistration {
         id: r.get(0)?,
@@ -462,72 +363,5 @@ mod tests {
             .unwrap()
             .url
             .starts_with("jetbrains://"));
-    }
-}
-
-#[cfg(test)]
-mod delivery_tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn webhook_delivery_posts_then_retries_after_an_http_failure() {
-        let temp = db::TempDb::new("webhook-delivery");
-        db::migrate_path(&temp).expect("migration");
-        std::env::set_var("SPACE_DB", temp.path());
-        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let body = Arc::new(Mutex::new(String::new()));
-        let captured = body.clone();
-        let server = std::thread::spawn(move || {
-            for status in ["500 Internal Server Error", "204 No Content"] {
-                let (mut stream, _) = listener.accept().expect("webhook request");
-                let mut request = [0_u8; 4096];
-                let n = stream.read(&mut request).expect("read request");
-                *captured.lock().unwrap() = String::from_utf8_lossy(&request[..n]).into_owned();
-                stream
-                    .write_all(
-                        format!(
-                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        )
-                        .as_bytes(),
-                    )
-                    .expect("response");
-            }
-        });
-        save_application(Application {
-            id: "app-delivery".into(),
-            name: "Delivery app".into(),
-            description: None,
-            application_type: "Application".into(),
-            endpoint_uri: Some(endpoint.clone()),
-            client_id: "delivery-client".into(),
-            client_credentials_flow_enabled: true,
-            code_flow_enabled: false,
-            pkce_required: false,
-            connection_status: "CONNECTED".into(),
-            archived: false,
-        })
-        .expect("app");
-        save_webhook(WebhookSubscription {
-            id: "hook-delivery".into(),
-            application_id: "app-delivery".into(),
-            event_type: "IssueWebhookEvent".into(),
-            filters_json: Some("{}".into()),
-            endpoint_uri: endpoint,
-            enabled: true,
-        })
-        .expect("hook");
-        let failed = deliver_webhook("hook-delivery".into(), r#"{"issue":"GAIA-7"}"#.into())
-            .expect("first delivery record");
-        assert_eq!(failed.status, "FAILED");
-        assert_eq!(failed.attempts, 1);
-        let succeeded = retry_webhook_delivery(failed.id).expect("retry");
-        assert_eq!(succeeded.status, "SUCCEEDED");
-        assert_eq!(succeeded.attempts, 2);
-        server.join().expect("server");
-        assert!(body.lock().unwrap().contains("GAIA-7"));
     }
 }
