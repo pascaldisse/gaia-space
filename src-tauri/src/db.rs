@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -178,6 +178,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 17 {
         tx.execute_batch(SCHEMA_V17)?;
     }
+    if version < 18 {
+        tx.execute_batch(SCHEMA_V18)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -279,6 +282,12 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+
+pub(crate) const SCHEMA_V18: &str = r#"
+CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE, payload_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), attempts INTEGER NOT NULL DEFAULT 0, response_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), delivered_at INTEGER, next_attempt_at INTEGER);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_created ON webhook_deliveries(webhook_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(status, next_attempt_at);
 "#;
 
 pub(crate) const SCHEMA_V17: &str = r#"
@@ -548,7 +557,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, SCHEMA_VERSION);
         conn.execute("INSERT INTO devfiles(id,project_id,path,name,content,generated) VALUES('d','demo-project','.space/dev.devfile.yaml','Dev','schemaVersion: 2.2.0',0)", []).unwrap();
         conn.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('a','App','Application','client')", []).unwrap();
         conn.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('w','a','IssueWebhookEvent','https://example.test/hook')", []).unwrap();
@@ -583,7 +592,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 14);
+        assert_eq!(SCHEMA_VERSION, 18);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
