@@ -387,6 +387,24 @@ mod tests {
     }
 
     #[test]
+    fn v14_adds_devfiles_and_application_extension_tables() {
+        let temp = TempDb::new("gaia-space-v14-applications");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.pragma_update(None, "user_version", 13).unwrap();
+        migrate(&conn).expect("v14");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 14);
+        conn.execute("INSERT INTO devfiles(id,project_id,path,name,content,generated) VALUES('d','demo-project','.space/dev.devfile.yaml','Dev','schemaVersion: 2.2.0',0)", []).unwrap();
+        conn.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('a','App','Application','client')", []).unwrap();
+        conn.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('w','a','IssueWebhookEvent','https://example.test/hook')", []).unwrap();
+        conn.execute("DELETE FROM applications WHERE id='a'", []).unwrap();
+        let orphaned: i64 = conn.query_row("SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphaned, 0, "extension rows cascade with their application");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -399,7 +417,7 @@ mod tests {
         migrate(&conn).expect("v11");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
-        assert_eq!(SCHEMA_VERSION, 13);
+        assert_eq!(SCHEMA_VERSION, 14);
         let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn.query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
