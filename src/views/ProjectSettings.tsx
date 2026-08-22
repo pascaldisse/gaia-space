@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type CfDefinition, type CfType, type Profile, type RoleAssignment } from "../api/platform";
 import { personalApi } from "../api/personal";
-import { currentUser, humanError, profileId, profiles, reloadProfiles, reloadProjects, setProjectId } from "../session";
+import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { navigate, route } from "../router";
 import "./ProjectSettings.css";
 
@@ -18,7 +18,7 @@ function ProjectMembers(props: { projectId: string; allowed: boolean }) {
   const [roleId, setRoleId] = createSignal("");
   const [members, { mutate: setMembers, refetch: reloadMembers }] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
   const [roles] = createResource(platformApi.roles);
-  const [assignments, { refetch: reloadAssignments }] = createResource(platformApi.assignments);
+  const [assignments, { refetch: reloadAssignments }] = createResource(() => true, () => platformApi.assignments());
   const projectAssignments = () => (assignments() ?? []).filter(assignment =>
     assignment.scope_type === "project" && assignment.scope_id === props.projectId && !!assignment.profile_id,
   );
@@ -106,7 +106,7 @@ function ProjectCustomFields(props: { projectId: string; allowed: boolean }) {
       const constraints_json = input.cf_type === "enum"
         ? JSON.stringify({ options: input.constraints.split(",").map(value => value.trim()).filter(Boolean) })
         : input.constraints.trim() || null;
-      if (input.cf_type === "enum" && !JSON.parse(constraints_json).options.length) throw new Error("List fields need at least one option.");
+      if (input.cf_type === "enum" && !(parseJson(constraints_json) as { options?: unknown[] } | undefined)?.options?.length) throw new Error("List fields need at least one option.");
       await platformApi.createCfDefinition({ entity_type: "project", cf_type: input.cf_type, name: input.name.trim(), constraints_json });
       setForm(blankCf()); setError(""); await reloadValues();
     } catch (reason) { setError(humanError(reason)); }

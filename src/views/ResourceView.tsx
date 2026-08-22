@@ -14,7 +14,7 @@ type Props = {
   summary?: (item: Item) => string | undefined;
 };
 const label = (key: string) => key.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
-const display = (value: unknown) => {
+const display = (value: unknown): string => {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.map(display).join(", ") || "—";
