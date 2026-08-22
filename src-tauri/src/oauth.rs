@@ -108,6 +108,13 @@ pub fn register_redirect_uri(application_id: &str, redirect_uri: &str) -> Result
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// Command-shaped wrappers: the HTTP/Tauri dispatch tables hand over owned values.
+pub fn register_redirect_uri_cmd(application_id: String, redirect_uri: String) -> Result<()> {
+    register_redirect_uri(&application_id, &redirect_uri)
+}
+pub fn list_redirect_uris_cmd(application_id: String) -> Result<Vec<String>> {
+    list_redirect_uris(&application_id)
+}
 pub fn list_redirect_uris(application_id: &str) -> Result<Vec<String>> {
     let c = db::conn()?;
     let mut q = c
@@ -156,7 +163,7 @@ struct Client {
     /// Argon2 digest of the registered client secret; empty = public client.
     secret_hash: String,
 }
-fn code_client(client_id: &str) -> Result<Client> {
+fn code_client(client_id: &str) -> std::result::Result<Client, TokenError> {
     let c = db::conn()?;
     let row: Option<(String, bool, String)> = c
         .query_row(
@@ -167,10 +174,15 @@ fn code_client(client_id: &str) -> Result<Client> {
         .optional()
         .map_err(|e| e.to_string())?;
     let Some((id, code_flow_enabled, secret_hash)) = row else {
-        return Err("unknown client_id".into());
+        return Err(TokenError::new("invalid_client", "unknown client_id"));
     };
+    // A known client asking for a flow it does not hold is `unauthorized_client`,
+    // not `invalid_client`: its credentials are fine, its grant is not.
     if !code_flow_enabled {
-        return Err("authorization-code flow is disabled for this application".into());
+        return Err(TokenError::new(
+            "unauthorized_client",
+            "authorization-code flow is disabled for this application",
+        ));
     }
     Ok(Client { id, secret_hash })
 }
@@ -188,12 +200,21 @@ pub fn rotate_client_secret(application_id: &str) -> Result<String> {
 
 /// RFC 6749 §2.3/§4.1.3: a confidential client MUST authenticate at the token endpoint.
 /// PKCE reinforces a public client; it never substitutes for the secret.
-fn authenticate_client(client: &Client, offered: Option<&str>) -> Result<()> {
+fn authenticate_client(
+    client: &Client,
+    offered: Option<&str>,
+) -> std::result::Result<(), TokenError> {
     match (client.secret_hash.is_empty(), offered) {
         (true, None) => Ok(()),
-        (true, Some(_)) => Err("this client is public and takes no client_secret".into()),
+        (true, Some(_)) => Err(TokenError::new(
+            "invalid_client",
+            "this client is public and takes no client_secret",
+        )),
         (false, Some(secret)) if matches(secret, &client.secret_hash) => Ok(()),
-        (false, _) => Err("invalid client credentials".into()),
+        (false, _) => Err(TokenError::new(
+            "invalid_client",
+            "invalid client credentials",
+        )),
     }
 }
 fn redirect_allowed(application_id: &str, redirect_uri: &str) -> Result<bool> {
@@ -215,7 +236,7 @@ pub fn authorize(
     if req.response_type != "code" {
         return Err("unsupported response_type".into());
     }
-    let client = code_client(&req.client_id)?;
+    let client = code_client(&req.client_id).map_err(|e| e.error_description)?;
     if !redirect_allowed(&client.id, &req.redirect_uri)? {
         return Err("redirect_uri is not registered for this application".into());
     }
@@ -271,11 +292,65 @@ fn s256(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
+/// RFC 6749 §5.2 token-endpoint error. The wire form is the standard one
+/// (`{"error":...,"error_description":...}`), never the house `{"ok":false,...}`
+/// envelope: an OAuth client parses §5.2 or nothing.
+#[derive(Clone, Debug, Serialize)]
+pub struct TokenError {
+    pub error: &'static str,
+    pub error_description: String,
+}
+/// The full §5.2 code set this endpoint may emit.
+pub const TOKEN_ERROR_CODES: [&str; 6] = [
+    "invalid_request",
+    "invalid_client",
+    "invalid_grant",
+    "unauthorized_client",
+    "unsupported_grant_type",
+    "invalid_scope",
+];
+impl TokenError {
+    fn new(error: &'static str, description: impl Into<String>) -> Self {
+        Self {
+            error,
+            error_description: description.into(),
+        }
+    }
+    /// §5.2: a failed client authentication answers 401 (and MUST carry a
+    /// `WWW-Authenticate` challenge); every other error is a 400.
+    pub fn http_status(&self) -> u16 {
+        if self.error == "invalid_client" {
+            401
+        } else {
+            400
+        }
+    }
+}
+impl std::fmt::Display for TokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.error, self.error_description)
+    }
+}
+/// Infrastructure failures (database, hashing) reach the client as `invalid_request`:
+/// §5.2 has no server-side code, and leaking the internal text is worse than a
+/// slightly wrong class.
+impl From<String> for TokenError {
+    fn from(message: String) -> Self {
+        Self::new("invalid_request", message)
+    }
+}
+
 /// Single use: the code row is consumed inside the same statement that claims it,
 /// so a replay (or a race) finds nothing to claim.
-pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenResponse> {
+pub fn exchange_code(
+    req: &TokenRequest,
+    cfg: OAuthConfig,
+) -> std::result::Result<TokenResponse, TokenError> {
     if req.grant_type != "authorization_code" {
-        return Err("unsupported grant_type".into());
+        return Err(TokenError::new(
+            "unsupported_grant_type",
+            format!("grant_type {:?} is not supported", req.grant_type),
+        ));
     }
     let client = code_client(&req.client_id)?;
     // Client authentication comes first, before the code row is even read: otherwise
@@ -284,7 +359,7 @@ pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenRespon
     let (code_id, code_secret) = req
         .code
         .split_once('.')
-        .ok_or_else(|| "invalid authorization code".to_string())?;
+        .ok_or_else(|| TokenError::new("invalid_grant", "invalid authorization code"))?;
     let c = db::conn()?;
     let row: Option<(String, String, String, String, String, Option<String>, i64)> = c
         .query_row(
@@ -297,7 +372,10 @@ pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenRespon
     let Some((code_hash, application_id, user_id, redirect_uri, scope, challenge, expires_at)) =
         row
     else {
-        return Err("invalid authorization code".into());
+        return Err(TokenError::new(
+            "invalid_grant",
+            "invalid authorization code",
+        ));
     };
     // Burn first, judge after: even a failed exchange must retire the code.
     let claimed = c
@@ -307,16 +385,28 @@ pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenRespon
         )
         .map_err(|e| e.to_string())?;
     if claimed == 0 {
-        return Err("invalid authorization code".into());
+        return Err(TokenError::new(
+            "invalid_grant",
+            "invalid authorization code",
+        ));
     }
     if !matches(code_secret, &code_hash) || application_id != client.id {
-        return Err("invalid authorization code".into());
+        return Err(TokenError::new(
+            "invalid_grant",
+            "invalid authorization code",
+        ));
     }
     if now() > expires_at {
-        return Err("authorization code has expired".into());
+        return Err(TokenError::new(
+            "invalid_grant",
+            "authorization code has expired",
+        ));
     }
     if redirect_uri != req.redirect_uri {
-        return Err("redirect_uri does not match the authorization request".into());
+        return Err(TokenError::new(
+            "invalid_grant",
+            "redirect_uri does not match the authorization request",
+        ));
     }
     if let Some(challenge) = challenge {
         let verifier = req
@@ -324,12 +414,18 @@ pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenRespon
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty())
-            .ok_or_else(|| "code_verifier is required".to_string())?;
+            .ok_or_else(|| TokenError::new("invalid_grant", "code_verifier is required"))?;
         if !(43..=128).contains(&verifier.len()) {
-            return Err("code_verifier length must be 43..=128".into());
+            return Err(TokenError::new(
+                "invalid_grant",
+                "code_verifier length must be 43..=128",
+            ));
         }
         if s256(verifier) != challenge {
-            return Err("code_verifier does not match the code_challenge".into());
+            return Err(TokenError::new(
+                "invalid_grant",
+                "code_verifier does not match the code_challenge",
+            ));
         }
     }
     let (token_id, token_secret) = (id("at"), secret(32));
@@ -540,7 +636,63 @@ mod tests {
                 .unwrap();
             let err =
                 exchange_code(&token_request("c6", &grant.code, Some(VERIFIER)), cfg).unwrap_err();
-            assert!(err.contains("expired"), "{err}");
+            assert_eq!(err.error, "invalid_grant");
+            assert!(err.error_description.contains("expired"), "{err}");
+        });
+    }
+
+    /// RFC 6749 §5.2: every refusal carries one of the registered codes, and only a
+    /// failed client authentication answers 401.
+    #[test]
+    fn token_errors_carry_rfc6749_codes_and_statuses() {
+        with_db(|| {
+            let cfg = OAuthConfig::default();
+            app("e1", false);
+            let grant = authorize("u1", &request("e1", Some(&s256(VERIFIER))), cfg).unwrap();
+
+            let mut wrong_grant_type = token_request("e1", &grant.code, Some(VERIFIER));
+            wrong_grant_type.grant_type = "client_credentials".into();
+            let e = exchange_code(&wrong_grant_type, cfg).unwrap_err();
+            assert_eq!(e.error, "unsupported_grant_type");
+            assert_eq!(e.http_status(), 400);
+            assert!(!e.error_description.is_empty(), "§5.2 description present");
+
+            let mut unknown = token_request("e1", &grant.code, Some(VERIFIER));
+            unknown.client_id = "no-such-client".into();
+            let e = exchange_code(&unknown, cfg).unwrap_err();
+            assert_eq!(e.error, "invalid_client");
+            assert_eq!(e.http_status(), 401, "§5.2: client auth failure is a 401");
+
+            // A public client that offers a secret fails client authentication.
+            let mut with_secret = token_request("e1", &grant.code, Some(VERIFIER));
+            with_secret.client_secret = Some("spcs_uninvited".into());
+            assert_eq!(
+                exchange_code(&with_secret, cfg).unwrap_err().error,
+                "invalid_client"
+            );
+
+            let mut bad_code = token_request("e1", "ac-nope.deadbeef", Some(VERIFIER));
+            bad_code.redirect_uri = "https://client.example/cb".into();
+            let e = exchange_code(&bad_code, cfg).unwrap_err();
+            assert_eq!(e.error, "invalid_grant");
+            assert_eq!(e.http_status(), 400);
+
+            // Known client, flow withdrawn: credentials fine, grant not.
+            db::conn()
+                .unwrap()
+                .execute(
+                    "UPDATE applications SET code_flow_enabled=0 WHERE id='app-e1'",
+                    [],
+                )
+                .unwrap();
+            let e =
+                exchange_code(&token_request("e1", &grant.code, Some(VERIFIER)), cfg).unwrap_err();
+            assert_eq!(e.error, "unauthorized_client");
+            assert_eq!(e.http_status(), 400);
+
+            for code in [e.error, "invalid_request", "invalid_scope"] {
+                assert!(TOKEN_ERROR_CODES.contains(&code), "{code} is a §5.2 code");
+            }
         });
     }
 
