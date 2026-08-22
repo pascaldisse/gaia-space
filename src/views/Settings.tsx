@@ -3,7 +3,7 @@ import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
 import { isMobileServer, openServerSetup } from "../mobile";
 import { NAV_GROUPS, defaultView, hiddenGroups, navLayout, setDefaultView, setNavLayout, toggleGroup } from "../nav";
-import { calendarFeedsApi } from "../api/calendar-feeds";
+import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { humanError, profileId } from "../session";
 import "./Settings.css";
@@ -67,6 +67,12 @@ function ConnectedCalendars() {
   </div>;
 }
 
+function NamedCalendars() {
+const [calendars, { refetch }] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
+const [name, setName] = createSignal(""); const [color, setColor] = createSignal("#2563eb"); const [error, setError] = createSignal("");
+const save = async (event: SubmitEvent) => { event.preventDefault(); const owner=profileId(); if (!owner || !name().trim()) { setError("Select a profile and enter a calendar name."); return; } try { await calendarsApi.save({profile_id:owner,name:name().trim(),color:color(),visible:true}); setName(""); refetch(); } catch(reason) { setError(humanError(reason)); } };
+return <div class="settings-card"><h2>My calendars</h2><p class="settings-hint">Create named calendars for organizing connected and future writable calendars.</p><Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show><ul class="settings-groups feed-list"><For each={calendars() ?? []}>{calendar => <li class="settings-option feed-row"><span><strong><span aria-hidden="true" style={{color:calendar.color}}>●</span> {calendar.name}</strong><em class="settings-sub">{calendar.visible ? "Visible" : "Hidden"}</em></span><button type="button" class="danger" onClick={() => void calendarsApi.remove(calendar.id).then(() => refetch()).catch(reason => setError(humanError(reason)))}>Remove</button></li>}</For><Show when={!calendars.loading && !(calendars() ?? []).length}><li class="settings-sub">No named calendars yet.</li></Show></ul><form class="feed-connect" onSubmit={save}><input aria-label="Calendar name" placeholder="Calendar name" value={name()} onInput={e=>setName(e.currentTarget.value)} /><input aria-label="Calendar color" type="color" value={color()} onInput={e=>setColor(e.currentTarget.value)} /><button class="primary" type="submit">Add calendar</button></form></div>;
+}
 function SecuritySettings() {
 const [tokens, { refetch }] = createResource(() => permanentTokensApi.list());
 const [name, setName] = createSignal(""); const [oneTime, setOneTime] = createSignal(""); const [error, setError] = createSignal(""); const [busy, setBusy] = createSignal(false);
@@ -110,7 +116,8 @@ export default function Settings() {
       </div>
     </div>
 
-    <ConnectedCalendars />
+    <NamedCalendars />
+<ConnectedCalendars />
 <SecuritySettings />
 
     <Show when={isMobileServer()}><div class="settings-card">
