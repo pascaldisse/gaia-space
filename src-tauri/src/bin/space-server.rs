@@ -839,6 +839,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "join_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
+        | "trigger_pipeline_on_push"
         | "review_diff"
         | "dry_run_merge"
         | "attempt_merge"
@@ -882,6 +883,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_message"
         | "delete_package_repository" => CommandPolicy::Session,
         "delete_package_version"
+        | "remove_package_repository_acl"
         | "download_package_payload"
         | "delete_pipeline_script"
         | "delete_planning_tag"
@@ -922,6 +924,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "list_meetings" => CommandPolicy::MeetingReadList,
         "list_package_repositories"
+        | "list_package_repository_acl"
         | "list_package_versions"
         | "list_pipeline_scripts"
         | "list_planning_tags"
@@ -945,9 +948,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_time_tracking_entries"
         | "livekit_server_status"
         | "mark_channel_read" => CommandPolicy::Session,
-        "move_issue_on_board" | "publish_package_version" | "remove_channel_member" => {
-            CommandPolicy::Session
-        }
+        "apply_package_retention"
+        | "move_issue_on_board"
+        | "publish_package_version"
+        | "remove_channel_member"
+        | "set_package_repository_acl"
+        | "set_package_version_pinned" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
@@ -2143,6 +2149,7 @@ async fn cmd(
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
+    "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
     "list_package_versions" => pipelines::list_package_versions(repository_id: String, query: Option<String>),
     "list_pipeline_scripts" => pipelines::list_pipeline_scripts(),
     "list_planning_tags" => issues::list_planning_tags(project_id: String),
@@ -2179,9 +2186,11 @@ async fn cmd(
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
+    "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>),
     "download_package_payload" => pipelines::download_package_payload(repository_id: String, package_name: String, version: String, filename: String),
     "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
+    "remove_package_repository_acl" => pipelines::remove_package_repository_acl(repository_id: String, profile_id: String),
     "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
     "remove_issue_link" => issues::remove_issue_link(id: String),
     "remove_reaction" => chat::remove_reaction(message_id: String, profile_id: String, emoji: String),
@@ -2200,12 +2209,15 @@ async fn cmd(
     "seed_rights" => platform::seed_rights(),
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
+    "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
+    "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
+    "trigger_pipeline_on_push" => pipelines::trigger_pipeline_on_push(script_id: String, repository: String, branch: String),
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),

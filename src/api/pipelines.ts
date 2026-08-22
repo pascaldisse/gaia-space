@@ -75,8 +75,9 @@ export function allowedDeploymentTransitions(status: string): string[] {
 }
 
 // ---------- package repositories + versions ----------
-export type PackageRepository = { id: string; project_id: string | null; name: string; format: string; mode: string; description: string | null; archived: boolean };
-export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; created_at: number };
+export type PackageRepository = { id: string; project_id: string | null; name: string; format: string; mode: string; description: string | null; archived: boolean; retention_days: number | null; retention_version_count: number | null; retain_downloaded: boolean; access_level: "PRIVATE" | "PROJECT" | "PUBLIC" };
+export type PackageRepositoryAcl = { repository_id: string; profile_id: string; role: "VIEWER" | "WRITER" | "MANAGER" };
+export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean };
 
 export const pipelinesApi = {
   // scripts
@@ -89,6 +90,7 @@ export const pipelinesApi = {
   listJobsForScript: (scriptId: string) => invoke<Job[]>("list_jobs_for_script", { scriptId }),
   listJobRunsForScript: (scriptId: string) => invoke<JobRun[]>("list_job_runs_for_script", { scriptId }),
   triggerScript: (scriptId: string) => invoke<JobRun[]>("trigger_pipeline_script", { scriptId }),
+  triggerOnPush: (scriptId: string, repository: string, branch: string) => invoke<JobRun[]>("trigger_pipeline_on_push", { scriptId, repository, branch }),
 
   // deploy targets
   listDeployTargets: () => invoke<DeployTarget[]>("list_deploy_targets"),
@@ -106,6 +108,10 @@ export const pipelinesApi = {
   createPackageRepository: (repo: PackageRepository) => invoke<void>("create_package_repository", { repo }),
   updatePackageRepository: (repo: PackageRepository) => invoke<void>("update_package_repository", { repo }),
   deletePackageRepository: (id: string) => invoke<void>("delete_package_repository", { id }),
+  listPackageRepositoryAcl: (repositoryId: string) => invoke<PackageRepositoryAcl[]>("list_package_repository_acl", { repositoryId }),
+  setPackageRepositoryAcl: (entry: PackageRepositoryAcl) => invoke<void>("set_package_repository_acl", { entry }),
+  removePackageRepositoryAcl: (repositoryId: string, profileId: string) => invoke<void>("remove_package_repository_acl", { repositoryId, profileId }),
+  applyPackageRetention: (repositoryId: string) => invoke<number>("apply_package_retention", { repositoryId }),
 
   // package versions
   listPackageVersions: (repositoryId: string, query?: string) => invoke<PackageVersion[]>("list_package_versions", { repositoryId, query: query ?? null }),
@@ -127,5 +133,6 @@ export const pipelinesApi = {
     }),
   downloadPackagePayload: (repositoryId: string, packageName: string, version: string, filename: string) =>
 invoke<number[]>("download_package_payload", { repositoryId, packageName, version, filename }),
+setPackageVersionPinned: (id: string, pinned: boolean) => invoke<void>("set_package_version_pinned", { id, pinned }),
 deletePackageVersion: (id: string) => invoke<void>("delete_package_version", { id }),
 };

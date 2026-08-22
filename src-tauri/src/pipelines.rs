@@ -132,6 +132,26 @@ pub struct PackageRepository {
     pub mode: String,
     pub description: Option<String>,
     pub archived: bool,
+    #[serde(default)]
+    pub retention_days: Option<i64>,
+    #[serde(default)]
+    pub retention_version_count: Option<i64>,
+    #[serde(default = "default_retain_downloaded")]
+    pub retain_downloaded: bool,
+    #[serde(default = "default_access_level")]
+    pub access_level: String,
+}
+fn default_retain_downloaded() -> bool {
+    true
+}
+fn default_access_level() -> String {
+    "PRIVATE".into()
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PackageRepositoryAcl {
+    pub repository_id: String,
+    pub profile_id: String,
+    pub role: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackageVersion {
@@ -141,6 +161,9 @@ pub struct PackageVersion {
     pub version: String,
     pub metadata_json: Option<String>,
     pub created_at: i64,
+    pub accessed_at: Option<i64>,
+    pub downloads: i64,
+    pub pinned: bool,
 }
 
 // ---------- script JSON model (the ".space.kts equivalent") ----------
@@ -526,6 +549,7 @@ fn spawn_script_jobs(
     conn: Arc<Mutex<Connection>>,
     workdir_root: PathBuf,
     script_id: &str,
+    required_trigger: Option<&str>,
 ) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
     let def = {
         let c = conn
@@ -542,7 +566,11 @@ fn spawn_script_jobs(
     };
     let mut runs = Vec::new();
     let mut handles = Vec::new();
-    for job in &def.jobs {
+    for job in def
+        .jobs
+        .iter()
+        .filter(|job| required_trigger.map_or(true, |trigger| job.trigger_type == trigger))
+    {
         let job_id = job_id_for(script_id, &job.name);
         let run_id = format!("{job_id}::run-{}", now_nanos());
         let triggered_at = now_secs();
@@ -587,7 +615,43 @@ pub fn trigger_pipeline_script(script_id: String) -> Result<Vec<JobRun>> {
         .map_err(|e| e.to_string())?;
     let workdir_root = std::env::temp_dir().join("pipeline-runs");
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id)?;
+    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, None)?;
+    Ok(runs)
+}
+/// Repository push entry point. The caller supplies the repository + branch rather than a
+/// global watcher assumption; only GIT_PUSH jobs from that repository's script are scheduled.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn trigger_pipeline_on_push(
+    script_id: String,
+    repository: String,
+    branch: String,
+) -> Result<Vec<JobRun>> {
+    if repository.trim().is_empty() || branch.trim().is_empty() {
+        return Err("push repository and branch are required".into());
+    }
+    let conn = db::conn()?;
+    let configured: Option<String> = conn
+        .query_row(
+            "SELECT repository FROM pipeline_scripts WHERE id=?1",
+            params![script_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "pipeline script not found".to_string())?;
+    if configured.as_deref() != Some(repository.as_str()) {
+        return Err("push repository does not match pipeline script".into());
+    }
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    let workdir_root = std::env::var_os("SPACE_PIPELINE_WORKDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("gaia-space")
+                .join("pipeline-runs")
+        });
+    let shared = Arc::new(Mutex::new(conn));
+    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, Some("GIT_PUSH"))?;
     Ok(runs)
 }
 
@@ -828,7 +892,7 @@ fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,project_id,name,format,mode,description,archived FROM package_repositories ORDER BY name").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,name,format,mode,description,archived,retention_days,retention_version_count,retain_downloaded,access_level FROM package_repositories ORDER BY name").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
             Ok(PackageRepository {
@@ -839,6 +903,10 @@ pub fn list_package_repositories() -> Result<Vec<PackageRepository>> {
                 mode: r.get(4)?,
                 description: r.get(5)?,
                 archived: r.get(6)?,
+                retention_days: r.get(7)?,
+                retention_version_count: r.get(8)?,
+                retain_downloaded: r.get(9)?,
+                access_level: r.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -851,10 +919,11 @@ pub fn create_package_repository(repo: PackageRepository) -> Result<()> {
     validate_package_path_component(&repo.id, "repository id")?;
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
+    validate_package_access_level(&repo.access_level)?;
     let c = db::conn()?;
     c.execute(
-        "INSERT INTO package_repositories(id,project_id,name,format,mode,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        params![repo.id, repo.project_id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
+        "INSERT INTO package_repositories(id,project_id,name,format,mode,description,archived,retention_days,retention_version_count,retain_downloaded,access_level) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        params![repo.id, repo.project_id, repo.name, repo.format, repo.mode, repo.description, repo.archived, repo.retention_days, repo.retention_version_count, repo.retain_downloaded, repo.access_level],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -863,10 +932,11 @@ pub fn create_package_repository(repo: PackageRepository) -> Result<()> {
 pub fn update_package_repository(repo: PackageRepository) -> Result<()> {
     validate_package_format(&repo.format)?;
     validate_repo_mode(&repo.mode)?;
+    validate_package_access_level(&repo.access_level)?;
     let c = db::conn()?;
     c.execute(
-        "UPDATE package_repositories SET name=?2,format=?3,mode=?4,description=?5,archived=?6 WHERE id=?1",
-        params![repo.id, repo.name, repo.format, repo.mode, repo.description, repo.archived],
+        "UPDATE package_repositories SET name=?2,format=?3,mode=?4,description=?5,archived=?6,retention_days=?7,retention_version_count=?8,retain_downloaded=?9,access_level=?10 WHERE id=?1",
+        params![repo.id, repo.name, repo.format, repo.mode, repo.description, repo.archived, repo.retention_days, repo.retention_version_count, repo.retain_downloaded, repo.access_level],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -892,7 +962,7 @@ pub fn list_package_versions(
     let c = db::conn()?;
     let like = format!("%{}%", query.unwrap_or_default());
     let mut s = c
-        .prepare("SELECT id,repository_id,package_name,version,metadata_json,created_at FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
+        .prepare("SELECT id,repository_id,package_name,version,metadata_json,created_at,accessed_at,downloads,pinned FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map(params![repository_id, like], |r| {
@@ -903,6 +973,9 @@ pub fn list_package_versions(
                 version: r.get(3)?,
                 metadata_json: r.get(4)?,
                 created_at: r.get(5)?,
+                accessed_at: r.get(6)?,
+                downloads: r.get(7)?,
+                pinned: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -988,6 +1061,9 @@ fn publish_package_version_tx(
         version: version.into(),
         metadata_json: Some(meta.to_string()),
         created_at,
+        accessed_at: None,
+        downloads: 0,
+        pinned: false,
     })
 }
 /// Publishes arbitrary registry bytes. HTTP registry routes use this rather than lossy text
@@ -1034,6 +1110,7 @@ pub fn download_registry_bytes(
     if canonical.file_name().and_then(|v| v.to_str()) != Some(filename) {
         return Err("payload filename does not match package version".into());
     }
+    c.execute("UPDATE package_versions SET downloads=downloads+1,accessed_at=?4 WHERE repository_id=?1 AND package_name=?2 AND version=?3",params![repository_id,package_name,version,now_secs()]).map_err(|e|e.to_string())?;
     fs::read(canonical).map_err(|e| e.to_string())
 }
 pub fn generic_registry_metadata(
@@ -1117,6 +1194,100 @@ pub fn download_package_payload(
     filename: String,
 ) -> Result<Vec<u8>> {
     download_registry_bytes(&repository_id, &package_name, &version, &filename)
+}
+fn validate_package_access_level(value: &str) -> Result<()> {
+    if matches!(value, "PRIVATE" | "PROJECT" | "PUBLIC") {
+        Ok(())
+    } else {
+        Err("access level must be PRIVATE, PROJECT, or PUBLIC".into())
+    }
+}
+fn validate_package_acl_role(value: &str) -> Result<()> {
+    if matches!(value, "VIEWER" | "WRITER" | "MANAGER") {
+        Ok(())
+    } else {
+        Err("package ACL role must be VIEWER, WRITER, or MANAGER".into())
+    }
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_package_repository_acl(repository_id: String) -> Result<Vec<PackageRepositoryAcl>> {
+    let c = db::conn()?;
+    let mut statement = c.prepare("SELECT repository_id,profile_id,role FROM package_repository_acl WHERE repository_id=?1 ORDER BY profile_id").map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![repository_id], |r| {
+            Ok(PackageRepositoryAcl {
+                repository_id: r.get(0)?,
+                profile_id: r.get(1)?,
+                role: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_package_repository_acl(entry: PackageRepositoryAcl) -> Result<()> {
+    validate_package_acl_role(&entry.role)?;
+    let c = db::conn()?;
+    c.execute("INSERT INTO package_repository_acl(repository_id,profile_id,role) VALUES(?1,?2,?3) ON CONFLICT(repository_id,profile_id) DO UPDATE SET role=excluded.role",params![entry.repository_id,entry.profile_id,entry.role]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_package_repository_acl(repository_id: String, profile_id: String) -> Result<()> {
+    let c = db::conn()?;
+    c.execute(
+        "DELETE FROM package_repository_acl WHERE repository_id=?1 AND profile_id=?2",
+        params![repository_id, profile_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn apply_package_retention(repository_id: String) -> Result<usize> {
+    let c = db::conn()?;
+    let (days,count,retain):(Option<i64>,Option<i64>,bool)=c.query_row("SELECT retention_days,retention_version_count,retain_downloaded FROM package_repositories WHERE id=?1",params![repository_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"package repository not found".to_string())?;
+    let cutoff = days
+        .filter(|value| *value >= 0)
+        .map(|value| now_secs() - value * 86_400);
+    let mut statement=c.prepare("SELECT id,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC").map_err(|e|e.to_string())?;
+    let versions = statement
+        .query_map(params![repository_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    let mut removed = 0;
+    for (id, created, downloads) in versions {
+        let ordinal = seen
+            .entry(id.rsplit("::").nth(1).unwrap_or("").to_string())
+            .or_default();
+        *ordinal += 1;
+        let old_by_days = cutoff.is_some_and(|time| created < time);
+        let old_by_count = count.is_some_and(|limit| *ordinal as i64 > limit.max(0));
+        if (old_by_days || old_by_count) && !(retain && downloads > 0) {
+            c.execute("DELETE FROM package_versions WHERE id=?1", params![id])
+                .map_err(|e| e.to_string())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_package_version_pinned(id: String, pinned: bool) -> Result<()> {
+    let c = db::conn()?;
+    c.execute(
+        "UPDATE package_versions SET pinned=?2 WHERE id=?1",
+        params![id, pinned],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_package_version(id: String) -> Result<()> {
@@ -1202,7 +1373,7 @@ mod tests {
         let workdir = temp_dir("runs-a");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a").expect("spawn");
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a", None).expect("spawn");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "SCHEDULED");
         for h in handles {

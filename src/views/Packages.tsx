@@ -40,6 +40,10 @@ export default function Packages() {
         mode: formMode(),
         description: formDescription().trim() || null,
         archived: false,
+        retention_days: null,
+        retention_version_count: null,
+        retain_downloaded: true,
+        access_level: "PRIVATE",
       };
       await pipelinesApi.createPackageRepository(repo);
       setFormName("");
@@ -111,6 +115,14 @@ export default function Packages() {
       setError(String(err));
     }
   }
+  async function applyRetention() {
+    const repo = selected();
+    if (!repo) return;
+    try { const removed = await pipelinesApi.applyPackageRetention(repo.id); setError(removed ? `Retention removed ${removed} version(s)` : "Retention found no removable versions"); refetchVersions(); } catch (err) { setError(String(err)); }
+  }
+  async function togglePinned(v: PackageVersion) {
+    try { await pipelinesApi.setPackageVersionPinned(v.id, !v.pinned); refetchVersions(); } catch (err) { setError(String(err)); }
+  }
   async function deleteVersion(id: string) {
     try {
       await pipelinesApi.deletePackageVersion(id);
@@ -176,7 +188,8 @@ export default function Packages() {
                   <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete</button>
                 </div>
               </header>
-              <p class="hint">{repo().description ?? "no description"}</p>
+              <p class="hint">{repo().description ?? "no description"} · {repo().access_level}</p>
+              <button class="ghost small" onClick={applyRetention}>Apply retention</button>
 
               <section class="publish-section">
                 <h3>Publish version</h3>
@@ -207,10 +220,11 @@ export default function Packages() {
                         {(v) => (
                           <tr>
                             <td>{v.package_name}</td>
-                            <td><code>{v.version}</code></td>
+                            <td><code>{v.version}</code>{v.pinned && " 📌"}</td>
                             <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
                             <td class="row-actions">
                               <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
+                              <button class="ghost small" onClick={() => togglePinned(v)}>{v.pinned ? "Unpin" : "Pin"}</button>
                               <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
                             </td>
                           </tr>
