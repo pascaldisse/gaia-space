@@ -349,6 +349,7 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
         .post(&endpoint_uri)
         .header("content-type", "application/json")
         .header("x-gaia-space-webhook", &webhook_id)
+        .header("x-gaia-space-delivery-id", id)
         .header("x-gaia-space-timestamp", timestamp.to_string())
         .header(
             "x-gaia-space-signature",
@@ -1057,6 +1058,11 @@ mod delivery_tests {
         assert_eq!(
             header(&request, "x-gaia-space-signature"),
             webhook_signature("shhh", timestamp, r#"{"issue":"GAIA-7"}"#)
+        );
+        assert_eq!(
+            header(&request, "x-gaia-space-delivery-id"),
+            succeeded.id,
+            "the receiver gets the durable delivery ID for idempotency"
         );
     }
 
