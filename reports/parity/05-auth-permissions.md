@@ -9,7 +9,7 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 |Concrete ~150-right catalog|KB §2.1|partial|`src-tauri/src/platform.rs:267-319,351-364`|Explicitly representative; 48 seeded rows, not the full catalog.|
 |Permission checking by global/project/team/profile/channel/document context|KB §1, §2.1|partial|`src-tauri/src/platform.rs:557-615`; `src-tauri/src/lib.rs:104-116`; `src/api/platform.ts:62-70`; `src/views/Admin.tsx:76-86,167-175`|Checker, API, and Admin tester exist; scopes omit `profile` and `documentFolder`; generic domain commands are mostly session/owner gates rather than right checks.|
 |Role record; custom role CRUD; role↔right matrix|KB §1, §2.2|done|`src-tauri/src/platform.rs:371-488`; `src-tauri/src/lib.rs:104-112`; `src/api/platform.ts:50-60`; `src/views/Admin.tsx:17-46,114-140`|Current custom role and rights-matrix path is wired end-to-end.|
-|Predefined roles and editability rules (System Admin, Team Admin/Lead, Manager, Member, External User)|KB §2.2|missing|`src-tauri/src/db.rs:191`; `src-tauri/src/platform.rs:414-425`; `src/views/Admin.tsx:31-40`|No predefined role seed, immutable roles, `membersEditable`/`rightsEditable`, reset-to-defaults, or comparison matrix.|
+|Predefined roles and editability rules (System Admin, Team Admin/Lead, Manager, Member, External User)|KB §2.2|partial|`src-tauri/src/rights.rs:544-584`; `src-tauri/src/platform.rs:405-441,1432-1479`; `src-tauri/src/bin/space-server.rs:3222-3227`|Bootstrap seeds idempotent SYSTEM Admin, Member, and read-only Guest roles with tested persisted grants. Names/coverage differ from KB; roles remain editable and lack `membersEditable`/`rightsEditable`, reset-to-defaults, and comparison matrix.|
 |GlobalRole account mapping (`GlobalAdmin`/`GlobalMember`/Guest/LightGuest)|KB §2.2|missing|`src/api/auth.ts:5-13`; `src-tauri/src/db.rs:171`; `src/views/Users.tsx:113-116`|Separate web account field is only `admin|member`; no guest/light-guest role model.|
 |Scoped role grants to a member or team|KB §1, §2.2-2.3|partial|`src-tauri/src/platform.rs:494-554`; `src-tauri/src/lib.rs:113-116`; `src/api/platform.ts:62-70`; `src/views/Admin.tsx:48-70,143-175`|Grant/revoke and exact scope matching work for five scope types; no profile/document-folder scope or context browser.|
 |Project-specific role templates and project-team roles|KB §2.2, §2.5|missing|`src-tauri/src/db.rs:194-195,267-268`; `src/api/platform.ts:72-95`; `src/views/Projects.tsx:109`|Only generic project-scoped assignments and simple `project_members`; no templates, ProjectRole variants, or project-team role records.|
@@ -40,5 +40,5 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 ## Counts
 
 - done: 4
-- partial: 14
-- missing: 14
+- partial: 15
+- missing: 13
