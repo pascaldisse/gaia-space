@@ -5,6 +5,12 @@
 // never compiles them; it's a thin webview pointed at a live server instead
 // (see `run()` below).
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod applications;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calendar_feeds;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -15,23 +21,17 @@ pub mod documents;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod ics;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calendar_feeds;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod applications;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod ics;
+pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod platform;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod review;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -328,7 +328,11 @@ fn connect_space_server(app: AppHandle, url: String) -> Result<(), String> {
 fn open_space_setup(app: AppHandle) -> Result<(), String> {
     // Tauri uses HTTPS for its app protocol on iOS; `tauri://localhost` is
     // retained for desktop-compatible mobile targets.
-    let url = if cfg!(target_os = "ios") { "https://tauri.localhost" } else { "tauri://localhost" };
+    let url = if cfg!(target_os = "ios") {
+        "https://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
     app.get_webview_window("main")
         .ok_or("Main window is unavailable.")?
         .navigate(url.parse().expect("valid bundled app URL"))
@@ -341,11 +345,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![app_info, connect_space_server, open_space_setup])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            connect_space_server,
+            open_space_setup
+        ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("GAIA Space")
-                .initialization_script(format!("window.__GAIA_SPACE_MOBILE__=true;{}", debug_server::init_script()))
+                .initialization_script(format!(
+                    "window.__GAIA_SPACE_MOBILE__=true;{}",
+                    debug_server::init_script()
+                ))
                 .build()?;
             debug_server::spawn(app.handle().clone());
             Ok(())
