@@ -1584,14 +1584,22 @@ mod v39_webhook_migration_tests {
     fn v39_guard_upgrades_a_v38_copy_and_tolerates_a_partial_database_without_the_table() {
         let copy = open_in_memory().unwrap();
         migrate(&copy).unwrap();
-        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN secret", []).unwrap();
-        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN max_attempts", []).unwrap();
+        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN secret", [])
+            .unwrap();
+        copy.execute(
+            "ALTER TABLE webhook_subscriptions DROP COLUMN max_attempts",
+            [],
+        )
+        .unwrap();
         copy.pragma_update(None, "user_version", 38).unwrap();
         migrate(&copy).unwrap();
         let columns = |conn: &Connection| -> Vec<String> {
-            conn.prepare("PRAGMA table_info(webhook_subscriptions)").unwrap()
-                .query_map([], |row| row.get(1)).unwrap()
-                .collect::<std::result::Result<Vec<String>, _>>().unwrap()
+            conn.prepare("PRAGMA table_info(webhook_subscriptions)")
+                .unwrap()
+                .query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<std::result::Result<Vec<String>, _>>()
+                .unwrap()
         };
         let upgraded = columns(&copy);
         assert!(upgraded.contains(&"secret".into()));
@@ -1600,7 +1608,12 @@ mod v39_webhook_migration_tests {
         let partial = open_in_memory().unwrap();
         partial.pragma_update(None, "user_version", 38).unwrap();
         migrate(&partial).unwrap();
-        assert_eq!(partial.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            partial
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
         assert!(!table_exists(&partial, "webhook_subscriptions").unwrap());
     }
 }

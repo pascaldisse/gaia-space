@@ -1326,7 +1326,10 @@ mod secret_ring_tests {
         let c = ring_db(Some("old-secret"));
         let rotated = rotate_webhook_secret_on(&c, "w1", Some(3_600)).expect("rotate");
         let ring = signing_secrets(&c, "w1", None).expect("ring");
-        assert_eq!(ring.first().map(String::as_str), Some(rotated.secret.as_str()));
+        assert_eq!(
+            ring.first().map(String::as_str),
+            Some(rotated.secret.as_str())
+        );
         assert!(
             ring.iter().any(|s| s == "old-secret"),
             "the superseded secret co-signs during overlap: {ring:?}"
@@ -1438,9 +1441,8 @@ mod filter_tests {
 
     #[test]
     fn event_and_fields_must_both_hold() {
-        let filter =
-            parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"HIGH"}"#)
-                .expect("mixed filter");
+        let filter = parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"HIGH"}"#)
+            .expect("mixed filter");
         assert!(filter.matches("issue.created", &envelope()));
         assert!(!filter.matches("issue.updated", &envelope()));
         let other = parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"LOW"}"#)
@@ -1495,7 +1497,11 @@ mod filter_tests {
             "issue.created",
             &payload
         ));
-        assert!(!webhook_filter_allows(Some("oops"), "issue.created", &payload));
+        assert!(!webhook_filter_allows(
+            Some("oops"),
+            "issue.created",
+            &payload
+        ));
     }
 }
 
@@ -1707,7 +1713,10 @@ mod delivery_tests {
             .map(|_| std::thread::spawn(|| process_webhook_queue(1)))
             .collect();
         let delivered: usize = sweepers.into_iter().map(JoinCount::unwrap_join).sum();
-        assert_eq!(delivered, 1, "exactly one of eight sweepers may own a due delivery");
+        assert_eq!(
+            delivered, 1,
+            "exactly one of eight sweepers may own a due delivery"
+        );
         drop(server);
         assert_eq!(*hits.lock().unwrap(), 2, "initial POST + one retry POST");
         let after = list_webhook_deliveries("hook-race".into()).expect("list");
@@ -1733,15 +1742,35 @@ mod delivery_tests {
         c.pragma_update(None, "foreign_keys", "OFF").unwrap();
         c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,attempts,next_attempt_at) VALUES ('lease','missing','{}','FAILED',3,unixepoch()-1)", []).unwrap();
         assert!(claim_delivery("lease", true).unwrap());
-        let claimed: (String, i64, i64) = c.query_row("SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let claimed: (String, i64, i64) = c
+            .query_row(
+                "SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
         assert_eq!(claimed.0, "PENDING");
         assert_eq!(claimed.1, 3, "claiming cannot consume an attempt");
-        c.execute("UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'", []).unwrap();
-        assert!(claim_delivery("lease", true).unwrap(), "an abandoned lease becomes claimable");
+        c.execute(
+            "UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            claim_delivery("lease", true).unwrap(),
+            "an abandoned lease becomes claimable"
+        );
         c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
         assert!(!claim_delivery("lease", false).unwrap());
-        c.execute("UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
-        assert!(!claim_delivery("lease", false).unwrap(), "dead letter stays terminal");
+        c.execute(
+            "UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !claim_delivery("lease", false).unwrap(),
+            "dead letter stays terminal"
+        );
     }
 
     #[test]

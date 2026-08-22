@@ -168,8 +168,46 @@ struct AppIdentity {
 /// RFC 6750 bearer authentication for the external application API. App bearer
 /// tokens are deliberately distinct from browser session tokens and are resolved
 /// only through the application token verifier.
+///
+/// Resolving the application here rather than per-handler is deliberate: a token
+/// carries the authority of a live application, so an application that has been
+/// archived (or deleted outright) must stop being an identity on the very next
+/// request. Archiving does not revoke outstanding tokens, so this check — not the
+/// token row — is what withdraws that authority.
 #[allow(clippy::result_large_err)]
-fn app_bearer(headers: &HeaderMap) -> Result<applications::AppToken, axum::response::Response> {
+fn app_bearer(
+    headers: &HeaderMap,
+) -> Result<(applications::AppToken, applications::Application), axum::response::Response> {
+    let token = app_bearer_token(headers)?;
+    let application = applications::list_applications()
+        .map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "application lookup failed",
+            )
+            .into_response()
+        })?
+        .into_iter()
+        .find(|application| application.id == token.application_id && !application.archived)
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                [(
+                    header::WWW_AUTHENTICATE,
+                    "Bearer error=\"invalid_token\"".to_string(),
+                )],
+                Json(json!({"ok": false, "error": "invalid_token"})),
+            )
+                .into_response()
+        })?;
+    Ok((token, application))
+}
+
+/// Header parsing and token verification only — says nothing about the application.
+#[allow(clippy::result_large_err)]
+fn app_bearer_token(
+    headers: &HeaderMap,
+) -> Result<applications::AppToken, axum::response::Response> {
     let unauthorized = |error: &str| {
         (
             StatusCode::UNAUTHORIZED,
@@ -223,18 +261,7 @@ fn app_read_scope(token: &applications::AppToken) -> Result<(), axum::response::
 }
 
 async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response::Response> {
-    let token = app_bearer(&headers)?;
-    let application = applications::list_applications()
-        .map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "application lookup failed",
-            )
-            .into_response()
-        })?
-        .into_iter()
-        .find(|application| application.id == token.application_id)
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid_token").into_response())?;
+    let (token, application) = app_bearer(&headers)?;
     Ok(Json(AppIdentity {
         application,
         scope: token.scope,
@@ -245,7 +272,7 @@ async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response:
 async fn app_projects(
     headers: HeaderMap,
 ) -> Result<Json<Vec<platform::Project>>, axum::response::Response> {
-    let token = app_bearer(&headers)?;
+    let (token, _application) = app_bearer(&headers)?;
     app_read_scope(&token)?;
     platform::list_projects().map(Json).map_err(|_| {
         err(StatusCode::INTERNAL_SERVER_ERROR, "project lookup failed").into_response()
@@ -288,7 +315,8 @@ fn registry_user(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)>
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
         .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
-    let decoded = String::from_utf8(decoded).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let decoded =
+        String::from_utf8(decoded).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     let (username, password) = decoded
         .split_once(':')
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
@@ -2245,8 +2273,11 @@ async fn registry_npm_put(
     let document: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(error) => {
-            return err(StatusCode::BAD_REQUEST, &format!("invalid npm document: {error}"))
-                .into_response()
+            return err(
+                StatusCode::BAD_REQUEST,
+                &format!("invalid npm document: {error}"),
+            )
+            .into_response()
         }
     };
     // Real `npm publish`/`bun publish` bodies carry `versions` + `_attachments`; the legacy
@@ -2363,7 +2394,10 @@ async fn registry_maven_get(
                 let body = if let Some(kind) = filename.strip_prefix("maven-metadata.xml.") {
                     match kind {
                         "sha1" => pipelines::sha1_hex(xml.as_bytes()),
-                        _ => return err(StatusCode::NOT_FOUND, "unsupported checksum").into_response(),
+                        _ => {
+                            return err(StatusCode::NOT_FOUND, "unsupported checksum")
+                                .into_response()
+                        }
                     }
                 } else {
                     xml
@@ -2427,7 +2461,6 @@ async fn registry_npm_publish_manifest(
         Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
     }
 }
-
 
 async fn cmd(
     h: HeaderMap,
@@ -2966,7 +2999,10 @@ mod tests {
             Some((DEFAULT_WEBHOOK_TICK_SECS, DEFAULT_WEBHOOK_TICK_BATCH))
         );
         // batch is clamped to the same bound process_webhook_queue enforces
-        assert_eq!(webhook_ticker_config(Some("30"), Some("9999")), Some((30, 100)));
+        assert_eq!(
+            webhook_ticker_config(Some("30"), Some("9999")),
+            Some((30, 100))
+        );
     }
     use axum::body::to_bytes;
     use std::sync::{Mutex, OnceLock};
@@ -3110,6 +3146,130 @@ mod tests {
         );
     }
 
+    /// Adversarial sweep (☠Bhairava) over the bearer path: every way a token could
+    /// outlive its authority. Each case is attacked over the real handler, not the
+    /// verifier, because the handler is what an attacker can reach.
+    #[tokio::test]
+    async fn app_bearer_refuses_expired_revoked_rotated_and_archived_authority() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-1','One','Application','client-1',1),('app-2','Two','Application','client-2',1)", []).unwrap();
+        drop(c);
+        let mint = |client: &str, app: &str, scope: &str, ttl: i64| {
+            let secret = applications::rotate_app_secret(app.to_string()).unwrap();
+            applications::issue_app_token(
+                client.to_string(),
+                secret.client_secret,
+                Some(scope.to_string()),
+                Some(ttl),
+            )
+            .unwrap()
+        };
+
+        // 1. Expiry is enforced, not merely recorded.
+        let expiring = mint("client-1", "app-1", "read", 60);
+        let expiring_token = expiring.access_token.clone().unwrap();
+        let c = db::conn().unwrap();
+        c.execute(
+            "UPDATE app_tokens SET expires_at=unixepoch()-1 WHERE id=?1",
+            [&expiring.id],
+        )
+        .unwrap();
+        drop(c);
+        let denied = app_me(bearer(&expiring_token)).await.unwrap_err();
+        assert_eq!(
+            denied.status(),
+            StatusCode::UNAUTHORIZED,
+            "an expired token is not an identity"
+        );
+        assert_eq!(
+            app_projects(bearer(&expiring_token))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        // 2. Explicit revocation takes effect immediately.
+        let revoked = mint("client-1", "app-1", "read", 3600);
+        let revoked_token = revoked.access_token.clone().unwrap();
+        assert_eq!(
+            app_me(bearer(&revoked_token))
+                .await
+                .unwrap()
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        applications::revoke_app_token(revoked.id).unwrap();
+        assert_eq!(
+            app_me(bearer(&revoked_token)).await.unwrap_err().status(),
+            StatusCode::UNAUTHORIZED,
+            "revocation must be honoured on the very next request"
+        );
+
+        // 3. Secret rotation invalidates tokens minted under the old secret.
+        let pre_rotation = mint("client-1", "app-1", "read", 3600)
+            .access_token
+            .unwrap();
+        applications::rotate_app_secret("app-1".into()).unwrap();
+        assert_eq!(
+            app_me(bearer(&pre_rotation)).await.unwrap_err().status(),
+            StatusCode::UNAUTHORIZED,
+            "rotating the secret must strand outstanding tokens"
+        );
+
+        // 4. A token is bound to the application that minted it: presenting app-2's
+        //    token never yields app-1's identity.
+        let foreign = mint("client-2", "app-2", "read", 3600)
+            .access_token
+            .unwrap();
+        let (status, body) =
+            status_and_body(app_me(bearer(&foreign)).await.unwrap().into_response()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["application"]["id"], "app-2",
+            "a token may only ever speak for its own application"
+        );
+
+        // 5. Scope strings are matched as whole tokens, so no prefix or substring
+        //    lookalike is mistaken for the `read` grant.
+        for lookalike in ["readonly", "read:none", "noread", "READ", ""] {
+            let sneaky = mint("client-2", "app-2", lookalike, 3600)
+                .access_token
+                .unwrap();
+            assert_eq!(
+                app_projects(bearer(&sneaky)).await.unwrap_err().status(),
+                StatusCode::FORBIDDEN,
+                "scope {lookalike:?} must not pass for `read`"
+            );
+        }
+
+        // 6. Archiving an application withdraws its API authority. Archiving does not
+        //    revoke outstanding tokens, so the handler itself must refuse them.
+        let archived_token = mint("client-2", "app-2", "read", 3600)
+            .access_token
+            .unwrap();
+        let c = db::conn().unwrap();
+        c.execute("UPDATE applications SET archived=1 WHERE id='app-2'", [])
+            .unwrap();
+        drop(c);
+        assert_eq!(
+            app_me(bearer(&archived_token)).await.unwrap_err().status(),
+            StatusCode::UNAUTHORIZED,
+            "an archived application has no identity to present"
+        );
+        assert_eq!(
+            app_projects(bearer(&archived_token))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::UNAUTHORIZED,
+            "an archived application must not keep reading projects"
+        );
+    }
+
     /// Regression (☾Kali): app credential commands were `Session`, so any logged-in
     /// member could rotate another application's secret or mint/verify its tokens.
     #[tokio::test]
@@ -3224,8 +3384,12 @@ mod tests {
         let fresh = rotated["value"]["secret"].as_str().unwrap().to_string();
         assert!(fresh.starts_with("spwh_"));
         // The listing describes the ring without ever repeating a secret value.
-        let (status, listed) =
-            call(cookie("tc"), "list_webhook_secrets", json!({"webhook_id":"wh-1"})).await;
+        let (status, listed) = call(
+            cookie("tc"),
+            "list_webhook_secrets",
+            json!({"webhook_id":"wh-1"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{listed}");
         let rows = listed["value"].as_array().unwrap();
         assert_eq!(rows.len(), 2, "active + retiring during overlap: {listed}");
@@ -3233,7 +3397,10 @@ mod tests {
         assert_eq!(rows[1]["state"].as_str(), Some("RETIRING"));
         let serialised = listed.to_string();
         assert!(!serialised.contains(&fresh), "secret leaked into listing");
-        assert!(!serialised.contains("old-secret"), "secret leaked into listing");
+        assert!(
+            !serialised.contains("old-secret"),
+            "secret leaked into listing"
+        );
         // Independent path: the superseded secret is still on the ring, so a receiver
         // that has not switched over yet still verifies inside the overlap.
         let c = db::conn().unwrap();
