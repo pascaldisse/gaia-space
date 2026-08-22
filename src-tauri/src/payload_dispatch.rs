@@ -31,8 +31,8 @@ pub fn parse_application_payload(payload_json: String) -> Result<String> {
 
 /// Every `className` this build accepts, for discovery in the UI and in an SDK.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn application_payload_classes() -> Vec<&'static str> {
-    ApplicationPayload::CLASS_NAMES.to_vec()
+pub fn application_payload_classes() -> Result<Vec<&'static str>> {
+    Ok(ApplicationPayload::CLASS_NAMES.to_vec())
 }
 
 /// Sign and POST one typed payload to the application's registered endpoint.

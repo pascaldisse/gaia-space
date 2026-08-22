@@ -10,7 +10,7 @@ use axum::{
 };
 use gaia_space_lib::{
     applications, blogs, calendar_feeds, calls, chat, db, documents, events, issues, meetings,
-    oauth, personal, pipelines, platform, review,
+    oauth, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -1322,6 +1322,13 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // enumerating the ring answers to the same admin gate.
         | "rotate_webhook_secret"
         | "list_webhook_secrets"
+        // The app's Ed25519 pair signs everything the app's endpoint will trust, and a
+        // dispatch spends that key against an arbitrary URL: same admin gate.
+        | "app_signing_key"
+        | "rotate_app_signing_key"
+        | "dispatch_application_payload"
+        | "parse_application_payload"
+        | "application_payload_classes"
         | "list_redirect_uris" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
@@ -2814,6 +2821,11 @@ async fn cmd(
     "list_webhook_deliveries" => applications::list_webhook_deliveries(webhook_id: String),
     "rotate_webhook_secret" => applications::rotate_webhook_secret(webhook_id: String, overlap_seconds: Option<i64>),
     "list_webhook_secrets" => applications::list_webhook_secrets(webhook_id: String),
+    "app_signing_key" => payload_dispatch::app_signing_key(application_id: String),
+    "rotate_app_signing_key" => payload_dispatch::rotate_app_signing_key(application_id: String),
+    "parse_application_payload" => payload_dispatch::parse_application_payload(payload_json: String),
+    "application_payload_classes" => payload_dispatch::application_payload_classes(),
+    "dispatch_application_payload" => payload_dispatch::dispatch_application_payload(application_id: String, payload_json: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
@@ -3580,6 +3592,18 @@ mod tests {
             ("verify_app_token", json!({"token":"spat_guess"})),
             ("revoke_app_token", json!({"id":"apptok-x"})),
             ("list_app_tokens", json!({"application_id":"app-x"})),
+            // Signing-key + typed dispatch surface: same credential gate.
+            ("app_signing_key", json!({"application_id":"app-x"})),
+            ("rotate_app_signing_key", json!({"application_id":"app-x"})),
+            ("application_payload_classes", json!({})),
+            (
+                "parse_application_payload",
+                json!({"payload_json":"{\"className\":\"CustomPayload\",\"data\":{}}"}),
+            ),
+            (
+                "dispatch_application_payload",
+                json!({"application_id":"app-x","payload_json":"{\"className\":\"CustomPayload\",\"data\":{}}"}),
+            ),
             (
                 "install_marketplace_app",
                 json!({"value":{"id":"i-x","marketplace_app_id":null,"application_id":"app-x","install_kind":"MANUAL","installed_by":null,"installed_at":0}}),
@@ -3610,6 +3634,42 @@ mod tests {
             0
         );
         drop(c);
+        // Admin: the typed payload surface is reachable in the web build, not just tauri.
+        let (status, classes) = call(cookie("tc"), "application_payload_classes", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{classes}");
+        assert!(classes["value"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str() == Some("CustomPayload")));
+        let (status, class_name) = call(
+            cookie("tc"),
+            "parse_application_payload",
+            json!({"payload_json":"{\"className\":\"CustomPayload\",\"data\":{}}"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{class_name}");
+        assert_eq!(class_name["value"].as_str(), Some("CustomPayload"));
+        let (status, key) = call(
+            cookie("tc"),
+            "app_signing_key",
+            json!({"application_id":"app-x"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{key}");
+        let first_key_id = key["value"]["key_id"].as_str().unwrap().to_string();
+        let (status, rotated) = call(
+            cookie("tc"),
+            "rotate_app_signing_key",
+            json!({"application_id":"app-x"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{rotated}");
+        assert_ne!(rotated["value"]["key_id"].as_str(), Some(first_key_id.as_str()));
+        assert_eq!(
+            rotated["value"]["previous_key_id"].as_str(),
+            Some(first_key_id.as_str())
+        );
         // Admin: the same flow works end to end.
         let (status, secret) = call(
             cookie("tc"),
