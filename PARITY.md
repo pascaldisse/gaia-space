@@ -24,7 +24,7 @@ Worst gaps: per-format registry protocols · retention/immutability/CVE/ACLs · 
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
 61 rows — done 8 · partial 30 · missing 21.
-Worst gaps: chat attachments/mentions/scheduled/pins/polls · doc sharing+KB permissions/search · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
+Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
 32 rows — done 3 · partial 12 · missing 17.
