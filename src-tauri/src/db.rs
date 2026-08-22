@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -175,6 +175,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 16 {
         tx.execute_batch(SCHEMA_V16)?;
     }
+    if version < 17 {
+        tx.execute_batch(SCHEMA_V17)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -278,7 +281,7 @@ CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
 "#;
 
-pub(crate) const SCHEMA_V16: &str = r#"
+pub(crate) const SCHEMA_V17: &str = r#"
 CREATE UNIQUE INDEX IF NOT EXISTS blog_posts_draft_once ON blog_posts(draft_id) WHERE draft_id IS NOT NULL;
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(entity_type UNINDEXED, entity_id UNINDEXED, title, body, breadcrumb);
 INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'issue',id,title,coalesce(description,''),'Issue · ' || project_id FROM issues WHERE archived=0;
