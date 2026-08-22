@@ -76,3 +76,37 @@
 
 ## 永久法遵守
 PARITY.md / reports/parity/*.md = **無変更** (356行凍結維持) · migration V39+ 無 · /tmp 不使用 · 原本 DB 不可触。
+
+---
+
+## 追記 (round2 · Brahma建 · @89506bb)
+
+### FINDING 1 塞: RFC 6749 §5.2 token 端点誤形
+- `oauth::TokenError{error,error_description}` 導入 · `exchange_code` 戻値 `Result<TokenResponse,TokenError>`。
+- 符割当: grant_type違=`unsupported_grant_type` · 未知client_id/秘鍵不整/公開clientに秘鍵=`invalid_client` · code_flow無効=`unauthorized_client` · code/redirect/PKCE不整=`invalid_grant` · 基盤誤(`From<String>`)=`invalid_request`。`TOKEN_ERROR_CODES`=6符。
+- HTTP: `invalid_client`→**401 + WWW-Authenticate** · 他→400 · 成否両方 `Cache-Control: no-store` + `Pragma: no-cache`。
+- ⨂ 分岐は `/oauth/token` のみ。他端点の `{ok:false,error}` 形=無変更 (UI依存維持)。
+- test: `oauth::tests::token_errors_carry_rfc6749_codes_and_statuses` · `tests::oauth_token_errors_speak_rfc6749_section_5_2` (cargo test, curl に非ず)。
+
+### FINDING 2 塞: register_redirect_uri のHTTP表面
+- command 追加: `register_redirect_uri(application_id,redirect_uri)` · `list_redirect_uris(application_id)` (`oauth::*_cmd` 薄包)。
+- policy = `CommandPolicy::AppAdmin` — app秘鍵系と同門 (allowlist=code配達先決定 ∴ credential面)。
+- test: `tests::register_redirect_uri_is_an_admin_only_command` (無session=401 · member=403 · admin=200 · http非localhost=400)。
+- 死枝 (round1) 「HTTP経由 redirect_uri 登録=表面不在」 → **解消**。
+
+### Gate (round2 実走)
+| gate | 結果 |
+|---|---|
+| cargo fmt --check | **0 (PASS)** |
+| cargo check --all-targets | **0 (PASS)** |
+| cargo test --lib | **0 (PASS)** — 159 passed / 0 failed |
+| cargo test --bin space-server | **0 (PASS)** — 41 passed / 0 failed |
+| cargo clippy --all-targets | **0 (PASS, warning 67)** |
+| cargo clippy --all-targets -D warnings | **FAIL (既存債務)** — lib test 22 error 他。本 lane 未着手 (§未驗)。 |
+
+### 未驗
+- clippy 債務掃除 (debug_server.rs/secretbox.rs/lib.rs/calls.rs) = **未着手**。
+- bunx tsc / bun test / vite build = round2 で再走せず (rust 面のみ変更 ∴ 無影響と**推定**, 実測に非ず)。
+
+### 永久法
+PARITY 356行 無変更 · migration 追加零 (V39+無) · /tmp 不使用 · 硬碼無 (policy=既存表)。
