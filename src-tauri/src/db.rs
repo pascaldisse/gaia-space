@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -250,6 +250,17 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+pub(crate) const SCHEMA_V14: &str = r#"
+CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, UNIQUE(project_id,path));
+CREATE INDEX IF NOT EXISTS devfiles_project ON devfiles(project_id);
+CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, endpoint_ssl_verification INTEGER NOT NULL DEFAULT 1, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_webhooks (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filter_json TEXT, endpoint_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_webhooks_application ON app_webhooks(application_id);
+CREATE TABLE IF NOT EXISTS app_chatbots (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL, display_name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_chatbots_application ON app_chatbots(application_id);
+CREATE TABLE IF NOT EXISTS app_ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_ui_extensions_application ON app_ui_extensions(application_id);
 "#;
 pub(crate) const SCHEMA_V13: &str = r#"
 CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
