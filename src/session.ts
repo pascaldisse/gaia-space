@@ -82,8 +82,8 @@ const auth = createRoot(() => {
     }
   };
 
-  const login = async (username: string, password: string) => {
-    const { user } = await authApi.login(username, password);
+  const login = async (username: string, password: string, totpCode?: string) => {
+    const { user } = await authApi.login(username, password, totpCode);
     setCurrentUser(user);
     return user;
   };

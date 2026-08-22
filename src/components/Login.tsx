@@ -6,6 +6,7 @@ import "./Login.css";
 export default function Login() {
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
+  const [totpCode, setTotpCode] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
@@ -14,7 +15,7 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      await login(username(), password());
+      await login(username(), password(), totpCode().trim() || undefined);
     } catch (e) {
       setError(humanError(e));
     } finally {
@@ -36,6 +37,10 @@ export default function Login() {
         <label>
           Password
           <input type="password" value={password()} onInput={(e) => setPassword(e.currentTarget.value)} required />
+        </label>
+        <label>
+          Authenticator code <span class="login-optional">(if enabled)</span>
+          <input inputMode="numeric" autocomplete="one-time-code" value={totpCode()} onInput={(e) => setTotpCode(e.currentTarget.value)} />
         </label>
         <button class="primary" type="submit" disabled={busy()}>{busy() ? "Signing in…" : "Sign in"}</button>
       </form>

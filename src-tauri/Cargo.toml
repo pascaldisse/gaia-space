@@ -54,6 +54,7 @@ argon2 = "0.5"
 rand = "0.8"
 hex = "0.4"
 chacha20poly1305 = "0.11.0"
+sha1 = "0.10"
 base64 = "0.23.1"
 # Outbound fetch for read-only calendar feeds (calendar_feeds.rs). rustls, not
 # native-tls: no openssl-sys/system-cert dependency on the deploy box.

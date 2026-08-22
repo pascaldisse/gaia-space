@@ -25,20 +25,20 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 |Password login, cookie session, logout, and current-user gate|KB §1, §3.2, §3.8|done|`src-tauri/src/bin/space-server.rs:40-62,1120`; `src/api/auth.ts:37-45`; `src/session.ts:68-111`; `src/components/Login.tsx:5-46`; `src/components/AccountFooter.tsx:4-44`|Real Argon2 verification and server session path are wired for web mode.|
 |Account directory/admin lifecycle and password reset/change|KB §2.5, §3.2|done|`src-tauri/src/bin/space-server.rs:63-181,1120`; `src/api/auth.ts:47-61`; `src/views/Users.tsx:12-185`; `src/components/AccountFooter.tsx:4-44`|Admin create/edit/deactivate/delete/reset plus self password change are wired.|
 |Multiple password/federated/OAuth2/LDAP auth modules; ordering and TTL configuration|KB §3.2|missing|`src-tauri/src/bin/space-server.rs:50-82,1120`; `src/api/auth.ts:37-45`; `src/components/Login.tsx:5-46`|Only local username/password routes; no module model/configuration or SSO.|
-|Two-factor policy/status; TOTP QR/scratch-code enrollment|KB §3.3|missing|`src-tauri/src/platform.rs:306-307`; `src/views/Admin.tsx:110-194`; `src/components/Login.tsx:5-46`|Catalog label only; no 2FA storage, handler, API, or UI.|
+|Two-factor policy/status; TOTP QR/scratch-code enrollment|KB §3.3|partial|`src-tauri/src/auth_security.rs:193-244`; `src-tauri/src/bin/space-server.rs:80-86,1139`; `src/components/Login.tsx:8-40`; `src/views/Settings.tsx:324-344`|Sealed RFC6238 enrollment/confirm/disable and login verification are wired; setup exposes the authenticator secret/otpauth URI, but no QR renderer or scratch codes.|
 |Application passwords for 2FA legacy clients|KB §3.3|missing|`src-tauri/src/db.rs:171-194`; `src/api/auth.ts:37-61`|No model or surface.|
-|Personal/application permanent tokens; scoped create/list/revoke|KB §3.4|missing|`src-tauri/src/platform.rs:306-307`; `src/api/platform.ts:50-70`; `src/views/Admin.tsx:110-175`|Catalog label only; no token records/commands/API/view.|
+|Personal/application permanent tokens; scoped create/list/revoke|KB §3.4|done|`src-tauri/src/db.rs:290-296`; `src-tauri/src/auth_security.rs:42-113`; `src-tauri/src/bin/space-server.rs:80-82,1139`; `src/api/auth.ts:60-66`; `src/views/Settings.tsx:324-344`|Opaque token is returned once, Argon2-hashed at rest, accepted as bearer auth, and user-scoped for list/revoke.|
 |OAuth2 authorization-code, client-credentials, implicit, and password flows|KB §3.1|missing|`src-tauri/src/bin/space-server.rs:50-82,1120`; `src/api/auth.ts:37-45`|Cookie-session local login only; no OAuth app registration or token endpoint.|
 |OAuth scope-string request-rights workflow|KB §2.3, §3.4-3.5|missing|`src-tauri/src/platform.rs:491-615`; `src/api/platform.ts:62-70`; `src/views/Admin.tsx:143-175`|No `<context>:<permission>` parser, request queue, or global/project/channel approval.|
 |Mobile authorization/download QR pairing|KB §3.5|missing|`src/components/ServerConnect.tsx:34-36`; `src-tauri/src/bin/space-server.rs:1120`|Server-connect form exists; no QR authorization API or scan/pair flow.|
-|Single-use invitations and reusable invitation links with pre-assigned roles/projects|KB §3.6|missing|`src-tauri/src/db.rs:188-195`; `src/api/auth.ts:37-61`; `src/views/Users.tsx:101-185`|No invitation/link records, handlers, API, acceptance, expiry, or usage limits.|
+|Single-use invitations and reusable invitation links with pre-assigned roles/projects|KB §3.6|partial|`src-tauri/src/db.rs:290-296`; `src-tauri/src/auth_security.rs:260-371`; `src-tauri/src/bin/space-server.rs:89-91,1139`|Admin create and unauthenticated accept validate expiry/usage atomically, mint a member/profile, and apply the invited project role; no invitation management UI/list yet.|
 |Brute-force throttled-login records and admin management|KB §3.7|partial|`src-tauri/src/bin/space-server.rs:11-23,50-59,1159-1163`; `src/api/auth.ts:37-45`; `src/components/Login.tsx:5-46`|Live in-memory username/IP limiter is invoked by Login; not persistent `ThrottledLogin`, no admin list/clear UI.|
 |Access/refresh-token session model and server logout URL|KB §3.8|partial|`src-tauri/src/db.rs:171-173`; `src-tauri/src/bin/space-server.rs:41-62`; `src/api/auth.ts:37-45`|Opaque cookie session expires after 30 days; no access-token DTO, refresh token, or federated logout URL.|
 |Verified domain auto-join/self-registration rules|KB §2.4, §3.2|missing|`src-tauri/src/db.rs:171-194`; `src-tauri/src/bin/space-server.rs:95-120`|Admin-only account creation; no domain status/settings or registration rules.|
-|Right enforcement across operational commands|KB §1, §2.1|partial|`src-tauri/src/platform.rs:731-755`; `src-tauri/src/bin/space-server.rs:47-49,536-741`|`Global.Superadmin` is unified with web admin and gates selected operations; other commands use session/owner/project-membership policies, not their catalog right.|
+|Right enforcement across operational commands|KB §1, §2.1|partial|`src-tauri/src/rights.rs:3-26`; `src-tauri/src/platform.rs:574-587`; `src-tauri/src/bin/space-server.rs:538-550,594,730,743`|Catalog enforcement helper gates issue creation, document creation, and message posting; remaining operations retain their existing scope/owner policies.|
 
 ## Counts
 
-- done: 3
-- partial: 12
-- missing: 17
+- done: 4
+- partial: 14
+- missing: 14
