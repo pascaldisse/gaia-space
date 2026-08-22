@@ -3,7 +3,7 @@ import { render } from "solid-js/web";
 import { invoke } from "../api/invoke";
 import { dateKey } from "../calendar";
 import { resetDashboardPrefs, hiddenWidgets } from "../dashboardPrefs";
-import { setProfileId } from "../session";
+import { reloadProfiles, setProfileId } from "../session";
 
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import Dashboard from "./Dashboard";
@@ -54,6 +54,7 @@ afterEach(() => {
 describe("dashboard", () => {
   test("does not request personalized data without a selected profile", async () => {
     stubTauriIpc();
+    await reloadProfiles(); // clear profiles cached by earlier test files; ensureDefaults must find none
     const host = await mount();
     expect(host.textContent).toContain("No profile selected");
     expect(calls.some((call) => call.command === "dashboard_aggregate")).toBe(false);
