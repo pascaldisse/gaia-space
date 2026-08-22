@@ -124,7 +124,31 @@ describe("documents workspace composition", () => {
     expect(host.textContent).toContain("Team");
   });
 
-  test("the folder tree is keyboard-operable and announces its expansion state", async () => {
+  test("renders rich text, interactive checklists, and numbered code by saved body format", async () => {
+setProfileId("me");
+const docs = [
+{ id: "rich", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "rich-text", title: "Rich", body: "<h2>Stored heading</h2><p>formatted</p>", version: 1, archived: false, created_by: "me" },
+{ id: "list", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "checklist", title: "List", body: "- [ ] draft\n- [x] ship", version: 1, archived: false, created_by: "me" },
+{ id: "code", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "code", title: "Code", body: "```typescript\nconst answer = 42;\n```", version: 1, archived: false, created_by: "me" },
+];
+serve({ list_document_folders: { ok: true, value: [] }, list_documents: { ok: true, value: docs } });
+const host = await mount();
+registerViews(["Documents"]);
+for (const [id, selector] of [["rich", ".rich-text-renderer"], ["list", ".checklist-renderer"], ["code", ".code-renderer"]] as const) {
+navigate({ view: "Documents", entityType: "document", entityId: id, containerType: "my-docs", containerId: "me" });
+await settle();
+expect(host.querySelector(selector), `missing ${id}: ${host.innerHTML}`).not.toBeNull();
+}
+expect(host.querySelector(".code-language")?.textContent).toBe("typescript");
+expect(host.querySelector(".code-line-number")?.textContent).toBe("1");
+navigate({ view: "Documents", entityType: "document", entityId: "list", containerType: "my-docs", containerId: "me" });
+await settle();
+const check = host.querySelector(".checklist-renderer input") as HTMLInputElement;
+check.click();
+await settle();
+expect(check.checked).toBe(true);
+});
+test("the folder tree is keyboard-operable and announces its expansion state", async () => {
     setProfileId("me");
     serve({
       list_document_folders: { ok: true, value: [folder({ id: "f1", name: "Mine" })] },

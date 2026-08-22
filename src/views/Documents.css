@@ -442,3 +442,17 @@
   .documents-tree { grid-column: 1; grid-row: 1; max-height: 30vh; border-right: 0; border-bottom: var(--dk-hairline) solid var(--dk-line); }
   .editor-panes.split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
 }
+
+/* Body-format renderers preserve the saved representation rather than treating every
+   document as Markdown. The editor remains the single source of truth for saves. */
+.document-renderer { min-height: 100%; }
+.rich-text-renderer :first-child { margin-top: 0; }
+.checklist-renderer { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45em; }
+.checklist-renderer label { display: flex; align-items: baseline; gap: 0.35em; cursor: pointer; }
+.checklist-renderer input { accent-color: var(--accent); }
+.checklist-renderer .done span { color: var(--text-muted); text-decoration: line-through; }
+.code-renderer { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+.code-language { color: var(--text-muted); font-size: 0.78em; text-transform: lowercase; margin-bottom: 0.5em; }
+.code-renderer pre { margin: 0; padding: 0.75em 0; overflow-x: auto; background: var(--dk-row-hover-bg); border-radius: var(--dk-radius-md); }
+.code-line { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); min-height: 1.5em; }
+.code-line-number { user-select: none; text-align: right; padding-right: 0.9em; color: var(--text-muted); border-right: var(--dk-hairline) solid var(--dk-line); margin-right: 0.9em; }
