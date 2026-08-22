@@ -1,5 +1,5 @@
 import { createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Checklist, type ChecklistItem, type Issue, type Status } from "../api/issues";
+import { planningApi, type Checklist, type ChecklistItem, type Issue, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import "./IssueDetail.css";
@@ -32,8 +32,13 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const openChild = (child: Issue) => { const from = issue(); if (from) setTrail([...trail(), { id: from.id, label: `#${from.number} ${from.title}` }]); setDraft(undefined); setOpenId(child.id); };
   const back = () => { const path = trail(); const previous = path[path.length - 1]; if (!previous) return; setTrail(path.slice(0, -1)); setDraft(undefined); setOpenId(path.length === 1 ? undefined : previous.id); };
   const [checklistTitle, setChecklistTitle] = createSignal("");
+  const [tagName, setTagName] = createSignal("");
   const [minutes, setMinutes] = createSignal("");
+  const [workDate, setWorkDate] = createSignal(new Date().toISOString().slice(0, 10));
+  const [workDescription, setWorkDescription] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
+  const [availableTags, { refetch: reloadTags }] = createResource(() => issue()?.project_id, id => id ? planningApi.tags(id) : Promise.resolve([]));
+  const [timeEntries, { refetch: reloadTimeEntries }] = createResource(currentId, id => id ? planningApi.time(id) : Promise.resolve([]));
   // A sub-item is a real issue in the same project, linked PARENT_CHILD — so it
   // can carry its own assignee, date and checklists like any other work.
   const addChild = async () => {
@@ -49,8 +54,20 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const nameOf = (id: string | null) => { if (!id) return "Unassigned"; const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
   const patch = (change: Partial<Issue>) => { const current = issue(); if (current) setDraft({ ...current, ...change }); };
   const save = async () => { const current = issue(); if (!current) return; try { await planningApi.updateIssue(current); setDraft(undefined); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
-  const addChecklist = async () => { const title = checklistTitle().trim(); if (!title) return; try { await planningApi.saveChecklist({ issue_id: props.issueId, title }); setChecklistTitle(""); await refetch(); } catch (reason) { setError(humanError(reason)); } };
-  const logTime = async () => { const value = Number(minutes()); if (!Number.isFinite(value) || value <= 0) return; try { await planningApi.saveTime({ issue_id: props.issueId, profile_id: "", entry_date: new Date().toISOString().slice(0, 10), duration_minutes: value, description: null }); setMinutes(""); await refetch(); } catch (reason) { setError(humanError(reason)); } };
+  const addChecklist = async () => { const title = checklistTitle().trim(); const id = currentId(); if (!id || !title) return; try { await planningApi.saveChecklist({ issue_id: id, title }); setChecklistTitle(""); await refetch(); } catch (reason) { setError(humanError(reason)); } };
+  const currentTags = () => detail()?.tags ?? [];
+  const setTags = async (next: PlanningTag[]) => { const item = issue(); if (!item) return; try { await planningApi.setTags(item.id, next.map(tag => tag.id)); await refetch(); await reloadTags(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
+  const toggleTag = (tag: PlanningTag) => { const exists = currentTags().some(current => current.id === tag.id); void setTags(exists ? currentTags().filter(current => current.id !== tag.id) : [...currentTags(), tag]); };
+  const addTag = async () => { const item = issue(); const name = tagName().trim(); if (!item || !name) return; try { const tag = await planningApi.saveTag({ project_id: item.project_id, parent_id: null, name, archived: false }); setTagName(""); await setTags([...currentTags(), tag]); } catch (reason) { setError(humanError(reason)); } };
+  const logTime = async () => {
+    const duration_minutes = Number(minutes()); const issue_id = currentId(); const profile_id = profileId();
+    if (!issue_id || !profile_id) { setError("Select the profile logging this work."); return; }
+    if (!Number.isInteger(duration_minutes) || duration_minutes <= 0) { setError("Duration must be a positive whole number of minutes."); return; }
+    try {
+      await planningApi.saveTime({ issue_id, profile_id, entry_date: workDate(), duration_minutes, description: workDescription().trim() || null });
+      setMinutes(""); setWorkDescription(""); await refetch(); await reloadTimeEntries(); props.onChanged?.();
+    } catch (reason) { setError(humanError(reason)); }
+  };
 
   return <aside class="issue-detail-panel">
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
@@ -110,13 +127,17 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           </div>
         </section>
 
-        <Show when={detail()?.tags?.length}>
-          <section class="idp-section"><h3>Tags</h3><div class="chips"><For each={detail()?.tags}>{tag => <span class="task-tag project">{tag.name}</span>}</For></div></section>
-        </Show>
+        <section class="idp-section">
+          <h3>Tags</h3>
+          <Show when={currentTags().length}><div class="chips"><For each={currentTags()}>{tag => <span class="task-tag project">{tag.name}</span>}</For></div></Show>
+          <div class="tag-picker"><For each={availableTags()}>{tag => <button type="button" classList={{ selected: currentTags().some(current => current.id === tag.id) }} onClick={() => toggleTag(tag)}>{tag.name}</button>}</For></div>
+          <div class="inline-form"><input aria-label="New tag" placeholder="New tag" value={tagName()} onInput={event => setTagName(event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void addTag(); } }} /><button type="button" onClick={addTag}>Add tag</button></div>
+        </section>
 
         <section class="idp-section">
-          <h3>Time <small>{detail()?.time_total_minutes ?? 0} min</small></h3>
-          <div class="inline-form"><input type="number" min="1" placeholder="Minutes" value={minutes()} onInput={e => setMinutes(e.currentTarget.value)} /><button onClick={logTime}>Log</button></div>
+          <h3>Time tracking <small>{detail()?.time_total_minutes ?? 0} min</small></h3>
+          <div class="time-form"><input aria-label="Work date" type="date" value={workDate()} onInput={event => setWorkDate(event.currentTarget.value)} /><input aria-label="Duration in minutes" type="number" min="1" step="1" placeholder="Minutes" value={minutes()} onInput={event => setMinutes(event.currentTarget.value)} /><input aria-label="Work description" placeholder="What did you do?" value={workDescription()} onInput={event => setWorkDescription(event.currentTarget.value)} /><button type="button" onClick={logTime}>Log time</button></div>
+          <Show when={timeEntries()?.length}><ul class="time-entries"><For each={timeEntries()}>{entry => <TimeEntryRow entry={entry} nameOf={nameOf} />}</For></ul></Show>
         </section>
 
         <section class="idp-section">
@@ -142,6 +163,10 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
       </>
     }</Show>
   </aside>;
+}
+
+function TimeEntryRow(props: { entry: TimeEntry; nameOf: (id: string | null) => string }) {
+  return <li><time>{props.entry.entry_date}</time><strong>{props.entry.duration_minutes} min</strong><span>{props.entry.description || "No description"}</span><small>{props.nameOf(props.entry.profile_id)}</small></li>;
 }
 
 /** One checklist with its items — the "an issue can be a to-do list" case. */
