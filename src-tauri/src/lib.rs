@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod blogs;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
@@ -76,6 +78,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             applications::list_devfiles,
+            blogs::list_blog_posts,
+            blogs::get_blog_post,
+            blogs::publish_blog_draft,
+            blogs::archive_blog_post,
             applications::save_devfile,
             applications::delete_devfile,
             applications::open_in_ide,
@@ -85,6 +91,9 @@ pub fn run() {
             applications::list_webhooks,
             applications::save_webhook,
             applications::delete_webhook,
+            applications::deliver_webhook,
+            applications::retry_webhook_delivery,
+            applications::list_webhook_deliveries,
             applications::list_chatbots,
             applications::save_chatbot,
             applications::delete_chatbot,
@@ -225,6 +234,9 @@ pub fn run() {
             review::list_review_discussions,
             review::create_review_discussion,
             review::set_discussion_resolved,
+            review::list_protected_branch_rules,
+            review::save_protected_branch_rule,
+            review::delete_protected_branch_rule,
             review::list_quality_gate_rules,
             review::create_quality_gate_rule,
             review::update_quality_gate_rule,
@@ -258,6 +270,8 @@ pub fn run() {
             calls::start_livekit_server,
             calls::livekit_server_status,
             calls::join_meeting_call,
+            calls::start_meeting_recording,
+            calls::stop_meeting_recording,
             pipelines::list_pipeline_scripts,
             pipelines::create_pipeline_script,
             pipelines::update_pipeline_script,
@@ -301,6 +315,7 @@ pub fn run() {
             personal::save_subscription_setting,
             personal::delete_subscription_setting,
             personal::goto_search,
+            personal::full_text_search,
             personal::dashboard_aggregate,
             calendar_feeds::list_calendar_feeds,
             calendar_feeds::save_calendar_feed,

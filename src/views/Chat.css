@@ -350,3 +350,18 @@
   width: 100%;
   margin-bottom: 0.4em;
 }
+
+.composer-wrap { flex-wrap: wrap; position: relative; }
+.attachment-button { display: grid; place-items: center; cursor: pointer; color: var(--text-muted); padding: .35em; }
+.attachment-button:hover { color: #5fe6d4; }
+.attachment-button input { display: none; }
+.pending-attachments { width: 100%; display: flex; gap: .3em; flex-wrap: wrap; }
+.attachment-chip { border: 1px solid #33405e; border-radius: 10px; background: #141d30; color: var(--text-muted); font-size: .78em; }
+.mention-menu { position: absolute; bottom: calc(100% - .25em); left: .9em; z-index: 3; display: grid; min-width: 180px; padding: .25em; border: 1px solid #33405e; border-radius: 6px; background: #101827; box-shadow: 0 8px 20px #0008; }
+.mention-menu button { text-align: left; background: transparent; border: 0; color: var(--text); padding: .35em .5em; }
+.mention-menu button:hover { background: #243050; }
+.message-attachments { display: flex; gap: .5em; flex-wrap: wrap; margin-top: .35em; }
+.attachment-card { max-width: 260px; display: grid; gap: .2em; color: var(--text-muted); font-size: .8em; }
+.attachment-card img, .attachment-card video { max-width: 260px; max-height: 180px; border-radius: 5px; border: 1px solid #33405e; }
+.attachment-card audio { max-width: 260px; }
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

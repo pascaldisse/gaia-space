@@ -212,8 +212,9 @@ export default function Reviews() {
     const p = diffRepoPath();
     if (!r || !p || !r.source_branch || !r.target_branch) return;
     try {
-      await reviewApi.attemptMerge(newId("merge"), p, r.id, r.source_branch, r.target_branch);
+      await reviewApi.attemptMerge(newId("merge"), p, r.id, r.source_branch, r.target_branch, actingProfileId());
       refetchMergeRuns();
+      refetchReviews();
     } catch (err) {
       setError(String(err));
     }
@@ -379,7 +380,7 @@ export default function Reviews() {
                   <button onClick={runDryRun}>Dry run</button>
                   <button class="primary" onClick={runMerge}>Merge</button>
                 </div>
-                <p class="hint">Merge execution is disabled for safety: both buttons only ever run an in-memory dry-run check against the picked repo and never write to it. Real merges only happen in cargo tests against throwaway repos.</p>
+                <p class="hint">Dry run snapshots both branch tips and waits for green project CI. Merge rechecks CI and both refs, then writes only the target ref—never the worktree.</p>
                 <Show when={mergeRuns()?.length}>
                   <ul class="merge-runs">
                     <For each={mergeRuns()}>

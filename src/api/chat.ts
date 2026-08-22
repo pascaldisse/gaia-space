@@ -37,12 +37,11 @@ export type Message = {
   edited_at: number | null;
   thread_of: string | null;
   archived: boolean;
+  mention_ids?: string[];
 };
-
-export type MessageView = Message & {
-  reply_count: number;
-  reactions: Reaction[];
-};
+export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string };
+export type NewMessageAttachment = Omit<MessageAttachment, "message_id">;
+export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
 // command (not owned by this lane; only invoked, never redefined here).
@@ -86,6 +85,7 @@ export const chatApi = {
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),
+  addMessageAttachment: (messageId: string, attachment: NewMessageAttachment) => invoke<MessageAttachment>("add_message_attachment", { messageId, attachment }),
   updateMessage: (id: string, text: string) => invoke<MessageView>("update_message", { id, text }),
   deleteMessage: (id: string) => invoke<void>("delete_message", { id }),
 

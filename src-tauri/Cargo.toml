@@ -57,7 +57,7 @@ chacha20poly1305 = "0.11.0"
 base64 = "0.23.1"
 # Outbound fetch for read-only calendar feeds (calendar_feeds.rs). rustls, not
 # native-tls: no openssl-sys/system-cert dependency on the deploy box.
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"
