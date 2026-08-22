@@ -1630,10 +1630,7 @@ pub fn npm_packument(
     {
         tags.insert("latest".into(), latest);
     }
-    if let Some(versions) = document
-        .get_mut("versions")
-        .and_then(Value::as_object_mut)
-    {
+    if let Some(versions) = document.get_mut("versions").and_then(Value::as_object_mut) {
         for (version, manifest) in versions.iter_mut() {
             let shasum = manifest
                 .get("dist")
@@ -1713,8 +1710,8 @@ pub fn maven_coordinates(path: &str) -> Result<(String, Option<String>, String)>
     let (filename, rest) = parts
         .split_last()
         .ok_or_else(|| "maven path is empty".to_string())?;
-    let artifact_level = *filename == "maven-metadata.xml"
-        || filename.starts_with("maven-metadata.xml.");
+    let artifact_level =
+        *filename == "maven-metadata.xml" || filename.starts_with("maven-metadata.xml.");
     let needed = if artifact_level { 2 } else { 3 };
     if rest.len() < needed {
         return Err("maven path must be groupId/artifactId/version/file".into());

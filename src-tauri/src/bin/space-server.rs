@@ -194,7 +194,8 @@ fn registry_user(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)>
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
         .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
-    let decoded = String::from_utf8(decoded).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let decoded =
+        String::from_utf8(decoded).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     let (username, password) = decoded
         .split_once(':')
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
@@ -2152,8 +2153,11 @@ async fn registry_npm_put(
     let document: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(error) => {
-            return err(StatusCode::BAD_REQUEST, &format!("invalid npm document: {error}"))
-                .into_response()
+            return err(
+                StatusCode::BAD_REQUEST,
+                &format!("invalid npm document: {error}"),
+            )
+            .into_response()
         }
     };
     // Real `npm publish`/`bun publish` bodies carry `versions` + `_attachments`; the legacy
@@ -2270,7 +2274,10 @@ async fn registry_maven_get(
                 let body = if let Some(kind) = filename.strip_prefix("maven-metadata.xml.") {
                     match kind {
                         "sha1" => pipelines::sha1_hex(xml.as_bytes()),
-                        _ => return err(StatusCode::NOT_FOUND, "unsupported checksum").into_response(),
+                        _ => {
+                            return err(StatusCode::NOT_FOUND, "unsupported checksum")
+                                .into_response()
+                        }
                     }
                 } else {
                     xml
@@ -2334,7 +2341,6 @@ async fn registry_npm_publish_manifest(
         Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
     }
 }
-
 
 async fn cmd(
     h: HeaderMap,
@@ -2872,7 +2878,10 @@ mod tests {
             Some((DEFAULT_WEBHOOK_TICK_SECS, DEFAULT_WEBHOOK_TICK_BATCH))
         );
         // batch is clamped to the same bound process_webhook_queue enforces
-        assert_eq!(webhook_ticker_config(Some("30"), Some("9999")), Some((30, 100)));
+        assert_eq!(
+            webhook_ticker_config(Some("30"), Some("9999")),
+            Some((30, 100))
+        );
     }
     use axum::body::to_bytes;
     use std::sync::{Mutex, OnceLock};
@@ -3067,8 +3076,12 @@ mod tests {
         let fresh = rotated["value"]["secret"].as_str().unwrap().to_string();
         assert!(fresh.starts_with("spwh_"));
         // The listing describes the ring without ever repeating a secret value.
-        let (status, listed) =
-            call(cookie("tc"), "list_webhook_secrets", json!({"webhook_id":"wh-1"})).await;
+        let (status, listed) = call(
+            cookie("tc"),
+            "list_webhook_secrets",
+            json!({"webhook_id":"wh-1"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{listed}");
         let rows = listed["value"].as_array().unwrap();
         assert_eq!(rows.len(), 2, "active + retiring during overlap: {listed}");
@@ -3076,7 +3089,10 @@ mod tests {
         assert_eq!(rows[1]["state"].as_str(), Some("RETIRING"));
         let serialised = listed.to_string();
         assert!(!serialised.contains(&fresh), "secret leaked into listing");
-        assert!(!serialised.contains("old-secret"), "secret leaked into listing");
+        assert!(
+            !serialised.contains("old-secret"),
+            "secret leaked into listing"
+        );
         // Independent path: the superseded secret is still on the ring, so a receiver
         // that has not switched over yet still verifies inside the overlap.
         let c = db::conn().unwrap();

@@ -696,8 +696,12 @@ pub(crate) fn enqueue_event(event_type: &str, payload: &serde_json::Value) -> Re
             continue;
         }
         let id = new_delivery_id()?;
+        // `next_attempt_at` must be written, not left NULL: `due_webhook_deliveries`
+        // selects on `next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch()`, so a
+        // NULL here would enqueue a row the sweeper and the ticker can never claim — the
+        // fan-out would be queue-visible but undeliverable. Due immediately.
         c.execute(
-            "INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status) VALUES(?1,?2,?3,'PENDING')",
+            "INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,next_attempt_at) VALUES(?1,?2,?3,'PENDING',unixepoch())",
             params![id, webhook_id, body],
         )
         .map_err(|e| e.to_string())?;
@@ -1326,7 +1330,10 @@ mod secret_ring_tests {
         let c = ring_db(Some("old-secret"));
         let rotated = rotate_webhook_secret_on(&c, "w1", Some(3_600)).expect("rotate");
         let ring = signing_secrets(&c, "w1", None).expect("ring");
-        assert_eq!(ring.first().map(String::as_str), Some(rotated.secret.as_str()));
+        assert_eq!(
+            ring.first().map(String::as_str),
+            Some(rotated.secret.as_str())
+        );
         assert!(
             ring.iter().any(|s| s == "old-secret"),
             "the superseded secret co-signs during overlap: {ring:?}"
@@ -1438,9 +1445,8 @@ mod filter_tests {
 
     #[test]
     fn event_and_fields_must_both_hold() {
-        let filter =
-            parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"HIGH"}"#)
-                .expect("mixed filter");
+        let filter = parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"HIGH"}"#)
+            .expect("mixed filter");
         assert!(filter.matches("issue.created", &envelope()));
         assert!(!filter.matches("issue.updated", &envelope()));
         let other = parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"LOW"}"#)
@@ -1495,7 +1501,11 @@ mod filter_tests {
             "issue.created",
             &payload
         ));
-        assert!(!webhook_filter_allows(Some("oops"), "issue.created", &payload));
+        assert!(!webhook_filter_allows(
+            Some("oops"),
+            "issue.created",
+            &payload
+        ));
     }
 }
 
@@ -1707,7 +1717,10 @@ mod delivery_tests {
             .map(|_| std::thread::spawn(|| process_webhook_queue(1)))
             .collect();
         let delivered: usize = sweepers.into_iter().map(JoinCount::unwrap_join).sum();
-        assert_eq!(delivered, 1, "exactly one of eight sweepers may own a due delivery");
+        assert_eq!(
+            delivered, 1,
+            "exactly one of eight sweepers may own a due delivery"
+        );
         drop(server);
         assert_eq!(*hits.lock().unwrap(), 2, "initial POST + one retry POST");
         let after = list_webhook_deliveries("hook-race".into()).expect("list");
@@ -1733,15 +1746,35 @@ mod delivery_tests {
         c.pragma_update(None, "foreign_keys", "OFF").unwrap();
         c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,attempts,next_attempt_at) VALUES ('lease','missing','{}','FAILED',3,unixepoch()-1)", []).unwrap();
         assert!(claim_delivery("lease", true).unwrap());
-        let claimed: (String, i64, i64) = c.query_row("SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let claimed: (String, i64, i64) = c
+            .query_row(
+                "SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
         assert_eq!(claimed.0, "PENDING");
         assert_eq!(claimed.1, 3, "claiming cannot consume an attempt");
-        c.execute("UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'", []).unwrap();
-        assert!(claim_delivery("lease", true).unwrap(), "an abandoned lease becomes claimable");
+        c.execute(
+            "UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            claim_delivery("lease", true).unwrap(),
+            "an abandoned lease becomes claimable"
+        );
         c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
         assert!(!claim_delivery("lease", false).unwrap());
-        c.execute("UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
-        assert!(!claim_delivery("lease", false).unwrap(), "dead letter stays terminal");
+        c.execute(
+            "UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !claim_delivery("lease", false).unwrap(),
+            "dead letter stays terminal"
+        );
     }
 
     #[test]
@@ -2118,6 +2151,188 @@ mod delivery_tests {
         assert_eq!(payload["event"], crate::events::GIT_COMMIT);
         assert_eq!(payload["commit"]["id"], oid);
         assert_eq!(payload["commit"]["message"], "first");
+    }
+
+    /// Builds a throwaway repo with `main` and a non-conflicting `feature` branch,
+    /// under `target/test-repos/` — never a user-registered repo.
+    fn merge_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-repos")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+        let commit = |branch_ref: &str, parent: Option<git2::Oid>, file: &str, body: &str| {
+            let blob = repo.blob(body.as_bytes()).unwrap();
+            let mut builder = match parent {
+                Some(p) => {
+                    let tree = repo.find_commit(p).unwrap().tree().unwrap();
+                    repo.treebuilder(Some(&tree)).unwrap()
+                }
+                None => repo.treebuilder(None).unwrap(),
+            };
+            builder.insert(file, blob, 0o100644).unwrap();
+            let tree_oid = builder.write().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let parents: Vec<git2::Commit> = parent
+                .map(|p| vec![repo.find_commit(p).unwrap()])
+                .unwrap_or_default();
+            let refs: Vec<&git2::Commit> = parents.iter().collect();
+            repo.commit(Some(branch_ref), &sig, &sig, "msg", &tree, &refs)
+                .unwrap()
+        };
+        let base = commit("refs/heads/main", None, "base.txt", "base\n");
+        repo.reference("refs/heads/feature", base, false, "create feature")
+            .unwrap();
+        commit("refs/heads/feature", Some(base), "extra.txt", "extra\n");
+        dir
+    }
+
+    /// The whole chain, observed rather than assumed: a real `review::attempt_merge`
+    /// against a real repository fires `review.merged`, the queue sweeper POSTs it to a
+    /// real socket, and the bytes that arrive carry the merged review plus a signature
+    /// this test recomputes independently from the timestamp the receiver saw.
+    ///
+    /// This is the test that retires two UNVERIFIED claims at once: "no delivery observed
+    /// against a live receiver" and "`review.merged` has no unit coverage".
+    #[test]
+    fn a_real_merge_reaches_a_live_receiver_with_a_verifiable_signature() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("merge-e2e");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let dir = merge_repo("merge-e2e");
+        let repo_path = dir.to_string_lossy().to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(String::new()));
+        let captured = seen.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("webhook request");
+            let mut buf = [0_u8; 8192];
+            let n = stream.read(&mut buf).expect("read request");
+            *captured.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+            stream
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .expect("response");
+        });
+
+        save_application(Application {
+            id: "app-merge".into(),
+            name: "Merge app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "merge-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-merge".into(),
+            application_id: "app-merge".into(),
+            event_type: crate::events::REVIEW_MERGED.into(),
+            filters_json: Some(r#"{"review.target_branch":"main"}"#.into()),
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: Some("merge-secret".into()),
+            max_attempts: 5,
+        })
+        .expect("hook");
+
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO projects(id,name,key,archived,created_at) VALUES('proj-merge','E2E','E2E',0,0)",
+            [],
+        )
+        .expect("project");
+        c.execute(
+            "INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based) \
+             VALUES('rev-merge','proj-merge',1,'MR','Opened','feature','main','Ship it',1)",
+            [],
+        )
+        .expect("review");
+        drop(c);
+
+        let run = crate::review::attempt_merge(
+            "run-merge".into(),
+            repo_path,
+            "rev-merge".into(),
+            "feature".into(),
+            "main".into(),
+            "actor-1".into(),
+        )
+        .expect("attempt_merge");
+        assert_eq!(run.state, "SUCCEEDED", "log: {:?}", run.log);
+
+        let delivered = process_webhook_queue(10).expect("sweep");
+        assert_eq!(delivered.len(), 1, "exactly one merged-review delivery");
+        assert_eq!(delivered[0].status, "SUCCEEDED");
+        server.join().expect("server");
+
+        let request = seen.lock().unwrap().clone();
+        let body = request
+            .split_once("\r\n\r\n")
+            .expect("request has a body")
+            .1;
+        let payload: serde_json::Value = serde_json::from_str(body).expect("body is json");
+        assert_eq!(payload["event"], crate::events::REVIEW_MERGED);
+        assert_eq!(payload["review"]["id"], "rev-merge");
+        assert_eq!(
+            payload["review"]["state"], "Merged",
+            "the receiver sees the stored post-merge state, not the caller's stale copy"
+        );
+        assert_eq!(payload["review"]["target_branch"], "main");
+
+        let timestamp: i64 = header(&request, "x-gaia-space-timestamp")
+            .parse()
+            .expect("ts");
+        assert_eq!(
+            header(&request, "x-gaia-space-signature"),
+            webhook_signature("merge-secret", timestamp, body),
+            "signature must be the HMAC of the exact bytes the receiver read"
+        );
+        assert_eq!(
+            header(&request, "x-gaia-space-delivery-id"),
+            delivered[0].id
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Independent of the end-to-end test above and of any HTTP: whatever `enqueue_event`
+    /// writes must be immediately visible to `due_webhook_deliveries`. A row that is
+    /// queued but never due is the failure mode that let "fan-out works" and "nothing is
+    /// ever delivered" both be true at once.
+    #[test]
+    fn an_enqueued_event_is_immediately_due_for_the_sweeper() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("enqueue-due");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-due",
+            &[("hook-due", crate::events::ISSUE_CREATED, None)],
+        );
+
+        let created = enqueue_event(
+            crate::events::ISSUE_CREATED,
+            &serde_json::json!({"event": crate::events::ISSUE_CREATED, "issue": {"id": "i1"}}),
+        )
+        .expect("enqueue");
+        assert_eq!(created.len(), 1);
+        assert_eq!(
+            due_webhook_deliveries(10).expect("due"),
+            created,
+            "a freshly enqueued delivery must be claimable right away"
+        );
     }
 
     /// Validation runs before any DB access, so these need no database.

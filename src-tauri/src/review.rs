@@ -1576,10 +1576,14 @@ pub fn attempt_merge(
             "target branch changed before finalization; merge commit left unreachable".into(),
         );
     }
+    // `force = true` is required: the target branch ref already exists, and advancing an
+    // existing ref is the whole point. The safety is not in this flag but in the
+    // `target_oid` re-read directly above — a target that moved aborts before we get here,
+    // so the forced write only ever fast-forwards the tip we just verified.
     repo.reference(
         &format!("refs/heads/{target_branch}"),
         merge_oid,
-        false,
+        true,
         "gaia-space safe merge",
     )
     .map_err(|e| e.to_string())?;

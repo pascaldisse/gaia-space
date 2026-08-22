@@ -3,7 +3,9 @@
 
 #[test]
 fn migrates_real_install_copy() {
-    let Some(path) = std::env::var_os("MIGRATE_CHECK_DB") else { return };
+    let Some(path) = std::env::var_os("MIGRATE_CHECK_DB") else {
+        return;
+    };
     let conn = gaia_space_lib::db::open_at(&path).expect("open copy");
     gaia_space_lib::db::migrate(&conn).expect("migrate copy");
     let v: i64 = conn
