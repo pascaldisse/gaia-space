@@ -276,6 +276,13 @@ pub struct Right {
     pub description: Option<String>,
     pub right_type: String,
     pub right_group: Option<String>,
+    /// Bit flags, transitive dependencies, feature gate, scope propagation and
+    /// opaque descriptor metadata compose the complete Right descriptor.
+    pub flags: u32,
+    pub implied_rights: Vec<String>,
+    pub feature_gate: Option<String>,
+    pub propagation: String,
+    pub descriptor: serde_json::Value,
 }
 fn read_right(r: &rusqlite::Row<'_>) -> rusqlite::Result<Right> {
     Ok(Right {
@@ -285,13 +292,19 @@ fn read_right(r: &rusqlite::Row<'_>) -> rusqlite::Result<Right> {
         description: r.get(3)?,
         right_type: r.get(4)?,
         right_group: r.get(5)?,
+        flags: r.get(6)?,
+        implied_rights: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default(),
+        feature_gate: r.get(8)?,
+        propagation: r.get(9)?,
+        descriptor: serde_json::from_str(&r.get::<_, String>(10)?)
+            .unwrap_or(serde_json::Value::Null),
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_rights() -> Result<Vec<Right>> {
     let c = db::conn()?;
     let mut s = err(c.prepare(
-        "SELECT id,code,title,description,right_type,right_group FROM rights ORDER BY right_type,right_group,title",
+        "SELECT id,code,title,description,right_type,right_group,flags,implied_rights_json,feature_gate,propagation,descriptor_json FROM rights ORDER BY right_type,right_group,title",
     ))?;
     let rows = err(s.query_map([], read_right))?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -488,6 +501,9 @@ pub fn create_role_assignment(input: RoleAssignmentInput) -> Result<RoleAssignme
     if input.profile_id.is_none() == input.team_id.is_none() {
         return Err("Assign the role to exactly one of profile_id or team_id".into());
     }
+    if !rights::is_scope_type(&input.scope_type) {
+        return Err(format!("unknown right scope type {}", input.scope_type));
+    }
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("assignment"));
     err(c.execute(
@@ -528,22 +544,26 @@ fn check_right_on(
         return Ok(false);
     }
     let mut s = err(c.prepare(
-        "SELECT ra.scope_type, ra.scope_id
+        "SELECT ra.scope_type, ra.scope_id, r.code
          FROM role_assignments ra
          JOIN role_rights rr ON rr.role_id = ra.role_id
          JOIN rights r ON r.id = rr.right_id
-         WHERE r.code = ?1
-           AND (
-             ra.profile_id = ?2
-             OR ra.team_id IN (SELECT team_id FROM team_memberships WHERE profile_id = ?2 AND archived = 0)
-           )",
+         WHERE ra.profile_id = ?1
+            OR ra.team_id IN (SELECT team_id FROM team_memberships WHERE profile_id = ?1 AND archived = 0)",
     ))?;
-    let rows = err(s.query_map(params![right_code, profile_id], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+    let rows = err(s.query_map([profile_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(2)?,
+        ))
     }))?
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())?;
-    for (assignment_scope_type, assignment_scope_id) in rows {
+    for (assignment_scope_type, assignment_scope_id, granted_code) in rows {
+        if !rights::implies(&granted_code, right_code) {
+            continue;
+        }
         if assignment_scope_type == "global" {
             return Ok(true);
         }

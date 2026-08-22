@@ -375,3 +375,81 @@ pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
         "Issues",
     ),
 ];
+
+/// Scope names accepted by role grants. Keep this beside Right metadata so UI,
+/// command validation, and SQLite's V37 constraint share one vocabulary.
+pub const SCOPE_TYPES: &[&str] = &[
+    "global",
+    "project",
+    "team",
+    "profile",
+    "channel",
+    "document",
+    "documentFolder",
+];
+pub fn is_scope_type(scope_type: &str) -> bool {
+    SCOPE_TYPES.contains(&scope_type)
+}
+
+/// Storage flags for a Right descriptor. Flags are intentionally extensible: unknown
+/// bits round-trip, allowing newer servers to describe rights to older clients.
+pub mod flags {
+    pub const DEPRECATED: u32 = 1 << 0;
+    pub const HIDDEN: u32 = 1 << 1;
+    pub const EXPERIMENTAL: u32 = 1 << 2;
+}
+
+/// Whether a grant crosses scope boundaries. `GlobalToDescendants` is the normal
+/// global grant behavior; `None` requires exact scope matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Propagation {
+    None,
+    GlobalToDescendants,
+}
+
+/// True if `granted` transitively contains `requested`. This remains code-based so
+/// catalog rows and descriptors added by a server stay forward-compatible.
+pub fn implies(granted: &str, requested: &str) -> bool {
+    if granted == requested || granted == "Global.Superadmin" {
+        return true;
+    }
+    let mut pending = vec![granted];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(code) = pending.pop() {
+        if !seen.insert(code) {
+            continue;
+        }
+        for (parent, child) in IMPLIED_RIGHTS {
+            if code == *parent {
+                if *child == requested {
+                    return true;
+                }
+                pending.push(child);
+            }
+        }
+    }
+    false
+}
+
+/// Direct edges only; [`implies`] computes the transitive closure.
+pub const IMPLIED_RIGHTS: &[(&str, &str)] = &[
+    ("Project.AdminProject", "Project.ViewProject"),
+    ("Project.VcsAdmin", "Project.VcsWrite"),
+    ("Project.VcsWrite", "Project.VcsRead"),
+    ("Project.EditCodeReview", "Project.CreateCodeReview"),
+    ("Project.CreateCodeReview", "Project.ViewCodeReview"),
+    ("Channel.ManageChannel", "Channel.PostMessages"),
+    ("Document.EditDocuments", "Document.CreateDocuments"),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn implied_rights_are_transitive_and_directional() {
+        assert!(implies("Project.VcsAdmin", "Project.VcsRead"));
+        assert!(implies("Channel.ManageChannel", "Channel.PostMessages"));
+        assert!(!implies("Project.VcsRead", "Project.VcsAdmin"));
+    }
+}
