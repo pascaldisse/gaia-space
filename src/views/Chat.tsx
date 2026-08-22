@@ -14,6 +14,8 @@ import {
   type NewMessageAttachment,
   type ProfileLite,
 } from "../api/chat";
+import { applicationsApi } from "../api/applications";
+import { applyCommand, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -158,6 +160,39 @@ export default function Chat() {
     if (kind === "draft") { setDraft(replace); setDraftMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
     else { setThreadDraft(replace); setThreadMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
   }
+  // ---- slash commands: asked of each bot's endpoint, never read from a local catalog ----
+  const [chatbots] = createResource(async () => {
+    const applications = await applicationsApi.applications();
+    const lists = await Promise.all(
+      applications
+        .filter((application) => !application.archived)
+        .map((application) => applicationsApi.chatbots(application.id).catch(() => [])),
+    );
+    return lists.flat();
+  });
+  const commandPrefix = () => slashPrefix(draft());
+  const [commandEntries, setCommandEntries] = createSignal<CommandEntry[]>([]);
+  createEffect(() => {
+    const prefix = commandPrefix();
+    const profile = actingProfileId();
+    const bots = chatbots() ?? [];
+    if (prefix === null || !profile || !bots.length) { setCommandEntries([]); return; }
+    let live = true;
+    onCleanup(() => { live = false; });
+    // Debounced: one keystroke must not fan out to every bot endpoint.
+    const timer = setTimeout(async () => {
+      const answers = await Promise.all(bots.map(async (bot) => {
+        try {
+          return { listing: await applicationsApi.chatbotCommands(bot.id, profile, prefix), bot_name: bot.display_name };
+        } catch { return null; }
+      }));
+      if (!live) return;
+      setCommandEntries(mergeCommandListings(answers.filter((a) => a !== null) as { listing: Awaited<ReturnType<typeof applicationsApi.chatbotCommands>>; bot_name: string }[]));
+    }, 150);
+    onCleanup(() => clearTimeout(timer));
+  });
+  function selectCommand(entry: CommandEntry) { setDraft(applyCommand(entry.name)); setCommandEntries([]); }
+
   async function queueAttachments(files: FileList | null, setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void) {
     if (!files) return;
     try {
@@ -569,6 +604,7 @@ export default function Chat() {
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments"><For each={draftAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
           </div>
         </Show>
