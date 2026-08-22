@@ -299,6 +299,89 @@ pub fn delete_webhook(id: String) -> Result<()> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// A webhook filter predicate: a flat JSON object.
+///
+/// * `"event"` — array of event names, matched as **OR**.
+/// * every other key — a dot-path into the event envelope, matched by exact JSON
+///   equality, all of them **AND**ed.
+/// * `{}` matches everything; a path that is absent never matches (fail closed).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct WebhookFilter {
+    events: Option<Vec<String>>,
+    fields: Vec<(String, serde_json::Value)>,
+}
+
+/// Rejects anything the evaluator cannot answer honestly, so a stored filter is
+/// always a decidable predicate rather than merely well-formed JSON.
+pub(crate) fn parse_webhook_filter(raw: &str) -> Result<WebhookFilter> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "webhook filters must be JSON".to_string())?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "webhook filters must be a JSON object".to_string())?;
+    let mut filter = WebhookFilter::default();
+    for (key, value) in object {
+        if key == "event" {
+            let names = value
+                .as_array()
+                .ok_or_else(|| "webhook filter \"event\" must be an array of event names")?;
+            let mut events = Vec::with_capacity(names.len());
+            for name in names {
+                let name = name.as_str().ok_or_else(|| {
+                    "webhook filter \"event\" must be an array of event names".to_string()
+                })?;
+                events.push(name.to_string());
+            }
+            filter.events = Some(events);
+        } else {
+            if key.is_empty() || key.split('.').any(str::is_empty) {
+                return Err(format!("webhook filter path \"{key}\" is not a dot-path"));
+            }
+            filter.fields.push((key.clone(), value.clone()));
+        }
+    }
+    Ok(filter)
+}
+
+/// Object traversal only: a path segment never indexes into an array, and a miss
+/// is a miss rather than a null.
+fn dot_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut cursor = value;
+    for segment in path.split('.') {
+        cursor = cursor.as_object()?.get(segment)?;
+    }
+    Some(cursor)
+}
+
+impl WebhookFilter {
+    pub(crate) fn matches(&self, event_type: &str, payload: &serde_json::Value) -> bool {
+        if let Some(events) = &self.events {
+            if !events.iter().any(|e| e == event_type) {
+                return false;
+            }
+        }
+        self.fields
+            .iter()
+            .all(|(path, expected)| dot_path(payload, path) == Some(expected))
+    }
+}
+
+/// Delivery-side gate. No filter = deliver; an unparsable legacy filter is
+/// **not** delivered, so a broken predicate can never widen a subscription.
+pub(crate) fn webhook_filter_allows(
+    filters_json: Option<&str>,
+    event_type: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    match filters_json {
+        None => true,
+        Some(raw) => match parse_webhook_filter(raw) {
+            Ok(filter) => filter.matches(event_type, payload),
+            Err(_) => false,
+        },
+    }
+}
+
 fn read_delivery(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookDelivery> {
     Ok(WebhookDelivery {
         id: r.get(0)?,
@@ -980,6 +1063,110 @@ mod tests {
             .unwrap()
             .url
             .starts_with("jetbrains://"));
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn envelope() -> serde_json::Value {
+        json!({
+            "event": "issue.created",
+            "issue": {"id": "i1", "priority": "HIGH", "number": 7, "archived": false}
+        })
+    }
+
+    #[test]
+    fn an_empty_object_matches_everything() {
+        let filter = parse_webhook_filter("{}").expect("empty filter");
+        assert!(filter.matches("issue.created", &envelope()));
+        assert!(filter.matches("anything.at.all", &json!({})));
+    }
+
+    #[test]
+    fn event_names_are_ored() {
+        let filter = parse_webhook_filter(r#"{"event":["issue.created","issue.updated"]}"#)
+            .expect("event filter");
+        assert!(filter.matches("issue.created", &envelope()));
+        assert!(filter.matches("issue.updated", &envelope()));
+        assert!(!filter.matches("issue.archived", &envelope()));
+        // An empty name list can never be satisfied.
+        let none = parse_webhook_filter(r#"{"event":[]}"#).expect("empty event list");
+        assert!(!none.matches("issue.created", &envelope()));
+    }
+
+    #[test]
+    fn field_paths_are_anded() {
+        let both = parse_webhook_filter(r#"{"issue.priority":"HIGH","issue.id":"i1"}"#)
+            .expect("two paths");
+        assert!(both.matches("issue.created", &envelope()));
+        let one_wrong = parse_webhook_filter(r#"{"issue.priority":"HIGH","issue.id":"i2"}"#)
+            .expect("two paths");
+        assert!(!one_wrong.matches("issue.created", &envelope()));
+    }
+
+    #[test]
+    fn event_and_fields_must_both_hold() {
+        let filter =
+            parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"HIGH"}"#)
+                .expect("mixed filter");
+        assert!(filter.matches("issue.created", &envelope()));
+        assert!(!filter.matches("issue.updated", &envelope()));
+        let other = parse_webhook_filter(r#"{"event":["issue.created"],"issue.priority":"LOW"}"#)
+            .expect("mixed filter");
+        assert!(!other.matches("issue.created", &envelope()));
+    }
+
+    #[test]
+    fn an_absent_path_never_matches() {
+        let missing = parse_webhook_filter(r#"{"issue.assignee_id":"nobody"}"#).expect("filter");
+        assert!(!missing.matches("issue.created", &envelope()));
+        // Not even against JSON null: absent is absent.
+        let null = parse_webhook_filter(r#"{"issue.assignee_id":null}"#).expect("filter");
+        assert!(!null.matches("issue.created", &envelope()));
+        // A path that walks through a non-object also misses.
+        let through_scalar = parse_webhook_filter(r#"{"issue.id.inner":"i1"}"#).expect("filter");
+        assert!(!through_scalar.matches("issue.created", &envelope()));
+    }
+
+    #[test]
+    fn equality_is_typed() {
+        let string_seven = parse_webhook_filter(r#"{"issue.number":"7"}"#).expect("filter");
+        assert!(!string_seven.matches("issue.created", &envelope()));
+        let number_seven = parse_webhook_filter(r#"{"issue.number":7}"#).expect("filter");
+        assert!(number_seven.matches("issue.created", &envelope()));
+        let bool_false = parse_webhook_filter(r#"{"issue.archived":false}"#).expect("filter");
+        assert!(bool_false.matches("issue.created", &envelope()));
+        let string_false = parse_webhook_filter(r#"{"issue.archived":"false"}"#).expect("filter");
+        assert!(!string_false.matches("issue.created", &envelope()));
+    }
+
+    #[test]
+    fn malformed_filters_are_rejected_on_parse() {
+        assert!(parse_webhook_filter("not json").is_err());
+        assert!(parse_webhook_filter("[]").is_err());
+        assert!(parse_webhook_filter("\"issue.created\"").is_err());
+        assert!(parse_webhook_filter("null").is_err());
+        assert!(parse_webhook_filter(r#"{"event":"issue.created"}"#).is_err());
+        assert!(parse_webhook_filter(r#"{"event":[1,2]}"#).is_err());
+        assert!(parse_webhook_filter(r#"{"":"x"}"#).is_err());
+        assert!(parse_webhook_filter(r#"{"issue..id":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn delivery_side_is_fail_closed() {
+        let payload = envelope();
+        assert!(webhook_filter_allows(None, "issue.created", &payload));
+        assert!(webhook_filter_allows(Some("{}"), "issue.created", &payload));
+        // Legacy rows written before validation existed must not be delivered.
+        assert!(!webhook_filter_allows(
+            Some("[\"issue.created\"]"),
+            "issue.created",
+            &payload
+        ));
+        assert!(!webhook_filter_allows(Some("oops"), "issue.created", &payload));
     }
 }
 
