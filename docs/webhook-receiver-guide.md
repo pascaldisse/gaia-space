@@ -1,10 +1,11 @@
 # Webhook receiver verification
 
 Use this procedure for every inbound GAIA Space webhook request. It describes the
-current sender contract: JSON body plus `x-gaia-space-webhook`,
-`x-gaia-space-timestamp`, and `x-gaia-space-signature` headers.
+sender contract: JSON body plus `x-gaia-space-webhook`,
+`x-gaia-space-delivery-id`, `x-gaia-space-timestamp`, and
+`x-gaia-space-signature` headers.
 
-1. Read and retain the raw, unmodified request body. Read all three headers.
+1. Read and retain the raw, unmodified request body. Read all four headers.
 2. Use `x-gaia-space-webhook` to look up that subscription's configured secret.
    Reject an unknown webhook ID; reject an absent signature or secret according to
    your receiver's unsigned-webhook policy.
