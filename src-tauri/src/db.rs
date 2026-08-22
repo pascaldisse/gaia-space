@@ -385,7 +385,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     // V45: dashboard widget visibility is an account preference, not browser state.
     // V43 is owned by the documents lane and V44 by its paired lane; preserve gaps.
-    if version < 45 { tx.execute_batch(SCHEMA_V45)?; }
+    if version < 45 {
+        tx.execute_batch(SCHEMA_V45)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1052,7 +1054,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 41);
+        assert_eq!(SCHEMA_VERSION, 45);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1070,6 +1072,26 @@ mod tests {
         );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
+    fn v45_dashboard_preferences_upgrade_and_rerun_are_idempotent() {
+        let temp = TempDb::new("gaia-space-v45-dashboard-preferences");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        conn.execute("DROP TABLE user_preferences", []).unwrap();
+        conn.pragma_update(None, "user_version", 44).unwrap();
+        migrate(&conn).expect("v45 creates preferences table");
+        conn.pragma_update(None, "user_version", 44).unwrap();
+        migrate(&conn).expect("v45 rerun is idempotent");
+        let table: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table, "user_preferences");
     }
 
     #[test]
@@ -1594,14 +1616,22 @@ mod v39_webhook_migration_tests {
     fn v39_guard_upgrades_a_v38_copy_and_tolerates_a_partial_database_without_the_table() {
         let copy = open_in_memory().unwrap();
         migrate(&copy).unwrap();
-        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN secret", []).unwrap();
-        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN max_attempts", []).unwrap();
+        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN secret", [])
+            .unwrap();
+        copy.execute(
+            "ALTER TABLE webhook_subscriptions DROP COLUMN max_attempts",
+            [],
+        )
+        .unwrap();
         copy.pragma_update(None, "user_version", 38).unwrap();
         migrate(&copy).unwrap();
         let columns = |conn: &Connection| -> Vec<String> {
-            conn.prepare("PRAGMA table_info(webhook_subscriptions)").unwrap()
-                .query_map([], |row| row.get(1)).unwrap()
-                .collect::<std::result::Result<Vec<String>, _>>().unwrap()
+            conn.prepare("PRAGMA table_info(webhook_subscriptions)")
+                .unwrap()
+                .query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<std::result::Result<Vec<String>, _>>()
+                .unwrap()
         };
         let upgraded = columns(&copy);
         assert!(upgraded.contains(&"secret".into()));
@@ -1610,7 +1640,12 @@ mod v39_webhook_migration_tests {
         let partial = open_in_memory().unwrap();
         partial.pragma_update(None, "user_version", 38).unwrap();
         migrate(&partial).unwrap();
-        assert_eq!(partial.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            partial
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
         assert!(!table_exists(&partial, "webhook_subscriptions").unwrap());
     }
 }

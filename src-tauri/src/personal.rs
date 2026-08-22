@@ -1,5 +1,5 @@
 //! Personal productivity, organization availability, notifications, and Goto search.
-use crate::{calendar_feeds, db, meetings};
+use crate::{actor, calendar_feeds, db, meetings};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -692,19 +692,53 @@ pub(crate) fn save_dashboard_preferences_on(
     }
     let hidden_widgets = clean_dashboard_widgets(preferences.hidden_widgets)?;
     let encoded = serde_json::to_string(&hidden_widgets).map_err(|e| e.to_string())?;
-    err(c.execute("INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES(?1,?2) ON CONFLICT(profile_id) DO UPDATE SET dashboard_hidden_widgets=excluded.dashboard_hidden_widgets", params![preferences.profile_id, encoded]))?;
-    Ok(DashboardPreferences {
-        profile_id: preferences.profile_id,
-        hidden_widgets,
-        initialized: true,
-    })
+    if preferences.initialized {
+        err(c.execute("INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES(?1,?2) ON CONFLICT(profile_id) DO UPDATE SET dashboard_hidden_widgets=excluded.dashboard_hidden_widgets", params![preferences.profile_id, encoded]))?;
+    } else {
+        // Legacy migration is insert-only: a delayed second browser/tab must not
+        // replace the server preference established by the first migration.
+        err(c.execute("INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES(?1,?2) ON CONFLICT(profile_id) DO NOTHING", params![preferences.profile_id, encoded]))?;
+    }
+    dashboard_preferences_on(c, &preferences.profile_id)
+}
+fn dashboard_preferences_for_actor_on(
+    c: &Connection,
+    profile_id: &str,
+) -> Result<DashboardPreferences> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if profile_id != actor_id {
+        return Err("Dashboard preferences belong to the active profile".into());
+    }
+    dashboard_preferences_on(c, profile_id)
+}
+fn save_dashboard_preferences_for_actor_on(
+    c: &Connection,
+    preferences: DashboardPreferences,
+) -> Result<DashboardPreferences> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if preferences.profile_id != actor_id {
+        return Err("Dashboard preferences belong to the active profile".into());
+    }
+    save_dashboard_preferences_on(c, preferences)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_dashboard_preferences(profile_id: String) -> Result<DashboardPreferences> {
-    dashboard_preferences_on(&db::conn()?, &profile_id)
+    let c = db::conn()?;
+    dashboard_preferences_for_actor_on(&c, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_dashboard_preferences(
+    preferences: DashboardPreferences,
+) -> Result<DashboardPreferences> {
+    let c = db::conn()?;
+    save_dashboard_preferences_for_actor_on(&c, preferences)
+}
+/// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
+pub fn get_dashboard_preferences_http(profile_id: String) -> Result<DashboardPreferences> {
+    dashboard_preferences_on(&db::conn()?, &profile_id)
+}
+/// HTTP has already replaced the payload owner at its policy gate.
+pub fn set_dashboard_preferences_http(
     preferences: DashboardPreferences,
 ) -> Result<DashboardPreferences> {
     save_dashboard_preferences_on(&db::conn()?, preferences)
@@ -1864,6 +1898,16 @@ mod dashboard_preference_tests {
         )
         .unwrap();
         assert_eq!(saved.hidden_widgets, vec!["calendar", "inbox"]);
+        let retry = save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "default-org".into(),
+                hidden_widgets: vec!["today".into()],
+                initialized: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(retry.hidden_widgets, vec!["calendar", "inbox"]);
         assert_eq!(
             dashboard_preferences_on(&c, "default-org")
                 .unwrap()
@@ -1877,6 +1921,23 @@ mod dashboard_preference_tests {
                 hidden_widgets: vec!["nope".into()],
                 initialized: false
             }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn dashboard_preferences_are_bound_to_the_native_actor() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        crate::db::seed(&c).unwrap();
+        assert!(dashboard_preferences_for_actor_on(&c, "other-profile").is_err());
+        assert!(save_dashboard_preferences_for_actor_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "other-profile".into(),
+                hidden_widgets: vec!["calendar".into()],
+                initialized: true,
+            },
         )
         .is_err());
     }
