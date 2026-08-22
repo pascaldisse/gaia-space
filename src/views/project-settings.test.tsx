@@ -55,7 +55,7 @@ describe("project settings", () => {
     expect(calls.find(call => call.cmd === "add_project_member")?.args).toMatchObject({ projectId: "p1", memberId: "member" });
     expect(calls.find(call => call.cmd === "create_role_assignment")?.args).toMatchObject({ input: { role_id: "lead", profile_id: "member", scope_type: "project", scope_id: "p1" } });
     const field = host.querySelector<HTMLInputElement>('input[aria-label="Custom field name"]')!;
-    field.value = "Cost center"; field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.value = "Cost center"; field.dispatchEvent(new Event("input", { bubbles: true })); await settle();
     [...host.querySelectorAll("button")].find(button => button.textContent === "Add field")!.click(); await settle();
     expect(calls.find(call => call.cmd === "create_cf_definition")?.args).toMatchObject({ input: { entity_type: "project", cf_type: "text", name: "Cost center" } });
   });
