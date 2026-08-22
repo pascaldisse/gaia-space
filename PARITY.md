@@ -15,7 +15,9 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — V39 NOT to be taken by any other lane until V38 merges
 
-TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 42 · partial 149 · stub 21 · missing 144. Matrix NOT green — steering loop active.
+
+RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
@@ -25,33 +27,33 @@ Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob m
 Worst gaps: stacked cherry-pick/restack UI · quality gates external checks; CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
-33 rows — done 8 · partial 15 · stub 0 · missing 10.
+33 rows — done 8 · partial 16 · stub 0 · missing 9.
 Worst gaps: swimlane grouping dimensions · matrix reports · external tracker integration.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
-49 rows — done 2 · partial 14 · stub 1 · missing 32.
+49 rows — done 5 · partial 18 · stub 1 · missing 25.
 Worst gaps: per-format registry protocols · retention/immutability/CVE/ACLs · workers/artifacts/test-reporting · non-manual triggers+DSL · deployment integrations/webhooks.
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
-61 rows — done 8 · partial 30 · missing 21.
+59 rows — done 8 · partial 30 · missing 21.
 Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
-32 rows — done 3 · partial 12 · missing 17.
+32 rows — done 4 · partial 14 · missing 14.
 Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
-54 rows — done 5 · partial 22 · stub 3 · missing 24.
+54 rows — done 5 · partial 24 · stub 2 · missing 23.
 Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29 `subscription_scopes`, org/team/project/location/profile/entity targets, wildcard `*` event, precedence scope→setting→default) + Inbox subscription editor rail ⇒ “Subscription editor / personal feeds” stub→partial, “Whole-org/team/project/location subscription targets” missing→partial. Tests: `personal::tests::scoped_subscription_beats_event_default_and_wildcard`, `invalid_subscription_target_is_rejected`.
 Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
-42 rows — done 0 · partial 6 · stub 19 · missing 17.
+42 rows — done 0 · partial 10 · stub 17 · missing 15.
 Progress (feat/w2-feeds-oauth @64ec368): app OAuth client_credentials grant (SCHEMA_V31 `app_secrets`/`app_tokens`, argon2-hashed secret+token, TTL, rotation revokes outstanding tokens, verify/revoke/list) + marketplace listing metadata and install records (`marketplace_apps`, `app_installs` with MARKETPLACE/LINK/MANUAL/JENKINS/TEAMCITY kinds), wired to Applications view ⇒ “App OAuth flows/credentials” stub→partial, “Marketplace app metadata” + “AppInstallInfo install flows” missing→partial. Tests: `applications::oauth_tests::*` (4) + HTTP regression `space-server::tests::app_credentials_are_admin_only`. Web policy: credential commands (rotate/issue/verify/revoke/list + marketplace writes) are `CommandPolicy::AppAdmin` — admin-only, since `applications` has no owner column (☾Kali finding). UNVERIFIED: no external HTTP API surface consumes the bearer token yet; PKCE/code flow still absent.
 Worst gaps: devfile/deep-links unwired · apps/webhooks/chatbots/extensions backend unreachable from UI · no app OAuth/HTTP-API/marketplace · no webhook delivery/retry · no slash-command/app-rights integration.
 
 ## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)
-35 rows — done 10 · partial 12 · missing 13.
+35 rows — done 10 · partial 15 · missing 10.
 Worst gaps: recording/egress · lobby/admission · remote audio playback · persistent video_provider · call lifecycle model.
 Note: lane reported 1 dashboard test fail; independent re-run (crown) = 99 pass/0 fail — not reproduced.
 
