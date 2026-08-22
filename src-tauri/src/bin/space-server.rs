@@ -1062,6 +1062,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // The redirect allowlist decides where a code is delivered: it is a credential
         // surface, so it answers to the same admin gate as the secrets themselves.
         | "register_redirect_uri"
+        // A webhook secret is an application credential like any other: minting one or
+        // enumerating the ring answers to the same admin gate.
+        | "rotate_webhook_secret"
+        | "list_webhook_secrets"
         | "list_redirect_uris" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
@@ -2413,6 +2417,8 @@ async fn cmd(
     "retry_webhook_delivery" => applications::retry_webhook_delivery(id: String),
     "process_webhook_queue" => applications::process_webhook_queue(limit: i64),
     "list_webhook_deliveries" => applications::list_webhook_deliveries(webhook_id: String),
+    "rotate_webhook_secret" => applications::rotate_webhook_secret(webhook_id: String, overlap_seconds: Option<i64>),
+    "list_webhook_secrets" => applications::list_webhook_secrets(webhook_id: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
@@ -3024,6 +3030,65 @@ mod tests {
             .0,
             StatusCode::FORBIDDEN
         );
+    }
+    /// ☀Agni (V41): the webhook key ring is a credential surface. A member must not be
+    /// able to mint a signing secret or enumerate the ring, and the ring itself must
+    /// never hand back a secret value after the one-time presentation at rotation.
+    #[tokio::test]
+    async fn webhook_secret_rotation_is_admin_only_and_shows_the_secret_once() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('app-w','App W','Application','client-w')", []).unwrap();
+        c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri,secret,max_attempts) VALUES('wh-1','app-w','IssueWebhookEvent','https://example.test/hook','old-secret',5)", []).unwrap();
+        drop(c);
+        for command in ["rotate_webhook_secret", "list_webhook_secrets"] {
+            let (status, body) = call(cookie("ta"), command, json!({"webhook_id":"wh-1"})).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{command}: {body}");
+        }
+        // Nothing was minted by the refused calls.
+        let c = db::conn().unwrap();
+        assert_eq!(
+            c.query_row::<i64, _, _>("SELECT count(*) FROM webhook_secrets", [], |r| r.get(0))
+                .unwrap(),
+            0
+        );
+        drop(c);
+        // Admin rotates: the new secret is presented exactly once.
+        let (status, rotated) = call(
+            cookie("tc"),
+            "rotate_webhook_secret",
+            json!({"webhook_id":"wh-1","overlap_seconds":3600}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{rotated}");
+        let fresh = rotated["value"]["secret"].as_str().unwrap().to_string();
+        assert!(fresh.starts_with("spwh_"));
+        // The listing describes the ring without ever repeating a secret value.
+        let (status, listed) =
+            call(cookie("tc"), "list_webhook_secrets", json!({"webhook_id":"wh-1"})).await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        let rows = listed["value"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "active + retiring during overlap: {listed}");
+        assert_eq!(rows[0]["state"].as_str(), Some("ACTIVE"));
+        assert_eq!(rows[1]["state"].as_str(), Some("RETIRING"));
+        let serialised = listed.to_string();
+        assert!(!serialised.contains(&fresh), "secret leaked into listing");
+        assert!(!serialised.contains("old-secret"), "secret leaked into listing");
+        // Independent path: the superseded secret is still on the ring, so a receiver
+        // that has not switched over yet still verifies inside the overlap.
+        let c = db::conn().unwrap();
+        let ring: Vec<String> = applications::signing_secrets(&c, "wh-1", None).unwrap();
+        assert_eq!(ring.first().map(String::as_str), Some(fresh.as_str()));
+        assert!(ring.iter().any(|s| s == "old-secret"));
+        // Outside the overlap it is gone.
+        c.execute(
+            "UPDATE webhook_secrets SET expires_at=unixepoch()-1 WHERE state='RETIRING'",
+            [],
+        )
+        .unwrap();
+        let ring: Vec<String> = applications::signing_secrets(&c, "wh-1", None).unwrap();
+        assert_eq!(ring, vec![fresh]);
     }
     /// ☀Ganga: one secret, one rotation. Over HTTP there is a single rotate command, and
     /// it must retire the authorization-code grants too — not just `app_tokens`.
