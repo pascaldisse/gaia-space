@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 52;
+pub const SCHEMA_VERSION: i64 = 53;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -428,6 +428,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V52)?;
     }
 
+    // V53: dev environment lifecycle. State, idle deadline and the preserved home/work
+    // trees are database facts, not runtime memory: hibernation must survive a restart
+    // of the server, otherwise a hibernated environment silently loses its snapshot.
+    if version < 53 {
+        tx.execute_batch(SCHEMA_V53)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -756,6 +762,28 @@ CREATE INDEX IF NOT EXISTS calendars_profile ON calendars(profile_id);
 /// V51 indexes the optional feed destination used by Calendar filtering.
 pub(crate) const SCHEMA_V51: &str = r#"
 CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id);
+"#;
+
+pub(crate) const SCHEMA_V53: &str = r#"
+CREATE TABLE IF NOT EXISTS dev_environments (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    owner_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    repository TEXT,
+    branch TEXT,
+    ide TEXT NOT NULL DEFAULT 'IntelliJ IDEA',
+    instance_type TEXT NOT NULL DEFAULT 'regular',
+    state TEXT NOT NULL CHECK(state IN ('STARTING','RUNNING','HIBERNATING','HIBERNATED','STANDBY','FAILED','DELETED')),
+    idle_timeout_minutes INTEGER NOT NULL DEFAULT 30,
+    last_activity_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    hibernated_at INTEGER,
+    persisted_home TEXT,
+    persisted_worktree TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS dev_environments_project ON dev_environments(project_id, state);
+CREATE INDEX IF NOT EXISTS dev_environments_owner ON dev_environments(owner_id);
 "#;
 
 pub(crate) const SCHEMA_V52: &str = r#"
@@ -1120,7 +1148,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 52);
+        assert_eq!(SCHEMA_VERSION, 53);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

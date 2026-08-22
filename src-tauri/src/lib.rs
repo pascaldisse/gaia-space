@@ -19,6 +19,8 @@ pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod devenv;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod documents;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod events;
@@ -257,6 +259,14 @@ pub fn run() {
             review::list_protected_branch_rules,
             review::save_protected_branch_rule,
             review::delete_protected_branch_rule,
+            devenv::list_dev_environments,
+            devenv::create_dev_environment,
+            devenv::touch_dev_environment,
+            devenv::hibernate_dev_environment,
+            devenv::hibernate_idle_dev_environments,
+            devenv::resume_dev_environment,
+            devenv::claim_standby_dev_environment,
+            devenv::delete_dev_environment,
             review::create_review_stack,
             review::list_review_stacks,
             review::list_my_review_stacks,

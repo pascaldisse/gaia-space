@@ -12,7 +12,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: "tasks", label: "My tasks", icon: "check", views: ["To-Do", "Project Tasks"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
-  { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Repos", "Code Reviews", "Pipelines"] },
+  { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
   { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Inbox", "Chat"] },

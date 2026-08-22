@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, documents, events, issues, meetings,
+    applications, blogs, calendar_feeds, calls, chat, db, devenv, documents, events, issues,
+    meetings,
     oauth, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
@@ -1291,6 +1292,14 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
+        | "list_dev_environments"
+        | "create_dev_environment"
+        | "touch_dev_environment"
+        | "hibernate_dev_environment"
+        | "hibernate_idle_dev_environments"
+        | "resume_dev_environment"
+        | "claim_standby_dev_environment"
+        | "delete_dev_environment"
         | "list_review_stacks"
         | "list_my_review_stacks"
         | "remove_review_stack"
@@ -2969,6 +2978,14 @@ async fn cmd(
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
+    "list_dev_environments" => devenv::list_dev_environments(project_id: String),
+    "create_dev_environment" => devenv::create_dev_environment(input: devenv::NewDevEnvironment),
+    "touch_dev_environment" => devenv::touch_dev_environment(id: String),
+    "hibernate_dev_environment" => devenv::hibernate_dev_environment(id: String, actor_id: Option<String>),
+    "hibernate_idle_dev_environments" => devenv::hibernate_idle_dev_environments(),
+    "resume_dev_environment" => devenv::resume_dev_environment(id: String, actor_id: Option<String>),
+    "claim_standby_dev_environment" => devenv::claim_standby_dev_environment(project_id: String, profile_id: String),
+    "delete_dev_environment" => devenv::delete_dev_environment(id: String, actor_id: Option<String>),
     "list_review_stacks" => review::list_review_stacks(project_id: String),
     "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
     "remove_review_stack" => review::remove_review_stack(stack_id: String),
