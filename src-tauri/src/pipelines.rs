@@ -748,7 +748,7 @@ fn spawn_script_jobs(
     for job in def
         .jobs
         .iter()
-        .filter(|job| required_trigger.map_or(true, |trigger| job.trigger_type == trigger))
+        .filter(|job| required_trigger.is_none_or(|trigger| job.trigger_type == trigger))
     {
         let job_id = job_id_for(script_id, &job.name);
         let run_id = format!("{job_id}::run-{}", now_nanos());
@@ -1325,6 +1325,9 @@ fn typed_format_metadata(
 /// — never a fixed/guessed location). Payload is stored as UTF-8 text (this local registry
 /// has no upload transport for arbitrary binaries yet; real Space's binary artifact storage is
 /// future work — noted here rather than faked).
+// Transactional core of the `publish_package_version` tauri command; its arguments are
+// that command's IPC parameters plus the connection/base-dir it must run inside.
+#[allow(clippy::too_many_arguments)]
 fn publish_package_version_tx(
     conn: &Connection,
     base_dir: &Path,
@@ -2186,9 +2189,8 @@ mod tests {
         let err = parse_and_validate_script(&script_source(&jobs_ref)).unwrap_err();
         assert!(err.contains("100 jobs"), "unexpected error: {err}");
 
-        let too_many_steps: Vec<&str> = std::iter::repeat("echo hi")
-            .take(MAX_STEPS_PER_JOB + 1)
-            .collect();
+        let too_many_steps: Vec<&str> =
+            std::iter::repeat_n("echo hi", MAX_STEPS_PER_JOB + 1).collect();
         let err2 =
             parse_and_validate_script(&script_source(&[("build", &too_many_steps)])).unwrap_err();
         assert!(err2.contains("50 steps"), "unexpected error: {err2}");

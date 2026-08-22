@@ -226,13 +226,12 @@ pub fn publish_blog_draft(input: PublishBlogDraftInput) -> Result<BlogPost> {
         return Err("only the draft author can publish it".into());
     }
     if input.project_id.as_deref().is_some_and(|project| {
-        c.query_row(
+        !c.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1)",
             [project],
             |r| r.get::<_, bool>(0),
         )
         .unwrap_or(false)
-            == false
     }) {
         return Err("blog project target not found".into());
     }

@@ -366,6 +366,9 @@ impl Write for PrependStream {
     }
 }
 
+// The handshake closure's `Result<Response, ErrorResponse>` type is imposed by
+// tungstenite's `accept_hdr` callback trait; we cannot box the `Err` variant.
+#[allow(clippy::result_large_err)]
 fn handle_cdp_connection(
     stream: TcpStream,
     request_head: Vec<u8>,
@@ -402,7 +405,7 @@ fn handle_cdp_connection(
                 let response =
                     handle_cdp_message(text.as_ref(), app.clone(), Arc::clone(&state), &label);
                 if let Some(response) = response {
-                    if ws.send(Message::Text(response.into())).is_err() {
+                    if ws.send(Message::Text(response)).is_err() {
                         break;
                     }
                 }
@@ -417,7 +420,7 @@ fn handle_cdp_connection(
                 ) =>
             {
                 while let Ok(event) = receiver.try_recv() {
-                    if ws.send(Message::Text(event.into())).is_err() {
+                    if ws.send(Message::Text(event)).is_err() {
                         state.cdp_clients.lock().unwrap().remove(&client_id);
                         return;
                     }
@@ -461,7 +464,7 @@ fn handle_cdp_message(
             if let Some(url) = params.get("url").and_then(Value::as_str) {
                 if let Some(window) = app.get_webview_window(label) {
                     if let Ok(url_json) = serde_json::to_string(url) {
-                        let _ = window.eval(&format!("location.href={url_json}"));
+                        let _ = window.eval(format!("location.href={url_json}"));
                     }
                 }
             }

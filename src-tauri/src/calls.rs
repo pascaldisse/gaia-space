@@ -27,7 +27,7 @@ const DEFAULT_RESERVATION_TTL_SECONDS: i64 = 120;
 const DEFAULT_MAX_STOP_ATTEMPTS: i64 = 3;
 const DEFAULT_SOURCES: [&str; 4] = ["camera", "microphone", "screen_share", "screen_share_audio"];
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct LivekitConfig {
     pub server_path: Option<String>,
     pub host: Option<String>,
@@ -61,28 +61,8 @@ pub struct LivekitConfig {
     pub recording_s3_force_path_style: Option<bool>,
 }
 
-impl Default for LivekitConfig {
-    fn default() -> Self {
-        Self {
-            server_path: None,
-            host: None,
-            port: None,
-            api_key: None,
-            api_secret: None,
-            egress_url: None,
-            recording_filepath: None,
-            egress_timeout_ms: None,
-            recording_reservation_ttl_seconds: None,
-            recording_max_stop_attempts: None,
-            recording_s3_bucket: None,
-            recording_s3_region: None,
-            recording_s3_endpoint: None,
-            recording_s3_access_key: None,
-            recording_s3_secret: None,
-            recording_s3_force_path_style: None,
-        }
-    }
-}
+// `Default` is derived: every field is an `Option`, so the derived impl is
+// byte-identical to the previous hand-written all-`None` constructor.
 
 /// Manual `Debug`: this struct carries LiveKit API/S3 credentials. A derived
 /// `Debug` would leak them into logs/panic output, so every secret prints as a

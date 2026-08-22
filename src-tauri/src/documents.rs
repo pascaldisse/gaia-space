@@ -5,8 +5,8 @@
 //! - "my-docs"  -> container_id = owning profile id (personal, private folder tree)
 //! - "project"  -> container_id = project id
 //! - "kb"       -> container_id = book id, where a "book" is simply the top-level
-//!                 (parent_id IS NULL) document_folder in the 'kb' container; articles
-//!                 are ordinary documents filed into folders under that book.
+//!   (parent_id IS NULL) document_folder in the 'kb' container; articles
+//!   are ordinary documents filed into folders under that book.
 //!
 //! Versioning: every content save (`save_document`) increments `documents.version` and
 //! appends an immutable `doc_versions` row. Restoring an old version does not rewrite
@@ -947,7 +947,7 @@ fn import_document_folder_tx(
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            if !extensions.iter().any(|e| *e == ext) {
+            if !extensions.contains(&ext) {
                 continue;
             }
             if meta.len() > request.max_file_bytes {

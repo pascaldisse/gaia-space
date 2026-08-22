@@ -51,7 +51,7 @@ pub mod secretbox;
 #[cfg(feature = "desktop")]
 use serde::Serialize;
 #[cfg(feature = "desktop")]
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(feature = "desktop")]
 #[derive(Serialize)]
@@ -360,7 +360,7 @@ pub fn run() {
             calendar_feeds::sync_calendar_feed,
         ])
         .setup(|app| {
-            let conn = db::connection(app.handle()).map_err(|e| std::io::Error::other(e))?;
+            let conn = db::connection(app.handle()).map_err(std::io::Error::other)?;
             db::seed(&conn).map_err(|e| std::io::Error::other(e.to_string()))?;
             // Built manually (instead of via tauri.conf.json's `app.windows`) so we
             // can attach the debug-server's console-capture init script before the
@@ -370,7 +370,7 @@ pub fn run() {
                 .inner_size(800.0, 600.0)
                 .min_inner_size(480.0, 360.0)
                 .resizable(true)
-                .initialization_script(&debug_server::init_script())
+                .initialization_script(debug_server::init_script())
                 .build()?;
             debug_server::spawn(app.handle().clone());
             Ok(())
