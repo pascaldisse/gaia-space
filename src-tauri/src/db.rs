@@ -690,19 +690,21 @@ UPDATE users SET profile_id = 'profile-' || id
 /// - `last_error` carries the operator-visible transport error and the `UNCONFIRMED:`
 ///   marker that keeps a row whose remote state is unknown locked (fail closed);
 /// - the partial unique index is the single-active-recording-per-meeting boundary.
-/// V41 key ring. `state` is the whole lifecycle: exactly one ACTIVE row signs, any
-/// number of RETIRING rows co-sign until `expires_at`, after which delivery skips and
-/// deletes them. `expires_at` is NULL for ACTIVE (it never expires on its own).
-pub(crate) const SCHEMA_V41: &str = r#"
-CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
-CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);
-CREATE UNIQUE INDEX IF NOT EXISTS webhook_secrets_active ON webhook_secrets(webhook_id) WHERE state='ACTIVE';
-"#;
-
 pub(crate) const SCHEMA_V38: &str = r#"
 CREATE TABLE IF NOT EXISTS meeting_recordings (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, egress_id TEXT, status TEXT NOT NULL CHECK(status IN ('starting','recording','stopping','stopped','failed')), filepath TEXT, started_by TEXT REFERENCES profiles(id), started_at INTEGER NOT NULL DEFAULT (unixepoch()), stopped_at INTEGER, stop_attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS meeting_recordings_active ON meeting_recordings(meeting_id) WHERE status IN ('starting','recording','stopping');
 CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meeting_id, started_at);
+"#;
+
+/// V41 key ring for webhook signing secrets.
+///
+/// `state` is the whole lifecycle: exactly one ACTIVE row signs, any number of RETIRING
+/// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
+/// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
+pub(crate) const SCHEMA_V41: &str = r#"
+CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
+CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS webhook_secrets_active ON webhook_secrets(webhook_id) WHERE state='ACTIVE';
 "#;
 
 pub(crate) const SCHEMA_V37: &str = r#"
