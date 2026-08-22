@@ -4,6 +4,8 @@ Sources: docs/space-knowledge-base/01→08 (KB) + legacy/flutter/ (legacy). Stat
 
 Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 99 pass/0 fail · vite build ✓.
 
+TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
+
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
 ## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md @ 88a03d7)
@@ -30,10 +32,9 @@ Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OA
 54 rows — done 2 · partial 20 · stub 3 · missing 29.
 Worst gaps: blogs absent · locations/org-directory stub · full-text search absent (Goto=substring) · dashboard personalization · subscription/feeds system.
 
-## 07 Dev Env / Apps / HTTP API (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB07 | UNVERIFIED | |
+## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
+42 rows — done 0 · partial 6 · stub 19 · missing 17.
+Worst gaps: devfile/deep-links unwired · apps/webhooks/chatbots/extensions backend unreachable from UI · no app OAuth/HTTP-API/marketplace · no webhook delivery/retry · no slash-command/app-rights integration.
 
 ## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)
 35 rows — done 10 · partial 12 · missing 13.
