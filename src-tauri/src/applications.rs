@@ -280,9 +280,11 @@ pub fn save_webhook(value: WebhookSubscription) -> Result<WebhookSubscription> {
     if !valid_http(&value.endpoint_uri) {
         return Err("webhook endpoint must use HTTP(S)".into());
     }
+    // First half of the double defence: a filter that cannot be evaluated is never
+    // stored. The second half is `webhook_filter_allows`, which refuses to deliver
+    // legacy rows that predate this check.
     if let Some(filters) = &value.filters_json {
-        serde_json::from_str::<serde_json::Value>(filters)
-            .map_err(|_| "webhook filters must be JSON".to_string())?;
+        parse_webhook_filter(filters)?;
     }
     if value.max_attempts < 1 {
         return Err("webhook max attempts must be at least 1".into());
@@ -1428,5 +1430,30 @@ mod delivery_tests {
             max_attempts: 0,
         })
         .is_err());
+    }
+
+    /// Validation runs before any DB access, so these need no database.
+    #[test]
+    fn undecidable_filters_are_refused_on_save() {
+        let with_filter = |filters: &str| {
+            save_webhook(WebhookSubscription {
+                id: "h".into(),
+                application_id: "a".into(),
+                event_type: "issue.created".into(),
+                filters_json: Some(filters.into()),
+                endpoint_uri: "https://example.test".into(),
+                enabled: true,
+                secret: None,
+                max_attempts: 5,
+            })
+        };
+        assert!(with_filter("[]").is_err(), "an array is not a predicate");
+        assert!(with_filter("7").is_err());
+        assert!(with_filter("not json").is_err());
+        assert!(
+            with_filter(r#"{"event":"issue.created"}"#).is_err(),
+            "event must be a list"
+        );
+        assert!(with_filter(r#"{"issue..id":"x"}"#).is_err());
     }
 }
