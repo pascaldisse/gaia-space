@@ -433,6 +433,43 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     }
   }
 
+  type ChecklistLine = { text: string; done: boolean };
+  function checklistLines(body: string): ChecklistLine[] {
+    return body.split("\n").filter((line) => line.trim()).map((line) => {
+      const match = line.match(/^\s*(?:[-*]\s*)?\[([ xX])\]\s*(.*)$/);
+      return match ? { text: match[2], done: match[1].toLowerCase() === "x" } : { text: line.trim(), done: false };
+    });
+  }
+  function toggleChecklistLine(index: number) {
+    let item = -1;
+    setEditBody(editBody().split("\n").map((line) => {
+      if (!line.trim()) return line;
+      item += 1;
+      if (item !== index) return line;
+      const match = line.match(/^(\s*(?:[-*]\s*)?\[)([ xX])(\]\s*.*)$/);
+      return match ? `${match[1]}${match[2].toLowerCase() === "x" ? " " : "x"}${match[3]}` : `- [x] ${line.trim()}`;
+    }).join("\n"));
+  }
+  function codePresentation(body: string) {
+    const match = body.match(/^```([\w+-]+)?\n?([\s\S]*?)\n?```\s*$/);
+    return { language: match?.[1] || "plain text", source: match?.[2] ?? body };
+  }
+  function CodeRenderer() {
+    const code = () => codePresentation(editBody());
+    return <div class="document-renderer code-renderer" data-format="code" data-language={code().language}>
+      <div class="code-language">{code().language}</div>
+      <pre><code><For each={code().source.split("\n")}>{(line, index) => <span class="code-line"><span class="code-line-number" aria-hidden="true">{index() + 1}</span><span>{line}{index() < code().source.split("\n").length - 1 ? "\n" : ""}</span></span>}</For></code></pre>
+    </div>;
+  }
+  function DocumentRenderer(props: { format: () => DocumentBodyFormat }) {
+    return <Show when={props.format()} keyed>{(format) => {
+      if (format === "rich-text") return <div class="document-renderer rich-text-renderer" data-format="rich-text" innerHTML={editBody()} />;
+      if (format === "checklist") return <ul class="document-renderer checklist-renderer" data-format="checklist"><For each={checklistLines(editBody())}>{(item, index) => <li classList={{ done: item.done }}><label><input type="checkbox" checked={item.done} onChange={() => toggleChecklistLine(index())} /><span>{item.text}</span></label></li>}</For></ul>;
+      if (format === "code") return <CodeRenderer />;
+      return <div class="document-renderer markdown-renderer" data-format="text" innerHTML={renderedMarkdown()} />;
+    }}</Show>;
+  }
+
   function FolderRow(props: { folder: DocumentFolder; depth: number }) {
     const f = () => props.folder;
     const childFolders = () => scopedFolders().filter((c) => c.parent_id === f().id);
@@ -737,7 +774,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <div class="editor-panes" classList={{ split: showPreview() }}>
                   <textarea class="editor-body" value={editBody()} onInput={(e) => setEditBody(e.currentTarget.value)} placeholder={doc().body_format === "checklist" ? "One item per line…" : doc().body_format === "code" ? "Code…" : doc().body_format === "rich-text" ? "Rich text / HTML…" : "Markdown body…"} />
                   <Show when={showPreview()}>
-                    <div class="editor-preview" innerHTML={renderedMarkdown()} />
+                    <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
                   </Show>
                 </div>
               </>

@@ -18,7 +18,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☀ — merged
 - V41 → feat/w3-secrot (webhook secret rotation / key-ring) ☘
 
-TOTALS (8/8 audited, 356 rows): done 42 · partial 154 · stub 19 · missing 141. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 43 · partial 153 · stub 19 · missing 141. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
