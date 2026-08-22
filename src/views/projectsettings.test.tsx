@@ -4,7 +4,7 @@ mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import ProjectSettings from "./ProjectSettings";
 import { createMemoryAdapter, initRouter, navigate, registerViews, setAvailableViews } from "../router";
-import { setProfileId, setProjectId } from "../session";
+import { reloadProjects, setProfileId, setProjectId } from "../session";
 
 const calls: { cmd: string; args: Record<string, unknown> }[] = [];
 let dispose: (() => void) | undefined;
@@ -26,7 +26,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 50));
 const mount = async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => { calls.push({ cmd, args }); return Promise.resolve(reply(cmd)); } };
   registerViews(["Projects", "Project Settings"]); setAvailableViews(null); initRouter(createMemoryAdapter());
-  setProfileId("owner"); setProjectId("p1"); navigate({ view: "Project Settings", projectId: "p1" });
+  setProfileId("owner"); setProjectId("p1"); await reloadProjects(); navigate({ view: "Project Settings", projectId: "p1" });
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(() => <ProjectSettings /> as any, host);
   await settle();
