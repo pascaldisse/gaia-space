@@ -5,6 +5,7 @@ import {
   type Role,
   type Team,
   type TeamMembership,
+  type MemberLocation,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -28,6 +29,8 @@ export default function Members() {
     platformApi.teams(),
   );
   const [roles] = createResource(() => platformApi.roles());
+  const [allMemberships] = createResource(() => platformApi.memberships());
+  const [locations, { refetch: refetchLocations }] = createResource(() => platformApi.memberLocations());
   const [profileDraft, setProfileDraft] = createSignal(newProfile());
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
@@ -38,6 +41,12 @@ export default function Members() {
   const [roleId, setRoleId] = createSignal("");
   const [problem, setProblem] = createSignal("");
   const [includeArchived, setIncludeArchived] = createSignal(false);
+  const [directoryQuery, setDirectoryQuery] = createSignal("");
+  const [positionFilter, setPositionFilter] = createSignal("");
+  const [locationFilter, setLocationFilter] = createSignal("");
+  const [locationProfileId, setLocationProfileId] = createSignal("");
+  const [locationDraft, setLocationDraft] = createSignal("");
+  const [locationType, setLocationType] = createSignal("Building");
   const [memberships, { refetch: refetchMemberships }] = createResource(
     () => activeTeam()?.id,
     (id) =>
@@ -46,11 +55,21 @@ export default function Members() {
         : Promise.resolve([] as TeamMembership[]),
   );
 
-  const listedProfiles = createMemo(() =>
-    (profiles() ?? []).filter(
-      (profile) => includeArchived() || !profile.archived,
-    ),
-  );
+  const positions = createMemo(() => [...new Set((allMemberships() ?? []).flatMap((membership) => {
+    const role = roles()?.find((item: Role) => item.id === membership.role_id);
+    return role ? [role.name] : [];
+  }))].sort());
+  const locationNames = createMemo(() => [...new Set((locations() ?? []).map((location) => location.location))].sort());
+  const listedProfiles = createMemo(() => {
+    const query = directoryQuery().trim().toLocaleLowerCase();
+    return (profiles() ?? []).filter((profile) => {
+      if (!includeArchived() && profile.archived) return false;
+      if (query && ![profile.display_name, profile.username, profile.email ?? ""].some((value) => value.toLocaleLowerCase().includes(query))) return false;
+      const membershipsForProfile = (allMemberships() ?? []).filter((item) => item.profile_id === profile.id);
+      if (positionFilter() && !membershipsForProfile.some((item) => roleName(item.role_id) === positionFilter())) return false;
+      return !locationFilter() || (locations() ?? []).some((item) => item.profile_id === profile.id && item.location === locationFilter());
+    });
+  });
   const listedTeams = createMemo(() =>
     (teams() ?? []).filter((team) => includeArchived() || !team.archived),
   );
@@ -129,6 +148,15 @@ export default function Members() {
     } catch (error) {
       setProblem(String(error));
     }
+  };
+  const addLocation = async () => {
+    if (!locationProfileId() || !locationDraft().trim()) return;
+    try { await platformApi.addMemberLocation(locationProfileId(), locationDraft().trim(), locationType()); setLocationDraft(""); setProblem(""); refetchLocations(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const removeLocation = async (location: MemberLocation) => {
+    try { await platformApi.removeMemberLocation(location.id); setProblem(""); refetchLocations(); }
+    catch (error) { setProblem(String(error)); }
   };
   const archiveProfile = async (profile: Profile) => {
     try {
@@ -233,6 +261,11 @@ export default function Members() {
               <span class="count-chip">{profileCount()}</span>
             </Show>
           </div>
+          <div class="org-form">
+            <input aria-label="Search directory" placeholder="Search people" value={directoryQuery()} onInput={(event) => setDirectoryQuery(event.currentTarget.value)} />
+            <select aria-label="Filter by position" value={positionFilter()} onChange={(event) => setPositionFilter(event.currentTarget.value)}><option value="">All positions</option><For each={positions()}>{(position) => <option value={position}>{position}</option>}</For></select>
+            <select aria-label="Filter by location" value={locationFilter()} onChange={(event) => setLocationFilter(event.currentTarget.value)}><option value="">All locations</option><For each={locationNames()}>{(location) => <option value={location}>{location}</option>}</For></select>
+          </div>
           <form class="org-form" onSubmit={saveProfile}>
             <input
               placeholder="Display name"
@@ -275,6 +308,13 @@ export default function Members() {
               </Show>
             </div>
           </form>
+          <div class="org-form">
+            <select aria-label="Person location" value={locationProfileId()} onChange={(event) => setLocationProfileId(event.currentTarget.value)}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></select>
+            <input aria-label="Location name" placeholder="Location" value={locationDraft()} onInput={(event) => setLocationDraft(event.currentTarget.value)} />
+            <select aria-label="Location type" value={locationType()} onChange={(event) => setLocationType(event.currentTarget.value)}><For each={["Region", "Campus", "Building", "Floor", "Room", "ConferenceRoom"]}>{(type) => <option value={type}>{type}</option>}</For></select>
+            <button type="button" class="ghost" disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</button>
+          </div>
+          <Show when={(locations() ?? []).length > 0}><ul class="org-list"><For each={locations()}>{(location) => <li><div class="org-list-text"><strong>{location.location}</strong><span class="org-sub">{personName(location.profile_id)} · {location.location_type}</span></div><button class="ghost small" onClick={() => removeLocation(location)}>Remove</button></li>}</For></ul></Show>
           <Show when={profiles.loading}>
             <p class="org-hint">Loading…</p>
           </Show>

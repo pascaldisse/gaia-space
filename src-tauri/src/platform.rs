@@ -99,6 +99,83 @@ pub fn update_profile(profile: Profile) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MemberLocation {
+    pub id: String,
+    pub profile_id: String,
+    pub location: String,
+    pub location_type: String,
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_member_locations(profile_id: Option<String>) -> Result<Vec<MemberLocation>> {
+    let c = db::conn()?;
+    let mut s = c.prepare("SELECT id,profile_id,location,type FROM member_locations WHERE (?1 IS NULL OR profile_id=?1) ORDER BY location")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([profile_id], |r| {
+            Ok(MemberLocation {
+                id: r.get(0)?,
+                profile_id: r.get(1)?,
+                location: r.get(2)?,
+                location_type: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_member_location(
+    member_id: String,
+    location: String,
+    location_type: String,
+) -> Result<MemberLocation> {
+    let location = location.trim().to_string();
+    if location.is_empty() {
+        return Err("A location is required".into());
+    }
+    if ![
+        "Region",
+        "Campus",
+        "Building",
+        "Floor",
+        "Room",
+        "ConferenceRoom",
+    ]
+    .contains(&location_type.as_str())
+    {
+        return Err("Invalid location type".into());
+    }
+    let value = MemberLocation {
+        id: new_id("member-location"),
+        profile_id: member_id,
+        location,
+        location_type,
+    };
+    let c = db::conn()?;
+    c.execute(
+        "INSERT INTO member_locations(id,profile_id,location,type) VALUES(?1,?2,?3,?4)",
+        params![
+            value.id,
+            value.profile_id,
+            value.location,
+            value.location_type
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(value)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_member_location(id: String) -> Result<()> {
+    let c = db::conn()?;
+    c.execute("DELETE FROM member_locations WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Teams + memberships
 // ---------------------------------------------------------------------------
