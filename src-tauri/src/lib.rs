@@ -38,6 +38,8 @@ pub mod platform;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod review;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod rights;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod secretbox;
 
 #[cfg(feature = "desktop")]
