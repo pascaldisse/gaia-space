@@ -16,11 +16,21 @@ use std::time::Duration;
 type Result<T> = std::result::Result<T, String>;
 
 fn new_id() -> String {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     format!("feed-{nanos:x}")
 }
-fn err<T>(result: rusqlite::Result<T>) -> Result<T> { result.map_err(|error| error.to_string()) }
-fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
+fn err<T>(result: rusqlite::Result<T>) -> Result<T> {
+    result.map_err(|error| error.to_string())
+}
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 /// Never carries the URL back to a client — only its sync state.
 #[derive(Clone, Debug, Serialize)]
@@ -53,16 +63,34 @@ fn row(c: &Connection, id: &str) -> Result<Option<CalendarFeed>> {
 /// write/sync/delete against — read from the row, never trusted from the body.
 pub fn feed_owner(id: &str) -> Result<Option<String>> {
     let c = db::conn()?;
-    err(c.query_row("SELECT profile_id FROM calendar_feeds WHERE id=?1", [id], |r| r.get(0)).optional())
+    err(c
+        .query_row(
+            "SELECT profile_id FROM calendar_feeds WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_calendar_feeds(profile_id: String) -> Result<Vec<CalendarFeed>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT id,profile_id,label,created_at,last_synced_at,last_error,event_count FROM calendar_feeds WHERE profile_id=?1 ORDER BY created_at"))?;
-    let rows = err(statement.query_map([&profile_id], |r| Ok(CalendarFeed { id: r.get(0)?, profile_id: r.get(1)?, label: r.get(2)?, created_at: r.get(3)?, last_synced_at: r.get(4)?, last_error: r.get(5)?, event_count: r.get(6)? })))?;
+    let rows = err(statement.query_map([&profile_id], |r| {
+        Ok(CalendarFeed {
+            id: r.get(0)?,
+            profile_id: r.get(1)?,
+            label: r.get(2)?,
+            created_at: r.get(3)?,
+            last_synced_at: r.get(4)?,
+            last_error: r.get(5)?,
+            event_count: r.get(6)?,
+        })
+    }))?;
     let mut out = Vec::new();
-    for feed in rows { out.push(feed.map_err(|e| e.to_string())?); }
+    for feed in rows {
+        out.push(feed.map_err(|e| e.to_string())?);
+    }
     Ok(out)
 }
 
@@ -73,7 +101,9 @@ pub fn list_calendar_feeds(profile_id: String) -> Result<Vec<CalendarFeed>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_calendar_feed(input: CalendarFeedInput) -> Result<CalendarFeed> {
     let label = input.label.trim();
-    if label.is_empty() { return Err("A calendar needs a label.".into()); }
+    if label.is_empty() {
+        return Err("A calendar needs a label.".into());
+    }
     let url = input.ics_url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("The calendar address must start with http:// or https://.".into());
@@ -82,7 +112,10 @@ pub fn save_calendar_feed(input: CalendarFeedInput) -> Result<CalendarFeed> {
     let c = db::conn()?;
     let id = match &input.id {
         Some(id) if row(&c, id)?.is_some() => {
-            err(c.execute("UPDATE calendar_feeds SET label=?1, ics_url_sealed=?2 WHERE id=?3", params![label, sealed, id]))?;
+            err(c.execute(
+                "UPDATE calendar_feeds SET label=?1, ics_url_sealed=?2 WHERE id=?3",
+                params![label, sealed, id],
+            ))?;
             id.clone()
         }
         _ => {
@@ -114,7 +147,11 @@ fn record_error(c: &Connection, id: &str, message: &str) -> Result<()> {
     // A failed fetch touches only sync bookkeeping — cached events (the
     // last-good sync) are left exactly as they were, never wiped by a
     // transient network error.
-    err(c.execute("UPDATE calendar_feeds SET last_synced_at=?1, last_error=?2 WHERE id=?3", params![now(), message, id])).map(|_| ())
+    err(c.execute(
+        "UPDATE calendar_feeds SET last_synced_at=?1, last_error=?2 WHERE id=?3",
+        params![now(), message, id],
+    ))
+    .map(|_| ())
 }
 
 /// Fetches the feed's URL, parses it, and replaces its cached events. Always
@@ -124,28 +161,47 @@ fn record_error(c: &Connection, id: &str, message: &str) -> Result<()> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn sync_calendar_feed(id: String) -> Result<CalendarFeed> {
     let c = db::conn()?;
-    let (sealed_url,) = err(c.query_row("SELECT ics_url_sealed FROM calendar_feeds WHERE id=?1", [&id], |r| Ok((r.get::<_, String>(0)?,))))
-        .map_err(|_| format!("Calendar feed `{id}` does not exist"))?;
+    let (sealed_url,) = err(c.query_row(
+        "SELECT ics_url_sealed FROM calendar_feeds WHERE id=?1",
+        [&id],
+        |r| Ok((r.get::<_, String>(0)?,)),
+    ))
+    .map_err(|_| format!("Calendar feed `{id}` does not exist"))?;
     let url = match secretbox::open(&sealed_url) {
         Ok(url) => url,
-        Err(message) => { record_error(&c, &id, &message)?; return row(&c, &id)?.ok_or_else(|| "Calendar feed disappeared during sync".to_string()); }
+        Err(message) => {
+            record_error(&c, &id, &message)?;
+            return row(&c, &id)?
+                .ok_or_else(|| "Calendar feed disappeared during sync".to_string());
+        }
     };
     drop(c);
 
     let outcome = fetch_and_parse(&url);
     let c = db::conn()?;
     match outcome {
-        Err(message) => { record_error(&c, &id, &message)?; }
+        Err(message) => {
+            record_error(&c, &id, &message)?;
+        }
         Ok(result) => {
             let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
-            tx.execute("DELETE FROM calendar_feed_events WHERE feed_id=?1", [&id]).map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM calendar_feed_events WHERE feed_id=?1", [&id])
+                .map_err(|e| e.to_string())?;
             for occurrence in &result.occurrences {
                 tx.execute(
                     "INSERT OR IGNORE INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES(?1,?2,?3,?4,?5,?6,?7)",
                     params![id, occurrence.uid, occurrence.occurrence_key, occurrence.title, occurrence.starts_at, occurrence.ends_at, occurrence.all_day_date],
                 ).map_err(|e| e.to_string())?;
             }
-            let last_error = if result.skipped > 0 { Some(format!("synced {} events; {} entries in this calendar could not be read", result.occurrences.len(), result.skipped)) } else { None };
+            let last_error = if result.skipped > 0 {
+                Some(format!(
+                    "synced {} events; {} entries in this calendar could not be read",
+                    result.occurrences.len(),
+                    result.skipped
+                ))
+            } else {
+                None
+            };
             tx.execute("UPDATE calendar_feeds SET last_synced_at=?1, last_error=?2, event_count=?3 WHERE id=?4", params![now(), last_error, result.occurrences.len() as i64, id]).map_err(|e| e.to_string())?;
             tx.commit().map_err(|e| e.to_string())?;
         }
@@ -153,7 +209,10 @@ pub fn sync_calendar_feed(id: String) -> Result<CalendarFeed> {
     row(&c, &id)?.ok_or_else(|| "Calendar feed disappeared during sync".to_string())
 }
 
-struct FetchOutcome { occurrences: Vec<ics::Occurrence>, skipped: usize }
+struct FetchOutcome {
+    occurrences: Vec<ics::Occurrence>,
+    skipped: usize,
+}
 
 /// Reqwest's blocking client owns its own little Tokio runtime; building *and
 /// dropping* one while already inside this binary's own async runtime (every
@@ -174,26 +233,53 @@ fn fetch_and_parse_off_the_async_runtime(url: &str) -> Result<FetchOutcome> {
         .user_agent("gaia-space-calendar-sync/1.0")
         .build()
         .map_err(|e| format!("could not start the fetch client: {e}"))?;
-    let response = client.get(url).send().map_err(|e| format!("could not reach that calendar address: {e}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("could not reach that calendar address: {e}"))?;
     if let Some(len) = response.content_length() {
-        if len > MAX_FEED_BYTES { return Err(format!("that calendar is {len} bytes, larger than the {MAX_FEED_BYTES} byte limit")); }
+        if len > MAX_FEED_BYTES {
+            return Err(format!(
+                "that calendar is {len} bytes, larger than the {MAX_FEED_BYTES} byte limit"
+            ));
+        }
     }
     let status = response.status();
-    if !status.is_success() { return Err(format!("the calendar server answered {status}")); }
-    let bytes = response.bytes().map_err(|e| format!("the calendar download was interrupted: {e}"))?;
-    if bytes.len() as u64 > MAX_FEED_BYTES { return Err(format!("that calendar is larger than the {MAX_FEED_BYTES} byte limit")); }
+    if !status.is_success() {
+        return Err(format!("the calendar server answered {status}"));
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("the calendar download was interrupted: {e}"))?;
+    if bytes.len() as u64 > MAX_FEED_BYTES {
+        return Err(format!(
+            "that calendar is larger than the {MAX_FEED_BYTES} byte limit"
+        ));
+    }
     let text = String::from_utf8_lossy(&bytes);
-    if !text.contains("BEGIN:VCALENDAR") { return Err("that address did not answer with a calendar (.ics) file".into()); }
+    if !text.contains("BEGIN:VCALENDAR") {
+        return Err("that address did not answer with a calendar (.ics) file".into());
+    }
     let window_start = now() - SYNC_WINDOW_PAST_DAYS * 86_400;
     let window_end = now() + SYNC_WINDOW_FUTURE_DAYS * 86_400;
     let result = ics::parse_ics(&text, window_start, window_end);
-    Ok(FetchOutcome { occurrences: result.occurrences, skipped: result.skipped })
+    Ok(FetchOutcome {
+        occurrences: result.occurrences,
+        skipped: result.skipped,
+    })
 }
 
 /// Every synced feed event belonging to `profile_id` that lands in either
 /// window: timed events by instant overlap (mirrors how meetings are shown),
 /// all-day events by their own calendar-day string (mirrors todos/deadlines).
-pub fn external_items_on(c: &Connection, profile_id: &str, range_start: i64, range_end: i64, day_start: &str, day_end: &str) -> Result<Vec<CalendarItem>> {
+pub fn external_items_on(
+    c: &Connection,
+    profile_id: &str,
+    range_start: i64,
+    range_end: i64,
+    day_start: &str,
+    day_end: &str,
+) -> Result<Vec<CalendarItem>> {
     let mut statement = err(c.prepare(
         "SELECT cfe.feed_id,cfe.uid,cfe.occurrence_key,cfe.title,cfe.starts_at,cfe.ends_at,cfe.all_day_date FROM calendar_feed_events cfe \
          JOIN calendar_feeds cf ON cf.id=cfe.feed_id WHERE cf.profile_id=?1 AND ( \
@@ -201,12 +287,24 @@ pub fn external_items_on(c: &Connection, profile_id: &str, range_start: i64, ran
            OR (cfe.all_day_date IS NOT NULL AND cfe.all_day_date>=?4 AND cfe.all_day_date<?5) \
          )",
     ))?;
-    let rows = err(statement.query_map(params![profile_id, range_start, range_end, day_start, day_end], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, i64>(4)?, r.get::<_, Option<i64>>(5)?, r.get::<_, Option<String>>(6)?))
-    }))?;
+    let rows = err(statement.query_map(
+        params![profile_id, range_start, range_end, day_start, day_end],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, Option<i64>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+            ))
+        },
+    ))?;
     let mut items = Vec::new();
     for record in rows {
-        let (feed_id, uid, occurrence_key, title, starts_at, ends_at, date) = record.map_err(|e| e.to_string())?;
+        let (feed_id, uid, occurrence_key, title, starts_at, ends_at, date) =
+            record.map_err(|e| e.to_string())?;
         items.push(CalendarItem {
             id: format!("external-{feed_id}-{uid}-{occurrence_key}"),
             source_id: feed_id,
@@ -239,10 +337,17 @@ mod tests {
         c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count) VALUES('f1','pa','Mine','sealed',0,0)", []).unwrap();
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f1','u1','1900000000','Timed',1900000000,1900003600,NULL)", []).unwrap();
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f1','u2','2030-03-10','All day',1899936000,NULL,'2030-03-10')", []).unwrap();
-        let owner = external_items_on(&c, "pa", 1899900000, 1900010000, "2030-03-10", "2030-03-11").unwrap();
-        assert_eq!(owner.len(), 2, "both the timed and all-day event land in their windows");
+        let owner = external_items_on(&c, "pa", 1899900000, 1900010000, "2030-03-10", "2030-03-11")
+            .unwrap();
+        assert_eq!(
+            owner.len(),
+            2,
+            "both the timed and all-day event land in their windows"
+        );
         assert!(owner.iter().all(|item| item.kind == "external"));
-        let stranger = external_items_on(&c, "pb", 1899900000, 1900010000, "2030-03-10", "2030-03-11").unwrap();
+        let stranger =
+            external_items_on(&c, "pb", 1899900000, 1900010000, "2030-03-10", "2030-03-11")
+                .unwrap();
         assert_eq!(stranger.len(), 0, "another profile's feed is invisible");
     }
 
@@ -251,9 +356,19 @@ mod tests {
         let c = seeded();
         c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count) VALUES('f2','pa','Mine','sealed',0,0)", []).unwrap();
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f2','u1','1',  'x',1900000000,NULL,NULL)", []).unwrap();
-        c.execute("DELETE FROM calendar_feeds WHERE id='f2'", []).unwrap();
-        let left: i64 = c.query_row("SELECT count(*) FROM calendar_feed_events WHERE feed_id='f2'", [], |r| r.get(0)).unwrap();
-        assert_eq!(left, 0, "junction-shaped cache rows never survive their feed (FK cascade)");
+        c.execute("DELETE FROM calendar_feeds WHERE id='f2'", [])
+            .unwrap();
+        let left: i64 = c
+            .query_row(
+                "SELECT count(*) FROM calendar_feed_events WHERE feed_id='f2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            left, 0,
+            "junction-shaped cache rows never survive their feed (FK cascade)"
+        );
     }
 
     #[test]
@@ -262,10 +377,22 @@ mod tests {
         c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,last_synced_at,last_error,event_count) VALUES('f3','pa','Mine','sealed',0,100,NULL,1)", []).unwrap();
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f3','u1','1','Kept',1900000000,NULL,NULL)", []).unwrap();
         record_error(&c, "f3", "could not reach that calendar address: timed out").unwrap();
-        let still_there: i64 = c.query_row("SELECT count(*) FROM calendar_feed_events WHERE feed_id='f3'", [], |r| r.get(0)).unwrap();
-        assert_eq!(still_there, 1, "a fetch failure must not wipe the last-good cache");
+        let still_there: i64 = c
+            .query_row(
+                "SELECT count(*) FROM calendar_feed_events WHERE feed_id='f3'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            still_there, 1,
+            "a fetch failure must not wipe the last-good cache"
+        );
         let feed = row(&c, "f3").unwrap().unwrap();
         assert!(feed.last_error.is_some());
-        assert_eq!(feed.event_count, 1, "event_count is untouched by a failed sync");
+        assert_eq!(
+            feed.event_count, 1,
+            "event_count is untouched by a failed sync"
+        );
     }
 }

@@ -105,7 +105,11 @@ fn parse_dt(raw: &str, params: &str) -> Option<DtValue> {
     let raw = raw.trim();
     let digits_only = |s: &str| s.len() >= 8 && s.as_bytes()[..8].iter().all(u8::is_ascii_digit);
     let date_of = |s: &str| -> Option<NaiveDate> {
-        NaiveDate::from_ymd_opt(s[0..4].parse().ok()?, s[4..6].parse().ok()?, s[6..8].parse().ok()?)
+        NaiveDate::from_ymd_opt(
+            s[0..4].parse().ok()?,
+            s[4..6].parse().ok()?,
+            s[6..8].parse().ok()?,
+        )
     };
     if params.contains("VALUE=DATE") || (digits_only(raw) && raw.len() == 8) {
         return date_of(raw).map(DtValue::Date);
@@ -124,7 +128,11 @@ fn parse_dt(raw: &str, params: &str) -> Option<DtValue> {
 fn instant_of(value: DtValue) -> i64 {
     match value {
         DtValue::Instant(seconds) => seconds,
-        DtValue::Date(date) => date.and_hms_opt(0, 0, 0).expect("midnight is always valid").and_utc().timestamp(),
+        DtValue::Date(date) => date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is always valid")
+            .and_utc()
+            .timestamp(),
     }
 }
 
@@ -171,7 +179,12 @@ fn parse_rrule(raw: &str) -> Option<Rrule> {
             _ => {}
         }
     }
-    Some(Rrule { freq: freq?, interval, count, until })
+    Some(Rrule {
+        freq: freq?,
+        interval,
+        count,
+        until,
+    })
 }
 
 fn advance_instant(at: NaiveDateTime, rule: &Rrule) -> Option<NaiveDateTime> {
@@ -179,11 +192,15 @@ fn advance_instant(at: NaiveDateTime, rule: &Rrule) -> Option<NaiveDateTime> {
         Freq::Daily => at.checked_add_signed(chrono::Duration::days(rule.interval)),
         Freq::Weekly => at.checked_add_signed(chrono::Duration::days(rule.interval * 7)),
         Freq::Monthly => {
-            let date = at.date().checked_add_months(Months::new(rule.interval.max(0) as u32))?;
+            let date = at
+                .date()
+                .checked_add_months(Months::new(rule.interval.max(0) as u32))?;
             Some(NaiveDateTime::new(date, at.time()))
         }
         Freq::Yearly => {
-            let date = at.date().checked_add_months(Months::new((rule.interval.max(0) as u32).saturating_mul(12)))?;
+            let date = at.date().checked_add_months(Months::new(
+                (rule.interval.max(0) as u32).saturating_mul(12),
+            ))?;
             Some(NaiveDateTime::new(date, at.time()))
         }
     }
@@ -194,7 +211,9 @@ fn advance_date(at: NaiveDate, rule: &Rrule) -> Option<NaiveDate> {
         Freq::Daily => at.checked_add_signed(chrono::Duration::days(rule.interval)),
         Freq::Weekly => at.checked_add_signed(chrono::Duration::days(rule.interval * 7)),
         Freq::Monthly => at.checked_add_months(Months::new(rule.interval.max(0) as u32)),
-        Freq::Yearly => at.checked_add_months(Months::new((rule.interval.max(0) as u32).saturating_mul(12))),
+        Freq::Yearly => at.checked_add_months(Months::new(
+            (rule.interval.max(0) as u32).saturating_mul(12),
+        )),
     }
 }
 
@@ -206,7 +225,13 @@ struct RawEvent {
     rrule: Option<String>,
 }
 
-fn emit(events: &mut Vec<Occurrence>, uid: &str, title: &str, start: DtValue, duration: Option<i64>) {
+fn emit(
+    events: &mut Vec<Occurrence>,
+    uid: &str,
+    title: &str,
+    start: DtValue,
+    duration: Option<i64>,
+) {
     let starts_at = instant_of(start);
     let (ends_at, all_day_date) = match start {
         DtValue::Date(date) => (None, Some(date.format("%Y-%m-%d").to_string())),
@@ -231,23 +256,55 @@ pub fn parse_ics(text: &str, window_start: i64, window_end: i64) -> ParseResult 
     let mut skipped = 0usize;
     let mut current: Option<RawEvent> = None;
     for line in &lines {
-        let Some((name, params, value)) = split_property(line) else { continue };
+        let Some((name, params, value)) = split_property(line) else {
+            continue;
+        };
         match name {
-            "BEGIN" if value == "VEVENT" => current = Some(RawEvent { uid: None, summary: None, dtstart: None, dtend: None, rrule: None }),
+            "BEGIN" if value == "VEVENT" => {
+                current = Some(RawEvent {
+                    uid: None,
+                    summary: None,
+                    dtstart: None,
+                    dtend: None,
+                    rrule: None,
+                })
+            }
             "END" if value == "VEVENT" => {
                 if let Some(event) = current.take() {
-                    let Some(dtstart) = event.dtstart else { skipped += 1; continue };
+                    let Some(dtstart) = event.dtstart else {
+                        skipped += 1;
+                        continue;
+                    };
                     let uid = event.uid.unwrap_or_else(|| dtstart_fallback_uid(dtstart));
-                    let title = event.summary.unwrap_or_else(|| "Untitled event".to_string());
-                    let duration = event.dtend.map(|end| instant_of(end) - instant_of(dtstart)).filter(|d| *d > 0);
+                    let title = event
+                        .summary
+                        .unwrap_or_else(|| "Untitled event".to_string());
+                    let duration = event
+                        .dtend
+                        .map(|end| instant_of(end) - instant_of(dtstart))
+                        .filter(|d| *d > 0);
                     let budget = MAX_TOTAL_OCCURRENCES.saturating_sub(occurrences.len());
-                    if budget == 0 { break; }
+                    if budget == 0 {
+                        break;
+                    }
                     match event.rrule.as_deref().and_then(parse_rrule) {
                         None => {
                             let at = instant_of(dtstart);
-                            if at >= window_start && at < window_end { emit(&mut occurrences, &uid, &title, dtstart, duration); }
+                            if at >= window_start && at < window_end {
+                                emit(&mut occurrences, &uid, &title, dtstart, duration);
+                            }
                         }
-                        Some(rule) => expand(&mut occurrences, &uid, &title, dtstart, duration, &rule, window_start, window_end, budget.min(MAX_OCCURRENCES_PER_EVENT)),
+                        Some(rule) => expand(
+                            &mut occurrences,
+                            &uid,
+                            &title,
+                            dtstart,
+                            duration,
+                            &rule,
+                            window_start,
+                            window_end,
+                            budget.min(MAX_OCCURRENCES_PER_EVENT),
+                        ),
                     }
                 }
             }
@@ -265,10 +322,15 @@ pub fn parse_ics(text: &str, window_start: i64, window_end: i64) -> ParseResult 
             _ => {}
         }
     }
-    ParseResult { occurrences, skipped }
+    ParseResult {
+        occurrences,
+        skipped,
+    }
 }
 
-fn dtstart_fallback_uid(start: DtValue) -> String { format!("no-uid-{}", instant_of(start)) }
+fn dtstart_fallback_uid(start: DtValue) -> String {
+    format!("no-uid-{}", instant_of(start))
+}
 
 #[allow(clippy::too_many_arguments)]
 fn expand(
@@ -287,26 +349,56 @@ fn expand(
     match dtstart {
         DtValue::Date(mut at) => {
             for _ in 0..cap {
-                if let Some(count) = rule.count { if generated >= count { break; } }
+                if let Some(count) = rule.count {
+                    if generated >= count {
+                        break;
+                    }
+                }
                 let at_instant = instant_of(DtValue::Date(at));
-                if let Some(until) = until_instant { if at_instant > until { break; } }
-                if at_instant >= window_end { break; }
-                if at_instant >= window_start { emit(out, uid, title, DtValue::Date(at), duration); }
+                if let Some(until) = until_instant {
+                    if at_instant > until {
+                        break;
+                    }
+                }
+                if at_instant >= window_end {
+                    break;
+                }
+                if at_instant >= window_start {
+                    emit(out, uid, title, DtValue::Date(at), duration);
+                }
                 generated += 1;
-                let Some(next) = advance_date(at, rule) else { break };
+                let Some(next) = advance_date(at, rule) else {
+                    break;
+                };
                 at = next;
             }
         }
         DtValue::Instant(_) => {
-            let mut at = chrono::DateTime::from_timestamp(instant_of(dtstart), 0).expect("valid instant").naive_utc();
+            let mut at = chrono::DateTime::from_timestamp(instant_of(dtstart), 0)
+                .expect("valid instant")
+                .naive_utc();
             for _ in 0..cap {
-                if let Some(count) = rule.count { if generated >= count { break; } }
+                if let Some(count) = rule.count {
+                    if generated >= count {
+                        break;
+                    }
+                }
                 let at_instant = at.and_utc().timestamp();
-                if let Some(until) = until_instant { if at_instant > until { break; } }
-                if at_instant >= window_end { break; }
-                if at_instant >= window_start { emit(out, uid, title, DtValue::Instant(at_instant), duration); }
+                if let Some(until) = until_instant {
+                    if at_instant > until {
+                        break;
+                    }
+                }
+                if at_instant >= window_end {
+                    break;
+                }
+                if at_instant >= window_start {
+                    emit(out, uid, title, DtValue::Instant(at_instant), duration);
+                }
                 generated += 1;
-                let Some(next) = advance_instant(at, rule) else { break };
+                let Some(next) = advance_instant(at, rule) else {
+                    break;
+                };
                 at = next;
             }
         }
@@ -346,14 +438,20 @@ mod tests {
         // it as a *second* character. Two spaces here: one marker, one content.
         let ics = "BEGIN:VEVENT\nUID:e3\nSUMMARY:A very long title that\n  continues on the next physical line\nDTSTART;VALUE=DATE:20300401\nEND:VEVENT\n";
         let result = parse_ics(ics, 1_899_000_000, 1_902_000_000);
-        assert_eq!(result.occurrences[0].title, "A very long title that continues on the next physical line");
+        assert_eq!(
+            result.occurrences[0].title,
+            "A very long title that continues on the next physical line"
+        );
     }
 
     #[test]
     fn escaped_text_is_unescaped() {
         let ics = "BEGIN:VEVENT\nUID:e4\nSUMMARY:Comma\\, semicolon\\; and newline\\nhere\nDTSTART;VALUE=DATE:20300401\nEND:VEVENT\n";
         let result = parse_ics(ics, 1_899_000_000, 1_902_000_000);
-        assert_eq!(result.occurrences[0].title, "Comma, semicolon; and newline here");
+        assert_eq!(
+            result.occurrences[0].title,
+            "Comma, semicolon; and newline here"
+        );
     }
 
     #[test]
@@ -368,21 +466,48 @@ mod tests {
     fn weekly_rrule_expands_within_the_window_and_respects_count() {
         // 2030-03-01 is a Friday; five weekly occurrences, only some in-window.
         let ics = "BEGIN:VEVENT\nUID:e7\nSUMMARY:Standup\nDTSTART:20300301T090000Z\nDTEND:20300301T093000Z\nRRULE:FREQ=WEEKLY;COUNT=5\nEND:VEVENT\n";
-        let start = NaiveDate::from_ymd_opt(2030, 3, 1).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
-        let end = NaiveDate::from_ymd_opt(2030, 3, 22).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        let start = NaiveDate::from_ymd_opt(2030, 3, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        let end = NaiveDate::from_ymd_opt(2030, 3, 22)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
         let result = parse_ics(ics, start, end);
         // COUNT=5 → 2030-03-01,08,15,22,29; window ends 2030-03-22 exclusive → 3 land inside.
         assert_eq!(result.occurrences.len(), 3);
-        assert_eq!(result.occurrences[0].occurrence_key, result.occurrences[0].starts_at.to_string());
-        let keys: std::collections::BTreeSet<_> = result.occurrences.iter().map(|o| o.occurrence_key.clone()).collect();
+        assert_eq!(
+            result.occurrences[0].occurrence_key,
+            result.occurrences[0].starts_at.to_string()
+        );
+        let keys: std::collections::BTreeSet<_> = result
+            .occurrences
+            .iter()
+            .map(|o| o.occurrence_key.clone())
+            .collect();
         assert_eq!(keys.len(), 3, "every occurrence has a distinct key");
     }
 
     #[test]
     fn monthly_rrule_respects_until() {
         let ics = "BEGIN:VEVENT\nUID:e8\nSUMMARY:Rent\nDTSTART;VALUE=DATE:20300101\nRRULE:FREQ=MONTHLY;UNTIL=20300401\nEND:VEVENT\n";
-        let start = NaiveDate::from_ymd_opt(2030, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
-        let end = NaiveDate::from_ymd_opt(2031, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        let start = NaiveDate::from_ymd_opt(2030, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        let end = NaiveDate::from_ymd_opt(2031, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
         let result = parse_ics(ics, start, end);
         // Jan, Feb, Mar, Apr(=UNTIL, inclusive) land; May is past UNTIL.
         assert_eq!(result.occurrences.len(), 4);
@@ -391,15 +516,26 @@ mod tests {
     #[test]
     fn a_runaway_daily_rrule_with_no_until_or_count_is_capped() {
         let ics = "BEGIN:VEVENT\nUID:e9\nSUMMARY:Forever\nDTSTART;VALUE=DATE:19700101\nRRULE:FREQ=DAILY\nEND:VEVENT\n";
-        let start = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
-        let end = NaiveDate::from_ymd_opt(2099, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        let start = NaiveDate::from_ymd_opt(1970, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        let end = NaiveDate::from_ymd_opt(2099, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
         let result = parse_ics(ics, start, end);
         assert_eq!(result.occurrences.len(), MAX_OCCURRENCES_PER_EVENT);
     }
 
     #[test]
     fn an_event_entirely_outside_the_window_contributes_nothing() {
-        let ics = "BEGIN:VEVENT\nUID:e10\nSUMMARY:Long ago\nDTSTART;VALUE=DATE:19990101\nEND:VEVENT\n";
+        let ics =
+            "BEGIN:VEVENT\nUID:e10\nSUMMARY:Long ago\nDTSTART;VALUE=DATE:19990101\nEND:VEVENT\n";
         let result = parse_ics(ics, 1_899_000_000, 1_902_000_000);
         assert_eq!(result.occurrences.len(), 0);
         assert_eq!(result.skipped, 0);
