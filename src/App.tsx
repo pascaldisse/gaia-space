@@ -7,6 +7,7 @@ import Absences from "./views/Absences";
 import Projects from "./views/Projects";
 import Repos from "./views/Repos";
 import Reviews from "./views/Reviews";
+import DevEnvironments from "./views/DevEnvironments";
 import Issues from "./views/Issues";
 import Boards from "./views/Boards";
 import Chat from "./views/Chat";
@@ -39,7 +40,7 @@ import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } fro
 type View = { name:string; icon:IconName; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
-const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
+const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};

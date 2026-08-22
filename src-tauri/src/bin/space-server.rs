@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, documents, events, issues, meetings,
+    applications, blogs, calendar_feeds, calls, chat, db, devenv, documents, events, issues,
+    meetings,
     oauth, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
@@ -1293,6 +1294,14 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
+        | "list_dev_environments"
+        | "create_dev_environment"
+        | "touch_dev_environment"
+        | "hibernate_dev_environment"
+        | "hibernate_idle_dev_environments"
+        | "resume_dev_environment"
+        | "claim_standby_dev_environment"
+        | "delete_dev_environment"
         | "list_review_stacks"
         | "list_my_review_stacks"
         | "remove_review_stack"
@@ -3001,6 +3010,14 @@ async fn cmd(
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
+    "list_dev_environments" => devenv::list_dev_environments(project_id: String),
+    "create_dev_environment" => devenv::create_dev_environment(input: devenv::NewDevEnvironment),
+    "touch_dev_environment" => devenv::touch_dev_environment(id: String),
+    "hibernate_dev_environment" => devenv::hibernate_dev_environment(id: String, actor_id: Option<String>),
+    "hibernate_idle_dev_environments" => devenv::hibernate_idle_dev_environments(),
+    "resume_dev_environment" => devenv::resume_dev_environment(id: String, actor_id: Option<String>),
+    "claim_standby_dev_environment" => devenv::claim_standby_dev_environment(project_id: String, profile_id: String),
+    "delete_dev_environment" => devenv::delete_dev_environment(id: String, actor_id: Option<String>),
     "list_review_stacks" => review::list_review_stacks(project_id: String),
     "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
     "remove_review_stack" => review::remove_review_stack(stack_id: String),
@@ -3613,6 +3630,62 @@ mod tests {
 
     /// Regression (☾Kali): app credential commands were `Session`, so any logged-in
     /// member could rotate another application's secret or mint/verify its tokens.
+    /// The dev environment lifecycle must be drivable over `/api/cmd`, not only in-process:
+    /// create → activity → idle sweep → resume, with the session gate in front of it.
+    #[tokio::test]
+    async fn dev_environment_lifecycle_is_reachable_over_http() {
+        let _serial = test_lock();
+        setup();
+
+        let (status, created) = call(
+            cookie("ta"),
+            "create_dev_environment",
+            json!({"input":{"id":"env-http","project_id":"demo-project","owner_id":"pa","name":"HTTP env","idle_timeout_minutes":0}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "create: {created}");
+        assert_eq!(created["value"]["state"], "STARTING");
+
+        let (status, touched) =
+            call(cookie("ta"), "touch_dev_environment", json!({"id":"env-http"})).await;
+        assert_eq!(status, StatusCode::OK, "touch: {touched}");
+        assert_eq!(touched["value"]["state"], "RUNNING");
+
+        // Timeout 0 means the sweep must take it immediately.
+        let (status, swept) = call(cookie("ta"), "hibernate_idle_dev_environments", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "sweep: {swept}");
+        assert_eq!(swept["value"][0]["id"], "env-http");
+        assert_eq!(swept["value"][0]["state"], "HIBERNATED");
+        assert!(swept["value"][0]["persisted_worktree"].is_string());
+
+        let (status, resumed) = call(
+            cookie("ta"),
+            "resume_dev_environment",
+            json!({"id":"env-http","actor_id":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "resume: {resumed}");
+        assert_eq!(resumed["value"]["state"], "RUNNING");
+
+        // Independent check: the listing agrees with the command results.
+        let (_, listed) = call(
+            cookie("ta"),
+            "list_dev_environments",
+            json!({"project_id":"demo-project"}),
+        )
+        .await;
+        assert_eq!(listed["value"][0]["state"], "RUNNING");
+
+        // No session, no lifecycle.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "list_dev_environments",
+            json!({"project_id":"demo-project"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn app_credentials_are_admin_only() {
         let _serial = test_lock();

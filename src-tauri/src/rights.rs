@@ -8,6 +8,9 @@ pub enum Right {
     PostMessage,
     ManageChannel,
     Superadmin,
+    CreateDevEnvironment,
+    ManageDevEnvironmentsInProject,
+    JoinHotPoolDevEnvironments,
 }
 impl Right {
     pub const fn code(self) -> &'static str {
@@ -19,11 +22,84 @@ impl Right {
             Self::PostMessage => "Channel.PostMessages",
             Self::ManageChannel => "Channel.ManageChannel",
             Self::Superadmin => "Global.Superadmin",
+            Self::CreateDevEnvironment => "Project.CreateDevEnvironments",
+            Self::ManageDevEnvironmentsInProject => "Project.ManageDevEnvironmentsInProject",
+            Self::JoinHotPoolDevEnvironments => "Project.JoinHotPoolDevEnvironments",
         }
     }
 }
 
 pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "Project.CreateDevEnvironments",
+        "Create dev environments",
+        "Rd.Workspaces.Create — create dev environments in the project.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Project.ManageDevEnvironmentsInProject",
+        "Manage dev environments of all project members",
+        "Rd.Workspaces.Manage — hibernate, resume or delete environments owned by others.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Project.ViewDevEnvironmentsInProject",
+        "View dev environments the user does not own",
+        "Rd.Workspaces.View.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Project.JoinHotPoolDevEnvironments",
+        "Join standby dev environments",
+        "Rd.Workspaces.Unattended.Join — claim a pre-warmed environment and become its owner.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Project.ConnectDevEnvironments",
+        "Connect to a dev environment",
+        "Rd.Workspaces.Connect — open an IDE session against a running environment.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Project.WarmupDevEnvironments",
+        "Manage warm-up snapshots",
+        "Rd.Workspaces.Warmup — configure and trigger warm-up builds.",
+        "Project",
+        "Dev Environments",
+    ),
+    (
+        "Global.ViewDevEnvironmentSettings",
+        "View dev environment settings",
+        "Rd.Settings.View — organization dev-environment settings such as the default IDE version.",
+        "Global",
+        "Dev Environments",
+    ),
+    (
+        "Global.EditDevEnvironmentSettings",
+        "Edit dev environment settings",
+        "Rd.Settings.Edit.",
+        "Global",
+        "Dev Environments",
+    ),
+    (
+        "Global.EditDevEnvironmentPolicy",
+        "Edit dev environment cloud policy",
+        "Rd.Policy.Edit — instance types and cloud policy available to the organization.",
+        "Global",
+        "Dev Environments",
+    ),
+    (
+        "Global.ViewDevEnvironmentDebugData",
+        "View dev environment debug data",
+        "Rd.DebugData.View — troubleshooting reports and environment logs.",
+        "Global",
+        "Dev Environments",
+    ),
     (
         "Global.Superadmin",
         "Superadmin",
@@ -416,6 +492,25 @@ pub enum Propagation {
 /// and two closures over the same edges are two answers waiting to disagree.
 /// Direct edges only; the persisted closure in `platform::check_right_on` is transitive.
 pub const IMPLIED_RIGHTS: &[(&str, &str)] = &[
+    // Dev Environments group (KB 07 §2.1): Space names these `Rd.Workspaces.*`;
+    // the codes here keep our `<RightType>.<Name>` namespacing and carry the Space
+    // code in the description so an operator can map them one to one.
+    (
+        "Project.JoinHotPoolDevEnvironments",
+        "Project.CreateDevEnvironments",
+    ),
+    (
+        "Project.CreateDevEnvironments",
+        "Global.ViewDevEnvironmentSettings",
+    ),
+    (
+        "Project.ManageDevEnvironmentsInProject",
+        "Project.ViewDevEnvironmentsInProject",
+    ),
+    (
+        "Global.EditDevEnvironmentSettings",
+        "Global.ViewDevEnvironmentSettings",
+    ),
     ("Project.AdminProject", "Project.ViewProject"),
     ("Project.VcsAdmin", "Project.VcsWrite"),
     ("Project.VcsWrite", "Project.VcsRead"),

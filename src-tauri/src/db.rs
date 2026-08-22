@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 54;
+pub const SCHEMA_VERSION: i64 = 55;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -443,6 +443,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 54 {
         tx.execute_batch(SCHEMA_V54)?;
     }
+    // V55: dev environment lifecycle. State, idle deadline and the preserved home/work
+    // trees are database facts, not runtime memory: hibernation must survive a restart
+    // of the server, otherwise a hibernated environment silently loses its snapshot.
+    if version < 55 {
+        tx.execute_batch(SCHEMA_V55)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -777,6 +783,29 @@ pub(crate) const SCHEMA_V54: &str = r#"
 CREATE TABLE IF NOT EXISTS app_ssh_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
 CREATE TABLE IF NOT EXISTS app_gpg_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
 "#;
+
+pub(crate) const SCHEMA_V55: &str = r#"
+CREATE TABLE IF NOT EXISTS dev_environments (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    owner_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    repository TEXT,
+    branch TEXT,
+    ide TEXT NOT NULL DEFAULT 'IntelliJ IDEA',
+    instance_type TEXT NOT NULL DEFAULT 'regular',
+    state TEXT NOT NULL CHECK(state IN ('STARTING','RUNNING','HIBERNATING','HIBERNATED','STANDBY','FAILED','DELETED')),
+    idle_timeout_minutes INTEGER NOT NULL DEFAULT 30,
+    last_activity_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    hibernated_at INTEGER,
+    persisted_home TEXT,
+    persisted_worktree TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS dev_environments_project ON dev_environments(project_id, state);
+CREATE INDEX IF NOT EXISTS dev_environments_owner ON dev_environments(owner_id);
+"#;
+
 pub(crate) const SCHEMA_V52: &str = r#"
 CREATE TABLE IF NOT EXISTS app_signing_keys (application_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, private_key TEXT NOT NULL, public_key TEXT NOT NULL, previous_key_id TEXT, previous_public_key TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 "#;
@@ -1139,7 +1168,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 54);
+        assert_eq!(SCHEMA_VERSION, 55);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
