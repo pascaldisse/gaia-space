@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 36;
+pub const SCHEMA_VERSION: i64 = 37;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -281,6 +281,26 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // grant it uses.
     if version < 36 {
         tx.execute_batch(SCHEMA_V36)?;
+    }
+    // V37: right descriptors are additive and guarded individually because test
+    // databases may contain a partially-applied migration batch.
+    if version < 37 {
+        add_column_if_missing(&tx, "rights", "flags", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(
+            &tx,
+            "rights",
+            "implied_rights_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        add_column_if_missing(&tx, "rights", "feature_gate", "TEXT")?;
+        add_column_if_missing(&tx, "rights", "propagation", "TEXT NOT NULL DEFAULT 'NONE'")?;
+        add_column_if_missing(
+            &tx,
+            "rights",
+            "descriptor_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )?;
+        tx.execute_batch(SCHEMA_V37)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -579,6 +599,24 @@ UPDATE users SET profile_id = 'profile-' || id
    AND EXISTS (SELECT 1 FROM profiles p WHERE p.id = 'profile-' || users.id);
 "#;
 
+/// V37 also expands assignment scopes. SQLite cannot alter a CHECK constraint,
+/// so reconstruct the small junction table inside the migration transaction.
+pub(crate) const SCHEMA_V37: &str = r#"
+ALTER TABLE role_assignments RENAME TO role_assignments_v36;
+CREATE TABLE role_assignments (
+    id TEXT PRIMARY KEY,
+    role_id TEXT NOT NULL REFERENCES roles(id),
+    profile_id TEXT REFERENCES profiles(id),
+    team_id TEXT REFERENCES teams(id),
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('global','project','team','profile','channel','document','documentFolder')),
+    scope_id TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+INSERT INTO role_assignments(id,role_id,profile_id,team_id,scope_type,scope_id,created_at)
+ SELECT id,role_id,profile_id,team_id,scope_type,scope_id,created_at FROM role_assignments_v36;
+DROP TABLE role_assignments_v36;
+"#;
+
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -809,7 +847,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 36);
+        assert_eq!(SCHEMA_VERSION, 37);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1035,3 +1073,52 @@ CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments(me
 CREATE TABLE IF NOT EXISTS message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(message_id, profile_id));
 CREATE INDEX IF NOT EXISTS message_mentions_profile ON message_mentions(profile_id);
 "#;
+
+#[cfg(test)]
+mod right_descriptor_migration_tests {
+    use super::*;
+
+    #[test]
+    fn v37_adds_idempotent_right_descriptor_columns() {
+        let c = open_in_memory().unwrap();
+        c.execute_batch(SCHEMA_V1).unwrap();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','p','P',0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('r','Role')", [])
+            .unwrap();
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('a','r','p','document')", []).unwrap();
+        c.pragma_update(None, "user_version", 27).unwrap();
+        migrate(&c).unwrap();
+        assert_eq!(
+            c.query_row(
+                "SELECT scope_type FROM role_assignments WHERE id='a'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "document"
+        );
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('b','r','p','profile')", []).unwrap();
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('c','r','p','documentFolder')", []).unwrap();
+        migrate(&c).unwrap();
+        let columns: Vec<String> = c
+            .prepare("PRAGMA table_info(rights)")
+            .unwrap()
+            .query_map([], |r| r.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for column in [
+            "flags",
+            "implied_rights_json",
+            "feature_gate",
+            "propagation",
+            "descriptor_json",
+        ] {
+            assert!(columns.contains(&column.to_string()));
+        }
+    }
+}

@@ -136,7 +136,12 @@ pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Resul
 
 pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
     let c = db::conn()?;
-    let mut s = c.prepare(&format!("SELECT {DOC_COLUMNS} FROM documents d WHERE {} ORDER BY d.updated_at DESC", document_read_scope())).map_err(|e| e.to_string())?;
+    let mut s = c
+        .prepare(&format!(
+            "SELECT {DOC_COLUMNS} FROM documents d WHERE {} ORDER BY d.updated_at DESC",
+            document_read_scope()
+        ))
+        .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([profile_id], row_to_document)
         .map_err(|e| e.to_string())?
@@ -148,7 +153,10 @@ pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
 pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
     let c = db::conn()?;
     c.query_row(
-        &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {}", document_read_scope()),
+        &format!(
+            "SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {}",
+            document_read_scope()
+        ),
         rusqlite::params![profile_id, id],
         row_to_document,
     )
@@ -232,8 +240,11 @@ pub fn update_document_access(
     if !private {
         return Err("only private documents can have explicit sharing".into());
     }
-    tx.execute("DELETE FROM document_permissions WHERE document_id=?1", [&document_id])
-        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM document_permissions WHERE document_id=?1",
+        [&document_id],
+    )
+    .map_err(|e| e.to_string())?;
     for permission in permissions {
         tx.execute(
             "INSERT INTO document_permissions(document_id,recipient_type,recipient_id,access_level) VALUES(?1,?2,?3,?4)",
@@ -1390,10 +1401,18 @@ mod tests {
     }
 
     fn scoped_doc_ids(c: &rusqlite::Connection, profile: &str, write: bool) -> Vec<String> {
-        let scope = if write { document_write_scope() } else { document_read_scope() };
+        let scope = if write {
+            document_write_scope()
+        } else {
+            document_read_scope()
+        };
         let sql = format!("SELECT d.id FROM documents d WHERE {scope} ORDER BY d.id");
         let mut statement = c.prepare(&sql).unwrap();
-        let params: &[&dyn rusqlite::ToSql] = if write { &[&profile, &false] } else { &[&profile] };
+        let params: &[&dyn rusqlite::ToSql] = if write {
+            &[&profile, &false]
+        } else {
+            &[&profile]
+        };
         statement
             .query_map(params, |r| r.get(0))
             .unwrap()
@@ -1411,8 +1430,11 @@ mod tests {
             )
             .unwrap();
         }
-        c.execute("INSERT INTO teams(id,name) VALUES('team-editors','Editors')", [])
-            .unwrap();
+        c.execute(
+            "INSERT INTO teams(id,name) VALUES('team-editors','Editors')",
+            [],
+        )
+        .unwrap();
         c.execute(
             "INSERT INTO team_memberships(id,profile_id,team_id) VALUES('membership-editor','editor','team-editors')",
             [],
@@ -1432,10 +1454,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(scoped_doc_ids(&c, "viewer", false), vec!["shared-view"]);
-        assert!(scoped_doc_ids(&c, "viewer", true).is_empty(), "a viewer cannot write");
+        assert!(
+            scoped_doc_ids(&c, "viewer", true).is_empty(),
+            "a viewer cannot write"
+        );
         assert_eq!(scoped_doc_ids(&c, "editor", false), vec!["shared-edit"]);
         assert_eq!(scoped_doc_ids(&c, "editor", true), vec!["shared-edit"]);
-        assert!(scoped_doc_ids(&c, "stranger", false).is_empty(), "ungranted profiles see nothing");
+        assert!(
+            scoped_doc_ids(&c, "stranger", false).is_empty(),
+            "ungranted profiles see nothing"
+        );
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,

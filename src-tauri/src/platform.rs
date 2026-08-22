@@ -276,6 +276,13 @@ pub struct Right {
     pub description: Option<String>,
     pub right_type: String,
     pub right_group: Option<String>,
+    /// Bit flags, transitive dependencies, feature gate, scope propagation and
+    /// opaque descriptor metadata compose the complete Right descriptor.
+    pub flags: u32,
+    pub implied_rights: Vec<String>,
+    pub feature_gate: Option<String>,
+    pub propagation: String,
+    pub descriptor: serde_json::Value,
 }
 fn read_right(r: &rusqlite::Row<'_>) -> rusqlite::Result<Right> {
     Ok(Right {
@@ -285,13 +292,19 @@ fn read_right(r: &rusqlite::Row<'_>) -> rusqlite::Result<Right> {
         description: r.get(3)?,
         right_type: r.get(4)?,
         right_group: r.get(5)?,
+        flags: r.get(6)?,
+        implied_rights: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default(),
+        feature_gate: r.get(8)?,
+        propagation: r.get(9)?,
+        descriptor: serde_json::from_str(&r.get::<_, String>(10)?)
+            .unwrap_or(serde_json::Value::Null),
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_rights() -> Result<Vec<Right>> {
     let c = db::conn()?;
     let mut s = err(c.prepare(
-        "SELECT id,code,title,description,right_type,right_group FROM rights ORDER BY right_type,right_group,title",
+        "SELECT id,code,title,description,right_type,right_group,flags,implied_rights_json,feature_gate,propagation,descriptor_json FROM rights ORDER BY right_type,right_group,title",
     ))?;
     let rows = err(s.query_map([], read_right))?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -300,18 +313,56 @@ pub fn list_rights() -> Result<Vec<Right>> {
 }
 fn seed_rights_on(c: &Connection) -> Result<usize> {
     for (code, title, description, right_type, right_group) in rights::CATALOG {
+        let implied_rights_json = serde_json::to_string(&rights::default_implied_rights(code))
+            .map_err(|e| e.to_string())?;
         err(c.execute(
-            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group) VALUES(?1,?2,?3,?4,?5,?6)",
-            params![new_id("right"), code, title, description, right_type, right_group],
+            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group,implied_rights_json,propagation,descriptor_json) VALUES(?1,?2,?3,?4,?5,?6,?7,'NONE','{}')",
+            params![new_id("right"), code, title, description, right_type, right_group, implied_rights_json],
         ))?;
     }
     err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
 }
+/// B4-3: the starting role set. Rights are seeded first because a role is defined by
+/// the rows it points at. Re-running this never rewrites an existing role: once an
+/// administrator has edited `Member`, the seed has no further opinion about it.
+fn seed_default_roles_on(c: &Connection) -> Result<usize> {
+    seed_rights_on(c)?;
+    let mut created = 0;
+    for (name, description, grants) in rights::DEFAULT_ROLES {
+        let existing: Option<String> = c
+            .query_row(
+                "SELECT id FROM roles WHERE name=?1 AND role_type='SYSTEM'",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if existing.is_some() {
+            continue;
+        }
+        let role_id = new_id("role");
+        err(c.execute(
+            "INSERT INTO roles(id,name,description,role_type) VALUES(?1,?2,?3,'SYSTEM')",
+            params![role_id, name, description],
+        ))?;
+        for code in *grants {
+            err(c.execute(
+                "INSERT OR IGNORE INTO role_rights(role_id,right_id) SELECT ?1,id FROM rights WHERE code=?2",
+                params![role_id, code],
+            ))?;
+        }
+        created += 1;
+    }
+    Ok(created)
+}
+
 /// Idempotent: inserting the catalog twice never duplicates a `code` (UNIQUE),
 /// so the total row count converges after the first call.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn seed_rights() -> Result<usize> {
-    seed_rights_on(&db::conn()?)
+    let c = db::conn()?;
+    seed_default_roles_on(&c)?;
+    err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +539,9 @@ pub fn create_role_assignment(input: RoleAssignmentInput) -> Result<RoleAssignme
     if input.profile_id.is_none() == input.team_id.is_none() {
         return Err("Assign the role to exactly one of profile_id or team_id".into());
     }
+    if !rights::is_scope_type(&input.scope_type) {
+        return Err(format!("unknown right scope type {}", input.scope_type));
+    }
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("assignment"));
     err(c.execute(
@@ -528,22 +582,51 @@ fn check_right_on(
         return Ok(false);
     }
     let mut s = err(c.prepare(
-        "SELECT ra.scope_type, ra.scope_id
+        "SELECT ra.scope_type, ra.scope_id, r.code, r.implied_rights_json
          FROM role_assignments ra
          JOIN role_rights rr ON rr.role_id = ra.role_id
          JOIN rights r ON r.id = rr.right_id
-         WHERE r.code = ?1
-           AND (
-             ra.profile_id = ?2
-             OR ra.team_id IN (SELECT team_id FROM team_memberships WHERE profile_id = ?2 AND archived = 0)
-           )",
+         WHERE ra.profile_id = ?1
+            OR ra.team_id IN (SELECT team_id FROM team_memberships WHERE profile_id = ?1 AND archived = 0)",
     ))?;
-    let rows = err(s.query_map(params![right_code, profile_id], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+    let rows = err(s.query_map([profile_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
     }))?
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())?;
-    for (assignment_scope_type, assignment_scope_id) in rows {
+    let mut descriptor_statement = err(c.prepare("SELECT code,implied_rights_json FROM rights"))?;
+    let descriptor_rows = err(descriptor_statement
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))))?;
+    let descriptors: std::collections::BTreeMap<String, Vec<String>> = descriptor_rows
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(code, json)| (code, serde_json::from_str(&json).unwrap_or_default()))
+        .collect();
+    for (assignment_scope_type, assignment_scope_id, granted_code, _) in rows {
+        let mut pending = vec![granted_code.as_str()];
+        let mut seen = std::collections::BTreeSet::new();
+        let mut granted = false;
+        while let Some(code) = pending.pop() {
+            if !seen.insert(code) {
+                continue;
+            }
+            if code == right_code {
+                granted = true;
+                break;
+            }
+            if let Some(implied) = descriptors.get(code) {
+                pending.extend(implied.iter().map(String::as_str));
+            }
+        }
+        if !granted {
+            continue;
+        }
         if assignment_scope_type == "global" {
             return Ok(true);
         }
@@ -1250,6 +1333,89 @@ mod tests {
             params![role_id, right_id],
         )
         .unwrap();
+    }
+
+    /// The only implication resolver is this one, and it walks persisted descriptors.
+    /// Seeding `Member` (which grants `Project.VcsWrite`, never `Project.VcsRead`) and
+    /// then asking for `VcsRead` exercises the closure end to end, by a path that shares
+    /// no code with `rights::default_implied_rights`.
+    #[test]
+    fn the_seeded_roles_resolve_implied_rights_through_the_persisted_closure() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('ps','ps','PS',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('us','us','x','US','ps','member',0)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            seed_default_roles_on(&c).unwrap(),
+            3,
+            "Admin, Member, Guest"
+        );
+        assert_eq!(
+            seed_default_roles_on(&c).unwrap(),
+            0,
+            "re-seeding creates nothing"
+        );
+        let member: String = c
+            .query_row("SELECT id FROM roles WHERE name='Member'", [], |r| r.get(0))
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('as','?','ps','project','proj1')"
+                .replace('?', &member)
+                .as_str(),
+            [],
+        )
+        .unwrap();
+        assert!(
+            check_right_on(&c, "ps", "Project.VcsWrite", "project", Some("proj1")).unwrap(),
+            "the direct grant holds"
+        );
+        assert!(
+            check_right_on(&c, "ps", "Project.VcsRead", "project", Some("proj1")).unwrap(),
+            "VcsWrite implies VcsRead through the persisted descriptor"
+        );
+        assert!(
+            !check_right_on(&c, "ps", "Project.VcsAdmin", "project", Some("proj1")).unwrap(),
+            "implication points down, never up"
+        );
+        assert!(
+            !check_right_on(&c, "ps", "Project.VcsRead", "project", Some("proj2")).unwrap(),
+            "and it does not cross scopes"
+        );
+    }
+
+    /// Admin holds `Global.Superadmin`, whose seeded descriptor is the whole catalog.
+    #[test]
+    fn the_seeded_admin_role_reaches_every_right() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','PA',0)",
+            [],
+        )
+        .unwrap();
+        seed_default_roles_on(&c).unwrap();
+        let admin: String = c
+            .query_row("SELECT id FROM roles WHERE name='Admin'", [], |r| r.get(0))
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('aa','?','pa','global')"
+                .replace('?', &admin)
+                .as_str(),
+            [],
+        )
+        .unwrap();
+        for (code, ..) in rights::CATALOG {
+            assert!(
+                check_right_on(&c, "pa", code, "project", Some("anything")).unwrap(),
+                "Admin must reach {code}"
+            );
+        }
     }
 
     #[test]
