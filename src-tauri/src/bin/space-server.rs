@@ -809,6 +809,10 @@ enum CommandPolicy {
     CalendarFeedRead,
     CalendarFeedUpsert,
     CalendarFeedOwnerAction,
+    /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
+    /// installs. `applications` carries no owner column, so the only ownership
+    /// resource available is the account role — administrators only.
+    AppAdmin,
     Unavailable,
 }
 
@@ -955,7 +959,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_safe_merge_runs"
         | "list_sprints"
         | "list_subscription_settings"
+        | "list_subscription_scopes"
+        | "list_marketplace_apps"
+        | "list_app_installs"
         | "list_swimlanes" => CommandPolicy::Session,
+        // Anything that mints, reads back, or spends an application credential.
+        "rotate_app_secret"
+        | "issue_app_token"
+        | "verify_app_token"
+        | "revoke_app_token"
+        | "list_app_tokens"
+        | "save_marketplace_app"
+        | "install_marketplace_app"
+        | "uninstall_app" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -979,6 +995,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "save_checklist_item"
         | "save_planning_tag"
         | "save_subscription_setting"
+        | "save_subscription_scope"
+        | "delete_subscription_scope"
         | "save_swimlane" => CommandPolicy::Session,
         "save_time_tracking_entry"
         | "schedule_deployment"
@@ -1335,6 +1353,19 @@ fn authorize_command(
             if !project_readable(user, project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
             if name == "create_issue" { require_catalog_right(user, gaia_space_lib::rights::Right::CreateIssue, "project", Some(project_id))?; }
             Ok(())
+        }
+        // App credentials are workspace-wide secrets with no per-app owner to fall
+        // back on: an ordinary member must not rotate another app's secret, mint a
+        // token, or probe one for validity.
+        CommandPolicy::AppAdmin => {
+            if user.role == "admin" {
+                Ok(())
+            } else {
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only an administrator can manage application credentials",
+                ))
+            }
         }
         // Only the owner or an admin decides who belongs to a project.
         CommandPolicy::ProjectMemberAdmin => {
@@ -2155,6 +2186,7 @@ async fn cmd(
     "delete_quality_gate_rule" => review::delete_quality_gate_rule(id: String),
     "delete_role_assignment" => platform::delete_role_assignment(id: String),
     "delete_sprint" => issues::delete_sprint(id: String),
+    "delete_subscription_scope" => personal::delete_subscription_scope(profile_id: String, event_type: String, target_type: String, target_id: String),
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
     "delete_swimlane" => issues::delete_swimlane(id: String),
     "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
@@ -2236,6 +2268,17 @@ async fn cmd(
     "list_roles" => platform::list_roles(),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
     "list_sprints" => issues::list_sprints(board_id: Option<String>),
+    "list_app_installs" => applications::list_app_installs(),
+    "list_app_tokens" => applications::list_app_tokens(application_id: String),
+    "list_marketplace_apps" => applications::list_marketplace_apps(),
+    "rotate_app_secret" => applications::rotate_app_secret(application_id: String),
+    "issue_app_token" => applications::issue_app_token(client_id: String, client_secret: String, scope: Option<String>, ttl_seconds: Option<i64>),
+    "verify_app_token" => applications::verify_app_token(token: String),
+    "revoke_app_token" => applications::revoke_app_token(id: String),
+    "save_marketplace_app" => applications::save_marketplace_app(value: applications::MarketplaceApp),
+    "install_marketplace_app" => applications::install_marketplace_app(value: applications::AppInstall),
+    "uninstall_app" => applications::uninstall_app(id: String),
+    "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
     "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
     "list_team_memberships" => platform::list_team_memberships(team_id: Option<String>, profile_id: Option<String>),
@@ -2275,6 +2318,7 @@ async fn cmd(
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
     "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
+    "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
     "save_swimlane" => issues::save_swimlane(input: issues::SwimlaneInput),
     "save_time_tracking_entry" => issues::save_time_tracking_entry(input: issues::TimeEntryInput),
@@ -2461,6 +2505,46 @@ mod tests {
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
     }
 
+    /// Regression (☾Kali): app credential commands were `Session`, so any logged-in
+    /// member could rotate another application's secret or mint/verify its tokens.
+    #[tokio::test]
+    async fn app_credentials_are_admin_only() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-x','App X','Application','client-x',1)", []).unwrap();
+        drop(c);
+        // Member: every credential command is refused before it reaches the handler.
+        for (command, body) in [
+            ("rotate_app_secret", json!({"application_id":"app-x"})),
+            ("issue_app_token", json!({"client_id":"client-x","client_secret":"guess"})),
+            ("verify_app_token", json!({"token":"spat_guess"})),
+            ("revoke_app_token", json!({"id":"apptok-x"})),
+            ("list_app_tokens", json!({"application_id":"app-x"})),
+            ("install_marketplace_app", json!({"value":{"id":"i-x","marketplace_app_id":null,"application_id":"app-x","install_kind":"MANUAL","installed_by":null,"installed_at":0}})),
+        ] {
+            let (status, _) = call(cookie("ta"), command, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{command} must be admin-only");
+        }
+        // Independent check: nothing was created by those attempts.
+        let c = db::conn().unwrap();
+        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_secrets", [], |r| r.get(0)).unwrap(), 0);
+        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_tokens", [], |r| r.get(0)).unwrap(), 0);
+        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_installs", [], |r| r.get(0)).unwrap(), 0);
+        drop(c);
+        // Admin: the same flow works end to end.
+        let (status, secret) = call(cookie("tc"), "rotate_app_secret", json!({"application_id":"app-x"})).await;
+        assert_eq!(status, StatusCode::OK, "{secret}");
+        let client_secret = secret["value"]["client_secret"].as_str().unwrap().to_string();
+        let (status, token) = call(cookie("tc"), "issue_app_token", json!({"client_id":"client-x","client_secret":client_secret,"scope":"read","ttl_seconds":60})).await;
+        assert_eq!(status, StatusCode::OK, "{token}");
+        let access = token["value"]["access_token"].as_str().unwrap().to_string();
+        let (status, verified) = call(cookie("tc"), "verify_app_token", json!({"token":access})).await;
+        assert_eq!(status, StatusCode::OK, "{verified}");
+        assert_eq!(verified["value"]["application_id"].as_str(), Some("app-x"));
+        // And a member still cannot read the tokens that now exist.
+        assert_eq!(call(cookie("ta"), "list_app_tokens", json!({"application_id":"app-x"})).await.0, StatusCode::FORBIDDEN);
+    }
     #[tokio::test]
     async fn login_limiter_refuses_correct_password_during_lockout() {
         let _serial = test_lock();

@@ -1,5 +1,10 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { personalApi, type Notification } from "../api/personal";
+import {
+  personalApi,
+  type Notification,
+  type SubscriptionScope,
+  type SubscriptionSetting,
+} from "../api/personal";
 import { Icon, type IconName } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
@@ -162,6 +167,104 @@ export default function Inbox() {
     );
   };
 
+  // Subscription editor: per-event delivery plus scoped (project/team/…) overrides.
+  const [settings, { refetch: refetchSettings }] = createResource(profileId, (id) =>
+    id ? personalApi.subscriptions(id) : Promise.resolve([] as SubscriptionSetting[]),
+  );
+  const [scopes, { refetch: refetchScopes }] = createResource(profileId, (id) =>
+    id ? personalApi.subscriptionScopes(id) : Promise.resolve([] as SubscriptionScope[]),
+  );
+  // Event types seen in the feed, merged with the ones already configured.
+  const eventTypes = createMemo(() => {
+    const seen = new Set<string>(everything().map((item) => item.event_type));
+    for (const setting of settings() ?? []) seen.add(setting.event_type);
+    return [...seen].sort();
+  });
+  const settingFor = (eventType: string) =>
+    (settings() ?? []).find((entry) => entry.event_type === eventType);
+  const toggleSetting = async (eventType: string) => {
+    const id = profileId();
+    if (!id) return;
+    try {
+      setError("");
+      await personalApi.saveSubscription({
+        profile_id: id,
+        event_type: eventType,
+        enabled: !(settingFor(eventType)?.enabled ?? true),
+      });
+      await refetchSettings();
+    } catch (reason) {
+      setError(humanError(reason));
+    }
+  };
+  const toggleScope = async (scope: SubscriptionScope) => {
+    try {
+      setError("");
+      await personalApi.saveSubscriptionScope({ ...scope, enabled: !scope.enabled });
+      await refetchScopes();
+    } catch (reason) {
+      setError(humanError(reason));
+    }
+  };
+  const removeScope = async (scope: SubscriptionScope) => {
+    try {
+      setError("");
+      await personalApi.deleteSubscriptionScope(scope);
+      await refetchScopes();
+    } catch (reason) {
+      setError(humanError(reason));
+    }
+  };
+
+  const subscriptionsCard = () => (
+    <div class="rail-card">
+      <h3>
+        <Icon name="inbox" size={13} /> Subscriptions
+      </h3>
+      <div class="rail-rows">
+        <For each={eventTypes()}>
+          {(eventType) => (
+            <button
+              class="rail-row"
+              classList={{ muted: settingFor(eventType)?.enabled === false }}
+              aria-pressed={settingFor(eventType)?.enabled !== false}
+              title="Turn this event type on or off for your feed"
+              onClick={() => toggleSetting(eventType)}
+            >
+              <span class="rail-row-label">{eventType}</span>
+              <span class="rail-row-val">
+                {settingFor(eventType)?.enabled === false ? "Muted" : "On"}
+              </span>
+            </button>
+          )}
+        </For>
+        <Show when={!eventTypes().length}>
+          <p class="rail-empty">No event types yet — subscriptions appear as events arrive.</p>
+        </Show>
+      </div>
+      <Show when={(scopes() ?? []).length}>
+        <h3>Scoped</h3>
+        <div class="rail-rows">
+          <For each={scopes() ?? []}>
+            {(scope) => (
+              <div class="rail-row">
+                <span class="rail-row-label">
+                  {scope.event_type} · {scope.target_type}:{scope.target_id}
+                </span>
+                <button class="ghost" onClick={() => toggleScope(scope)}>
+                  {scope.enabled ? "On" : "Muted"}
+                </button>
+                <button class="ghost" onClick={() => removeScope(scope)} title="Remove this scope">
+                  Remove
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+
   const summaryCard = () => (
     <div class="rail-card">
       <h3>
@@ -260,6 +363,7 @@ export default function Inbox() {
               </div>
               <aside class="view-rail inbox-rail">
                 {summaryCard()}
+                {subscriptionsCard()}
                 <div class="rail-card">
                   <h3>How it works</h3>
                   <p class="rail-empty">
@@ -371,6 +475,7 @@ export default function Inbox() {
                     </div>
                   </div>
                 </Show>
+                {subscriptionsCard()}
               </aside>
             </div>
           </Show>

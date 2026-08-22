@@ -4,7 +4,7 @@ Sources: docs/space-knowledge-base/01→08 (KB) + legacy/flutter/ (legacy). Stat
 
 Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 99 pass/0 fail · vite build ✓.
 
-LEDGER (衝突禁 · same-domain double-start forbidden): ☀build-crown → WIP:☀ 07 (feat/tree-devenv-api merged aeaa227) · WIP:☀ 01 (feat/tree-review) · WIP:☀ 02 (feat/tree-fields) · WIP:☀ 04 (feat/tree-chatdocs) · WIP:☀ 06 (feat/tree-blogsearch) · WIP:☀ 08 (feat/tree-callsx) · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (feat/parity-05-auth; rebasing onto master — applications domain ceded to ☀ 07, auth tables→SCHEMA_V27 (reserved; 03 landed as V26 @9f9c367)).
+LEDGER (衝突禁 · same-domain double-start forbidden): WIP:☀ 06 feeds + 07 OAuth/marketplace (worktree ../gaia-space-w2-feeds-oauth, branch feat/w2-feeds-oauth; SCHEMA_V29 feeds, SCHEMA_V31 app OAuth — odd versions reserved by this lane) · ☀build-crown → WIP:☀ 07 (feat/tree-devenv-api merged aeaa227) · WIP:☀ 01 (feat/tree-review) · WIP:☀ 02 (feat/tree-fields) · WIP:☀ 04 (feat/tree-chatdocs) · WIP:☀ 06 (feat/tree-blogsearch) · WIP:☀ 08 (feat/tree-callsx) · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (feat/parity-05-auth; rebasing onto master — applications domain ceded to ☀ 07, auth tables→SCHEMA_V27 (reserved; 03 landed as V26 @9f9c367)).
 
 TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
 
@@ -33,10 +33,12 @@ Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OA
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
 54 rows — done 5 · partial 22 · stub 3 · missing 24.
+Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29 `subscription_scopes`, org/team/project/location/profile/entity targets, wildcard `*` event, precedence scope→setting→default) + Inbox subscription editor rail ⇒ “Subscription editor / personal feeds” stub→partial, “Whole-org/team/project/location subscription targets” missing→partial. Tests: `personal::tests::scoped_subscription_beats_event_default_and_wildcard`, `invalid_subscription_target_is_rejected`.
 Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
 42 rows — done 0 · partial 6 · stub 19 · missing 17.
+Progress (feat/w2-feeds-oauth @64ec368): app OAuth client_credentials grant (SCHEMA_V31 `app_secrets`/`app_tokens`, argon2-hashed secret+token, TTL, rotation revokes outstanding tokens, verify/revoke/list) + marketplace listing metadata and install records (`marketplace_apps`, `app_installs` with MARKETPLACE/LINK/MANUAL/JENKINS/TEAMCITY kinds), wired to Applications view ⇒ “App OAuth flows/credentials” stub→partial, “Marketplace app metadata” + “AppInstallInfo install flows” missing→partial. Tests: `applications::oauth_tests::*` (4) + HTTP regression `space-server::tests::app_credentials_are_admin_only`. Web policy: credential commands (rotate/issue/verify/revoke/list + marketplace writes) are `CommandPolicy::AppAdmin` — admin-only, since `applications` has no owner column (☾Kali finding). UNVERIFIED: no external HTTP API surface consumes the bearer token yet; PKCE/code flow still absent.
 Worst gaps: devfile/deep-links unwired · apps/webhooks/chatbots/extensions backend unreachable from UI · no app OAuth/HTTP-API/marketplace · no webhook delivery/retry · no slash-command/app-rights integration.
 
 ## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)

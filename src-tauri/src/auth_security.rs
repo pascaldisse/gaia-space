@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha1::{Digest, Sha1};
 
 type Result<T> = std::result::Result<T, String>;
-fn opaque(prefix: &str) -> String {
+pub(crate) fn opaque(prefix: &str) -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     format!("{prefix}{}", hex::encode(bytes))
@@ -17,14 +17,14 @@ fn opaque(prefix: &str) -> String {
 fn id(prefix: &str) -> String {
     format!("{prefix}-{}", &opaque("")[..24])
 }
-fn hash(value: &str) -> Result<String> {
+pub(crate) fn hash(value: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(value.as_bytes(), &salt)
         .map(|v| v.to_string())
         .map_err(|e| e.to_string())
 }
-fn matches(value: &str, stored: &str) -> bool {
+pub(crate) fn matches(value: &str, stored: &str) -> bool {
     PasswordHash::new(stored)
         .ok()
         .and_then(|p| Argon2::default().verify_password(value.as_bytes(), &p).ok())
