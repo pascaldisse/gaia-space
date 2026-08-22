@@ -1571,7 +1571,7 @@ mod tests {
         let workdir = temp_dir("runs-b");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b").expect("spawn");
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b", None).expect("spawn");
         assert_eq!(runs.len(), 2);
         for h in handles {
             h.join().unwrap();
@@ -1712,7 +1712,7 @@ mod tests {
             "1.2.3",
             Some(r#"{"license":"MIT"}"#),
             Some("left-pad-1.2.3.tgz"),
-            Some("fake package payload bytes"),
+            Some(b"fake package payload bytes"),
         )
         .unwrap();
         assert_eq!(pv.package_name, "left-pad");
@@ -1767,7 +1767,7 @@ mod tests {
                     "1.0.0",
                     None,
                     Some("pkg.tgz"),
-                    Some("payload")
+                    Some(b"payload")
                 )
                 .is_err(),
                 "repository id {repository_id:?}"
@@ -1792,7 +1792,7 @@ mod tests {
                     "1.0.0",
                     None,
                     Some("pkg.tgz"),
-                    Some("payload")
+                    Some(b"payload")
                 )
                 .is_err(),
                 "package name {package_name:?}"
@@ -1817,7 +1817,7 @@ mod tests {
                     version,
                     None,
                     Some("pkg.tgz"),
-                    Some("payload")
+                    Some(b"payload")
                 )
                 .is_err(),
                 "version {version:?}"
@@ -1842,7 +1842,7 @@ mod tests {
                     "1.0.0",
                     None,
                     Some(filename),
-                    Some("payload")
+                    Some(b"payload")
                 )
                 .is_err(),
                 "payload filename {filename:?}"
