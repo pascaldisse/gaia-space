@@ -47,6 +47,8 @@ test("joining exposes native media controls, device selectors, and a clean leave
     if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
     if (command === "start_meeting_recording") return { egress_id: "EG_1", status: "recording" };
     if (command === "stop_meeting_recording") return { egress_id: "EG_1", status: "stopped" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings") return [];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
@@ -74,6 +76,52 @@ test("joining exposes native media controls, device selectors, and a clean leave
   await settle();
   expect(calls).toContain("leave");
   expect(host.textContent).toContain("Join call");
+});
+
+test("a persisted running egress job is shown on join, so a restart cannot strand it", async () => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+    ipcCommands.push(command);
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    // The job was started by a previous process; only SQLite remembers it.
+    if (command === "list_meeting_recordings") return [{ id: "rec-1", meeting_id: "meeting-1", egress_id: "EG_1", status: "recording", filepath: "recordings/meeting-meeting-1.mp4", started_by: "me", started_at: 1, stopped_at: null }];
+    if (command === "stop_meeting_recording") return { id: "rec-1", meeting_id: "meeting-1", egress_id: "EG_1", status: "stopped", filepath: null, started_by: "me", started_at: 1, stopped_at: 2 };
+    throw new Error(`unexpected command: ${command}`);
+  } };
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
+  await settle();
+  expect(ipcCommands).toContain("list_meeting_recordings");
+  expect(host.textContent).toContain("Recording in progress");
+  // The organizer can stop the job they never started in this process.
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Stop recording") as HTMLButtonElement).click();
+  await settle();
+  expect(ipcCommands).toContain("stop_meeting_recording");
+  expect(host.textContent).not.toContain("Recording in progress");
+});
+
+// The backend refuses recording when it cannot name the acting profile. The UI must
+// say so rather than offer a button that throws: a control that looks armed and does
+// nothing is the interface lying about what the system will do.
+test("an unresolvable native actor disables recording and explains why", async () => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+    ipcCommands.push(command);
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: false, profile_id: null, source: null, reason: "This installation has 2 profiles, so the app cannot tell who is acting" };
+    if (command === "list_meeting_recordings") return [];
+    throw new Error(`unexpected command: ${command}`);
+  } };
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
+  await settle();
+  const record = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement;
+  expect(record.disabled).toBe(true);
+  expect(host.textContent).toContain("cannot tell who is acting");
+  record.click();
+  await settle();
+  expect(ipcCommands).not.toContain("start_meeting_recording");
 });
 
 test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {

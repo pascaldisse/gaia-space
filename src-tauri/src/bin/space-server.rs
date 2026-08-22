@@ -1284,6 +1284,7 @@ fn authorize_command(
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
     if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
         && policy != CommandPolicy::DocumentAccessWrite
+        && policy != CommandPolicy::MeetingParticipantWrite
     {
         // Access recipient ids intentionally name *other* people/teams; rebinding them
         // to the caller would turn every share into a self-grant.
@@ -1799,15 +1800,21 @@ fn authorize_command(
         CommandPolicy::MeetingParticipantWrite => {
             let id = meeting_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid meeting id"))?;
+            let target: String =
+                arg(body, "profile_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-            let allowed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)",params![id,user.profile_id],|r|r.get(0)).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()))?;
-            if allowed {
+            let self_rsvp: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2)", params![&id, user.profile_id], |r| r.get(0)).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            let organizer: bool = c
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM meetings WHERE id=?1 AND organizer_id=?2)",
+                    params![id, user.profile_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            if (target == user.profile_id && self_rsvp) || organizer || user.role == "admin" {
                 Ok(())
             } else {
-                Err(err(
-                    StatusCode::FORBIDDEN,
-                    "meeting participant access denied",
-                ))
+                Err(err(StatusCode::FORBIDDEN, "only a participant may change their RSVP; organizer access is required for another participant"))
             }
         }
         CommandPolicy::SearchRead => {
@@ -2342,7 +2349,7 @@ async fn cmd(
     "save_calendar_feed" => calendar_feeds::save_calendar_feed(input: calendar_feeds::CalendarFeedInput),
     "delete_calendar_feed" => calendar_feeds::delete_calendar_feed(id: String),
     "sync_calendar_feed" => calendar_feeds::sync_calendar_feed(id: String),
-    "livekit_server_status" => calls::livekit_server_status(config: Option<calls::LivekitConfig>),
+    "livekit_server_status" => calls::livekit_server_status(),
     "mark_channel_read" => chat::mark_channel_read(channel_id: String, profile_id: String, message_id: Option<String>),
     "mark_notification_read" => personal::mark_notification_read(id: String),
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
@@ -2610,33 +2617,73 @@ mod tests {
         // Member: every credential command is refused before it reaches the handler.
         for (command, body) in [
             ("rotate_app_secret", json!({"application_id":"app-x"})),
-            ("issue_app_token", json!({"client_id":"client-x","client_secret":"guess"})),
+            (
+                "issue_app_token",
+                json!({"client_id":"client-x","client_secret":"guess"}),
+            ),
             ("verify_app_token", json!({"token":"spat_guess"})),
             ("revoke_app_token", json!({"id":"apptok-x"})),
             ("list_app_tokens", json!({"application_id":"app-x"})),
-            ("install_marketplace_app", json!({"value":{"id":"i-x","marketplace_app_id":null,"application_id":"app-x","install_kind":"MANUAL","installed_by":null,"installed_at":0}})),
+            (
+                "install_marketplace_app",
+                json!({"value":{"id":"i-x","marketplace_app_id":null,"application_id":"app-x","install_kind":"MANUAL","installed_by":null,"installed_at":0}}),
+            ),
         ] {
             let (status, _) = call(cookie("ta"), command, body).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{command} must be admin-only");
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{command} must be admin-only"
+            );
         }
         // Independent check: nothing was created by those attempts.
         let c = db::conn().unwrap();
-        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_secrets", [], |r| r.get(0)).unwrap(), 0);
-        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_tokens", [], |r| r.get(0)).unwrap(), 0);
-        assert_eq!(c.query_row::<i64,_,_>("SELECT count(*) FROM app_installs", [], |r| r.get(0)).unwrap(), 0);
+        assert_eq!(
+            c.query_row::<i64, _, _>("SELECT count(*) FROM app_secrets", [], |r| r.get(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            c.query_row::<i64, _, _>("SELECT count(*) FROM app_tokens", [], |r| r.get(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            c.query_row::<i64, _, _>("SELECT count(*) FROM app_installs", [], |r| r.get(0))
+                .unwrap(),
+            0
+        );
         drop(c);
         // Admin: the same flow works end to end.
-        let (status, secret) = call(cookie("tc"), "rotate_app_secret", json!({"application_id":"app-x"})).await;
+        let (status, secret) = call(
+            cookie("tc"),
+            "rotate_app_secret",
+            json!({"application_id":"app-x"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{secret}");
-        let client_secret = secret["value"]["client_secret"].as_str().unwrap().to_string();
+        let client_secret = secret["value"]["client_secret"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let (status, token) = call(cookie("tc"), "issue_app_token", json!({"client_id":"client-x","client_secret":client_secret,"scope":"read","ttl_seconds":60})).await;
         assert_eq!(status, StatusCode::OK, "{token}");
         let access = token["value"]["access_token"].as_str().unwrap().to_string();
-        let (status, verified) = call(cookie("tc"), "verify_app_token", json!({"token":access})).await;
+        let (status, verified) =
+            call(cookie("tc"), "verify_app_token", json!({"token":access})).await;
         assert_eq!(status, StatusCode::OK, "{verified}");
         assert_eq!(verified["value"]["application_id"].as_str(), Some("app-x"));
         // And a member still cannot read the tokens that now exist.
-        assert_eq!(call(cookie("ta"), "list_app_tokens", json!({"application_id":"app-x"})).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(
+            call(
+                cookie("ta"),
+                "list_app_tokens",
+                json!({"application_id":"app-x"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
     }
     #[tokio::test]
     async fn login_limiter_refuses_correct_password_during_lockout() {
@@ -3401,6 +3448,47 @@ mod tests {
             let (status, _) = call(cookie("tb"), command, body).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{command}");
         }
+        c.execute_batch("INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('shared-rsvp','Shared RSVP',100,200,'pa',0); INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES('shared-rsvp','pb','invited')").unwrap();
+        let (status, _) = call(
+            cookie("tb"),
+            "set_meeting_participant_status",
+            json!({"meeting_id":"shared-rsvp","profile_id":"pa","status":"accepted"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an attendee cannot alter another RSVP"
+        );
+        let (status, _) = call(
+            cookie("tb"),
+            "set_meeting_participant_status",
+            json!({"meeting_id":"shared-rsvp","profile_id":"pb","status":"accepted"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "an attendee may accept their own RSVP"
+        );
+        let (status, _) = call(
+            cookie("ta"),
+            "set_meeting_participant_status",
+            json!({"meeting_id":"shared-rsvp","profile_id":"pb","status":"declined"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "the organizer may moderate another RSVP"
+        );
+        c.execute(
+            "DELETE FROM meeting_participants WHERE meeting_id='shared-rsvp'",
+            [],
+        )
+        .unwrap();
+        c.execute("DELETE FROM meetings WHERE id='shared-rsvp'", [])
+            .unwrap();
         let unchanged: (String, bool) = c
             .query_row(
                 "SELECT title,archived FROM meetings WHERE id='alice-private-meeting'",

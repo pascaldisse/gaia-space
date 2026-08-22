@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 37;
+pub const SCHEMA_VERSION: i64 = 38;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -95,12 +95,27 @@ pub fn test_serial() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The single precedence rule for "which file is *the* database", shared by every
+/// entry point. Split databases (one IPC command on the app-data file, the next on
+/// `SPACE_DB`) are the failure this function exists to make impossible: an explicit
+/// `set_db_path` binding wins, then `SPACE_DB`, then the platform app-data dir.
+pub fn resolve_db_path(
+    bound: Option<PathBuf>,
+    env: Option<PathBuf>,
+    app_data: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    bound
+        .or(env)
+        .or(app_data)
+        .ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())
+}
+
+fn env_db_path() -> Option<PathBuf> {
+    std::env::var_os("SPACE_DB").map(PathBuf::from)
+}
+
 pub fn conn() -> Result<Connection, String> {
-    let path = DB_PATH
-        .get()
-        .cloned()
-        .or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from))
-        .ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
+    let path = resolve_db_path(DB_PATH.get().cloned(), env_db_path(), None)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -109,13 +124,28 @@ pub fn conn() -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Where this installation's database lives when nothing overrides it.
 #[cfg(feature = "desktop")]
-pub fn connection(app: &AppHandle) -> Result<Connection, String> {
+pub fn app_data_db_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let conn = open_at(dir.join("space.db")).map_err(|e| e.to_string())?;
-    migrate(&conn).map_err(|e| e.to_string())?;
-    Ok(conn)
+    Ok(dir.join("space.db"))
+}
+
+/// AppHandle-taking front door. It does **not** open its own file: it binds the
+/// process-global path (app-data dir unless already bound / `SPACE_DB`-overridden)
+/// and then hands back the same connection `conn()` gives. So an IPC command that
+/// takes an `AppHandle` (recording start/stop, actor resolution) and one that does
+/// not (`list_meeting_recordings`, meeting authorization) always read one database.
+#[cfg(feature = "desktop")]
+pub fn connection(app: &AppHandle) -> Result<Connection, String> {
+    let path = resolve_db_path(
+        DB_PATH.get().cloned(),
+        env_db_path(),
+        Some(app_data_db_path(app)?),
+    )?;
+    set_db_path(path);
+    conn()
 }
 
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -258,16 +288,25 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V27)?;
     }
     // V29: subscriptions gain a target scope (org/team/project/location/profile/entity).
-    if version < 29 { tx.execute_batch(SCHEMA_V29)?; }
+    if version < 29 {
+        tx.execute_batch(SCHEMA_V29)?;
+    }
     // V31: application OAuth credentials/tokens and the marketplace install model.
-    if version < 31 { tx.execute_batch(SCHEMA_V31)?; }
+    if version < 31 {
+        tx.execute_batch(SCHEMA_V31)?;
+    }
     // V32: normalized, format-specific package metadata alongside legacy generic JSON.
     if version < 32 {
         add_column_if_missing(&tx, "package_versions", "format_metadata_json", "TEXT")?;
         tx.execute_batch(SCHEMA_V32)?;
     }
     if version < 33 {
-        add_column_if_missing(&tx, "package_versions", "immutable", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(
+            &tx,
+            "package_versions",
+            "immutable",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         tx.execute_batch(SCHEMA_V33)?;
     }
     if version < 34 {
@@ -301,6 +340,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "TEXT NOT NULL DEFAULT '{}'",
         )?;
         tx.execute_batch(SCHEMA_V37)?;
+    }
+    // V38: recording/egress lifecycle is durable state, not process memory. The table
+    // never existed on master, so the final shape lands in one DDL for both fresh and
+    // V37 databases.
+    if version < 38 {
+        tx.execute_batch(SCHEMA_V38)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -601,6 +646,20 @@ UPDATE users SET profile_id = 'profile-' || id
 
 /// V37 also expands assignment scopes. SQLite cannot alter a CHECK constraint,
 /// so reconstruct the small junction table inside the migration transaction.
+/// V38 (recording/egress lifecycle, final shape):
+/// - an egress job started before a crash must still be stoppable and listable, so the
+///   handle lives in SQLite, not in a process-local map;
+/// - `starting` is the local reservation taken before the non-transactional Egress RPC,
+///   `stopping` is the durable compare-and-swap target (one in-flight StopEgress per row);
+/// - `last_error` carries the operator-visible transport error and the `UNCONFIRMED:`
+///   marker that keeps a row whose remote state is unknown locked (fail closed);
+/// - the partial unique index is the single-active-recording-per-meeting boundary.
+pub(crate) const SCHEMA_V38: &str = r#"
+CREATE TABLE IF NOT EXISTS meeting_recordings (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, egress_id TEXT, status TEXT NOT NULL CHECK(status IN ('starting','recording','stopping','stopped','failed')), filepath TEXT, started_by TEXT REFERENCES profiles(id), started_at INTEGER NOT NULL DEFAULT (unixepoch()), stopped_at INTEGER, stop_attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS meeting_recordings_active ON meeting_recordings(meeting_id) WHERE status IN ('starting','recording','stopping');
+CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meeting_id, started_at);
+"#;
+
 pub(crate) const SCHEMA_V37: &str = r#"
 ALTER TABLE role_assignments RENAME TO role_assignments_v36;
 CREATE TABLE role_assignments (
@@ -641,6 +700,87 @@ fn add_column_if_missing(
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    // --- one database per process: path resolution ---------------------------
+
+    /// The app-data dir is only a *default*. Once a path is bound (desktop setup, or a
+    /// test), every later resolution — including an AppHandle-carrying IPC command —
+    /// must return that same file, or recording start/stop and the list/authorization
+    /// queries would run against two databases.
+    #[test]
+    fn bound_path_wins_over_env_and_app_data() {
+        let bound = PathBuf::from("/bound/space.db");
+        let resolved = resolve_db_path(
+            Some(bound.clone()),
+            Some(PathBuf::from("/env/space.db")),
+            Some(PathBuf::from("/appdata/space.db")),
+        )
+        .expect("a bound path always resolves");
+        assert_eq!(resolved, bound);
+    }
+
+    #[test]
+    fn env_overrides_app_data_when_nothing_is_bound() {
+        let resolved = resolve_db_path(
+            None,
+            Some(PathBuf::from("/env/space.db")),
+            Some(PathBuf::from("/appdata/space.db")),
+        )
+        .expect("env path resolves");
+        assert_eq!(resolved, PathBuf::from("/env/space.db"));
+    }
+
+    #[test]
+    fn app_data_is_the_fallback_not_a_second_source() {
+        let app = PathBuf::from("/appdata/space.db");
+        assert_eq!(
+            resolve_db_path(None, None, Some(app.clone())).expect("app-data resolves"),
+            app
+        );
+        // Desktop binds on first `connection(app)` call; a *later* AppHandle naming a
+        // different dir must not repoint the process.
+        assert_eq!(
+            resolve_db_path(
+                Some(app.clone()),
+                None,
+                Some(PathBuf::from("/other/space.db"))
+            )
+            .expect("bound path resolves"),
+            app
+        );
+    }
+
+    #[test]
+    fn no_source_at_all_fails_loudly() {
+        assert!(resolve_db_path(None, None, None).is_err());
+    }
+
+    /// End-to-end on real files: what `conn()` opens after binding is the bound file,
+    /// so a row written through one handle is visible through the next.
+    #[test]
+    fn conn_opens_the_bound_file() {
+        let _guard = test_serial();
+        let temp = TempDb::new("db-single-source");
+        let path = resolve_db_path(None, None, Some(temp.path().to_path_buf()))
+            .expect("app-data fallback resolves");
+        let first = open_at(&path).expect("open bound file");
+        migrate(&first).expect("migrate");
+        first
+            .execute(
+                "CREATE TABLE IF NOT EXISTS single_source_probe(id TEXT PRIMARY KEY)",
+                [],
+            )
+            .expect("probe table");
+        first
+            .execute("INSERT INTO single_source_probe(id) VALUES('x')", [])
+            .expect("probe row");
+        drop(first);
+        let second = open_at(&path).expect("reopen bound file");
+        let seen: i64 = second
+            .query_row("SELECT count(*) FROM single_source_probe", [], |r| r.get(0))
+            .expect("probe visible through the same path");
+        assert_eq!(seen, 1, "both handles must address one database file");
+    }
 
     type SchemaObject = (String, String, String, Option<String>);
     type ForeignKey = (
@@ -847,7 +987,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 37);
+        assert_eq!(SCHEMA_VERSION, 38);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1120,5 +1260,263 @@ mod right_descriptor_migration_tests {
         ] {
             assert!(columns.contains(&column.to_string()));
         }
+    }
+}
+
+/// V38 on an *existing* V37 database, not just a fresh one. The recording table never
+/// existed on master, so an installed V37 file must gain the final shape (columns,
+/// CHECK, partial unique index) in one step, keep its pre-V38 rows, and survive a
+/// repeated migrate — the crash-restart path runs `migrate` on every open.
+#[cfg(test)]
+mod v38_recording_migration_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// Builds a database that looks like a V37 install: full pre-V38 schema, no
+    /// `meeting_recordings`, `user_version = 37`.
+    fn v37_database() -> Connection {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        c.execute_batch(
+            "DROP INDEX IF EXISTS meeting_recordings_meeting;\n             DROP INDEX IF EXISTS meeting_recordings_active;\n             DROP TABLE IF EXISTS meeting_recordings;",
+        )
+        .unwrap();
+        c.pragma_update(None, "user_version", 37).unwrap();
+        c
+    }
+
+    fn seed_meeting(c: &Connection, id: &str) {
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,0)",
+            rusqlite::params![format!("host-{id}")],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id) VALUES(?1,'Standup',0,60,?2)",
+            rusqlite::params![id, format!("host-{id}")],
+        )
+        .unwrap();
+    }
+
+    fn columns(c: &Connection, table: &str) -> Vec<(String, String, i64)> {
+        c.prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn v37_database_starts_without_the_recording_table() {
+        let c = v37_database();
+        let present: i64 = c
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='meeting_recordings'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 0, "the V37 fixture must not already carry V38");
+        assert_eq!(
+            c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            37
+        );
+    }
+
+    #[test]
+    fn migrating_a_v37_database_lands_the_final_v38_shape() {
+        let c = v37_database();
+        migrate(&c).unwrap();
+
+        assert_eq!(
+            c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION,
+            "an upgraded V37 file must be stamped with the current version"
+        );
+
+        let cols = columns(&c, "meeting_recordings");
+        let names: Vec<&str> = cols.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "id",
+                "meeting_id",
+                "egress_id",
+                "status",
+                "filepath",
+                "started_by",
+                "started_at",
+                "stopped_at",
+                "stop_attempts",
+                "last_error",
+            ]
+        );
+        for required in ["meeting_id", "status", "started_at", "stop_attempts"] {
+            let (_, _, notnull) = cols.iter().find(|(n, _, _)| n == required).unwrap();
+            assert_eq!(*notnull, 1, "{required} must be NOT NULL");
+        }
+
+        let indexes: BTreeSet<String> = c
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='meeting_recordings' AND name NOT LIKE 'sqlite_%'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            indexes,
+            BTreeSet::from([
+                "meeting_recordings_active".to_string(),
+                "meeting_recordings_meeting".to_string(),
+            ])
+        );
+        let active_sql: String = c
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='meeting_recordings_active'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            active_sql.contains("UNIQUE")
+                && active_sql.contains("WHERE status IN ('starting','recording','stopping')"),
+            "single-active-recording boundary must be a partial UNIQUE index: {active_sql}"
+        );
+    }
+
+    /// The migrated table must actually enforce its invariants on an upgraded file —
+    /// shape without behaviour would let a second egress job start after a restart.
+    #[test]
+    fn upgraded_table_enforces_status_check_and_single_active_recording() {
+        let c = v37_database();
+        migrate(&c).unwrap();
+        seed_meeting(&c, "m1");
+
+        c.execute(
+            "INSERT INTO meeting_recordings(id,meeting_id,status,started_at) VALUES('r1','m1','recording',10)",
+            [],
+        )
+        .unwrap();
+        assert!(
+            c.execute(
+                "INSERT INTO meeting_recordings(id,meeting_id,status,started_at) VALUES('r2','m1','starting',20)",
+                [],
+            )
+            .is_err(),
+            "two live jobs for one meeting must be unrepresentable"
+        );
+        assert!(
+            c.execute(
+                "INSERT INTO meeting_recordings(id,meeting_id,status,started_at) VALUES('r3','m1','paused',30)",
+                [],
+            )
+            .is_err(),
+            "status CHECK must reject unknown states"
+        );
+        // A terminal row is not "live": a later recording may follow it.
+        c.execute(
+            "UPDATE meeting_recordings SET status='stopped', stopped_at=40 WHERE id='r1'",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO meeting_recordings(id,meeting_id,status,started_at) VALUES('r4','m1','starting',50)",
+            [],
+        )
+        .unwrap();
+        let defaults: (i64, Option<String>) = c
+            .query_row(
+                "SELECT stop_attempts, last_error FROM meeting_recordings WHERE id='r4'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(defaults, (0, None));
+    }
+
+    /// Every open runs `migrate`. Re-running it must not drop, recreate, or duplicate
+    /// anything: pre-V38 rows and already-written recording rows survive untouched.
+    #[test]
+    fn migrate_is_idempotent_on_an_upgraded_v37_database() {
+        let c = v37_database();
+        seed_meeting(&c, "m1");
+        migrate(&c).unwrap();
+        c.execute(
+            "INSERT INTO meeting_recordings(id,meeting_id,status,started_at) VALUES('r1','m1','recording',10)",
+            [],
+        )
+        .unwrap();
+
+        let shape_before = columns(&c, "meeting_recordings");
+        let ddl_before: Vec<String> = c
+            .prepare("SELECT sql FROM sqlite_master WHERE tbl_name='meeting_recordings' AND sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        migrate(&c).unwrap();
+        migrate(&c).unwrap();
+
+        assert_eq!(shape_before, columns(&c, "meeting_recordings"));
+        let ddl_after: Vec<String> = c
+            .prepare("SELECT sql FROM sqlite_master WHERE tbl_name='meeting_recordings' AND sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(ddl_before, ddl_after);
+        assert_eq!(
+            c.query_row(
+                "SELECT count(*) FROM meeting_recordings WHERE id='r1'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1,
+            "existing recording rows must survive a re-migrate"
+        );
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM meetings WHERE id='m1'", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1,
+            "pre-V38 rows must survive the upgrade"
+        );
+        assert_eq!(
+            c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+    }
+
+    /// A fresh install and an upgraded V37 install must be indistinguishable.
+    #[test]
+    fn upgraded_v37_matches_a_fresh_v38_database() {
+        let upgraded = v37_database();
+        migrate(&upgraded).unwrap();
+        let fresh = open_in_memory().unwrap();
+        migrate(&fresh).unwrap();
+
+        let ddl = |c: &Connection| -> Vec<String> {
+            c.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='meeting_recordings' AND sql IS NOT NULL ORDER BY name")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        assert_eq!(ddl(&upgraded), ddl(&fresh));
     }
 }
