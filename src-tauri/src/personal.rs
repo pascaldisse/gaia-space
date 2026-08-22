@@ -37,6 +37,9 @@ pub struct Todo {
     pub notes: Option<String>,
     #[serde(default)]
     pub assignee_ids: Vec<String>,
+    /// How the body is meant to be read: `text` (verbatim) or `markdown`.
+    #[serde(default = "default_content_kind")]
+    pub content_kind: String,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -53,6 +56,19 @@ pub struct TodoInput {
     pub notes: Option<String>,
     #[serde(default)]
     pub assignee_ids: Vec<String>,
+    #[serde(default = "default_content_kind")]
+    pub content_kind: String,
+}
+fn default_content_kind() -> String {
+    "text".into()
+}
+/// Only two bodies exist; anything else is a client bug, not a new format.
+fn normalized_content_kind(kind: &str) -> Result<String> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "" | "text" => Ok("text".into()),
+        "markdown" => Ok("markdown".into()),
+        other => Err(format!("Unknown to-do content kind: {other}")),
+    }
 }
 fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
     Ok(Todo {
@@ -66,6 +82,7 @@ fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
         source_entity_id: row.get(7)?,
         notes: row.get(8)?,
         assignee_ids: Vec::new(),
+        content_kind: row.get(9)?,
     })
 }
 /// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
@@ -247,7 +264,7 @@ pub fn remove_project_member(project_id: String, member_id: String) -> Result<Ve
     project_member_ids(project_id)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => {
             todo.assignee_ids = assignees_on(c, id)?;
@@ -259,7 +276,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(
         params![profile_id, include_done.unwrap_or(false)],
         read_todo,
@@ -287,7 +304,8 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let id = input.id.unwrap_or_else(|| new_id("todo"));
     let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes)]))?;
+    let content_kind = normalized_content_kind(&input.content_kind)?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
     todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
@@ -304,7 +322,8 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     valid_anchor(&todo.source_entity_type, &todo.source_entity_id)?;
     let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone())]))?;
+    let content_kind = normalized_content_kind(&todo.content_kind)?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,content_kind=?10,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone()), content_kind]))?;
     if updated == 0 {
         return Err("Todo not found".into());
     }
@@ -319,7 +338,7 @@ pub fn list_project_todos(
     include_done: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(
         params![project_id, profile_id, include_done.unwrap_or(false)],
         read_todo,
@@ -363,6 +382,76 @@ pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
     todo_on(&c, &id)?.ok_or_else(|| "Todo not found".into())
 }
 
+/// Move a to-do's due date forward. An overdue task rolls over to today first, so
+/// "postpone by one day" always means one day from now, never one day from a date that
+/// has already passed. A task with no due date acquires one.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn postpone_todo(id: String, days: i64) -> Result<Todo> {
+    if days <= 0 {
+        return Err("Postponing needs a positive number of days".into());
+    }
+    let c = db::conn()?;
+    let today = Utc::now().date_naive();
+    let current: Option<String> = err(c
+        .query_row("SELECT due_date FROM todos WHERE id=?1", [&id], |row| {
+            row.get(0)
+        })
+        .optional())?
+    .ok_or_else(|| "Todo not found".to_string())?;
+    let due = postponed_due(current.as_deref(), today, days);
+    err(c.execute(
+        "UPDATE todos SET due_date=?2,updated_at=unixepoch() WHERE id=?1",
+        params![id, due],
+    ))?;
+    todo_on(&c, &id)?.ok_or_else(|| "Todo not found".into())
+}
+/// The date a postponement lands on. Past or missing due dates roll over to today first.
+fn postponed_due(current: Option<&str>, today: chrono::NaiveDate, days: i64) -> String {
+    let base = current
+        .and_then(|value| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+        .filter(|date| *date > today)
+        .unwrap_or(today);
+    (base + Duration::days(days)).format("%Y-%m-%d").to_string()
+}
+/// Promote a personal to-do into a tracked issue. The to-do survives as a closed row
+/// anchored to the issue it became, so the bookmark trail stays intact; the issue owns
+/// the work from here on.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn convert_todo_to_issue(
+    id: String,
+    project_id: String,
+    status_id: Option<String>,
+) -> Result<crate::issues::Issue> {
+    if project_id.trim().is_empty() {
+        return Err("Converting a to-do needs a target project".into());
+    }
+    let c = db::conn()?;
+    let todo = todo_on(&c, &id)?.ok_or_else(|| "Todo not found".to_string())?;
+    if todo.source_entity_type.as_deref() == Some("issue") {
+        return Err("This to-do was already converted into an issue".into());
+    }
+    drop(c);
+    let issue = crate::issues::create_issue(crate::issues::IssueInput {
+        id: None,
+        project_id: project_id.trim().to_string(),
+        title: todo.content.clone(),
+        description: todo.notes.clone(),
+        status_id,
+        assignee_id: None,
+        assignee_ids: todo.assignee_ids.clone(),
+        created_by: Some(todo.profile_id.clone()),
+        due_date: todo.due_date.clone(),
+        priority: None,
+        archived: Some(false),
+    })?;
+    let c = db::conn()?;
+    err(c.execute(
+        "UPDATE todos SET done=1,source_entity_type='issue',source_entity_id=?2,updated_at=unixepoch() WHERE id=?1",
+        params![id, issue.id],
+    ))?;
+    Ok(issue)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Absence {
     pub id: String,
@@ -371,6 +460,12 @@ pub struct Absence {
     pub date_from: String,
     pub date_to: String,
     pub approved: bool,
+    /// The reason is private: colleagues see the availability, not why.
+    #[serde(default)]
+    pub reason_confidential: bool,
+    /// What every colleague may see regardless of confidentiality.
+    #[serde(default = "default_availability")]
+    pub availability: String,
 }
 #[derive(Debug, Deserialize)]
 pub struct AbsenceInput {
@@ -380,6 +475,37 @@ pub struct AbsenceInput {
     pub date_from: String,
     pub date_to: String,
     pub approved: bool,
+    #[serde(default)]
+    pub reason_confidential: bool,
+    #[serde(default = "default_availability")]
+    pub availability: String,
+}
+fn default_availability() -> String {
+    "away".into()
+}
+/// Availability is a closed set: away, partially reachable, or working from elsewhere.
+fn normalized_availability(value: &str) -> Result<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "away" => Ok("away".into()),
+        "partial" => Ok("partial".into()),
+        "available" => Ok("available".into()),
+        other => Err(format!("Unknown availability: {other}")),
+    }
+}
+/// What a given viewer may read. A confidential reason is replaced by the word
+/// `Private` for everybody except the person themselves and administrators — the
+/// dates and the availability stay public, which is the whole point of the field.
+pub fn redacted_for(mut absence: Absence, viewer: &str, admin: bool) -> Absence {
+    if absence.reason_confidential && !admin && absence.profile_id != viewer {
+        absence.reason_type = "Private".into();
+    }
+    absence
+}
+pub fn redact_all(absences: Vec<Absence>, viewer: &str, admin: bool) -> Vec<Absence> {
+    absences
+        .into_iter()
+        .map(|absence| redacted_for(absence, viewer, admin))
+        .collect()
 }
 fn read_absence(row: &rusqlite::Row<'_>) -> rusqlite::Result<Absence> {
     Ok(Absence {
@@ -389,6 +515,8 @@ fn read_absence(row: &rusqlite::Row<'_>) -> rusqlite::Result<Absence> {
         date_from: row.get(3)?,
         date_to: row.get(4)?,
         approved: row.get(5)?,
+        reason_confidential: row.get(6)?,
+        availability: row.get(7)?,
     })
 }
 fn validate_absence(absence: &Absence) -> Result<()> {
@@ -402,12 +530,13 @@ fn validate_absence(absence: &Absence) -> Result<()> {
     if absence.date_to < absence.date_from {
         return Err("Absence end date must not precede its start date".into());
     }
+    normalized_availability(&absence.availability)?;
     Ok(())
 }
 fn absence_on(c: &Connection, id: &str) -> Result<Option<Absence>> {
     err(c
         .query_row(
-            "SELECT id,profile_id,reason_type,date_from,date_to,approved FROM absences WHERE id=?1",
+            "SELECT id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability FROM absences WHERE id=?1",
             [id],
             read_absence,
         )
@@ -416,7 +545,7 @@ fn absence_on(c: &Connection, id: &str) -> Result<Option<Absence>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_absences(profile_id: Option<String>) -> Result<Vec<Absence>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved FROM absences WHERE (?1 IS NULL OR profile_id=?1) ORDER BY date_from DESC,date_to DESC"))?;
+    let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability FROM absences WHERE (?1 IS NULL OR profile_id=?1) ORDER BY date_from DESC,date_to DESC"))?;
     let absences = err(statement.query_map([profile_id], read_absence))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -431,18 +560,20 @@ pub fn create_absence(input: AbsenceInput) -> Result<Absence> {
         date_from: input.date_from,
         date_to: input.date_to,
         approved: input.approved,
+        reason_confidential: input.reason_confidential,
+        availability: normalized_availability(&input.availability)?,
     };
     validate_absence(&absence)?;
     let c = db::conn()?;
     // `RETURNING` answers with the row this statement wrote; a separate `SELECT id=?` could
     // pick up somebody else's row if the id changed hands in between.
-    err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES(?1,?2,?3,?4,?5,?6) RETURNING id,profile_id,reason_type,date_from,date_to,approved", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved], read_absence))
+    err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, absence.availability], read_absence))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_absence(absence: Absence) -> Result<Absence> {
     validate_absence(&absence)?;
     let c = db::conn()?;
-    if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved]))? == 0 { return Err("Absence not found".into()); }
+    if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6,reason_confidential=?7,availability=?8 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, normalized_availability(&absence.availability)?]))? == 0 { return Err("Absence not found".into()); }
     absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
 }
 /// Member update. Check, write, and readback are one statement, so the row cannot change
@@ -456,9 +587,9 @@ pub fn update_absence_details(absence: Absence, owner: &str) -> Result<Option<Ab
     validate_absence(&absence)?;
     let c = db::conn()?;
     err(c.query_row(
-        "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5 WHERE id=?1 AND profile_id=?2 \
-         RETURNING id,profile_id,reason_type,date_from,date_to,approved",
-        params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to],
+        "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5,reason_confidential=?6,availability=?7 WHERE id=?1 AND profile_id=?2 \
+         RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability",
+        params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to, absence.reason_confidential, normalized_availability(&absence.availability)?],
         read_absence,
     ).optional())
 }
@@ -480,7 +611,7 @@ pub fn delete_absence(id: String) -> Result<()> {
     Ok(())
 }
 fn current_absences_on(c: &Connection, date: &str) -> Result<Vec<Absence>> {
-    let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved FROM absences WHERE approved=1 AND date_from<=?1 AND date_to>=?1 ORDER BY date_from,profile_id"))?;
+    let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability FROM absences WHERE approved=1 AND date_from<=?1 AND date_to>=?1 ORDER BY date_from,profile_id"))?;
     let absences = err(statement.query_map([date], read_absence))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -1183,7 +1314,7 @@ mod tests {
     }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement
             .query_map(params![profile_id, include_done], read_todo)
             .unwrap()
@@ -1207,6 +1338,7 @@ mod tests {
             source_entity_type: None,
             source_entity_id: None,
             assignee_ids: assignees.iter().map(|x| x.to_string()).collect(),
+            content_kind: default_content_kind(),
         }
     }
     #[test]
@@ -1945,5 +2077,97 @@ mod dashboard_preference_tests {
             },
         )
         .is_err());
+    }
+
+    fn day(value: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()
+    }
+    #[test]
+    fn postponing_an_overdue_task_rolls_it_over_to_today_first() {
+        let today = day("2026-08-22");
+        // Overdue: one more day means tomorrow, not the day after a date long gone.
+        assert_eq!(postponed_due(Some("2026-07-01"), today, 1), "2026-08-23");
+        // Due today counts as overdue for this purpose: today + 1 is tomorrow.
+        assert_eq!(postponed_due(Some("2026-08-22"), today, 1), "2026-08-23");
+        // A future date is shifted from itself.
+        assert_eq!(postponed_due(Some("2026-09-01"), today, 7), "2026-09-08");
+        // No due date at all: the task acquires one.
+        assert_eq!(postponed_due(None, today, 1), "2026-08-23");
+    }
+    #[test]
+    fn a_todo_body_is_text_or_markdown_and_nothing_else() {
+        assert_eq!(normalized_content_kind("").unwrap(), "text");
+        assert_eq!(normalized_content_kind("Markdown").unwrap(), "markdown");
+        assert!(normalized_content_kind("html").is_err());
+    }
+    fn absence(profile: &str, confidential: bool) -> Absence {
+        Absence {
+            id: "a".into(),
+            profile_id: profile.into(),
+            reason_type: "Chemotherapy".into(),
+            date_from: "2026-08-01".into(),
+            date_to: "2026-08-10".into(),
+            approved: true,
+            reason_confidential: confidential,
+            availability: "away".into(),
+        }
+    }
+    #[test]
+    fn a_confidential_reason_is_hidden_from_colleagues_but_the_availability_is_not() {
+        let hidden = redacted_for(absence("p", true), "q", false);
+        assert_eq!(hidden.reason_type, "Private");
+        assert_eq!(hidden.availability, "away");
+        assert_eq!(hidden.date_from, "2026-08-01");
+        // The person themselves and an admin still read the reason.
+        assert_eq!(
+            redacted_for(absence("p", true), "p", false).reason_type,
+            "Chemotherapy"
+        );
+        assert_eq!(
+            redacted_for(absence("p", true), "q", true).reason_type,
+            "Chemotherapy"
+        );
+        // A non-confidential reason is never touched.
+        assert_eq!(
+            redacted_for(absence("p", false), "q", false).reason_type,
+            "Chemotherapy"
+        );
+    }
+    #[test]
+    fn availability_is_a_closed_set() {
+        assert_eq!(normalized_availability("").unwrap(), "away");
+        assert_eq!(normalized_availability("Partial").unwrap(), "partial");
+        assert!(normalized_availability("maybe").is_err());
+    }
+    #[test]
+    fn v53_columns_land_on_a_pre_v53_database_with_todays_behaviour() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        crate::db::seed(&c).unwrap();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO todos(id,profile_id,content) VALUES('t','p','Legacy')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved) VALUES('a','p','Vacation','2026-08-01','2026-08-02',1)", []).unwrap();
+        let kind: String = c
+            .query_row("SELECT content_kind FROM todos WHERE id='t'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap();
+        assert_eq!(kind, "text");
+        let legacy = absence_on(&c, "a").unwrap().unwrap();
+        assert!(!legacy.reason_confidential);
+        assert_eq!(legacy.availability, "away");
+        // A legacy row stays readable by everybody, exactly as before V53.
+        assert_eq!(
+            redacted_for(legacy, "someone-else", false).reason_type,
+            "Vacation"
+        );
     }
 }

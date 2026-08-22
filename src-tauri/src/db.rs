@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 52;
+pub const SCHEMA_VERSION: i64 = 53;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -417,7 +417,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V51: feed destinations are optional; legacy rows remain unassigned. Hand-built
     // partial fixtures may predate V13 and have no feed table at all.
     if version < 51 && table_exists(&tx, "calendar_feeds")? {
-        add_column_if_missing(&tx, "calendar_feeds", "calendar_id", "TEXT REFERENCES calendars(id) ON DELETE SET NULL")?;
+        add_column_if_missing(
+            &tx,
+            "calendar_feeds",
+            "calendar_id",
+            "TEXT REFERENCES calendars(id) ON DELETE SET NULL",
+        )?;
         tx.execute_batch(SCHEMA_V51)?;
     }
     // V52: each application owns one Ed25519 signing key pair used to sign outbound
@@ -427,7 +432,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 52 {
         tx.execute_batch(SCHEMA_V52)?;
     }
-
+    // V53: to-do content kind and confidential absence availability; column-only migration.
+    if version < 53 {
+        if table_exists(&tx, "todos")? { add_column_if_missing(&tx, "todos", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?; }
+        if table_exists(&tx, "absences")? {
+            add_column_if_missing(&tx, "absences", "reason_confidential", "INTEGER NOT NULL DEFAULT 0")?;
+            add_column_if_missing(&tx, "absences", "availability", "TEXT NOT NULL DEFAULT 'away'")?;
+        }
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1120,7 +1132,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 52);
+        assert_eq!(SCHEMA_VERSION, 53);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1156,7 +1168,10 @@ mod tests {
             let version: i64 = conn
                 .query_row("PRAGMA user_version", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(version, SCHEMA_VERSION, "ladder from v{start} lands on head");
+            assert_eq!(
+                version, SCHEMA_VERSION,
+                "ladder from v{start} lands on head"
+            );
             for table in ["documents", "document_files", "user_preferences"] {
                 assert!(
                     table_exists(&conn, table).unwrap(),

@@ -1177,7 +1177,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "delete_calendar_feed" | "sync_calendar_feed" => CommandPolicy::CalendarFeedOwnerAction,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "delete_todo" => CommandPolicy::TodoOwnerWrite,
+        "update_todo" | "delete_todo" | "postpone_todo" | "convert_todo_to_issue" => {
+            CommandPolicy::TodoOwnerWrite
+        }
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
@@ -2795,6 +2797,27 @@ async fn cmd(
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
         };
     }
+    // A confidential absence reason never leaves the process for a reader who is not
+    // the person themselves or an administrator: redaction happens here, at the one
+    // chokepoint every web read passes through, not in the view.
+    if name == "list_absences" || name == "current_absences" {
+        let admin = user.role == "admin";
+        let rows = if name == "list_absences" {
+            personal::list_absences(arg::<Option<String>>(&body, "profile_id").ok().flatten())
+        } else {
+            match arg::<String>(&body, "date") {
+                Ok(date) => personal::current_absences(date),
+                Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response(),
+            }
+        };
+        return match rows {
+            Ok(rows) => {
+                Json(json!({"ok":true,"value":personal::redact_all(rows,&user.profile_id,admin)}))
+                    .into_response()
+            }
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+        };
+    }
     if name == "update_absence" {
         return absence_update(&user, &body);
     }
@@ -3081,6 +3104,8 @@ async fn cmd(
     "update_team_membership" => platform::update_team_membership(membership: platform::TeamMembership),
     "update_todo" => personal::update_todo(todo: personal::Todo),
     "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
+    "postpone_todo" => personal::postpone_todo(id: String, days: i64),
+    "convert_todo_to_issue" => personal::convert_todo_to_issue(id: String, project_id: String, status_id: Option<String>),
     })
 }
 /// OAuth2 authorization endpoint (RFC 6749 §3.1). The resource owner is the caller's
@@ -3669,7 +3694,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{rotated}");
-        assert_ne!(rotated["value"]["key_id"].as_str(), Some(first_key_id.as_str()));
+        assert_ne!(
+            rotated["value"]["key_id"].as_str(),
+            Some(first_key_id.as_str())
+        );
         assert_eq!(
             rotated["value"]["previous_key_id"].as_str(),
             Some(first_key_id.as_str())

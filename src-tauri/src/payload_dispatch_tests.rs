@@ -162,7 +162,10 @@ fn rotation_publishes_a_new_key_and_keeps_the_previous_public_key() {
     let second = rotate_app_signing_key_on(&c, "app").unwrap();
     assert_ne!(second.key_id, first.key_id);
     assert_ne!(second.public_key, first.public_key);
-    assert_eq!(second.previous_key_id.as_deref(), Some(first.key_id.as_str()));
+    assert_eq!(
+        second.previous_key_id.as_deref(),
+        Some(first.key_id.as_str())
+    );
     assert_eq!(
         second.previous_public_key.as_deref(),
         Some(first.public_key.as_str())
@@ -275,11 +278,15 @@ fn a_real_post_carries_headers_a_receiver_can_verify_independently() {
     let sent = receiver.join().expect("receiver thread");
     assert_eq!(sent.method_and_path, "POST /hook HTTP/1.1");
     assert_eq!(
-        sent.headers.get("x-gaia-space-application").map(String::as_str),
+        sent.headers
+            .get("x-gaia-space-application")
+            .map(String::as_str),
         Some("app")
     );
     assert_eq!(
-        sent.headers.get("x-gaia-space-payload-class").map(String::as_str),
+        sent.headers
+            .get("x-gaia-space-payload-class")
+            .map(String::as_str),
         Some("MessagePayload")
     );
     assert_eq!(
@@ -390,13 +397,17 @@ fn the_egress_guard_refuses_internal_addresses_and_plaintext_secrets() {
         "endpoint must use https"
     );
     guard_endpoint_with("http://93.184.216.34/hook", plain, false, true).unwrap();
-    let error = guard_endpoint_with("http://93.184.216.34/hook", secretive, true, true).unwrap_err();
+    let error =
+        guard_endpoint_with("http://93.184.216.34/hook", secretive, true, true).unwrap_err();
     assert!(error.contains("credential-bearing"), "{error}");
     // The same secret over https is fine: the objection is the plaintext hop.
     guard_endpoint_with("https://93.184.216.34/hook", secretive, false, false).unwrap();
     // Non-HTTP schemes never dispatch.
     for endpoint in ["file:///etc/passwd", "gopher://x/1", "ftp://x/y"] {
-        assert!(guard_endpoint_with(endpoint, plain, true, true).is_err(), "{endpoint}");
+        assert!(
+            guard_endpoint_with(endpoint, plain, true, true).is_err(),
+            "{endpoint}"
+        );
     }
 }
 

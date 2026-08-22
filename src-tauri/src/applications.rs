@@ -2782,7 +2782,10 @@ pub(crate) fn sign_app_payload(
     let pair = ring::signature::Ed25519KeyPair::from_pkcs8(&pkcs8)
         .map_err(|_| "stored signing key is unusable".to_string())?;
     let signature = pair.sign(format!("{timestamp}.{body}").as_bytes());
-    Ok((key.key_id, format!("ed25519={}", STANDARD.encode(signature.as_ref()))))
+    Ok((
+        key.key_id,
+        format!("ed25519={}", STANDARD.encode(signature.as_ref())),
+    ))
 }
 
 /// Verification path an app SDK mirrors: base64 public key, the same `{ts}.{body}`

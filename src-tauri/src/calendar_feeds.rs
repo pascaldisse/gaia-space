@@ -147,7 +147,7 @@ pub struct CalendarFeedInput {
     pub profile_id: String,
     pub label: String,
     pub ics_url: String,
-pub calendar_id: Option<String>,
+    pub calendar_id: Option<String>,
 }
 
 fn row(c: &Connection, id: &str) -> Result<Option<CalendarFeed>> {
@@ -212,7 +212,9 @@ pub fn save_calendar_feed(input: CalendarFeedInput) -> Result<CalendarFeed> {
     let c = db::conn()?;
     if let Some(calendar_id) = input.calendar_id.as_deref() {
         let owner = calendar_owner(calendar_id)?.ok_or_else(|| "Calendar not found".to_string())?;
-        if owner != input.profile_id { return Err("Calendar belongs to another profile".into()); }
+        if owner != input.profile_id {
+            return Err("Calendar belongs to another profile".into());
+        }
     }
     let id = match &input.id {
         Some(id) if row(&c, id)?.is_some() => {
@@ -463,12 +465,31 @@ mod tests {
         c.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES('work','pa','Work','#2563eb',1,0),('private','pa','Private','#2563eb',0,0)", []).unwrap();
         c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count,calendar_id) VALUES('work-feed','pa','Work','sealed',0,0,'work'),('private-feed','pa','Private','sealed',0,0,'private')", []).unwrap();
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('work-feed','u1','1','Visible',1900000000,NULL,NULL),('private-feed','u2','1','Hidden',1900000000,NULL,NULL)", []).unwrap();
-        let items = external_items_on(&c, "pa", 1899900000, 1900010000, "2030-03-10", "2030-03-11").unwrap();
-        assert_eq!(items.len(), 1, "hidden named calendars must not leak into the aggregate");
-        assert_eq!(items[0].calendar_id.as_deref(), Some("work"), "the UI filter receives the owning calendar");
-        c.execute("DELETE FROM calendars WHERE id='work'", []).unwrap();
-        let retained: Option<String> = c.query_row("SELECT calendar_id FROM calendar_feeds WHERE id='work-feed'", [], |r| r.get(0)).unwrap();
-        assert_eq!(retained, None, "deleting a calendar unassigns its feed without deleting cached events");
+        let items = external_items_on(&c, "pa", 1899900000, 1900010000, "2030-03-10", "2030-03-11")
+            .unwrap();
+        assert_eq!(
+            items.len(),
+            1,
+            "hidden named calendars must not leak into the aggregate"
+        );
+        assert_eq!(
+            items[0].calendar_id.as_deref(),
+            Some("work"),
+            "the UI filter receives the owning calendar"
+        );
+        c.execute("DELETE FROM calendars WHERE id='work'", [])
+            .unwrap();
+        let retained: Option<String> = c
+            .query_row(
+                "SELECT calendar_id FROM calendar_feeds WHERE id='work-feed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, None,
+            "deleting a calendar unassigns its feed without deleting cached events"
+        );
     }
 
     #[test]

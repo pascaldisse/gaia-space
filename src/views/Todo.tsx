@@ -5,9 +5,12 @@ import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
+import { parseMarkdown } from "../markdownLite";
 import { humanError } from "../session";
 
-const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[] });
+const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
+// Tokens, never HTML: a task body can style itself but can never inject markup.
+const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
 type MemberLookup = { ids?: string[]; failed?: string };
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
@@ -28,8 +31,6 @@ export default function Todo() {
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
-  const personalTodos=()=>todos()?.filter(todo=>!todo.project_id)??[];
-  const groupedTodos=()=>todos()?.filter(todo=>todo.project_id)??[];
   const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
   // A person is on or off this task; the popover stays open so several can be picked.
   const toggleAssignee=(id:string)=>{ form().assignee_ids.includes(id) ? removeAssignee(id) : addAssignee(id); };
@@ -40,7 +41,7 @@ export default function Todo() {
   const selectableProjects=()=>(projects()??[]).filter(project=>!project.archived).map(project=>({id:project.id,name:project.name,key:project.key}));
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
   const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
-  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
   // ── edit an existing task (content/notes/due date/project/assignees/source) ──
@@ -53,7 +54,7 @@ export default function Todo() {
   const editMembersFailed=()=>failedOf(editMembers());
   const startEdit=(todo:TodoItem)=>{
     setEditingId(todo.id);
-    setEditForm({ content:todo.content, notes:todo.notes??"", due_date:todo.due_date??"", project_id:todo.project_id??"", source_entity_type:todo.source_entity_type??"", source_entity_id:todo.source_entity_id??"", assignee_ids:[...todo.assignee_ids] });
+    setEditForm({ content:todo.content, notes:todo.notes??"", due_date:todo.due_date??"", project_id:todo.project_id??"", source_entity_type:todo.source_entity_type??"", source_entity_id:todo.source_entity_id??"", assignee_ids:[...todo.assignee_ids], content_kind:todo.content_kind??"text" });
     setError("");
   };
   const cancelEdit=()=>setEditingId(null);
@@ -67,7 +68,7 @@ export default function Todo() {
       if(!f.content.trim()) throw new Error("Task content cannot be empty.");
       if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together.");
       // Everything not in the edit form (id, profile_id, done…) survives untouched.
-      await personalApi.updateTodo({...todo,content:f.content.trim(),notes:f.notes.trim()||null,due_date:f.due_date||null,project_id:f.project_id||null,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids});
+      await personalApi.updateTodo({...todo,content:f.content.trim(),notes:f.notes.trim()||null,due_date:f.due_date||null,project_id:f.project_id||null,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind});
       setEditingId(null);
       refetch();
     } catch(reason) { setError(humanError(reason)); }
@@ -80,6 +81,15 @@ export default function Todo() {
   const dueSoon=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>=today()&&todo.due_date<=inDays(7));
   const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
   const attention=()=>[...overdue(),...dueSoon()].sort((a,b)=>(a.due_date??"").localeCompare(b.due_date??"")).slice(0,5);
+  // Today = due today or already overdue (an overdue task IS today's work); Later = a
+  // future due date; No date = never scheduled. Every open task lands in exactly one.
+  const todayList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<=today());
+  const laterList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>today());
+  const somedayList=()=>openTodos().filter(todo=>!todo.due_date);
+  const doneList=()=>todos()?.filter(todo=>todo.done)??[];
+  const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  // Only a task that already belongs to a project can become that project's issue.
+  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into an issue."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const editRow=(todo:TodoItem)=><article class="task-card task-card-editing">
     <div class="task-body">
       <input class="composer-title" autofocus aria-label="Task title" value={editForm().content} onInput={e=>setEditForm({...editForm(),content:e.currentTarget.value})} onKeyDown={e=>{ if(e.key==="Escape") cancelEdit(); }}/>
@@ -93,6 +103,7 @@ export default function Todo() {
       <Show when={editMembersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
       <Show when={editForm().assignee_ids.length}><ul class="assignee-chips"><For each={editForm().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeEditAssignee(id)}>×</button></li>}</For></ul></Show>
       <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={editForm().notes} onInput={e=>setEditForm({...editForm(),notes:e.currentTarget.value})}/></label>
+      <label class="fld-check"><input type="checkbox" checked={editForm().content_kind==="markdown"} onChange={e=>setEditForm({...editForm(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
       <details class="composer-source" open={Boolean(editForm().source_entity_type||editForm().source_entity_id)}><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={editForm().source_entity_type} onInput={e=>setEditForm({...editForm(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={editForm().source_entity_id} onInput={e=>setEditForm({...editForm(),source_entity_id:e.currentTarget.value})}/></div></details>
       <div class="composer-actions task-edit-actions"><button type="button" class="ghost" onClick={cancelEdit}>Cancel</button><button type="button" class="primary composer-submit" onClick={()=>saveEdit(todo)}>Save</button></div>
     </div>
@@ -100,7 +111,7 @@ export default function Todo() {
   const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
     <button type="button" class="task-body task-body-edit" aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
-      <span class="task-title">{todo.content}</span>
+      <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
       <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
 <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
         <div class="task-meta">
@@ -111,7 +122,16 @@ export default function Todo() {
         </div>
       </Show>
     </button>
-    <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>
+    <div class="task-row-actions">
+      <Show when={!todo.done}>
+        <button type="button" class="ghost small" title="Postpone by one day" aria-label={`Postpone ${todo.content} by a day`} onClick={()=>postpone(todo,1)}>+1d</button>
+        <button type="button" class="ghost small" title="Postpone by a week" aria-label={`Postpone ${todo.content} by a week`} onClick={()=>postpone(todo,7)}>+1w</button>
+        <Show when={todo.project_id&&todo.source_entity_type!=="issue"}>
+          <button type="button" class="ghost small" title="Convert to issue" aria-label={`Convert ${todo.content} to an issue`} onClick={()=>convert(todo)}>→ Issue</button>
+        </Show>
+      </Show>
+      <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>
+    </div>
   </article>}>
     {editRow(todo)}
   </Show>;
@@ -134,16 +154,30 @@ export default function Todo() {
           <Show when={form().project_id&&!projectMembers.loading&&!membersFailed()&&!memberIds().length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
           <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
+          <label class="fld-check"><input type="checkbox" checked={form().content_kind==="markdown"} onChange={e=>setForm({...form(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
 <details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
           <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
         </form>
         <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
         <section class="task-list">
-          <Show when={!personalTodos().length}><p class="personal-empty">No personal tasks.</p></Show>
-          <For each={personalTodos()}>{todoRow}</For>
+          <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
+          <Show when={todayList().length} fallback={<p class="personal-empty">Nothing due today.</p>}><For each={todayList()}>{todoRow}</For></Show>
         </section>
-        <Show when={groupedTodos().length}>
-          <section class="task-list"><For each={groupedTodos()}>{todoRow}</For></section>
+        <section class="task-list">
+          <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
+          <Show when={laterList().length} fallback={<p class="personal-empty">Nothing scheduled ahead.</p>}><For each={laterList()}>{todoRow}</For></Show>
+        </section>
+        <Show when={somedayList().length}>
+          <section class="task-list">
+            <h3 class="task-group-title">No date<span class="rail-count">{somedayList().length}</span></h3>
+            <For each={somedayList()}>{todoRow}</For>
+          </section>
+        </Show>
+        <Show when={doneList().length}>
+          <section class="task-list">
+            <h3 class="task-group-title">Done<span class="rail-count">{doneList().length}</span></h3>
+            <For each={doneList()}>{todoRow}</For>
+          </section>
         </Show>
       </div>
       <aside class="view-rail todo-rail">

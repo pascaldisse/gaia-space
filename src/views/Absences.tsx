@@ -1,5 +1,9 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { personalApi, type Absence } from "../api/personal";
+import {
+  personalApi,
+  type Absence,
+  type AbsenceAvailability,
+} from "../api/personal";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
@@ -27,7 +31,14 @@ const emptyAbsence = () => ({
   date_from: "",
   date_to: "",
   approved: false,
+  reason_confidential: false,
+  availability: "away" as AbsenceAvailability,
 });
+const availabilityLabels: Record<string, string> = {
+  away: "Not available",
+  partial: "Partly available",
+  available: "Available elsewhere",
+};
 const dateKey = () => new Date().toISOString().slice(0, 10);
 
 function statusFor(absence: Absence) {
@@ -225,6 +236,38 @@ export default function Absences() {
               />
             </label>
           </div>
+          <div class="timeoff-form-grid">
+            <label class="fld">
+              Availability
+              <select
+                value={draft().availability}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft(),
+                    availability: event.currentTarget
+                      .value as AbsenceAvailability,
+                  })
+                }
+              >
+                <option value="away">Not available</option>
+                <option value="partial">Partly available</option>
+                <option value="available">Available elsewhere</option>
+              </select>
+            </label>
+            <label class="fld-check">
+              <input
+                type="checkbox"
+                checked={draft().reason_confidential}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft(),
+                    reason_confidential: event.currentTarget.checked,
+                  })
+                }
+              />{" "}
+              Keep the reason private (colleagues see only the availability)
+            </label>
+          </div>
           <div class="timeoff-form-foot">
             <Show when={mayApprove()}>
               <label class="fld-check">
@@ -329,6 +372,10 @@ export default function Absences() {
                             <strong class="timeoff-reason">
                               {absence.reason_type}
                             </strong>
+                            <span class="pill">
+                              {availabilityLabels[absence.availability] ??
+                                absence.availability}
+                            </span>
                             <span
                               class="pill"
                               classList={{ [`pill-${status.key}`]: true }}

@@ -2,8 +2,8 @@
 //! Kept beside `applications.rs`: the payload family and the signing keys live there,
 //! this file is the outbound path plus the tauri command surface.
 use crate::applications::{
-    app_signing_key_on, dispatch_body, rotate_app_signing_key_on, sign_app_payload,
-    AppDispatch, AppSigningKey, ApplicationPayload,
+    app_signing_key_on, dispatch_body, rotate_app_signing_key_on, sign_app_payload, AppDispatch,
+    AppSigningKey, ApplicationPayload,
 };
 use crate::db;
 type Result<T> = std::result::Result<T, String>;
@@ -189,7 +189,9 @@ pub(crate) fn guard_endpoint_with(
             return Err("endpoint must use https".into());
         }
     }
-    let host = url.host_str().ok_or_else(|| "endpoint has no host".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "endpoint has no host".to_string())?;
     if allow_private {
         return Ok(());
     }
@@ -199,7 +201,9 @@ pub(crate) fn guard_endpoint_with(
     let host = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         if address_is_internal(ip) {
-            return Err(format!("endpoint address {ip} is not routable off this host"));
+            return Err(format!(
+                "endpoint address {ip} is not routable off this host"
+            ));
         }
         return Ok(());
     }

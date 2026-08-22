@@ -358,6 +358,8 @@ pub fn run() {
             personal::create_todo,
             personal::update_todo,
             personal::set_todo_completion,
+            personal::postpone_todo,
+            personal::convert_todo_to_issue,
             personal::delete_todo,
             personal::list_absences,
             personal::create_absence,

@@ -87,7 +87,7 @@ if (invalid) throw new Error(invalid);
 const owner=profileId();
 if (!owner) throw new Error("Select a profile before creating a task.");
 // The server rebinds the owner from the session; due_date stays a calendar day.
-await personalApi.createTodo({ profile_id:owner, content:f.title.trim(), notes:null, due_date:f.day, project_id:null, done:false, source_entity_type:null, source_entity_id:null, assignee_ids:[] });
+await personalApi.createTodo({ profile_id:owner, content:f.title.trim(), notes:null, due_date:f.day, project_id:null, done:false, source_entity_type:null, source_entity_id:null, assignee_ids:[], content_kind:"text" });
 setComposerDay(undefined); setNotice(`Task added for ${f.day}.`); refetch();
 } catch (reason) { setError(humanError(reason)); }
 };

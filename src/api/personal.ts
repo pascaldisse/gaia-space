@@ -1,8 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[] };
+export type TodoContentKind = "text"|"markdown";
+export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind };
 export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
-export type Absence = { id:string; profile_id:string; reason_type:string; date_from:string; date_to:string; approved:boolean };
+export type AbsenceAvailability = "away"|"partial"|"available";
+// `reason_type` arrives as "Private" when the owner marked it confidential and the
+// reader is neither the owner nor an admin; the server redacts, the view never does.
+export type Absence = { id:string; profile_id:string; reason_type:string; date_from:string; date_to:string; approved:boolean; reason_confidential:boolean; availability:AbsenceAvailability };
 export type Notification = { id:string; recipient_id:string; event_type:string; title:string; body:string|null; entity_type:string|null; entity_id:string|null; created_at:number; read_at:number|null };
 export type SubscriptionSetting = { profile_id:string; event_type:string; enabled:boolean };
 export type SubscriptionTargetType = "org"|"team"|"project"|"location"|"profile"|"entity";
@@ -23,6 +27,8 @@ export const personalApi = {
   removeProjectMember:(project_id:string,member_id:string)=>call<string[]>("remove_project_member",{projectId:project_id,memberId:member_id}),
   calendar:(profile_id:string,range_start:number,range_end:number,range_start_date:string,range_end_date:string)=>call<CalendarItem[]>("calendar_aggregate",{profileId:profile_id,rangeStart:range_start,rangeEnd:range_end,rangeStartDate:range_start_date,rangeEndDate:range_end_date}),
   createTodo:(input:Omit<Todo,"id">&{id?:string})=>call<Todo>("create_todo",{input}), updateTodo:(todo:Todo)=>call<Todo>("update_todo",{todo}), setTodoCompletion:(id:string,done:boolean)=>call<Todo>("set_todo_completion",{id,done}), deleteTodo:(id:string)=>call<void>("delete_todo",{id}),
+  postponeTodo:(id:string,days:number)=>call<Todo>("postpone_todo",{id,days}),
+  convertTodoToIssue:(id:string,project_id:string,status_id?:string)=>call<{id:string;project_id:string;number:number;title:string}>("convert_todo_to_issue",{id,projectId:project_id,statusId:status_id??null}),
   absences:(profile_id?:string)=>call<Absence[]>("list_absences",{profileId:profile_id}), createAbsence:(input:Omit<Absence,"id">&{id?:string})=>call<Absence>("create_absence",{input}), updateAbsence:(absence:Absence)=>call<Absence>("update_absence",{absence}), deleteAbsence:(id:string)=>call<void>("delete_absence",{id}), currentAbsences:(date:string)=>call<Absence[]>("current_absences",{date}),
   notifications:(recipient_id:string,unread_only=false)=>call<Notification[]>("list_notifications",{recipientId:recipient_id,unreadOnly:unread_only}), emitNotification:(input:Omit<Notification,"id"|"created_at"|"read_at">&{id?:string})=>call<Notification|null>("emit_notification",{input}), markRead:(id:string)=>call<void>("mark_notification_read",{id}),
   subscriptions:(profile_id:string)=>call<SubscriptionSetting[]>("list_subscription_settings",{profileId:profile_id}), saveSubscription:(setting:SubscriptionSetting)=>call<SubscriptionSetting>("save_subscription_setting",{setting}), deleteSubscription:(profile_id:string,event_type:string)=>call<void>("delete_subscription_setting",{profileId:profile_id,eventType:event_type}),
