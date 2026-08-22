@@ -305,6 +305,7 @@ pub fn run() {
             personal::save_subscription_setting,
             personal::delete_subscription_setting,
             personal::goto_search,
+            personal::full_text_search,
             personal::dashboard_aggregate,
             calendar_feeds::list_calendar_feeds,
             calendar_feeds::save_calendar_feed,

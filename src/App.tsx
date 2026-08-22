@@ -49,6 +49,7 @@ const projectSettingsView:View={name:"Project Settings",icon:"settings",componen
 export default function App() {
   const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
+const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const [accountOpen,setAccountOpen]=createSignal(false);
   const [menuOpen,setMenuOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
@@ -65,7 +66,7 @@ export default function App() {
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
-    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
+    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==="f"){event.preventDefault();setFullTextOpen(open=>!open)} else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
     const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
     window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
     onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
@@ -106,7 +107,7 @@ export default function App() {
           <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
         </Show>
         <main class="workspace"><Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show></main>
-        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
+        <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
     </Match>
   </Switch>;

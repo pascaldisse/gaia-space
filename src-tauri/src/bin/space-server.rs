@@ -899,7 +899,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
         "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
-        "goto_search" => CommandPolicy::SearchRead,
+        "goto_search" | "full_text_search" => CommandPolicy::SearchRead,
         "list_blog_posts" | "get_blog_post" | "publish_blog_draft" => CommandPolicy::Session,
         "issue_time_total" | "join_channel" | "launch_sprint" | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
@@ -2010,6 +2010,7 @@ async fn cmd(
     "get_role" => platform::get_role(id: String),
     "get_team" => platform::get_team(id: String),
     "goto_search" => personal::goto_search_scoped(query: String, limit: Option<i64>, profile_id: String, allow_all: bool),
+    "full_text_search" => personal::full_text_search_scoped(query: String, limit: Option<i64>, profile_id: String, allow_all: bool),
     "list_blog_posts" => blogs::list_blog_posts_scoped(filter: Option<blogs::BlogFilter>, profile_id: String, allow_all: bool),
     "get_blog_post" => blogs::get_blog_post_scoped(id: String, profile_id: String, allow_all: bool),
     "publish_blog_draft" => blogs::publish_blog_draft_scoped(input: blogs::PublishBlogDraftInput, profile_id: String, allow_all: bool),

@@ -31,8 +31,8 @@ Worst gaps: chat attachments/mentions/scheduled/pins/polls · doc sharing+KB per
 Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
-54 rows — done 2 · partial 20 · stub 3 · missing 29.
-Worst gaps: blogs absent · locations/org-directory stub · full-text search absent (Goto=substring) · dashboard personalization · subscription/feeds system.
+54 rows — done 5 · partial 22 · stub 3 · missing 24.
+Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
 42 rows — done 0 · partial 6 · stub 19 · missing 17.
