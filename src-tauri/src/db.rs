@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 43;
+pub const SCHEMA_VERSION: i64 = 45;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -401,6 +401,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 43 && table_exists(&tx, "documents")? {
         tx.execute_batch(SCHEMA_V43)?;
     }
+    if version < 45 { tx.execute_batch(SCHEMA_V45)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -719,6 +720,12 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 /// `state` is the whole lifecycle: exactly one ACTIVE row signs, any number of RETIRING
 /// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
 /// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
+pub(crate) const SCHEMA_V45: &str = r#"
+CREATE TABLE IF NOT EXISTS ide_connections (id TEXT PRIMARY KEY, ide TEXT NOT NULL, connected INTEGER NOT NULL DEFAULT 1, last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS ide_opened_repositories (connection_id TEXT NOT NULL REFERENCES ide_connections(id) ON DELETE CASCADE, repository TEXT NOT NULL, PRIMARY KEY(connection_id, repository));
+CREATE INDEX IF NOT EXISTS ide_opened_repositories_repository ON ide_opened_repositories(repository);
+"#;
+
 pub(crate) const SCHEMA_V41: &str = r#"
 CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
 CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);

@@ -93,6 +93,8 @@ pub fn run() {
             applications::save_devfile,
             applications::delete_devfile,
             applications::open_in_ide,
+            applications::list_ide_sessions,
+            applications::report_ide_session,
             applications::list_applications,
             applications::save_application,
             applications::delete_application,
