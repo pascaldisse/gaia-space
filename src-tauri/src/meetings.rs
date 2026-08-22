@@ -109,7 +109,9 @@ pub fn list_meetings_scoped(profile_id: String) -> Result<Vec<Meeting>> {
 /// needs "which meetings may this profile see" — list, calendar aggregate,
 /// occurrence expansion — goes through here, so the predicates cannot drift.
 pub fn visible_meetings_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<Meeting>> {
-    let mut s = c.prepare(&visible_meetings_sql("")).map_err(|e| e.to_string())?;
+    let mut s = c
+        .prepare(&visible_meetings_sql(""))
+        .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([profile_id], row_to_meeting)
         .map_err(|e| e.to_string())?
@@ -339,7 +341,11 @@ fn next_start(start: DateTime<Utc>, rule: &Rule) -> Result<DateTime<Utc>> {
 
 /// Occurrences of one meeting overlapping `[range_start, range_end)`. Visibility
 /// is the caller's business: this only knows the RRULE and the range.
-pub fn expand(meeting: &Meeting, range_start: i64, range_end: i64) -> Result<Vec<MeetingOccurrence>> {
+pub fn expand(
+    meeting: &Meeting,
+    range_start: i64,
+    range_end: i64,
+) -> Result<Vec<MeetingOccurrence>> {
     let duration = meeting.ends_at - meeting.starts_at;
     let rule = meeting.rrule.as_deref().map(parse_rule).transpose()?;
     let mut start = Utc
@@ -485,14 +491,22 @@ mod tests {
             .into_iter()
             .map(|m| m.id)
             .collect();
-        assert_eq!(owner, vec!["m-private", "m-shared"], "the organizer sees both");
+        assert_eq!(
+            owner,
+            vec!["m-private", "m-shared"],
+            "the organizer sees both"
+        );
 
         let guest: Vec<String> = visible_meetings_on(&c, "p-guest")
             .unwrap()
             .into_iter()
             .map(|m| m.id)
             .collect();
-        assert_eq!(guest, vec!["m-shared"], "an invited guest sees only their meeting");
+        assert_eq!(
+            guest,
+            vec!["m-shared"],
+            "an invited guest sees only their meeting"
+        );
 
         assert!(
             visible_meetings_on(&c, "p-stranger").unwrap().is_empty(),
@@ -508,7 +522,10 @@ mod tests {
             )
             .optional()
             .unwrap();
-        assert!(one.is_none(), "get_meeting cannot reach outside the scope either");
+        assert!(
+            one.is_none(),
+            "get_meeting cannot reach outside the scope either"
+        );
     }
 
     #[test]
