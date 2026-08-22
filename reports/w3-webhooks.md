@@ -32,4 +32,10 @@ bun test                    115 pass / 0 fail (23 files)
 bun run build               ✓ built
 python3 scripts/parity_totals.py --check   TOTAL rows 356 (unchanged)
 ```
-UNVERIFIED: concurrent `process_webhook_queue` sweeps are not proven single-delivery (no row-level claim); Kali's audit owns this.
+## Audit round (Kali → BLOCK → fixed @6074758)
+- **duplicate delivery, reproduced**: two `process_webhook_queue` calls both POSTed the same row. Fixed with a single conditional UPDATE that stamps a 120s lease — the loser sees zero rows changed. Regression test `two_sweepers_deliver_a_due_row_exactly_once`, falsified against the unclaimed code (fails with `left: 2`).
+- **V39 crashed hand-built partial fixtures** (`webhook_subscriptions` absent at user_version 27): the additive step is now table-guarded.
+- **concurrent writers**: connections now carry `busy_timeout(5s)` instead of failing the caller on a contended write.
+- HMAC verified against independent Python/openssl vectors incl. a 100-byte key — match.
+
+Still open (not this lane's debt): `cargo clippy -D warnings` fails on ~21 pre-existing lints in untouched files; receiver-side timestamp freshness / replay-cache expectations are undocumented.
