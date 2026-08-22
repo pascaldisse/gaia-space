@@ -9,6 +9,7 @@ import {
   newId,
   type ContainerType,
   type Document,
+  type DocumentAccessRecipient,
   type DocumentFolder,
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
@@ -39,6 +40,7 @@ export default function Documents() {
   // rebinds `created_by`/`container_id` from the cookie session and ignores client claims.
   // Desktop (local sqlite, no session) keeps the explicit operator profile choice.
   const [profiles] = createResource(() => documentsApi.listProfiles());
+  const [teams] = createResource(() => documentsApi.listTeams());
   const [localProfileId, setLocalProfileId] = createSignal<string | null>(null);
   const actingProfileId = () => (profileLocked() ? sessionProfileId() || null : localProfileId());
   const setActingProfileId = (id: string | null) => { if (!profileLocked()) setLocalProfileId(id); };
@@ -278,6 +280,46 @@ export default function Documents() {
   const [versions, { refetch: refetchVersions }] = createResource(selectedDocumentId, (id) =>
     id ? documentsApi.listDocVersions(id) : Promise.resolve([]),
   );
+  const [access, { refetch: refetchAccess }] = createResource(selectedDocumentId, (id) =>
+    id ? documentsApi.listDocumentAccess(id) : Promise.resolve([]),
+  );
+  const [showSharing, setShowSharing] = createSignal(false);
+  const [shareRecipientType, setShareRecipientType] = createSignal<"profile" | "team">("profile");
+  const [shareRecipientId, setShareRecipientId] = createSignal("");
+  const [shareAccessLevel, setShareAccessLevel] = createSignal<"viewer" | "editor">("viewer");
+  const canManageAccess = () => {
+    const doc = selectedDocument();
+    return doc?.container_type === "my-docs" && doc.created_by === actingProfileId();
+  };
+  const recipientName = (permission: DocumentAccessRecipient) =>
+    permission.recipient_type === "profile"
+      ? profiles()?.find((p) => p.id === permission.recipient_id)?.display_name ?? permission.recipient_id
+      : teams()?.find((t) => t.id === permission.recipient_id)?.name ?? permission.recipient_id;
+  async function saveAccess(next: DocumentAccessRecipient[]) {
+    const doc = selectedDocument();
+    if (!doc) return;
+    try {
+      await documentsApi.updateDocumentAccess(doc.id, next);
+      await refetchAccess();
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function addAccessRecipient() {
+    const recipientId = shareRecipientId();
+    if (!recipientId) return;
+    const next = (access() ?? []).filter(
+      (entry) => entry.recipient_type !== shareRecipientType() || entry.recipient_id !== recipientId,
+    );
+    next.push({ recipient_type: shareRecipientType(), recipient_id: recipientId, access_level: shareAccessLevel() });
+    await saveAccess(next);
+    setShareRecipientId("");
+  }
+  async function removeAccessRecipient(permission: DocumentAccessRecipient) {
+    await saveAccess((access() ?? []).filter(
+      (entry) => entry.recipient_type !== permission.recipient_type || entry.recipient_id !== permission.recipient_id,
+    ));
+  }
 
   async function saveDocument() {
     const doc = selectedDocument();
@@ -591,6 +633,11 @@ export default function Documents() {
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
                   </button>
+                  <Show when={canManageAccess()}>
+                    <button class="ghost small" aria-expanded={showSharing()} onClick={() => setShowSharing((open) => !open)}>
+                      {showSharing() ? "hide sharing" : "Share"}
+                    </button>
+                  </Show>
                   <button class="primary" onClick={saveDocument}>
                     Save version
                   </button>
@@ -609,6 +656,56 @@ export default function Documents() {
 
         <Show when={selectedDocument()}>
           <aside class="documents-history">
+            <Show when={canManageAccess() && showSharing()}>
+              <section class="document-sharing" aria-label="Document sharing">
+                <div class="sharing-head">
+                  <div class="section-label">Share document</div>
+                  <span class="sharing-note">Private document access</span>
+                </div>
+                <p class="hint">Invite people or teams as viewers or editors. Project documents inherit project access.</p>
+                <div class="sharing-add">
+                  <select value={shareRecipientType()} onChange={(e) => { setShareRecipientType(e.currentTarget.value as "profile" | "team"); setShareRecipientId(""); }}>
+                    <option value="profile">Person</option>
+                    <option value="team">Team</option>
+                  </select>
+                  <select value={shareRecipientId()} onChange={(e) => setShareRecipientId(e.currentTarget.value)}>
+                    <option value="">Select {shareRecipientType() === "profile" ? "person" : "team"}…</option>
+                    <Show when={shareRecipientType() === "profile"}>
+                      <For each={profiles()?.filter((p) => !p.archived && p.id !== actingProfileId())}>
+                        {(p) => <option value={p.id}>{p.display_name}</option>}
+                      </For>
+                    </Show>
+                    <Show when={shareRecipientType() === "team"}>
+                      <For each={teams()?.filter((t) => !t.archived)}>
+                        {(t) => <option value={t.id}>{t.name}</option>}
+                      </For>
+                    </Show>
+                  </select>
+                  <select value={shareAccessLevel()} onChange={(e) => setShareAccessLevel(e.currentTarget.value as "viewer" | "editor")}>
+                    <option value="viewer">Viewer</option>
+                    <option value="editor">Editor</option>
+                  </select>
+                  <button class="primary small" disabled={!shareRecipientId()} onClick={addAccessRecipient}>Add</button>
+                </div>
+                <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
+                  <ul class="sharing-list">
+                    <For each={access()}>
+                      {(permission) => (
+                        <li>
+                          <span class="sharing-recipient">{recipientName(permission)}</span>
+                          <span class="sharing-kind">{permission.recipient_type === "profile" ? "person" : "team"}</span>
+                          <span class="sharing-level">{permission.access_level}</span>
+                          <button class="ghost small" aria-label={`Remove ${recipientName(permission)}`} onClick={() => removeAccessRecipient(permission)}>Remove</button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={(access() ?? []).length === 0}>
+                    <p class="hint">Only you can access this document.</p>
+                  </Show>
+                </Show>
+              </section>
+            </Show>
             <div class="section-label" style="padding:0 0 0.4em">
               Version history
             </div>

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 21;
+pub const SCHEMA_VERSION: i64 = 25;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -191,9 +191,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 20 {
         tx.execute_batch(SCHEMA_V20)?;
     }
+    // V21: explicit per-document viewer/editor grants for private documents.
     if version < 21 {
         tx.execute_batch(SCHEMA_V21)?;
     }
+    // V22: CODEOWNERS is read from each MR's source commit; no cache belongs in SQLite.
+    if version < 22 { tx.execute_batch(SCHEMA_V22)?; }
+    if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
+    if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
+    if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -267,6 +273,8 @@ CREATE TABLE IF NOT EXISTS safe_merge_runs (id TEXT PRIMARY KEY, review_id TEXT 
 CREATE TABLE IF NOT EXISTS document_folders (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, parent_id TEXT REFERENCES document_folders(id), name TEXT NOT NULL, description TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, folder_id TEXT REFERENCES document_folders(id), doc_type TEXT NOT NULL CHECK(doc_type IN ('text','file')), title TEXT NOT NULL, body TEXT, version INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
+CREATE TABLE IF NOT EXISTS document_permissions (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(document_id, recipient_type, recipient_id));
+CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
 CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
 CREATE TABLE IF NOT EXISTS pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
@@ -298,7 +306,14 @@ INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_
 "#;
 
 pub(crate) const SCHEMA_V21: &str = r#"
-CREATE TABLE IF NOT EXISTS board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
+CREATE TABLE IF NOT EXISTS document_permissions (
+ document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')),
+ recipient_id TEXT NOT NULL,
+ access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')),
+ PRIMARY KEY(document_id, recipient_type, recipient_id)
+);
+CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
 "#;
 
 pub(crate) const SCHEMA_V20: &str = r#"
@@ -309,6 +324,32 @@ CREATE TABLE IF NOT EXISTS protected_branch_rules (
  allow_merge_json TEXT, linear_history INTEGER NOT NULL DEFAULT 0, bypass_quality_gate_json TEXT
 );
 CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_branch_rules(project_id, branch_pattern);
+"#;
+/// V21 reserves a distinct migration boundary for source-branch CODEOWNERS.
+/// Matching is computed from Git at gate evaluation; a copied file would go stale when
+/// an MR source branch advances.
+pub(crate) const SCHEMA_V22: &str = r#"
+CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+pub(crate) const SCHEMA_V25: &str = r#"
+CREATE TABLE IF NOT EXISTS board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
+"#;
+
+pub(crate) const SCHEMA_V24: &str = r#"
+CREATE TABLE IF NOT EXISTS review_external_checks (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, check_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), details TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(review_id,check_name));
+"#;
+pub(crate) const SCHEMA_V23: &str = r#"
+CREATE TABLE IF NOT EXISTS review_stacks (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ repo_path TEXT NOT NULL, target_branch TEXT NOT NULL, source_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS review_stack_items (
+ stack_id TEXT NOT NULL REFERENCES review_stacks(id) ON DELETE CASCADE,
+ review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+ ordering INTEGER NOT NULL, PRIMARY KEY(stack_id, review_id), UNIQUE(stack_id, ordering)
+);
+CREATE INDEX IF NOT EXISTS review_stack_items_review ON review_stack_items(review_id);
 "#;
 
 pub(crate) const SCHEMA_V18: &str = r#"
@@ -619,7 +660,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 21);
+        assert_eq!(SCHEMA_VERSION, 25);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -684,6 +725,23 @@ mod tests {
         );
         let shared: i64 = conn.query_row("SELECT count(*) FROM (SELECT profile_id FROM users GROUP BY profile_id HAVING count(*) > 1)", [], |r| r.get(0)).unwrap();
         assert_eq!(shared, 0, "one profile per account");
+    }
+
+    #[test]
+    fn v20_database_gains_document_permissions() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        conn.execute("DROP TABLE document_permissions", [])
+            .expect("simulate V20 database");
+        conn.pragma_update(None, "user_version", 20)
+            .expect("V20 stamp");
+        migrate(&conn).expect("V21 migration");
+        let exists: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='document_permissions'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(exists, 1);
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[test]

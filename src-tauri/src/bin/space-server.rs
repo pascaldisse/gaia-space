@@ -794,6 +794,8 @@ enum CommandPolicy {
     DocumentReadList,
     DocumentRead,
     DocumentWrite,
+    DocumentOwnerWrite,
+    DocumentAccessWrite,
     DocumentFolderCreate,
     DocumentFolderReadList,
     DocumentFolderWrite,
@@ -833,6 +835,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
         "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
+        "list_document_access" => CommandPolicy::DocumentRead,
+        "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
         | "join_meeting_call"
@@ -849,7 +853,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" | "delete_document" => CommandPolicy::DocumentWrite,
+        "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
         "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
@@ -865,6 +869,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "create_profile"
         | "create_quality_gate_rule"
+        | "create_review_stack"
         | "create_review"
         | "create_review_discussion"
         | "create_role"
@@ -927,6 +932,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
+        | "list_review_stacks"
         | "list_review_discussions"
         | "list_review_participants"
         | "list_reviews"
@@ -947,7 +953,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "move_issue_on_board" | "publish_package_version" | "remove_channel_member" => {
             CommandPolicy::Session
         }
-        "move_document" => CommandPolicy::DocumentWrite,
+        "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
         | "remove_issue_link"
@@ -973,7 +979,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_cf_definition" | "update_channel" | "update_deploy_target" | "update_issue" => {
             CommandPolicy::Session
         }
-        "update_document" => CommandPolicy::DocumentWrite,
+        "update_document" => CommandPolicy::DocumentOwnerWrite,
         "update_document_folder" => CommandPolicy::DocumentFolderWrite,
         "update_issue_status"
         | "update_message"
@@ -1145,7 +1151,7 @@ fn nested_id(body: &Value, key: &str) -> Option<String> {
 fn document_id(body: &Value, name: &str) -> Option<String> {
     if name == "update_document" {
         nested_id(body, "document")
-    } else if matches!(name, "restore_doc_version" | "list_doc_versions") {
+    } else if matches!(name, "restore_doc_version" | "list_doc_versions" | "list_document_access" | "update_document_access") {
         arg(body, "document_id").ok()
     } else {
         arg(body, "id").ok()
@@ -1227,7 +1233,11 @@ fn authorize_command(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let policy =
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
-    if !matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin" {
+    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
+        && policy != CommandPolicy::DocumentAccessWrite
+    {
+        // Access recipient ids intentionally name *other* people/teams; rebinding them
+        // to the caller would turn every share into a self-grant.
         bind_session_identity(body, &user.profile_id);
     }
     match policy {
@@ -1631,6 +1641,28 @@ fn authorize_command(
                 Err(err(StatusCode::FORBIDDEN, "document write denied"))
             }
         }
+        CommandPolicy::DocumentOwnerWrite => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if documents::document_owner_writable_by(&id, &user.profile_id, user.role == "admin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "document owner access denied"))
+            }
+        }
+        CommandPolicy::DocumentAccessWrite => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if documents::document_access_manageable_by(&id, &user.profile_id, user.role == "admin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "document sharing access denied"))
+            }
+        }
         CommandPolicy::DocumentFolderCreate => {
             bind_folder_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))
         }
@@ -1976,6 +2008,7 @@ async fn cmd(
     "create_profile" => platform::create_profile(profile: platform::Profile),
     "create_project" => platform::create_project(project: platform::Project),
     "create_quality_gate_rule" => review::create_quality_gate_rule(rule: review::QualityGateRule),
+    "create_review_stack" => review::create_review_stack(input: review::NewReviewStack),
     "create_review" => review::create_review(review: review::Review),
     "create_review_discussion" => review::create_review_discussion(discussion: review::NewDiscussion),
     "create_role" => platform::create_role(input: platform::RoleInput),
@@ -2042,6 +2075,8 @@ async fn cmd(
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
+    "list_document_access" => documents::list_document_access(document_id: String),
+    "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
     "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
@@ -2064,6 +2099,7 @@ async fn cmd(
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
+    "list_review_stacks" => review::list_review_stacks(project_id: String),
     "list_review_discussions" => review::list_review_discussions(review_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
     "list_reviews" => review::list_reviews(),
@@ -2791,6 +2827,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read_at, None);
+    }
+
+    #[tokio::test]
+    async fn document_sharing_grants_person_view_and_team_editor_without_acl_delegation() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", []).unwrap();
+        c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('design-dora','pd','design')", []).unwrap();
+        let document = json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pa","folder_id":null,"doc_type":"text","title":"Shared plan","body":"first","version":1,"archived":false,"created_by":"pa"});
+        let (status, value) = call(cookie("ta"), "create_document", json!({"document":document})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+
+        let grants = json!({"document_id":"shared-private-doc","permissions":[
+            {"recipient_type":"profile","recipient_id":"pb","access_level":"viewer"},
+            {"recipient_type":"team","recipient_id":"design","access_level":"editor"}
+        ]});
+        let (status, value) = call(cookie("ta"), "update_document_access", grants).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let grant_count: i64 = c.query_row("SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'", [], |row| row.get(0)).unwrap();
+        assert_eq!(grant_count, 2, "shares persisted");
+        let (stored_container, stored_creator, grant_profile): (String, String, String) = c.query_row("SELECT d.container_type,d.created_by,dp.recipient_id FROM documents d JOIN document_permissions dp ON dp.document_id=d.id WHERE d.id='shared-private-doc' AND dp.recipient_type='profile'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!((stored_container.as_str(), stored_creator.as_str(), grant_profile.as_str()), ("my-docs", "pa", "pb"));
+        assert!(documents::document_readable_by("shared-private-doc", "pb").unwrap(), "direct viewer grant resolves");
+
+        let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"][0]["id"], json!("shared-private-doc"), "{value}");
+        let (status, value) = call(cookie("tb"), "list_document_access", json!({"document_id":"shared-private-doc"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"].as_array().unwrap().len(), 2);
+        let (status, _) = call(cookie("tb"), "save_document", json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot edit");
+        let (status, _) = call(cookie("tb"), "update_document_access", json!({"document_id":"shared-private-doc","permissions":[]})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an editor/viewer cannot delegate sharing");
+
+        let (status, value) = call(cookie("td"), "save_document", json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["body"], json!("edited"));
+        let (status, _) = call(cookie("td"), "move_document", json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pd","folder_id":null})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an editor cannot move a shared document");
+        let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='shared-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
+        assert_eq!(actor, "pd", "the web gateway binds the editor identity");
     }
 
     #[tokio::test]

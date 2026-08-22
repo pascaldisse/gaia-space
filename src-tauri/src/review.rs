@@ -69,6 +69,26 @@ pub struct SafeMergeRun {
     pub target_oid: Option<String>,
     pub merge_commit_oid: Option<String>,
 }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewStack {
+    pub id: String,
+    pub project_id: String,
+    pub repo_path: String,
+    pub target_branch: String,
+    pub source_branch: String,
+    pub review_ids: Vec<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExternalCheck { pub review_id: String, pub check_name: String, pub status: String, pub details: Option<String> }
+#[derive(Debug, Deserialize)]
+pub struct NewReviewStack {
+    pub id: String,
+    pub project_id: String,
+    pub repo_path: String,
+    pub target_branch: String,
+    pub source_branch: String,
+    pub review_ids: Vec<String>,
+}
 
 /// Input for opening a merge request against a registered repo's *real* branches.
 #[derive(Debug, Deserialize)]
@@ -105,6 +125,9 @@ pub struct QualityGateEvaluation {
     pub approvals: i64,
     pub min_approvals: i64,
     pub matched_rules: i64,
+    /// Source-branch CODEOWNERS paths that have a rule, plus locally resolved owners.
+    pub codeowner_paths: Vec<String>,
+    pub codeowner_approvers: Vec<String>,
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -439,6 +462,44 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
     Ok(())
 }
 
+// ---------- stacked merge requests ----------
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_review_stack(input: NewReviewStack) -> Result<ReviewStack> {
+    if input.review_ids.is_empty() { return Err("a review stack needs at least one merge request".into()); }
+    let c = db::conn()?;
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    for review_id in &input.review_ids {
+        let (project, repo): (String, Option<String>) = tx.query_row("SELECT project_id,repo_path FROM reviews WHERE id=?1 AND kind='MR'", rusqlite::params![review_id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|_| format!("merge request '{review_id}' not found"))?;
+        if project != input.project_id || repo.as_deref() != Some(input.repo_path.as_str()) { return Err("all stacked reviews must share project and repository".into()); }
+    }
+    tx.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES(?1,?2,?3,?4,?5)", rusqlite::params![input.id,input.project_id,input.repo_path,input.target_branch,input.source_branch]).map_err(|e| e.to_string())?;
+    for (ordering, review_id) in input.review_ids.iter().enumerate() {
+        tx.execute("INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES(?1,?2,?3)", rusqlite::params![input.id,review_id,ordering as i64]).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(ReviewStack { id: input.id, project_id: input.project_id, repo_path: input.repo_path, target_branch: input.target_branch, source_branch: input.source_branch, review_ids: input.review_ids })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_review_stacks(project_id: String) -> Result<Vec<ReviewStack>> {
+    let c = db::conn()?;
+    let rows: Vec<(String, String, String, String, String)> = {
+        let mut s = c.prepare("SELECT id,project_id,repo_path,target_branch,source_branch FROM review_stacks WHERE project_id=?1 ORDER BY created_at").map_err(|e| e.to_string())?;
+        let rows = s.query_map(rusqlite::params![project_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+        rows
+    };
+    rows.into_iter().map(|(id, project_id, repo_path, target_branch, source_branch)| {
+        let mut items = c.prepare("SELECT review_id FROM review_stack_items WHERE stack_id=?1 ORDER BY ordering").map_err(|e|e.to_string())?;
+        let review_ids = items.query_map(rusqlite::params![&id], |r|r.get(0)).map_err(|e|e.to_string())?.collect::<std::result::Result<Vec<String>,_>>().map_err(|e|e.to_string())?;
+        Ok(ReviewStack { id, project_id, repo_path, target_branch, source_branch, review_ids })
+    }).collect()
+}
+/// When a stack parent lands, children based on its source branch are retargeted to the
+/// newly advanced target branch; no refs are changed by this database operation.
+fn retarget_stacked_children_tx(conn: &Connection, review_id: &str) -> Result<i64> {
+    let (project_id, source, target): (String, Option<String>, Option<String>) = conn.query_row("SELECT project_id,source_branch,target_branch FROM reviews WHERE id=?1", rusqlite::params![review_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e|e.to_string())?;
+    match (source,target) { (Some(source),Some(target)) => conn.execute("UPDATE reviews SET target_branch=?3 WHERE project_id=?1 AND target_branch=?2 AND state='Opened' AND id IN (SELECT review_id FROM review_stack_items)",rusqlite::params![project_id,source,target]).map(|count| count as i64).map_err(|e|e.to_string()), _ => Ok(0) }
+}
+
 // ---------- protected branches: per-action allow-lists ----------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProtectedBranchRule {
@@ -591,6 +652,191 @@ fn branch_matches(pattern: &str, branch: &str) -> bool {
         None => pattern == branch,
     }
 }
+#[derive(Debug)]
+struct CodeOwnerMatch {
+    path: String,
+    owner_ids: Vec<String>,
+}
+
+/// Split owners while retaining quoted role names, e.g. "Project Admin".
+fn codeowner_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for ch in input.chars() {
+        match ch {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// `*` stays in one path component; `**` can span components.
+fn codeowner_glob(pattern: &[u8], path: &[u8]) -> bool {
+    match pattern {
+        [] => path.is_empty(),
+        [b'*', b'*', rest @ ..] => {
+            codeowner_glob(rest, path) || (!path.is_empty() && codeowner_glob(pattern, &path[1..]))
+        }
+        [b'*', rest @ ..] => {
+            codeowner_glob(rest, path)
+                || (!path.is_empty() && path[0] != b'/' && codeowner_glob(pattern, &path[1..]))
+        }
+        [b'?', rest @ ..] => {
+            !path.is_empty() && path[0] != b'/' && codeowner_glob(rest, &path[1..])
+        }
+        [first, rest @ ..] => {
+            !path.is_empty() && *first == path[0] && codeowner_glob(rest, &path[1..])
+        }
+    }
+}
+
+fn codeowner_pattern_matches(raw: &str, path: &str) -> bool {
+    let mut pattern = raw.trim_start_matches('/').to_owned();
+    if pattern.ends_with('/') {
+        pattern.push_str("**");
+    }
+    if !pattern.contains('/') {
+        return codeowner_glob(
+            pattern.as_bytes(),
+            path.rsplit('/').next().unwrap_or(path).as_bytes(),
+        );
+    }
+    codeowner_glob(pattern.as_bytes(), path.as_bytes())
+}
+
+fn codeowner_profile_ids(
+    conn: &Connection,
+    project_id: &str,
+    owners: &[String],
+) -> Result<Vec<String>> {
+    let mut ids = std::collections::BTreeSet::new();
+    for owner in owners {
+        let owner = owner.trim_start_matches('@');
+        let mut profiles = conn
+            .prepare(
+                "SELECT id FROM profiles WHERE lower(username)=lower(?1) OR lower(email)=lower(?1)",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = profiles
+            .query_map(rusqlite::params![owner], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
+        let mut role_members = conn.prepare(
+            "SELECT DISTINCT a.profile_id FROM roles r JOIN role_assignments a ON a.role_id=r.id \
+             WHERE r.name=?1 AND a.profile_id IS NOT NULL AND (a.scope_type='global' OR (a.scope_type='project' AND a.scope_id=?2))",
+        ).map_err(|e| e.to_string())?;
+        let rows = role_members
+            .query_map(rusqlite::params![owner, project_id], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(ids.into_iter().collect())
+}
+
+/// Read root CODEOWNERS (or `.space/CODEOWNERS`) from the MR source commit and apply
+/// last-match-wins ownership to changed paths. It is never cached, so new source pushes
+/// are evaluated against their own ownership file.
+fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOwnerMatch>> {
+    let (project_id, repo_path, source_branch, target_branch): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT project_id,repo_path,source_branch,target_branch FROM reviews WHERE id=?1",
+            rusqlite::params![review_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (repo_path, source_branch, target_branch) = match (repo_path, source_branch, target_branch)
+    {
+        (Some(repo), Some(source), Some(target)) => (repo, source, target),
+        _ => return Ok(Vec::new()),
+    };
+    let repo = open(&repo_path)?;
+    let source = branch_commit(&repo, &source_branch)?;
+    let target = branch_commit(&repo, &target_branch)?;
+    let base = repo
+        .merge_base(target.id(), source.id())
+        .map_err(|e| e.to_string())?;
+    let base_tree = repo
+        .find_commit(base)
+        .map_err(|e| e.to_string())?
+        .tree()
+        .map_err(|e| e.to_string())?;
+    let source_tree = source.tree().map_err(|e| e.to_string())?;
+    let entry = source_tree
+        .get_path(std::path::Path::new("CODEOWNERS"))
+        .or_else(|_| source_tree.get_path(std::path::Path::new(".space/CODEOWNERS")));
+    let Ok(entry) = entry else {
+        return Ok(Vec::new());
+    };
+    let blob = repo.find_blob(entry.id()).map_err(|e| e.to_string())?;
+    let text =
+        std::str::from_utf8(blob.content()).map_err(|_| "CODEOWNERS must be UTF-8".to_string())?;
+    let rules: Vec<(String, Vec<String>)> = text
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let tokens = codeowner_tokens(line);
+            (tokens.len() >= 2).then(|| (tokens[0].clone(), tokens[1..].to_vec()))
+        })
+        .collect();
+    let diff = repo
+        .diff_tree_to_tree(Some(&base_tree), Some(&source_tree), None)
+        .map_err(|e| e.to_string())?;
+    let mut matches = Vec::new();
+    for delta in diff.deltas() {
+        let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+            continue;
+        };
+        let path = path.to_string_lossy().to_string();
+        if let Some((_, owners)) = rules
+            .iter()
+            .rev()
+            .find(|(pattern, _)| codeowner_pattern_matches(pattern, &path))
+        {
+            matches.push(CodeOwnerMatch {
+                path,
+                owner_ids: codeowner_profile_ids(conn, &project_id, owners)?,
+            });
+        }
+    }
+    Ok(matches)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn record_external_check(check: ExternalCheck) -> Result<()> {
+    if !matches!(check.status.as_str(), "PENDING" | "SUCCEEDED" | "FAILED") { return Err("external check status must be PENDING, SUCCEEDED, or FAILED".into()); }
+    db::conn()?.execute("INSERT INTO review_external_checks(review_id,check_name,status,details,updated_at) VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(review_id,check_name) DO UPDATE SET status=excluded.status,details=excluded.details,updated_at=excluded.updated_at", rusqlite::params![check.review_id,check.check_name,check.status,check.details]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_external_checks(review_id: String) -> Result<Vec<ExternalCheck>> {
+    let c=db::conn()?; let mut s=c.prepare("SELECT review_id,check_name,status,details FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
+    let checks = s.query_map(rusqlite::params![review_id],|r|Ok(ExternalCheck{review_id:r.get(0)?,check_name:r.get(1)?,status:r.get(2)?,details:r.get(3)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+    Ok(checks)
+}
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
     let (project_id, target_branch): (String, Option<String>) = conn
         .query_row(
@@ -630,6 +876,8 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
             approvals: 0,
             min_approvals: 0,
             matched_rules: 0,
+            codeowner_paths: Vec::new(),
+            codeowner_approvers: Vec::new(),
         });
     }
 
@@ -679,18 +927,47 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
             missing_reviewers.join(", ")
         ));
     }
-    // Simplified: no CODEOWNERS file parsing (KB §4 gap). codeowners_required is treated as
-    // "at least one reviewer approval" until real CODEOWNERS-file matching is implemented.
-    if codeowners_required && approvals < 1 {
-        reasons.push("requires at least one reviewer approval (CODEOWNERS gate)".into());
+    let codeowner_matches = if codeowners_required {
+        codeowner_matches_tx(conn, review_id)?
+    } else {
+        Vec::new()
+    };
+    let codeowner_paths: Vec<String> = codeowner_matches.iter().map(|m| m.path.clone()).collect();
+    let mut codeowner_approvers = std::collections::BTreeSet::new();
+    for owner_match in &codeowner_matches {
+        codeowner_approvers.extend(owner_match.owner_ids.iter().cloned());
+        if owner_match.owner_ids.is_empty() {
+            reasons.push(format!(
+                "CODEOWNERS for '{}' has no locally resolvable owner",
+                owner_match.path
+            ));
+        } else if !owner_match
+            .owner_ids
+            .iter()
+            .any(|id| accepted_ids.contains(id))
+        {
+            reasons.push(format!(
+                "missing CODEOWNERS approval for '{}'",
+                owner_match.path
+            ));
+        }
+    }
+    if codeowners_required && codeowner_matches.is_empty() {
+        reasons.push(
+            "CODEOWNERS gate requires a source-branch CODEOWNERS rule for changed files".into(),
+        );
     }
 
+    let mut external = conn.prepare("SELECT check_name,status FROM review_external_checks WHERE review_id=?1").map_err(|e|e.to_string())?;
+    for check in external.query_map(rusqlite::params![review_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).map_err(|e|e.to_string())? { let (name,status)=check.map_err(|e|e.to_string())?; if status != "SUCCEEDED" { reasons.push(format!("external check '{name}' is {status}; waiting")); } }
     Ok(QualityGateEvaluation {
         satisfied: reasons.is_empty(),
         reasons,
         approvals,
         min_approvals,
         matched_rules: matched.len() as i64,
+        codeowner_paths,
+        codeowner_approvers: codeowner_approvers.into_iter().collect(),
     })
 }
 /// Live gate evaluation banner: satisfied/blocking reasons for a review's target branch.
@@ -948,13 +1225,14 @@ pub fn attempt_merge(
         rusqlite::params![review_id],
     )
     .map_err(|e| e.to_string())?;
+    let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
     record_merge_run_tx(
         &c,
         &id,
         &review_id,
         "SUCCEEDED",
         false,
-        format!("merged as {merge_oid}; CI green"),
+        format!("merged as {merge_oid}; CI green; retargeted {retargeted} stacked review(s)"),
         Some(&source_oid),
         Some(&target_oid),
         Some(&merge_oid.to_string()),
@@ -1133,6 +1411,58 @@ mod tests {
         assert_eq!(eval.approvals, 1);
 
         drop(db_path);
+    }
+
+    #[test]
+    fn merged_stack_parent_retargets_open_children_only() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        for (id, source, target, state) in [("parent", "feature-a", "main", "Merged"), ("child", "feature-b", "feature-a", "Opened"), ("closed", "feature-c", "feature-a", "Closed")] {
+            conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title) VALUES(?1,'demo-project',(SELECT COALESCE(MAX(number),0)+1 FROM reviews),'MR',?4,?2,?3,?1)", rusqlite::params![id,source,target,state]).unwrap();
+        }
+        conn.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES('stack','demo-project','repo','main','feature-b')", []).unwrap();
+        for (review_id, ordering) in [("parent", 0), ("child", 1), ("closed", 2)] { conn.execute("INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES('stack',?1,?2)", rusqlite::params![review_id,ordering]).unwrap(); }
+        assert_eq!(retarget_stacked_children_tx(&conn, "parent").unwrap(), 1);
+        let target: String = conn.query_row("SELECT target_branch FROM reviews WHERE id='child'", [], |r| r.get(0)).unwrap();
+        assert_eq!(target, "main");
+        let closed_target: String = conn.query_row("SELECT target_branch FROM reviews WHERE id='closed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(closed_target, "feature-a");
+    }
+
+    #[test]
+    fn codeowners_last_match_wins_and_requires_the_matching_reviewer() {
+        assert!(codeowner_pattern_matches("/src/**", "src/lib.rs"));
+        assert!(!codeowner_pattern_matches("*.ts", "src/lib.rs"));
+        let (dir, repo) = clean_repo("codeowners");
+        let feature = branch_commit(&repo, "feature").unwrap().id();
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(feature),
+            "CODEOWNERS",
+            "* @reviewer1\nextra.txt @owner2\n",
+        );
+        let path = dir.to_string_lossy().to_string();
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-1','reviewer1','Reviewer One',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-2','owner2','Reviewer Two',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('r-owner','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
+        conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,codeowners_required) VALUES('owners','demo-project','main',1)", []).unwrap();
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-1','Reviewer','accepted',0)", []).unwrap();
+        let blocked = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
+        assert!(!blocked.satisfied);
+        assert!(blocked.reasons.iter().any(|r| r.contains("extra.txt")));
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-2','Reviewer','accepted',0)", []).unwrap();
+        let passed = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
+        assert!(passed.satisfied, "{:?}", passed.reasons);
+        assert!(passed
+            .codeowner_paths
+            .iter()
+            .any(|path| path == "extra.txt"));
+        assert_eq!(passed.codeowner_approvers, vec!["reviewer-1", "reviewer-2"]);
+        drop(db_path);
+        sweep(&dir);
     }
 
     #[test]
