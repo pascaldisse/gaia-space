@@ -199,6 +199,7 @@ export default function Boards() {
 
         <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
         <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} onAdd={issueId => move(issueId, (columns() ?? [])[0]?.id ?? "")} moved={reloadIssues} /></section>
+<BoardMatrix issues={issues() ?? []} columns={columns() ?? []} statuses={statuses()} />
       </div>
     </>}</Show>
   </section>;
@@ -239,4 +240,21 @@ function Backlog(props: { boardId: string; columns: BoardColumn[]; onAdd: (issue
     <Show when={!items()?.length}><p class="hint">Nothing in the backlog.</p></Show>
     <For each={items()}>{issue => <div class="backlog-row"><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => add(issue.id)}>Add to board</button></div>}</For>
   </>;
+}
+
+/** A live cross-tab report deliberately derives from the same board query as the
+ * board: changing a card immediately changes its cell, without a stale report copy. */
+function BoardMatrix(props: { issues: Issue[]; columns: BoardColumn[]; statuses?: Status[] }) {
+const [axis, setAxis] = createSignal<"assignee" | "priority">("assignee");
+const statusName = (column: BoardColumn) => column.name;
+const rowName = (issue: Issue) => axis() === "priority" ? (issue.priority ?? "No priority") : (issue.assignee_ids?.length ? issue.assignee_ids.map(id => profiles()?.find(p => p.id === id)?.display_name ?? id).join(", ") : "Unassigned");
+const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.localeCompare(b));
+const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
+return <section class="board-matrix" aria-label="Board matrix report">
+<h2>Matrix report</h2>
+<label>Rows <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
+<Show when={props.issues.length} fallback={<p class="hint">No board issues for this matrix.</p>}>
+<table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
+</Show>
+</section>;
 }

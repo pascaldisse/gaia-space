@@ -16,7 +16,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — V39 NOT to be taken by any other lane until V38 merges
 - V39 → feat/w3-webhooks (webhook_subscriptions.secret + max_attempts; signed delivery + bounded retry) ☀ — V38 already on master @b9a6f90
 
-TOTALS (8/8 audited, 356 rows): done 42 · partial 151 · stub 21 · missing 142. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 42 · partial 152 · stub 21 · missing 141. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 

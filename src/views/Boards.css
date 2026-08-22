@@ -64,3 +64,8 @@
 .issue-card:active { cursor: grabbing; }
 .cards { min-height: 40px; border-radius: 10px; transition: background .12s ease, outline-color .12s ease; outline: 2px dashed transparent; outline-offset: 2px; }
 .cards.drop-target { background: var(--accent-soft); outline-color: var(--accent); }
+
+.board-matrix { margin-top: 1rem; overflow-x: auto; }
+.board-matrix table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+.board-matrix th, .board-matrix td { border: 1px solid var(--border, #334155); padding: .4rem .6rem; text-align: right; }
+.board-matrix th:first-child { text-align: left; }
