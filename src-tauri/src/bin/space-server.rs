@@ -158,6 +158,100 @@ fn token() -> String {
     rand::thread_rng().fill_bytes(&mut b);
     hex::encode(b)
 }
+#[derive(Debug, Serialize)]
+struct AppIdentity {
+    application: applications::Application,
+    scope: String,
+    expires_at: Option<i64>,
+}
+
+/// RFC 6750 bearer authentication for the external application API. App bearer
+/// tokens are deliberately distinct from browser session tokens and are resolved
+/// only through the application token verifier.
+#[allow(clippy::result_large_err)]
+fn app_bearer(headers: &HeaderMap) -> Result<applications::AppToken, axum::response::Response> {
+    let unauthorized = |error: &str| {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                header::WWW_AUTHENTICATE,
+                format!("Bearer error=\"{error}\""),
+            )],
+            Json(json!({"ok": false, "error": error})),
+        )
+            .into_response()
+    };
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| unauthorized("invalid_token"))?;
+    let token = authorization
+        .strip_prefix("Bearer ")
+        .or_else(|| authorization.strip_prefix("bearer "))
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| unauthorized("invalid_request"))?;
+    applications::verify_app_token(token.trim().to_string())
+        .map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "app token verification failed",
+            )
+            .into_response()
+        })?
+        .ok_or_else(|| unauthorized("invalid_token"))
+}
+
+#[allow(clippy::result_large_err)]
+fn app_read_scope(token: &applications::AppToken) -> Result<(), axum::response::Response> {
+    if token
+        .scope
+        .split_whitespace()
+        .any(|scope| scope == "read" || scope == "*")
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            [(
+                header::WWW_AUTHENTICATE,
+                "Bearer error=\"insufficient_scope\", scope=\"read\"",
+            )],
+            Json(json!({"ok": false, "error": "insufficient_scope"})),
+        )
+            .into_response())
+    }
+}
+
+async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response::Response> {
+    let token = app_bearer(&headers)?;
+    let application = applications::list_applications()
+        .map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "application lookup failed",
+            )
+            .into_response()
+        })?
+        .into_iter()
+        .find(|application| application.id == token.application_id)
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid_token").into_response())?;
+    Ok(Json(AppIdentity {
+        application,
+        scope: token.scope,
+        expires_at: token.expires_at,
+    }))
+}
+
+async fn app_projects(
+    headers: HeaderMap,
+) -> Result<Json<Vec<platform::Project>>, axum::response::Response> {
+    let token = app_bearer(&headers)?;
+    app_read_scope(&token)?;
+    platform::list_projects().map(Json).map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "project lookup failed").into_response()
+    })
+}
+
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     let t = headers
         .get(header::COOKIE)
@@ -2813,6 +2907,8 @@ async fn main() {
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
+        .route("/api/app/me", get(app_me))
+        .route("/api/app/projects", get(app_projects))
         .route(
             "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
             get(registry_generic_metadata),
@@ -2949,6 +3045,69 @@ mod tests {
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1),('pd','dora','Dora',1)", []).unwrap();
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
+    }
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn app_bearer_api_resolves_identity_and_enforces_read_scope() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-api','API App','Application','client-api',1)", []).unwrap();
+        drop(c);
+        let secret = applications::rotate_app_secret("app-api".into()).unwrap();
+        let readable = applications::issue_app_token(
+            "client-api".into(),
+            secret.client_secret,
+            Some("read".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        let identity = app_me(bearer(&readable)).await.unwrap().into_response();
+        let (status, body) = status_and_body(identity).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["application"]["id"], "app-api");
+        assert_eq!(body["scope"], "read");
+        let projects = app_projects(bearer(&readable))
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(projects.status(), StatusCode::OK);
+
+        let unscoped = applications::issue_app_token(
+            "client-api".into(),
+            applications::rotate_app_secret("app-api".into())
+                .unwrap()
+                .client_secret,
+            None,
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        let denied = app_projects(bearer(&unscoped)).await.unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            denied.headers()[header::WWW_AUTHENTICATE],
+            "Bearer error=\"insufficient_scope\", scope=\"read\""
+        );
+
+        let invalid = app_me(bearer("spat_not-a-token")).await.unwrap_err();
+        assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            invalid.headers()[header::WWW_AUTHENTICATE],
+            "Bearer error=\"invalid_token\""
+        );
     }
 
     /// Regression (☾Kali): app credential commands were `Session`, so any logged-in
