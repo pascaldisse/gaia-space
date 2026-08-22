@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 39;
+pub const SCHEMA_VERSION: i64 = 40;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -364,6 +364,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "max_attempts",
             "INTEGER NOT NULL DEFAULT 5",
         )?;
+    }
+    // V40 keeps legacy doc_type stable and adds an independently versioned body mode.
+    if version < 40 {
+        add_column_if_missing(&tx, "documents", "body_format", "TEXT NOT NULL DEFAULT 'text' CHECK(body_format IN ('text','rich-text','checklist','code'))")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1013,7 +1017,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 39);
+        assert_eq!(SCHEMA_VERSION, 40);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

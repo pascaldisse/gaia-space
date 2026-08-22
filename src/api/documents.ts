@@ -24,13 +24,15 @@ export type DocumentFolder = {
 };
 
 export type DocType = "text" | "file";
+export type DocumentBodyFormat = "text" | "rich-text" | "checklist" | "code";
 
 export type Document = {
   id: string;
   container_type: string;
   container_id: string | null;
   folder_id: string | null;
-  doc_type: string;
+  doc_type: DocType;
+  body_format: DocumentBodyFormat;
   title: string;
   body: string | null;
   version: number;

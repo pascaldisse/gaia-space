@@ -20,7 +20,7 @@ export default function Blogs() {
     if(!owner || !headline) { setError("Choose a profile and enter a title."); return; }
     setPublishing(true); setError("");
     try {
-      const draft:Document={id:newId("blog-draft"),container_type:"my-docs",container_id:owner,folder_id:null,doc_type:"text",title:headline,body:body(),version:1,archived:false,created_by:owner};
+      const draft:Document={id:newId("blog-draft"),container_type:"my-docs",container_id:owner,folder_id:null,doc_type:"text",body_format:"text",title:headline,body:body(),version:1,archived:false,created_by:owner};
       await documentsApi.createDocument(draft);
       const post=await blogsApi.publish({draft_id:draft.id,author_id:owner,team_id:team()||null,project_id:project()||null,location_id:location()||null});
       setTitle(""); setBody(""); await refetch(); setSelected(post.id); linkEntity("blog",post.id);
