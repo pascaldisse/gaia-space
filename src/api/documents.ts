@@ -53,6 +53,31 @@ export type DocumentAccessRecipient = {
   access_level: "viewer" | "editor";
 };
 
+// Import defaults live in Rust (documents.rs); omit a field to accept its default.
+export type DocumentImportRequest = {
+  source_path: string;
+  container_type: ContainerType;
+  container_id: string | null;
+  parent_folder_id: string | null;
+  created_by: string | null;
+  extensions?: string[];
+  max_file_bytes?: number;
+  max_depth?: number;
+};
+
+export type DocumentImportSummary = {
+  folders_created: number;
+  documents_created: number;
+  skipped: string[];
+};
+
+export type DocumentPublication = {
+  document_id: string;
+  published: boolean;
+  published_at: number | null;
+  public_slug: string | null;
+};
+
 export const documentsApi = {
   // documents
   listDocuments: () => invoke<Document[]>("list_documents"),
@@ -71,6 +96,20 @@ export const documentsApi = {
     invoke<DocumentAccessRecipient[]>("list_document_access", { documentId }),
   updateDocumentAccess: (documentId: string, permissions: DocumentAccessRecipient[]) =>
     invoke<void>("update_document_access", { documentId, permissions }),
+
+  // publication (public links) — unpublishing keeps the slug so the link can be reopened.
+  getPublication: (documentId: string) =>
+    invoke<DocumentPublication>("get_document_publication", { documentId }),
+  publishDocument: (documentId: string, published: boolean, slug: string | null = null) =>
+    invoke<DocumentPublication>("publish_document", { documentId, published, slug }),
+  getPublicDocument: (slug: string) => invoke<Document | null>("get_public_document", { slug }),
+  listBookAccess: (bookId: string) =>
+    invoke<DocumentAccessRecipient[]>("list_book_access", { bookId }),
+  updateBookAccess: (bookId: string, permissions: DocumentAccessRecipient[]) =>
+    invoke<void>("update_book_access", { bookId, permissions }),
+
+  importFolder: (request: DocumentImportRequest) =>
+    invoke<DocumentImportSummary>("import_document_folder", { request }),
 
   // folders
   listDocumentFolders: () => invoke<DocumentFolder[]>("list_document_folders"),

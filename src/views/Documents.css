@@ -106,6 +106,22 @@
   border-color: var(--accent);
   color: var(--text-strong);
 }
+.container-tabs .import-folder {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: var(--dk-fs-xs);
+  color: var(--text-muted);
+}
+.container-tabs .import-folder input {
+  min-width: 22ch;
+}
+.container-tabs .import-summary {
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .container-tabs .show-archived {
   margin-left: auto;
   display: flex;
@@ -300,6 +316,11 @@
   padding: 0.1em 0.6em;
   font-size: 0.78em;
   color: var(--text-muted);
+}
+.public-link {
+  font-size: var(--dk-fs-xs);
+  color: var(--text-muted);
+  font-family: var(--dk-font-mono, monospace);
 }
 .archived-chip {
   background: var(--status-danger-bg);
