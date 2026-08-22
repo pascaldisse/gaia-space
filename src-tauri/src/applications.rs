@@ -3,7 +3,7 @@
 //! This intentionally does not provision remote machines. Devfiles describe a
 //! repository and `open_in_ide` produces a user-initiated JetBrains deep link.
 use crate::db;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 type Result<T> = std::result::Result<T, String>;
@@ -67,19 +67,18 @@ pub struct IdeLaunch {
 pub fn list_devfiles(project_id: Option<String>) -> Result<Vec<Devfile>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,project_id,path,name,content,generated,updated_at FROM devfiles WHERE (?1 IS NULL OR project_id=?1) ORDER BY project_id,name"))?;
-    err(s
-        .query_map(params![project_id], |r| {
-            Ok(Devfile {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                path: r.get(2)?,
-                name: r.get(3)?,
-                content: r.get(4)?,
-                generated: r.get(5)?,
-                updated_at: r.get(6)?,
-            })
-        })?
-        .collect())
+    let rows = err(s.query_map(params![project_id], |r| {
+        Ok(Devfile {
+            id: r.get(0)?,
+            project_id: r.get(1)?,
+            path: r.get(2)?,
+            name: r.get(3)?,
+            content: r.get(4)?,
+            generated: r.get(5)?,
+            updated_at: r.get(6)?,
+        })
+    }))?;
+    err(rows.collect())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_devfile(input: DevfileInput) -> Result<Devfile> {
@@ -163,9 +162,8 @@ fn read_app(r: &rusqlite::Row<'_>) -> rusqlite::Result<Application> {
 pub fn list_applications(include_archived: Option<bool>) -> Result<Vec<Application>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,name,description,application_type,endpoint_uri,endpoint_ssl_verification,connection_status,archived,created_at FROM applications WHERE (?1=1 OR archived=0) ORDER BY name"))?;
-    err(s
-        .query_map([include_archived.unwrap_or(false)], read_app)?
-        .collect())
+    let rows = err(s.query_map([include_archived.unwrap_or(false)], read_app))?;
+    err(rows.collect())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_application(input: ApplicationInput) -> Result<Application> {
@@ -250,9 +248,8 @@ fn read_webhook(r: &rusqlite::Row<'_>) -> rusqlite::Result<Webhook> {
 pub fn list_webhooks(application_id: Option<String>) -> Result<Vec<Webhook>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,application_id,event_type,filter_json,endpoint_url,enabled FROM app_webhooks WHERE (?1 IS NULL OR application_id=?1) ORDER BY event_type"))?;
-    err(s
-        .query_map(params![application_id], read_webhook)?
-        .collect())
+    let rows = err(s.query_map(params![application_id], read_webhook))?;
+    err(rows.collect())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_webhook(input: WebhookInput) -> Result<Webhook> {
@@ -310,9 +307,8 @@ fn read_chatbot(r: &rusqlite::Row<'_>) -> rusqlite::Result<Chatbot> {
 pub fn list_chatbots(application_id: Option<String>) -> Result<Vec<Chatbot>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,application_id,channel_id,display_name,enabled FROM app_chatbots WHERE (?1 IS NULL OR application_id=?1) ORDER BY display_name"))?;
-    err(s
-        .query_map(params![application_id], read_chatbot)?
-        .collect())
+    let rows = err(s.query_map(params![application_id], read_chatbot))?;
+    err(rows.collect())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_chatbot(input: ChatbotInput) -> Result<Chatbot> {
@@ -370,9 +366,8 @@ fn read_extension(r: &rusqlite::Row<'_>) -> rusqlite::Result<UiExtension> {
 pub fn list_ui_extensions(application_id: Option<String>) -> Result<Vec<UiExtension>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,application_id,extension_type,display_name,unique_code,iframe_url,enabled FROM app_ui_extensions WHERE (?1 IS NULL OR application_id=?1) ORDER BY display_name"))?;
-    err(s
-        .query_map(params![application_id], read_extension)?
-        .collect())
+    let rows = err(s.query_map(params![application_id], read_extension))?;
+    err(rows.collect())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_ui_extension(input: UiExtensionInput) -> Result<UiExtension> {
