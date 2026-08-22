@@ -22,6 +22,19 @@ fn err<T>(value: rusqlite::Result<T>) -> Result<T> {
     value.map_err(|e| e.to_string())
 }
 
+/// Webhook fan-out envelope: `{"event": …, "issue": …}`. Subscription filters address
+/// it by dot-path, e.g. `"issue.priority"`.
+///
+/// Called after the write and after the issue is materialized — never with a write
+/// transaction open. Fan-out is best effort: a subscriber problem must not undo a
+/// user's issue edit, so the error is reported and swallowed.
+fn issue_event(event_type: &str, issue: &Issue) {
+    let payload = serde_json::json!({ "event": event_type, "issue": issue });
+    if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
+        eprintln!("webhook fan-out for {event_type} failed: {e}");
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Issue {
     pub id: String,
@@ -384,7 +397,10 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
         input.assignee_ids
     };
     write_assignees(&c, &id, &people)?;
-    get_issue(id)?.ok_or_else(|| "Created issue was not found".into())
+    drop(c);
+    let issue = get_issue(id)?.ok_or_else(|| "Created issue was not found".to_string())?;
+    issue_event("issue.created", &issue);
+    Ok(issue)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_issue(issue: Issue) -> Result<Issue> {
@@ -397,7 +413,10 @@ pub fn update_issue(issue: Issue) -> Result<Issue> {
         issue.assignee_ids.clone()
     };
     write_assignees(&c, &issue.id, &people)?;
-    get_issue(issue.id)?.ok_or_else(|| "Issue not found".into())
+    drop(c);
+    let saved = get_issue(issue.id)?.ok_or_else(|| "Issue not found".to_string())?;
+    issue_event("issue.updated", &saved);
+    Ok(saved)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_issue(id: String, archived: bool) -> Result<()> {
@@ -406,6 +425,11 @@ pub fn archive_issue(id: String, archived: bool) -> Result<()> {
         "UPDATE issues SET archived=?2 WHERE id=?1",
         params![id, archived],
     ))?;
+    drop(c);
+    // The command returns nothing, so the payload has to be read back for the event.
+    if let Some(issue) = get_issue(id)? {
+        issue_event("issue.archived", &issue);
+    }
     Ok(())
 }
 
