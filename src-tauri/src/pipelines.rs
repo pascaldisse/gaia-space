@@ -23,6 +23,7 @@
 use crate::db;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs,
@@ -924,7 +925,7 @@ fn publish_package_version_tx(
     version: &str,
     metadata_json: Option<&str>,
     payload_filename: Option<&str>,
-    payload_content: Option<&str>,
+    payload_content: Option<&[u8]>,
 ) -> Result<PackageVersion> {
     validate_package_path_component(repository_id, "repository id")?;
     validate_package_path_component(package_name, "name")?;
@@ -989,6 +990,102 @@ fn publish_package_version_tx(
         created_at,
     })
 }
+/// Publishes arbitrary registry bytes. HTTP registry routes use this rather than lossy text
+/// conversion; metadata and path safety remain identical to the desktop command.
+pub fn publish_registry_bytes(
+    repository_id: &str,
+    package_name: &str,
+    version: &str,
+    metadata_json: Option<&str>,
+    payload_filename: Option<&str>,
+    payload: Option<&[u8]>,
+) -> Result<PackageVersion> {
+    let c = db::conn()?;
+    publish_package_version_tx(
+        &c,
+        &package_base_dir(),
+        repository_id,
+        package_name,
+        version,
+        metadata_json,
+        payload_filename,
+        payload,
+    )
+}
+/// Reads a stored registry asset only after resolving its server-owned path beneath the registry root.
+pub fn download_registry_bytes(
+    repository_id: &str,
+    package_name: &str,
+    version: &str,
+    filename: &str,
+) -> Result<Vec<u8>> {
+    validate_package_path_component(repository_id, "repository id")?;
+    validate_package_path_component(package_name, "name")?;
+    validate_package_path_component(version, "version")?;
+    validate_package_path_component(filename, "payload filename")?;
+    let c = db::conn()?;
+    let meta: String = c.query_row("SELECT metadata_json FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3", params![repository_id, package_name, version], |r| r.get(0)).map_err(|_| "package version not found".to_string())?;
+    let value: Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+    let path = value
+        .get("_file_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "package version has no downloadable payload".to_string())?;
+    let canonical = canonical_path_within(&package_base_dir(), Path::new(path))?;
+    if canonical.file_name().and_then(|v| v.to_str()) != Some(filename) {
+        return Err("payload filename does not match package version".into());
+    }
+    fs::read(canonical).map_err(|e| e.to_string())
+}
+pub fn generic_registry_metadata(
+    repository_id: &str,
+    package_name: &str,
+    version: &str,
+) -> Result<Value> {
+    let c = db::conn()?;
+    let (metadata, created_at): (Option<String>, i64) = c.query_row("SELECT metadata_json,created_at FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3", params![repository_id,package_name,version], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|_| "package version not found".to_string())?;
+    let mut value = metadata
+        .and_then(|m| serde_json::from_str(&m).ok())
+        .unwrap_or_else(|| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        object.insert("name".into(), json!(package_name));
+        object.insert("version".into(), json!(version));
+        object.insert("publishedAt".into(), json!(created_at));
+    }
+    Ok(value)
+}
+pub fn npm_registry_metadata(repository_id: &str, package_name: &str) -> Result<Value> {
+    let c = db::conn()?;
+    let mut statement = c.prepare("SELECT version,metadata_json,created_at FROM package_versions WHERE repository_id=?1 AND package_name=?2 ORDER BY created_at DESC").map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![repository_id, package_name], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if rows.is_empty() {
+        return Err("npm package not found".into());
+    }
+    let latest = rows[0].0.clone();
+    let mut versions = serde_json::Map::new();
+    let mut time = serde_json::Map::new();
+    for (version, metadata, created_at) in rows {
+        let mut doc = metadata
+            .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+            .unwrap_or_else(|| json!({}));
+        if let Some(obj) = doc.as_object_mut() {
+            obj.insert("name".into(), json!(package_name));
+            obj.insert("version".into(), json!(&version));
+        }
+        versions.insert(version.clone(), doc);
+        time.insert(version, json!(created_at));
+    }
+    Ok(json!({"name":package_name,"dist-tags":{"latest":latest},"versions":versions,"time":time}))
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 #[allow(clippy::too_many_arguments)]
 pub fn publish_package_version(
@@ -1009,8 +1106,17 @@ pub fn publish_package_version(
         &version,
         metadata_json.as_deref(),
         payload_filename.as_deref(),
-        payload_content.as_deref(),
+        payload_content.as_deref().map(str::as_bytes),
     )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn download_package_payload(
+    repository_id: String,
+    package_name: String,
+    version: String,
+    filename: String,
+) -> Result<Vec<u8>> {
+    download_registry_bytes(&repository_id, &package_name, &version, &filename)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_package_version(id: String) -> Result<()> {

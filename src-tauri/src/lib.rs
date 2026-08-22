@@ -278,6 +278,7 @@ pub fn run() {
             pipelines::delete_package_repository,
             pipelines::list_package_versions,
             pipelines::publish_package_version,
+            pipelines::download_package_payload,
             pipelines::delete_package_version,
             personal::list_todos,
             personal::list_project_todos,

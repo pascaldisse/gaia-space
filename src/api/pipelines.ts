@@ -125,5 +125,7 @@ export const pipelinesApi = {
       payloadFilename: args.payloadFilename ?? null,
       payloadContent: args.payloadContent ?? null,
     }),
-  deletePackageVersion: (id: string) => invoke<void>("delete_package_version", { id }),
+  downloadPackagePayload: (repositoryId: string, packageName: string, version: string, filename: string) =>
+invoke<number[]>("download_package_payload", { repositoryId, packageName, version, filename }),
+deletePackageVersion: (id: string) => invoke<void>("delete_package_version", { id }),
 };

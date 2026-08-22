@@ -1,10 +1,11 @@
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{
+    body::Bytes,
     extract::{ConnectInfo, Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use gaia_space_lib::{
@@ -881,6 +882,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_message"
         | "delete_package_repository" => CommandPolicy::Session,
         "delete_package_version"
+        | "download_package_payload"
         | "delete_pipeline_script"
         | "delete_planning_tag"
         | "delete_quality_gate_rule"
@@ -1837,6 +1839,117 @@ fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
         Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
     }
 }
+/// Generic registry protocol: binary upload/download plus a server-normalized metadata
+/// endpoint. It deliberately shares `pipelines` validation and ownership of filesystem paths.
+async fn registry_generic_upload(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version, filename)): Path<(String, String, String, String)>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    let metadata = headers
+        .get("x-package-metadata")
+        .and_then(|v| v.to_str().ok());
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        metadata,
+        Some(&filename),
+        Some(&payload),
+    ) {
+        Ok(value) => (StatusCode::CREATED, Json(json!(value))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+async fn registry_generic_download(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version, filename)): Path<(String, String, String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::download_registry_bytes(&repository_id, &package_name, &version, &filename) {
+        Ok(payload) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            payload,
+        )
+            .into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+async fn registry_generic_metadata(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version)): Path<(String, String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::generic_registry_metadata(&repository_id, &package_name, &version) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+/// npm-compatible package document endpoint. A PUT stores a version manifest; GET returns
+/// the `versions` and `dist-tags.latest` shape clients use for resolution.
+async fn registry_npm_publish(
+    headers: HeaderMap,
+    Path((repository_id, package_name)): Path<(String, String)>,
+    Json(mut manifest): Json<Value>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    let version = match manifest.get("version").and_then(Value::as_str) {
+        Some(value) => value.to_string(),
+        None => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "npm manifest requires string version",
+            )
+            .into_response()
+        }
+    };
+    if let Some(name) = manifest.get("name").and_then(Value::as_str) {
+        if name != package_name {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "npm manifest name must match URL package",
+            )
+            .into_response();
+        }
+    }
+    if let Some(object) = manifest.as_object_mut() {
+        object.insert("name".into(), json!(package_name));
+    }
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        Some(&manifest.to_string()),
+        None,
+        None,
+    ) {
+        Ok(value) => (StatusCode::CREATED, Json(json!(value))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+async fn registry_npm_metadata(
+    headers: HeaderMap,
+    Path((repository_id, package_name)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::npm_registry_metadata(&repository_id, &package_name) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+
 async fn cmd(
     h: HeaderMap,
     Path(name): Path<String>,
@@ -2067,6 +2180,7 @@ async fn cmd(
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>),
+    "download_package_payload" => pipelines::download_package_payload(repository_id: String, package_name: String, version: String, filename: String),
     "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
     "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
     "remove_issue_link" => issues::remove_issue_link(id: String),
@@ -2152,6 +2266,18 @@ async fn main() {
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
+        .route(
+            "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
+            get(registry_generic_metadata),
+        )
+        .route(
+            "/api/registry/{repository_id}/generic/{package_name}/{version}/{filename}",
+            put(registry_generic_upload).get(registry_generic_download),
+        )
+        .route(
+            "/api/registry/{repository_id}/npm/{package_name}",
+            put(registry_npm_publish).get(registry_npm_metadata),
+        )
         .route("/api/cmd/{command}", post(cmd))
         .with_state(App::new());
     let port = env::var("SPACE_PORT")
