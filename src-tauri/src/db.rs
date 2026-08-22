@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 43;
+pub const SCHEMA_VERSION: i64 = 45;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -394,12 +394,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             )?;
         }
     }
-    // V43: an uploaded file is a document whose body lives outside SQLite. The blob is
+    // V45: an uploaded file is a document whose body lives outside SQLite. The blob is
     // stored next to the database and the row carries only the metadata needed to serve
     // it back (original name, declared type, size, on-disk path), so a large upload never
     // bloats the database file or a version snapshot.
-    if version < 43 && table_exists(&tx, "documents")? {
-        tx.execute_batch(SCHEMA_V43)?;
+    if version < 45 && table_exists(&tx, "documents")? {
+        tx.execute_batch(SCHEMA_V45)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -725,8 +725,8 @@ CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id
 CREATE UNIQUE INDEX IF NOT EXISTS webhook_secrets_active ON webhook_secrets(webhook_id) WHERE state='ACTIVE';
 "#;
 
-/// V43 uploaded-file payload metadata (one row per `documents.doc_type='file'`).
-pub(crate) const SCHEMA_V43: &str = r#"
+/// V45 uploaded-file payload metadata (one row per `documents.doc_type='file'`).
+pub(crate) const SCHEMA_V45: &str = r#"
 CREATE TABLE IF NOT EXISTS document_files (document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, stored_path TEXT NOT NULL, uploaded_by TEXT REFERENCES profiles(id), uploaded_at INTEGER NOT NULL DEFAULT (unixepoch()));
 "#;
 
@@ -1065,7 +1065,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 43);
+        assert_eq!(SCHEMA_VERSION, 45);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
