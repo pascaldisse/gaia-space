@@ -492,8 +492,14 @@ pub(crate) fn rotate_app_secret_on(c: &rusqlite::Connection, application_id: &st
     let secret = crate::auth_security::opaque("spcs_");
     let hashed = crate::auth_security::hash(&secret)?;
     c.execute("INSERT INTO app_secrets(application_id,secret_hash,created_at) VALUES(?1,?2,unixepoch()) ON CONFLICT(application_id) DO UPDATE SET secret_hash=excluded.secret_hash,created_at=unixepoch()",params![application_id,hashed]).map_err(|e|e.to_string())?;
-    // Rotation invalidates outstanding tokens: an old secret must not keep access.
+    // Rotation invalidates every outstanding credential of this application: an old
+    // secret must not keep access through *either* grant. One secret (`app_secrets`)
+    // backs both client_credentials (`app_tokens`) and the authorization-code flow
+    // (`oauth_access_tokens`), so a single rotation retires both, plus authorization
+    // codes that were minted under the old secret and not yet exchanged.
     c.execute("UPDATE app_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
+    c.execute("UPDATE oauth_access_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
+    c.execute("UPDATE oauth_auth_codes SET consumed_at=unixepoch() WHERE application_id=?1 AND consumed_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
     Ok(AppSecret { application_id: application_id.into(), client_id, client_secret: secret })
 }
 /// client_credentials grant: verifies the app secret and mints an opaque bearer token.
