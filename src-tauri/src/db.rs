@@ -257,6 +257,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V23)?;
     }
     if version < 24 {
+        // JSON array of external check names the gate waits for (KB §3.1 item 6);
+        // consumed by review::evaluate_quality_gate_tx.
         add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?;
         tx.execute_batch(SCHEMA_V24)?;
     }
@@ -425,6 +427,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 52 {
         tx.execute_batch(SCHEMA_V52)?;
     }
+
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }

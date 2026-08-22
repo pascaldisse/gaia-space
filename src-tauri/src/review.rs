@@ -57,6 +57,11 @@ pub struct QualityGateRule {
     pub min_approvals: i64,
     pub required_reviewers_json: Option<String>,
     pub codeowners_required: bool,
+    /// JSON array of external check names this gate waits for. A named check that has
+    /// never reported blocks the merge — otherwise a CI job that simply never posts
+    /// would leave the gate green (KB §3.1 item 6).
+    #[serde(default)]
+    pub external_checks_json: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SafeMergeRun {
@@ -135,6 +140,10 @@ pub struct QualityGateEvaluation {
     /// Source-branch CODEOWNERS paths that have a rule, plus locally resolved owners.
     pub codeowner_paths: Vec<String>,
     pub codeowner_approvers: Vec<String>,
+    /// Check names the matched rules require, so the UI can show a gate waiting on a
+    /// job that has not posted anything yet.
+    #[serde(default)]
+    pub required_checks: Vec<String>,
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -913,7 +922,7 @@ fn enforce_merge_permission_tx(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![project_id], |r| {
             Ok(QualityGateRule {
@@ -923,6 +932,7 @@ pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule
                 min_approvals: r.get(3)?,
                 required_reviewers_json: r.get(4)?,
                 codeowners_required: r.get(5)?,
+                external_checks_json: r.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -934,8 +944,8 @@ pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule
 pub fn create_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
-        "INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required) VALUES(?1,?2,?3,?4,?5,?6)",
-        rusqlite::params![rule.id, rule.project_id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required],
+        "INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        rusqlite::params![rule.id, rule.project_id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -944,8 +954,8 @@ pub fn create_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
 pub fn update_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
-        "UPDATE quality_gate_rules SET branch_pattern=?2,min_approvals=?3,required_reviewers_json=?4,codeowners_required=?5 WHERE id=?1",
-        rusqlite::params![rule.id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required],
+        "UPDATE quality_gate_rules SET branch_pattern=?2,min_approvals=?3,required_reviewers_json=?4,codeowners_required=?5,external_checks_json=?6 WHERE id=?1",
+        rusqlite::params![rule.id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1196,7 +1206,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
     let target = target_branch.unwrap_or_default();
 
     let mut s = conn
-        .prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required FROM quality_gate_rules WHERE project_id=?1")
+        .prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json FROM quality_gate_rules WHERE project_id=?1")
         .map_err(|e| e.to_string())?;
     let rules: Vec<QualityGateRule> = s
         .query_map(rusqlite::params![project_id], |r| {
@@ -1207,6 +1217,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
                 min_approvals: r.get(3)?,
                 required_reviewers_json: r.get(4)?,
                 codeowners_required: r.get(5)?,
+                external_checks_json: r.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1226,6 +1237,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
             matched_rules: 0,
             codeowner_paths: Vec::new(),
             codeowner_approvers: Vec::new(),
+            required_checks: Vec::new(),
         });
     }
 
@@ -1306,6 +1318,16 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         );
     }
 
+    // Checks the matched rules insist on, whether or not anything has reported them yet.
+    let mut required_checks: std::collections::BTreeSet<String> = Default::default();
+    for r in &matched {
+        if let Some(json) = &r.external_checks_json {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(json) {
+                required_checks.extend(list.into_iter().filter(|n| !n.trim().is_empty()));
+            }
+        }
+    }
+    let mut reported: std::collections::BTreeSet<String> = Default::default();
     let mut external = conn
         .prepare("SELECT check_name,status FROM review_external_checks WHERE review_id=?1")
         .map_err(|e| e.to_string())?;
@@ -1316,9 +1338,15 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         .map_err(|e| e.to_string())?
     {
         let (name, status) = check.map_err(|e| e.to_string())?;
+        reported.insert(name.clone());
         if status != "SUCCEEDED" {
             reasons.push(format!("external check '{name}' is {status}; waiting"));
         }
+    }
+    for name in required_checks.iter().filter(|n| !reported.contains(*n)) {
+        reasons.push(format!(
+            "required external check '{name}' has not reported"
+        ));
     }
     Ok(QualityGateEvaluation {
         satisfied: reasons.is_empty(),
@@ -1328,6 +1356,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         matched_rules: matched.len() as i64,
         codeowner_paths,
         codeowner_approvers: codeowner_approvers.into_iter().collect(),
+        required_checks: required_checks.into_iter().collect(),
     })
 }
 /// Live gate evaluation banner: satisfied/blocking reasons for a review's target branch.
@@ -1901,6 +1930,36 @@ mod tests {
         )
         .unwrap();
         assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+
+        drop(db_path);
+    }
+
+    /// A rule may name checks that have never reported. Silence must block, otherwise a CI
+    /// job that dies before posting leaves the gate green.
+    #[test]
+    fn required_external_check_blocks_until_it_reports_success() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,target_branch,title) VALUES('rq','demo-project',1,'MR','Opened','main','T')", []).unwrap();
+        conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,external_checks_json) VALUES('rule-q','demo-project','main',0,'[\"ci/build\"]')", []).unwrap();
+
+        let silent = evaluate_quality_gate_tx(&conn, "rq").unwrap();
+        assert!(!silent.satisfied, "a check that never reported must block");
+        assert_eq!(silent.required_checks, vec!["ci/build".to_string()]);
+        assert!(silent
+            .reasons
+            .iter()
+            .any(|r| r.contains("has not reported")));
+
+        conn.execute("INSERT INTO review_external_checks(review_id,check_name,status,updated_at) VALUES('rq','ci/build','PENDING',unixepoch())", []).unwrap();
+        assert!(!evaluate_quality_gate_tx(&conn, "rq").unwrap().satisfied);
+
+        conn.execute(
+            "UPDATE review_external_checks SET status='SUCCEEDED' WHERE review_id='rq'",
+            [],
+        )
+        .unwrap();
+        assert!(evaluate_quality_gate_tx(&conn, "rq").unwrap().satisfied);
 
         drop(db_path);
     }

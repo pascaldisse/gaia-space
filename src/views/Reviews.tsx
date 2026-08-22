@@ -171,6 +171,8 @@ export default function Reviews() {
   const [rulePattern, setRulePattern] = createSignal("main");
   const [ruleApprovals, setRuleApprovals] = createSignal(1);
   const [ruleCodeowners, setRuleCodeowners] = createSignal(false);
+  // Comma-separated check names the gate must wait for even before they report.
+  const [ruleChecks, setRuleChecks] = createSignal("");
   async function addRule(e: SubmitEvent) {
     e.preventDefault();
     const pid = selected()?.project_id;
@@ -183,6 +185,13 @@ export default function Reviews() {
         min_approvals: ruleApprovals(),
         required_reviewers_json: null,
         codeowners_required: ruleCodeowners(),
+        external_checks_json: (() => {
+          const names = ruleChecks()
+            .split(",")
+            .map((n) => n.trim())
+            .filter(Boolean);
+          return names.length ? JSON.stringify(names) : null;
+        })(),
       });
       refetchGateRules();
       refetchGateEval();
@@ -420,6 +429,9 @@ export default function Reviews() {
                   <ul><For each={gateEval()!.reasons}>{(reason) => <li>{reason}</li>}</For></ul>
                 </Show>
                 <p class="hint">{gateEval()?.approvals ?? 0} approval(s), matched {gateEval()?.matched_rules ?? 0} rule(s), needs {gateEval()?.min_approvals ?? 0}.</p>
+<Show when={gateEval()?.required_checks.length}>
+<p class="hint">Required checks: {gateEval()!.required_checks.join(", ")}</p>
+</Show>
 <Show when={gateEval()?.codeowner_paths.length}>
 <p class="hint">CODEOWNERS: {gateEval()!.codeowner_paths.join(", ")} · resolved approvers: {gateEval()!.codeowner_approvers.join(", ") || "none"}</p>
 </Show>
@@ -432,6 +444,7 @@ export default function Reviews() {
                         <li>
                           <code>{rule.branch_pattern}</code> min {rule.min_approvals} approval(s)
                           <Show when={rule.codeowners_required}> · CODEOWNERS</Show>
+                          <Show when={rule.external_checks_json}> · checks: {(JSON.parse(rule.external_checks_json!) as string[]).join(", ")}</Show>
                           <button class="ghost small" onClick={() => deleteRule(rule.id)}>×</button>
                         </li>
                       )}
@@ -441,6 +454,7 @@ export default function Reviews() {
                     <input placeholder="branch pattern (e.g. main, release/*)" value={rulePattern()} onInput={(e) => setRulePattern(e.currentTarget.value)} />
                     <input type="number" min="0" value={ruleApprovals()} onInput={(e) => setRuleApprovals(Number(e.currentTarget.value))} />
                     <label><input type="checkbox" checked={ruleCodeowners()} onChange={(e) => setRuleCodeowners(e.currentTarget.checked)} /> CODEOWNERS</label>
+                    <input class="grow" placeholder="required checks (comma separated, e.g. ci/build, ci/test)" value={ruleChecks()} onInput={(e) => setRuleChecks(e.currentTarget.value)} />
                     <button class="ghost">Add rule</button>
                   </form>
                 </details>

@@ -55,6 +55,8 @@ export type QualityGateRule = {
   min_approvals: number;
   required_reviewers_json: string | null;
   codeowners_required: boolean;
+  // JSON array of external check names the gate waits for, even before they report.
+  external_checks_json: string | null;
 };
 
 export type SafeMergeRun = {
@@ -76,6 +78,7 @@ export type QualityGateEvaluation = {
   matched_rules: number;
   codeowner_paths: string[];
   codeowner_approvers: string[];
+  required_checks: string[];
 };
 
 export type ExternalCheckStatus = "PENDING" | "SUCCEEDED" | "FAILED";
