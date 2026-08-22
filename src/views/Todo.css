@@ -69,6 +69,15 @@
 .task-project-edit .field-label{font-size:11px;color:var(--text-faint)}
 .task-delete{flex:none;margin-top:-2px}
 
+/* ── click-to-edit: the task body is a real <button> so it is keyboard-
+   native for free, reset back to looking like plain card content ── */
+button.task-body-edit{display:grid;gap:8px;flex:1;min-width:0;text-align:left;background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer}
+button.task-body-edit:hover .task-title{color:var(--accent-text,var(--accent))}
+button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.task-card-editing{display:block;border-color:var(--accent);border-left-color:var(--accent);background:var(--surface-raised)}
+.task-card-editing .task-body{gap:14px}
+.task-edit-actions{justify-content:space-between}
+
 @media(max-width:1040px){.todo-rail{max-width:none}}
 @media(max-width:640px){.composer-source-fields{grid-template-columns:1fr}.composer-meta{grid-template-columns:1fr}.composer-submit{width:100%}}
 
