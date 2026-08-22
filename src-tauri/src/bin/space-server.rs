@@ -794,6 +794,7 @@ enum CommandPolicy {
     DocumentReadList,
     DocumentRead,
     DocumentWrite,
+    DocumentOwnerWrite,
     DocumentAccessWrite,
     DocumentFolderCreate,
     DocumentFolderReadList,
@@ -852,7 +853,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" | "delete_document" => CommandPolicy::DocumentWrite,
+        "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
         "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
@@ -950,7 +951,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "move_issue_on_board" | "publish_package_version" | "remove_channel_member" => {
             CommandPolicy::Session
         }
-        "move_document" => CommandPolicy::DocumentWrite,
+        "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
         | "remove_issue_link"
@@ -976,7 +977,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_cf_definition" | "update_channel" | "update_deploy_target" | "update_issue" => {
             CommandPolicy::Session
         }
-        "update_document" => CommandPolicy::DocumentWrite,
+        "update_document" => CommandPolicy::DocumentOwnerWrite,
         "update_document_folder" => CommandPolicy::DocumentFolderWrite,
         "update_issue_status"
         | "update_message"
@@ -1636,6 +1637,17 @@ fn authorize_command(
                 Ok(())
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document write denied"))
+            }
+        }
+        CommandPolicy::DocumentOwnerWrite => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if documents::document_owner_writable_by(&id, &user.profile_id, user.role == "admin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "document owner access denied"))
             }
         }
         CommandPolicy::DocumentAccessWrite => {
@@ -2850,6 +2862,8 @@ mod tests {
         let (status, value) = call(cookie("td"), "save_document", json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["body"], json!("edited"));
+        let (status, _) = call(cookie("td"), "move_document", json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pd","folder_id":null})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an editor cannot move a shared document");
         let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='shared-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
         assert_eq!(actor, "pd", "the web gateway binds the editor identity");
     }

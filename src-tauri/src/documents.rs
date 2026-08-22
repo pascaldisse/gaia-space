@@ -90,6 +90,7 @@ const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permi
 /// the rows behind but project membership remains the sole effective access policy.
 const DOCUMENT_READ_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (d.container_type='my-docs' AND ";
 const DOCUMENT_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)) OR (d.container_type='my-docs' AND ";
+const DOCUMENT_OWNER_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)))";
 
 fn document_read_scope() -> String {
     format!("{DOCUMENT_READ_SCOPE}{DOCUMENT_EXPLICIT_READ_SCOPE}))")
@@ -144,6 +145,19 @@ pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Docu
         row_to_document,
     )
     .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Content editors may save versions, but placement/lifecycle changes remain with
+/// the owner (or the project owner/admin). A shared document can never be moved or
+/// archived by the person it was shared with.
+pub fn document_owner_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
+    let c = db::conn()?;
+    c.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {DOCUMENT_OWNER_WRITE_SCOPE})"),
+        rusqlite::params![profile_id, is_admin, id],
+        |row| row.get(0),
+    )
     .map_err(|e| e.to_string())
 }
 
