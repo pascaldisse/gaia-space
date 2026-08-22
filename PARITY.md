@@ -18,7 +18,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☀ — merged
 - V41 → feat/w3-secrot (webhook secret rotation / key-ring) ☘
 
-TOTALS (8/8 audited, 356 rows): done 42 · partial 149 · stub 21 · missing 144. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 42 · partial 152 · stub 21 · missing 141. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -30,11 +30,11 @@ Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob m
 Worst gaps: stacked cherry-pick/restack UI · quality gates external checks; CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
-33 rows — done 8 · partial 16 · stub 0 · missing 9.
+33 rows — done 8 · partial 17 · stub 0 · missing 8.
 Worst gaps: swimlane grouping dimensions · matrix reports · external tracker integration.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
-49 rows — done 5 · partial 18 · stub 1 · missing 25.
+49 rows — done 5 · partial 20 · stub 1 · missing 23.
 Worst gaps: per-format registry protocols · retention/immutability/CVE/ACLs · workers/artifacts/test-reporting · non-manual triggers+DSL · deployment integrations/webhooks.
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
