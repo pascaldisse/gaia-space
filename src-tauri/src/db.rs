@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 21;
+pub const SCHEMA_VERSION: i64 = 22;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -195,6 +195,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 21 {
         tx.execute_batch(SCHEMA_V21)?;
     }
+    if version < 22 {
+        tx.execute_batch(SCHEMA_V22)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -312,6 +315,19 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 /// an MR source branch advances.
 pub(crate) const SCHEMA_V21: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+pub(crate) const SCHEMA_V22: &str = r#"
+CREATE TABLE IF NOT EXISTS review_stacks (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ repo_path TEXT NOT NULL, target_branch TEXT NOT NULL, source_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS review_stack_items (
+ stack_id TEXT NOT NULL REFERENCES review_stacks(id) ON DELETE CASCADE,
+ review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+ ordering INTEGER NOT NULL, PRIMARY KEY(stack_id, review_id), UNIQUE(stack_id, ordering)
+);
+CREATE INDEX IF NOT EXISTS review_stack_items_review ON review_stack_items(review_id);
 "#;
 
 pub(crate) const SCHEMA_V18: &str = r#"
@@ -622,7 +638,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 21);
+        assert_eq!(SCHEMA_VERSION, 22);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

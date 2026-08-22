@@ -69,6 +69,24 @@ pub struct SafeMergeRun {
     pub target_oid: Option<String>,
     pub merge_commit_oid: Option<String>,
 }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewStack {
+    pub id: String,
+    pub project_id: String,
+    pub repo_path: String,
+    pub target_branch: String,
+    pub source_branch: String,
+    pub review_ids: Vec<String>,
+}
+#[derive(Debug, Deserialize)]
+pub struct NewReviewStack {
+    pub id: String,
+    pub project_id: String,
+    pub repo_path: String,
+    pub target_branch: String,
+    pub source_branch: String,
+    pub review_ids: Vec<String>,
+}
 
 /// Input for opening a merge request against a registered repo's *real* branches.
 #[derive(Debug, Deserialize)]
@@ -440,6 +458,44 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------- stacked merge requests ----------
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_review_stack(input: NewReviewStack) -> Result<ReviewStack> {
+    if input.review_ids.is_empty() { return Err("a review stack needs at least one merge request".into()); }
+    let c = db::conn()?;
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    for review_id in &input.review_ids {
+        let (project, repo): (String, Option<String>) = tx.query_row("SELECT project_id,repo_path FROM reviews WHERE id=?1 AND kind='MR'", rusqlite::params![review_id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|_| format!("merge request '{review_id}' not found"))?;
+        if project != input.project_id || repo.as_deref() != Some(input.repo_path.as_str()) { return Err("all stacked reviews must share project and repository".into()); }
+    }
+    tx.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES(?1,?2,?3,?4,?5)", rusqlite::params![input.id,input.project_id,input.repo_path,input.target_branch,input.source_branch]).map_err(|e| e.to_string())?;
+    for (ordering, review_id) in input.review_ids.iter().enumerate() {
+        tx.execute("INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES(?1,?2,?3)", rusqlite::params![input.id,review_id,ordering as i64]).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(ReviewStack { id: input.id, project_id: input.project_id, repo_path: input.repo_path, target_branch: input.target_branch, source_branch: input.source_branch, review_ids: input.review_ids })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_review_stacks(project_id: String) -> Result<Vec<ReviewStack>> {
+    let c = db::conn()?;
+    let rows: Vec<(String, String, String, String, String)> = {
+        let mut s = c.prepare("SELECT id,project_id,repo_path,target_branch,source_branch FROM review_stacks WHERE project_id=?1 ORDER BY created_at").map_err(|e| e.to_string())?;
+        let rows = s.query_map(rusqlite::params![project_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+        rows
+    };
+    rows.into_iter().map(|(id, project_id, repo_path, target_branch, source_branch)| {
+        let mut items = c.prepare("SELECT review_id FROM review_stack_items WHERE stack_id=?1 ORDER BY ordering").map_err(|e|e.to_string())?;
+        let review_ids = items.query_map(rusqlite::params![&id], |r|r.get(0)).map_err(|e|e.to_string())?.collect::<std::result::Result<Vec<String>,_>>().map_err(|e|e.to_string())?;
+        Ok(ReviewStack { id, project_id, repo_path, target_branch, source_branch, review_ids })
+    }).collect()
+}
+/// When a stack parent lands, children based on its source branch are retargeted to the
+/// newly advanced target branch; no refs are changed by this database operation.
+fn retarget_stacked_children_tx(conn: &Connection, review_id: &str) -> Result<i64> {
+    let (project_id, source, target): (String, Option<String>, Option<String>) = conn.query_row("SELECT project_id,source_branch,target_branch FROM reviews WHERE id=?1", rusqlite::params![review_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e|e.to_string())?;
+    match (source,target) { (Some(source),Some(target)) => conn.execute("UPDATE reviews SET target_branch=?3 WHERE project_id=?1 AND target_branch=?2 AND state='Opened' AND id IN (SELECT review_id FROM review_stack_items)",rusqlite::params![project_id,source,target]).map(|count| count as i64).map_err(|e|e.to_string()), _ => Ok(0) }
 }
 
 // ---------- protected branches: per-action allow-lists ----------
@@ -1153,13 +1209,14 @@ pub fn attempt_merge(
         rusqlite::params![review_id],
     )
     .map_err(|e| e.to_string())?;
+    let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
     record_merge_run_tx(
         &c,
         &id,
         &review_id,
         "SUCCEEDED",
         false,
-        format!("merged as {merge_oid}; CI green"),
+        format!("merged as {merge_oid}; CI green; retargeted {retargeted} stacked review(s)"),
         Some(&source_oid),
         Some(&target_oid),
         Some(&merge_oid.to_string()),
@@ -1338,6 +1395,22 @@ mod tests {
         assert_eq!(eval.approvals, 1);
 
         drop(db_path);
+    }
+
+    #[test]
+    fn merged_stack_parent_retargets_open_children_only() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).unwrap();
+        for (id, source, target, state) in [("parent", "feature-a", "main", "Merged"), ("child", "feature-b", "feature-a", "Opened"), ("closed", "feature-c", "feature-a", "Closed")] {
+            conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title) VALUES(?1,'demo-project',(SELECT COALESCE(MAX(number),0)+1 FROM reviews),'MR',?4,?2,?3,?1)", rusqlite::params![id,source,target,state]).unwrap();
+        }
+        conn.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES('stack','demo-project','repo','main','feature-b')", []).unwrap();
+        for (review_id, ordering) in [("parent", 0), ("child", 1), ("closed", 2)] { conn.execute("INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES('stack',?1,?2)", rusqlite::params![review_id,ordering]).unwrap(); }
+        assert_eq!(retarget_stacked_children_tx(&conn, "parent").unwrap(), 1);
+        let target: String = conn.query_row("SELECT target_branch FROM reviews WHERE id='child'", [], |r| r.get(0)).unwrap();
+        assert_eq!(target, "main");
+        let closed_target: String = conn.query_row("SELECT target_branch FROM reviews WHERE id='closed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(closed_target, "feature-a");
     }
 
     #[test]

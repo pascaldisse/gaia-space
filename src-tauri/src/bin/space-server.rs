@@ -865,6 +865,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "create_profile"
         | "create_quality_gate_rule"
+        | "create_review_stack"
         | "create_review"
         | "create_review_discussion"
         | "create_role"
@@ -927,6 +928,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
+        | "list_review_stacks"
         | "list_review_discussions"
         | "list_review_participants"
         | "list_reviews"
@@ -1976,6 +1978,7 @@ async fn cmd(
     "create_profile" => platform::create_profile(profile: platform::Profile),
     "create_project" => platform::create_project(project: platform::Project),
     "create_quality_gate_rule" => review::create_quality_gate_rule(rule: review::QualityGateRule),
+    "create_review_stack" => review::create_review_stack(input: review::NewReviewStack),
     "create_review" => review::create_review(review: review::Review),
     "create_review_discussion" => review::create_review_discussion(discussion: review::NewDiscussion),
     "create_role" => platform::create_role(input: platform::RoleInput),
@@ -2064,6 +2067,7 @@ async fn cmd(
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
+    "list_review_stacks" => review::list_review_stacks(project_id: String),
     "list_review_discussions" => review::list_review_discussions(review_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
     "list_reviews" => review::list_reviews(),
