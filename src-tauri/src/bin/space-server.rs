@@ -2543,6 +2543,8 @@ async fn cmd(
     "save_devfile" => applications::save_devfile(value: applications::Devfile),
     "delete_devfile" => applications::delete_devfile(id: String),
     "open_in_ide" => applications::open_in_ide(repository: String, ide: String),
+    "list_ide_sessions" => applications::list_ide_sessions(),
+    "report_ide_session" => applications::report_ide_session(value: applications::IdeSession),
     "list_applications" => applications::list_applications(),
     "register_redirect_uri" => oauth::register_redirect_uri_cmd(application_id: String, redirect_uri: String),
     "list_redirect_uris" => oauth::list_redirect_uris_cmd(application_id: String),

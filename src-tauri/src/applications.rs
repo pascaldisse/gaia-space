@@ -31,6 +31,157 @@ pub struct IdeLaunch {
     pub ide: String,
     pub repository: String,
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct IdeSession {
+    pub id: String,
+    pub ide: String,
+    pub repositories: Vec<String>,
+    pub last_seen_at: i64,
+}
+
+/// Inspects actual local IDE process command lines plus workspace lock/socket files.
+/// The roots are configurable for installations with repositories outside the cwd.
+fn discover_local_ide_sessions(
+    processes: &[String],
+    roots: &[std::path::PathBuf],
+) -> Vec<IdeSession> {
+    let mut found = std::collections::BTreeMap::<String, (String, Vec<String>)>::new();
+    for (n, process) in processes.iter().enumerate() {
+        let lower = process.to_ascii_lowercase();
+        let ide = if lower.contains("visual studio code") || lower.contains("/code") {
+            Some("VS Code")
+        } else if lower.contains("idea")
+            || lower.contains("webstorm")
+            || lower.contains("pycharm")
+            || lower.contains("jetbrains")
+        {
+            Some("JetBrains")
+        } else {
+            None
+        };
+        let Some(ide) = ide else { continue };
+        let repositories = process
+            .split_whitespace()
+            .filter_map(|part| {
+                let path = part.strip_prefix("file://").unwrap_or(part);
+                let path = std::path::Path::new(path);
+                path.is_dir().then(|| path.to_string_lossy().into_owned())
+            })
+            .collect::<Vec<_>>();
+        found.insert(format!("process-{n}"), (ide.into(), repositories));
+    }
+    for root in roots {
+        let markers = [
+            (".vscode/.ipc", "VS Code"),
+            (".vscode/.lock", "VS Code"),
+            (".idea/.lock", "JetBrains"),
+        ];
+        for (marker, ide) in markers {
+            if root.join(marker).exists() {
+                found.insert(
+                    format!("lock-{}", root.to_string_lossy()),
+                    (ide.into(), vec![root.to_string_lossy().into_owned()]),
+                );
+                break;
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|(source, (ide, repositories))| IdeSession {
+            id: format!("local-{source}"),
+            ide,
+            repositories,
+            last_seen_at: 0,
+        })
+        .collect()
+}
+fn local_ide_scan_roots() -> Vec<std::path::PathBuf> {
+    std::env::var_os("GAIA_SPACE_IDE_SCAN_ROOTS")
+        .map(|value| std::env::split_paths(&value).collect())
+        .unwrap_or_else(|| std::env::current_dir().into_iter().collect())
+}
+fn local_processes() -> Vec<String> {
+    std::process::Command::new("ps")
+        .args(["-ax", "-o", "command="])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn read_ide_session(
+    c: &rusqlite::Connection,
+    id: String,
+    ide: String,
+    last_seen_at: i64,
+) -> Result<IdeSession> {
+    let mut q=c.prepare("SELECT repository FROM ide_opened_repositories WHERE connection_id=?1 ORDER BY repository").map_err(|e|e.to_string())?;
+    let repositories = q
+        .query_map([&id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(IdeSession {
+        id,
+        ide,
+        repositories,
+        last_seen_at,
+    })
+}
+fn persist_ide_session(c: &mut rusqlite::Connection, value: IdeSession) -> Result<IdeSession> {
+    required("IDE session id", &value.id)?;
+    required("IDE", &value.ide)?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO ide_connections(id,ide,connected,last_seen_at) VALUES(?1,?2,1,unixepoch()) ON CONFLICT(id) DO UPDATE SET ide=excluded.ide,connected=1,last_seen_at=unixepoch()",params![value.id,value.ide]).map_err(|e|e.to_string())?;
+    tx.execute(
+        "DELETE FROM ide_opened_repositories WHERE connection_id=?1",
+        [&value.id],
+    )
+    .map_err(|e| e.to_string())?;
+    for repository in &value.repositories {
+        required("repository", repository)?;
+        tx.execute(
+            "INSERT INTO ide_opened_repositories(connection_id,repository) VALUES(?1,?2)",
+            params![value.id, repository.trim()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    let (ide, last_seen_at) = c
+        .query_row(
+            "SELECT ide,last_seen_at FROM ide_connections WHERE id=?1",
+            [&value.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    read_ide_session(c, value.id, ide, last_seen_at)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_ide_sessions() -> Result<Vec<IdeSession>> {
+    let mut c = db::conn()?;
+    for session in discover_local_ide_sessions(&local_processes(), &local_ide_scan_roots()) {
+        persist_ide_session(&mut c, session)?;
+    }
+    let mut q=c.prepare("SELECT id,ide,last_seen_at FROM ide_connections WHERE connected=1 ORDER BY last_seen_at DESC,ide").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<(String, String, i64)>, _>>()
+        .map_err(|e| e.to_string())?;
+    rows.into_iter()
+        .map(|(id, ide, last_seen_at)| read_ide_session(&c, id, ide, last_seen_at))
+        .collect()
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn report_ide_session(value: IdeSession) -> Result<IdeSession> {
+    persist_ide_session(&mut db::conn()?, value)
+}
 fn read_devfile(r: &rusqlite::Row<'_>) -> rusqlite::Result<Devfile> {
     Ok(Devfile {
         id: r.get(0)?,
@@ -1302,6 +1453,39 @@ mod tests {
             .unwrap()
             .url
             .starts_with("jetbrains://"));
+    }
+    #[test]
+    fn local_ide_process_and_lock_produce_sessions() {
+        let root = crate::db::TempDb::new("gaia-space-ide-root");
+        let project = root.path().parent().unwrap().join("project");
+        std::fs::create_dir_all(project.join(".idea")).unwrap();
+        std::fs::write(project.join(".idea/.lock"), "live").unwrap();
+        let sessions = discover_local_ide_sessions(
+            &[format!("Visual Studio Code {}", project.display())],
+            std::slice::from_ref(&project),
+        );
+        assert!(sessions.iter().any(|session| session.ide == "VS Code"
+            && session.repositories == vec![project.to_string_lossy()]));
+        assert!(sessions.iter().any(|session| session.ide == "JetBrains"
+            && session.repositories == vec![project.to_string_lossy()]));
+    }
+
+    #[test]
+    fn ide_session_reads_opened_repositories() {
+        let c = db::open_in_memory().unwrap();
+        db::migrate(&c).unwrap();
+        c.execute(
+            "INSERT INTO ide_connections(id,ide,connected,last_seen_at) VALUES('i','Fleet',1,9)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO ide_opened_repositories(connection_id,repository) VALUES('i','/work/demo')",[]).unwrap();
+        assert_eq!(
+            read_ide_session(&c, "i".into(), "Fleet".into(), 9)
+                .unwrap()
+                .repositories,
+            vec!["/work/demo"]
+        );
     }
 }
 

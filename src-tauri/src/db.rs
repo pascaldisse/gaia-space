@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 45;
+pub const SCHEMA_VERSION: i64 = 46;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -401,10 +401,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 43 && table_exists(&tx, "documents")? {
         tx.execute_batch(SCHEMA_V43)?;
     }
-    // V45: dashboard widget visibility is an account preference, not browser state.
-    // V43 is owned by the documents lane and V44 by its paired lane; preserve gaps.
+    // V45: IDE discovery state. V43/V44 are reserved by paired lanes.
     if version < 45 {
         tx.execute_batch(SCHEMA_V45)?;
+    }
+    // V46: dashboard widget visibility is an account preference, not browser state.
+    if version < 46 {
+        tx.execute_batch(SCHEMA_V46)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -725,6 +728,11 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 /// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
 /// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
 pub(crate) const SCHEMA_V45: &str = r#"
+CREATE TABLE IF NOT EXISTS ide_connections (id TEXT PRIMARY KEY, ide TEXT NOT NULL, connected INTEGER NOT NULL DEFAULT 1, last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS ide_opened_repositories (connection_id TEXT NOT NULL REFERENCES ide_connections(id) ON DELETE CASCADE, repository TEXT NOT NULL, PRIMARY KEY(connection_id, repository));
+CREATE INDEX IF NOT EXISTS ide_opened_repositories_repository ON ide_opened_repositories(repository);
+"#;
+pub(crate) const SCHEMA_V46: &str = r#"
 CREATE TABLE IF NOT EXISTS user_preferences (
     profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
     dashboard_hidden_widgets TEXT NOT NULL
@@ -1077,7 +1085,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 45);
+        assert_eq!(SCHEMA_VERSION, 46);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1098,7 +1106,7 @@ mod tests {
     }
 
     /// The integration lane merged three schema-touching branches into one serial
-    /// (V43 documents, V45 preferences). This walks the whole ladder from every version
+    /// (V43 documents, V45 IDE state, V46 preferences). This walks the whole ladder from every version
     /// those branches care about and re-runs it, so neither DDL depends on the other
     /// having run first and neither breaks on a second pass.
     #[test]

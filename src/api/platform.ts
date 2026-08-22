@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
 export type Team = { id: string; name: string; description: string | null; parent_id: string | null; archived: boolean };
 export type TeamMembership = {
   id: string; profile_id: string; team_id: string; role_id: string | null; lead: boolean;
@@ -32,7 +33,10 @@ export const platformApi = {
   createProfile: (profile: Profile) => call<void>("create_profile", { profile }),
   updateProfile: (profile: Profile) => call<void>("update_profile", { profile }),
 
-  // Teams + memberships
+  memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
+addMemberLocation: (member_id: string, location: string, location_type: string) => call<MemberLocation>("add_member_location", { memberId: member_id, location, locationType: location_type }),
+removeMemberLocation: (id: string) => call<void>("remove_member_location", { id }),
+// Teams + memberships
   teams: () => call<Team[]>("list_teams"),
   createTeam: (input: { id?: string; name: string; description: string | null; parent_id: string | null }) =>
     call<Team>("create_team", { input }),
