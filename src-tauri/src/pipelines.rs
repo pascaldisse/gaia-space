@@ -1026,7 +1026,14 @@ fn validate_package_path_component(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 fn package_base_dir() -> PathBuf {
-    std::env::temp_dir().join("packages")
+    std::env::var_os("SPACE_PACKAGE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("gaia-space")
+                .join("packages")
+        })
 }
 /// Independently resolve the filesystem path; lexical validation alone never authorizes a write.
 fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
