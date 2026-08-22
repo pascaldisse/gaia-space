@@ -1035,6 +1035,32 @@ fn validate_package_path_component(value: &str, field: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Registry package names are multi-segment in real wire protocols: npm scopes
+/// (`@scope/name`) and Maven coordinates (`groupId/artifactId`). Each `/`-separated segment
+/// obeys the single-component rule, and an optional `@` prefix is allowed on the first
+/// segment only, so nothing can escape the registry root.
+fn validate_package_name(value: &str) -> Result<()> {
+    let (segments, scoped) = match value.strip_prefix('@') {
+        Some(rest) => (rest, true),
+        None => (value, false),
+    };
+    let parts: Vec<&str> = segments.split('/').collect();
+    if parts.is_empty() || (scoped && parts.len() < 2) {
+        return Err("invalid package name: scoped names require @scope/name".into());
+    }
+    for part in parts {
+        validate_package_path_component(part, "name")?;
+    }
+    Ok(())
+}
+/// Relative on-disk directory for a package name (each name segment is already validated).
+fn package_name_dir(package_name: &str) -> PathBuf {
+    let mut dir = PathBuf::new();
+    for part in package_name.trim_start_matches('@').split('/') {
+        dir.push(part);
+    }
+    dir
+}
 fn package_base_dir() -> PathBuf {
     std::env::var_os("SPACE_PACKAGE_DIR")
         .map(PathBuf::from)
@@ -1046,6 +1072,14 @@ fn package_base_dir() -> PathBuf {
         })
 }
 /// Independently resolve the filesystem path; lexical validation alone never authorizes a write.
+/// SHA-1 hex digest — the checksum Maven clients fetch as `<file>.sha1` and npm publishes as
+/// `dist.shasum`. Content addressing only; no security claim is made on SHA-1 here.
+pub fn sha1_hex(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
 fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
     let canonical_base =
         fs::canonicalize(base_dir).map_err(|e| format!("cannot canonicalize package root: {e}"))?;
@@ -1219,7 +1253,7 @@ fn publish_package_version_tx(
 immutable: Option<bool>,
 ) -> Result<PackageVersion> {
     validate_package_path_component(repository_id, "repository id")?;
-    validate_package_path_component(package_name, "name")?;
+    validate_package_name(package_name)?;
     validate_package_path_component(version, "version")?;
     if let Some(filename) = payload_filename {
         validate_package_path_component(filename, "payload filename")?;
@@ -1247,11 +1281,26 @@ immutable: Option<bool>,
     meta_object.remove("_file_path");
     meta_object.remove("_file_size");
     meta_object.remove("_format");
+    meta_object.remove("_files");
+    // Assets already stored for this version survive a metadata-only or additional-file
+    // publish (Maven uploads .pom and .jar as separate requests for the same version).
+    let version_id = format!("{repository_id}::{package_name}::{version}");
+    let previous_files = conn
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE id=?1",
+            params![&version_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+        .and_then(|v| v.get("_files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
     if let (Some(filename), Some(content)) = (payload_filename, payload_content) {
         fs::create_dir_all(base_dir).map_err(|e| e.to_string())?;
         let dir = base_dir
             .join(repository_id)
-            .join(package_name)
+            .join(package_name_dir(package_name))
             .join(version);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         canonical_path_within(base_dir, &dir)?;
@@ -1260,6 +1309,21 @@ immutable: Option<bool>,
         let canonical_file_path = canonical_path_within(base_dir, &file_path)?;
         meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
+        // Real Maven deploys ship several assets per version (.pom, .jar, checksums) and npm
+        // ships one tarball; `_files` is the per-version asset index, `_file_path` stays as
+        // the single-payload compatibility field for existing generic callers.
+        let mut files = previous_files.clone();
+        files.insert(
+            filename.to_string(),
+            json!({
+                "path": canonical_file_path.display().to_string(),
+                "size": content.len(),
+                "sha1": sha1_hex(content),
+            }),
+        );
+        meta["_files"] = Value::Object(files);
+    } else if !previous_files.is_empty() {
+        meta["_files"] = Value::Object(previous_files.clone());
     }
     let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
     meta["_format"] = serde_json::Value::String(format);
@@ -1322,15 +1386,19 @@ pub fn download_registry_bytes(
     filename: &str,
 ) -> Result<Vec<u8>> {
     validate_package_path_component(repository_id, "repository id")?;
-    validate_package_path_component(package_name, "name")?;
+    validate_package_name(package_name)?;
     validate_package_path_component(version, "version")?;
     validate_package_path_component(filename, "payload filename")?;
     let c = db::conn()?;
     let meta: String = c.query_row("SELECT metadata_json FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3", params![repository_id, package_name, version], |r| r.get(0)).map_err(|_| "package version not found".to_string())?;
     let value: Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
     let path = value
-        .get("_file_path")
+        .get("_files")
+        .and_then(Value::as_object)
+        .and_then(|files| files.get(filename))
+        .and_then(|entry| entry.get("path"))
         .and_then(Value::as_str)
+        .or_else(|| value.get("_file_path").and_then(Value::as_str))
         .ok_or_else(|| "package version has no downloadable payload".to_string())?;
     let canonical = canonical_path_within(&package_base_dir(), Path::new(path))?;
     if canonical.file_name().and_then(|v| v.to_str()) != Some(filename) {
