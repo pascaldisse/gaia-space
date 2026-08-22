@@ -47,6 +47,49 @@ The overlap length is chosen by the sender at rotation time (default
 `GAIA_SPACE_WEBHOOK_SECRET_OVERLAP_SECONDS`, 86400s). Deploy the new secret to
 your receiver inside that window; after it expires, only the ACTIVE secret signs.
 
+## Typed application payloads (app endpoint)
+
+An application's own `endpoint_uri` receives the typed payload family
+(`dispatch_application_payload`), signed with the application's **Ed25519** key —
+not the HMAC webhook secret. Five headers travel with the JSON body:
+
+* `x-gaia-space-application` — application ID;
+* `x-gaia-space-payload-class` — the `className` tag of the payload;
+* `x-gaia-space-key-id` — which signing key was used;
+* `x-gaia-space-timestamp` — Unix seconds, part of the signed message;
+* `x-gaia-space-signature` — `ed25519=<base64 signature>`.
+
+Verification procedure:
+
+1. Read and retain the raw body. Read all five headers.
+2. Fetch the application's public key (`app_signing_key`). Match
+   `x-gaia-space-key-id` against `key_id`, or against `previous_key_id` while a
+   rotation is in flight — `rotate_app_signing_key` keeps the retired public key
+   readable exactly so an in-flight payload still verifies.
+3. Parse `x-gaia-space-timestamp` and reject it outside the freshness window.
+   The sender's window is `GAIA_APP_PAYLOAD_MAX_AGE_SECS` (default **300s**);
+   `payload_dispatch::verify_fresh_app_payload` performs steps 3 and 4 together
+   and is the exact check to mirror.
+4. Verify the base64 signature (after stripping the `ed25519=` prefix) over the
+   byte string `timestamp + "." + rawBody` with the public key. Reject a mismatch.
+5. Retain `(application_id, timestamp, signature)` for at least the window and
+   reject an already-seen tuple: the timestamp is inside the signed message, so a
+   captured request cannot be re-dated, and the window bounds how long it could be
+   replayed verbatim.
+
+Sender-side egress policy, re-validated at dispatch time (the endpoint row may
+have been written by somebody else, long before):
+
+* the endpoint must be `https://`. A plaintext `http://` endpoint is refused
+  unless `GAIA_APP_DISPATCH_ALLOW_PLAINTEXT=1`, and a payload carrying a
+  credential-shaped field (`secret`, `token`, `password`, `private_key`,
+  `credential`, at any depth) is refused over plaintext **regardless** of that
+  switch;
+* loopback, private, link-local, CGNAT and unique-local destinations are refused,
+  literal or resolved from the hostname, unless
+  `GAIA_APP_DISPATCH_ALLOW_PRIVATE_ENDPOINTS=1` (on-prem receivers, tests);
+* non-HTTP schemes never dispatch; redirects are not followed.
+
 ## Retry and idempotency
 
 Each send attempt obtains a new current Unix-seconds timestamp. A retry can
