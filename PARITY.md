@@ -25,7 +25,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V53 → feat/w7-personal (to-do content kind; absence confidentiality + availability) ☀Kali
 - V54 → feat/w7-keys (application SSH/GPG public-key records + revocation) ☀Kali
 - V56 → feat/w7-chatbot (two-stage application rights: developer-declared required rights vs. admin-approved authorized rights per context) ☀Vishnu-II
-- V57 → feat/w8-auth (predefined role audit / policy follow-up) ☀Kali-VIII
+- V57 → feat/w8-auth (predefined role policy; UNSTARTED — reservation only) ☀Kali-VIII
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 356 rows): done 52 · partial 174 · stub 4 · missing 126. Matrix NOT green — steering loop active.
