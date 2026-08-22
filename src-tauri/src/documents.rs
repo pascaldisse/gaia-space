@@ -1066,7 +1066,7 @@ pub fn move_document_folder(id: String, parent_id: Option<String>) -> Result<()>
 }
 
 // ---------------------------------------------------------------------------
-// Uploaded files (V45)
+// Uploaded files (V43)
 //
 // An upload is an ordinary document with `doc_type='file'`: it lives in the same folder
 // tree, obeys the same container scoping and access rules, and shows up in the same
