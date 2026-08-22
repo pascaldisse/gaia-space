@@ -64,7 +64,9 @@ pub struct DocumentAccessRecipient {
     pub access_level: String,
 }
 
-fn default_body_format() -> String { "text".into() }
+fn default_body_format() -> String {
+    "text".into()
+}
 fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     Ok(Document {
         id: r.get(0)?,

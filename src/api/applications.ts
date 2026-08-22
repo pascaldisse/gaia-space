@@ -14,6 +14,8 @@ export type AppSecret={application_id:string;client_id:string;client_secret:stri
 export type AppToken={id:string;application_id:string;scope:string;expires_at:number|null;access_token:string|null};
 export type MarketplaceApp={id:string;name:string;vendor:string;description:string|null;capabilities_json:string;compatibility:string|null;listing_url:string|null};
 export type AppInstall={id:string;marketplace_app_id:string|null;application_id:string;install_kind:"MARKETPLACE"|"LINK"|"MANUAL"|"JENKINS"|"TEAMCITY";installed_by:string|null;installed_at:number};
+/** External bearer-token API paths; use the issued token in `Authorization: Bearer …`. */
+export const appHttpApi={me:"/api/app/me",projects:"/api/app/projects"} as const;
 export const applicationsApi={
 rotateAppSecret:(application_id:string)=>call<AppSecret>("rotate_app_secret",{applicationId:application_id}),
 issueAppToken:(client_id:string,client_secret:string,scope?:string,ttl_seconds?:number)=>call<AppToken>("issue_app_token",{clientId:client_id,clientSecret:client_secret,scope:scope??null,ttlSeconds:ttl_seconds??null}),
