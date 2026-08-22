@@ -78,6 +78,8 @@ pub struct ReviewStack {
     pub source_branch: String,
     pub review_ids: Vec<String>,
 }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExternalCheck { pub review_id: String, pub check_name: String, pub status: String, pub details: Option<String> }
 #[derive(Debug, Deserialize)]
 pub struct NewReviewStack {
     pub id: String,
@@ -823,6 +825,18 @@ fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOw
     Ok(matches)
 }
 
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn record_external_check(check: ExternalCheck) -> Result<()> {
+    if !matches!(check.status.as_str(), "PENDING" | "SUCCEEDED" | "FAILED") { return Err("external check status must be PENDING, SUCCEEDED, or FAILED".into()); }
+    db::conn()?.execute("INSERT INTO review_external_checks(review_id,check_name,status,details,updated_at) VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(review_id,check_name) DO UPDATE SET status=excluded.status,details=excluded.details,updated_at=excluded.updated_at", rusqlite::params![check.review_id,check.check_name,check.status,check.details]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_external_checks(review_id: String) -> Result<Vec<ExternalCheck>> {
+    let c=db::conn()?; let mut s=c.prepare("SELECT review_id,check_name,status,details FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
+    let checks = s.query_map(rusqlite::params![review_id],|r|Ok(ExternalCheck{review_id:r.get(0)?,check_name:r.get(1)?,status:r.get(2)?,details:r.get(3)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+    Ok(checks)
+}
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
     let (project_id, target_branch): (String, Option<String>) = conn
         .query_row(
@@ -944,6 +958,8 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         );
     }
 
+    let mut external = conn.prepare("SELECT check_name,status FROM review_external_checks WHERE review_id=?1").map_err(|e|e.to_string())?;
+    for check in external.query_map(rusqlite::params![review_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).map_err(|e|e.to_string())? { let (name,status)=check.map_err(|e|e.to_string())?; if status != "SUCCEEDED" { reasons.push(format!("external check '{name}' is {status}; waiting")); } }
     Ok(QualityGateEvaluation {
         satisfied: reasons.is_empty(),
         reasons,

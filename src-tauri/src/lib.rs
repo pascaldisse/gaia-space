@@ -237,6 +237,8 @@ pub fn run() {
             review::delete_protected_branch_rule,
             review::create_review_stack,
             review::list_review_stacks,
+            review::record_external_check,
+            review::list_external_checks,
             review::list_quality_gate_rules,
             review::create_quality_gate_rule,
             review::update_quality_gate_rule,
