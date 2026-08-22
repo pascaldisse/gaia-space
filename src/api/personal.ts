@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[] };
-export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; date:string|null };
+export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
 export type Absence = { id:string; profile_id:string; reason_type:string; date_from:string; date_to:string; approved:boolean };
 export type Notification = { id:string; recipient_id:string; event_type:string; title:string; body:string|null; entity_type:string|null; entity_id:string|null; created_at:number; read_at:number|null };
 export type SubscriptionSetting = { profile_id:string; event_type:string; enabled:boolean };

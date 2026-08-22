@@ -16,8 +16,10 @@ const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLo
  *  text below for why, and `calendar_feeds.rs` for the sync mechanics. */
 function ConnectedCalendars() {
   const [feeds, { refetch: reloadFeeds }] = createResource(() => profileId(), profile => profile ? calendarFeedsApi.list(profile) : Promise.resolve([]));
+const [calendars] = createResource(() => profileId(), profile => profile ? calendarsApi.list(profile) : Promise.resolve([]));
   const [label, setLabel] = createSignal("");
   const [url, setUrl] = createSignal("");
+const [calendarId, setCalendarId] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
   const connect = async (event: SubmitEvent) => {
@@ -30,8 +32,8 @@ function ConnectedCalendars() {
     try {
       // `profile_id` is shape-only: the server always rebinds it to the
       // session, the same as every other personal write.
-      await calendarFeedsApi.save({ profile_id: owner, label: label().trim(), ics_url: url().trim() });
-      setLabel(""); setUrl(""); reloadFeeds();
+      await calendarFeedsApi.save({ profile_id: owner, label: label().trim(), ics_url: url().trim(), calendar_id: calendarId() || null });
+      setLabel(""); setUrl(""); setCalendarId(""); reloadFeeds();
     } catch (reason) { setError(humanError(reason)); }
     finally { setBusy(false); }
   };
@@ -62,6 +64,7 @@ function ConnectedCalendars() {
     <form class="feed-connect" onSubmit={connect}>
       <input placeholder="Label, e.g. My Gmail" aria-label="Calendar label" value={label()} onInput={e => setLabel(e.currentTarget.value)} />
       <input placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="Calendar address" value={url()} onInput={e => setUrl(e.currentTarget.value)} />
+      <select aria-label="Calendar destination" value={calendarId()} onChange={e => setCalendarId(e.currentTarget.value)}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></select>
       <button type="submit" class="primary" disabled={busy()}>Connect</button>
     </form>
   </div>;

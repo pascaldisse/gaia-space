@@ -8,6 +8,7 @@ export type CalendarFeed = {
   id: string;
   profile_id: string;
   label: string;
+  calendar_id: string | null;
   created_at: number;
   last_synced_at: number | null;
   last_error: string | null;
@@ -20,7 +21,7 @@ export const calendarFeedsApi = {
   list: (profile_id: string) => call<CalendarFeed[]>("list_calendar_feeds", { profileId: profile_id }),
   // `profile_id` here is shape-only — the server always rebinds it to the
   // session's own profile, the same as every other personal write.
-  save: (input: { id?: string; profile_id: string; label: string; ics_url: string }) =>
+  save: (input: { id?: string; profile_id: string; label: string; ics_url: string; calendar_id?: string | null }) =>
     call<CalendarFeed>("save_calendar_feed", { input }),
   remove: (id: string) => call<void>("delete_calendar_feed", { id }),
   sync: (id: string) => call<CalendarFeed>("sync_calendar_feed", { id }),

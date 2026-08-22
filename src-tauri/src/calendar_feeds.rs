@@ -135,6 +135,7 @@ pub struct CalendarFeed {
     pub id: String,
     pub profile_id: String,
     pub label: String,
+    pub calendar_id: Option<String>,
     pub created_at: i64,
     pub last_synced_at: Option<i64>,
     pub last_error: Option<String>,
@@ -146,13 +147,14 @@ pub struct CalendarFeedInput {
     pub profile_id: String,
     pub label: String,
     pub ics_url: String,
+pub calendar_id: Option<String>,
 }
 
 fn row(c: &Connection, id: &str) -> Result<Option<CalendarFeed>> {
     err(c.query_row(
-        "SELECT id,profile_id,label,created_at,last_synced_at,last_error,event_count FROM calendar_feeds WHERE id=?1",
+        "SELECT id,profile_id,label,calendar_id,created_at,last_synced_at,last_error,event_count FROM calendar_feeds WHERE id=?1",
         [id],
-        |r| Ok(CalendarFeed { id: r.get(0)?, profile_id: r.get(1)?, label: r.get(2)?, created_at: r.get(3)?, last_synced_at: r.get(4)?, last_error: r.get(5)?, event_count: r.get(6)? }),
+        |r| Ok(CalendarFeed { id: r.get(0)?, profile_id: r.get(1)?, label: r.get(2)?, calendar_id: r.get(3)?, created_at: r.get(4)?, last_synced_at: r.get(5)?, last_error: r.get(6)?, event_count: r.get(7)? }),
     ).optional())
 }
 
@@ -172,16 +174,17 @@ pub fn feed_owner(id: &str) -> Result<Option<String>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_calendar_feeds(profile_id: String) -> Result<Vec<CalendarFeed>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT id,profile_id,label,created_at,last_synced_at,last_error,event_count FROM calendar_feeds WHERE profile_id=?1 ORDER BY created_at"))?;
+    let mut statement = err(c.prepare("SELECT id,profile_id,label,calendar_id,created_at,last_synced_at,last_error,event_count FROM calendar_feeds WHERE profile_id=?1 ORDER BY created_at"))?;
     let rows = err(statement.query_map([&profile_id], |r| {
         Ok(CalendarFeed {
             id: r.get(0)?,
             profile_id: r.get(1)?,
             label: r.get(2)?,
-            created_at: r.get(3)?,
-            last_synced_at: r.get(4)?,
-            last_error: r.get(5)?,
-            event_count: r.get(6)?,
+            calendar_id: r.get(3)?,
+            created_at: r.get(4)?,
+            last_synced_at: r.get(5)?,
+            last_error: r.get(6)?,
+            event_count: r.get(7)?,
         })
     }))?;
     let mut out = Vec::new();
@@ -207,19 +210,23 @@ pub fn save_calendar_feed(input: CalendarFeedInput) -> Result<CalendarFeed> {
     }
     let sealed = secretbox::seal(url)?;
     let c = db::conn()?;
+    if let Some(calendar_id) = input.calendar_id.as_deref() {
+        let owner = calendar_owner(calendar_id)?.ok_or_else(|| "Calendar not found".to_string())?;
+        if owner != input.profile_id { return Err("Calendar belongs to another profile".into()); }
+    }
     let id = match &input.id {
         Some(id) if row(&c, id)?.is_some() => {
             err(c.execute(
-                "UPDATE calendar_feeds SET label=?1, ics_url_sealed=?2 WHERE id=?3",
-                params![label, sealed, id],
+                "UPDATE calendar_feeds SET label=?1, ics_url_sealed=?2, calendar_id=?3 WHERE id=?4",
+                params![label, sealed, input.calendar_id, id],
             ))?;
             id.clone()
         }
         _ => {
             let id = new_id();
             err(c.execute(
-                "INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,last_synced_at,last_error,event_count) VALUES(?1,?2,?3,?4,?5,NULL,NULL,0)",
-                params![id, input.profile_id, label, sealed, now()],
+                "INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,calendar_id,created_at,last_synced_at,last_error,event_count) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,0)",
+                params![id, input.profile_id, label, sealed, input.calendar_id, now()],
             ))?;
             id
         }
@@ -378,8 +385,8 @@ pub fn external_items_on(
     day_end: &str,
 ) -> Result<Vec<CalendarItem>> {
     let mut statement = err(c.prepare(
-        "SELECT cfe.feed_id,cfe.uid,cfe.occurrence_key,cfe.title,cfe.starts_at,cfe.ends_at,cfe.all_day_date FROM calendar_feed_events cfe \
-         JOIN calendar_feeds cf ON cf.id=cfe.feed_id WHERE cf.profile_id=?1 AND ( \
+        "SELECT cfe.feed_id,cfe.uid,cfe.occurrence_key,cfe.title,cfe.starts_at,cfe.ends_at,cfe.all_day_date,cf.calendar_id FROM calendar_feed_events cfe \
+         JOIN calendar_feeds cf ON cf.id=cfe.feed_id LEFT JOIN calendars cal ON cal.id=cf.calendar_id WHERE cf.profile_id=?1 AND (cf.calendar_id IS NULL OR cal.visible=1) AND ( \
            (cfe.all_day_date IS NULL AND cfe.starts_at<?3 AND (cfe.ends_at IS NULL OR cfe.ends_at>?2)) \
            OR (cfe.all_day_date IS NOT NULL AND cfe.all_day_date>=?4 AND cfe.all_day_date<?5) \
          )",
@@ -395,12 +402,13 @@ pub fn external_items_on(
                 r.get::<_, i64>(4)?,
                 r.get::<_, Option<i64>>(5)?,
                 r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<String>>(7)?,
             ))
         },
     ))?;
     let mut items = Vec::new();
     for record in rows {
-        let (feed_id, uid, occurrence_key, title, starts_at, ends_at, date) =
+        let (feed_id, uid, occurrence_key, title, starts_at, ends_at, date, calendar_id) =
             record.map_err(|e| e.to_string())?;
         items.push(CalendarItem {
             id: format!("external-{feed_id}-{uid}-{occurrence_key}"),
@@ -410,6 +418,7 @@ pub fn external_items_on(
             starts_at,
             ends_at,
             project_id: None,
+            calendar_id,
             date,
         });
     }
@@ -446,6 +455,20 @@ mod tests {
             external_items_on(&c, "pb", 1899900000, 1900010000, "2030-03-10", "2030-03-11")
                 .unwrap();
         assert_eq!(stranger.len(), 0, "another profile's feed is invisible");
+    }
+
+    #[test]
+    fn external_items_carry_their_calendar_and_hide_invisible_destinations() {
+        let c = seeded();
+        c.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES('work','pa','Work','#2563eb',1,0),('private','pa','Private','#2563eb',0,0)", []).unwrap();
+        c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count,calendar_id) VALUES('work-feed','pa','Work','sealed',0,0,'work'),('private-feed','pa','Private','sealed',0,0,'private')", []).unwrap();
+        c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('work-feed','u1','1','Visible',1900000000,NULL,NULL),('private-feed','u2','1','Hidden',1900000000,NULL,NULL)", []).unwrap();
+        let items = external_items_on(&c, "pa", 1899900000, 1900010000, "2030-03-10", "2030-03-11").unwrap();
+        assert_eq!(items.len(), 1, "hidden named calendars must not leak into the aggregate");
+        assert_eq!(items[0].calendar_id.as_deref(), Some("work"), "the UI filter receives the owning calendar");
+        c.execute("DELETE FROM calendars WHERE id='work'", []).unwrap();
+        let retained: Option<String> = c.query_row("SELECT calendar_id FROM calendar_feeds WHERE id='work-feed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(retained, None, "deleting a calendar unassigns its feed without deleting cached events");
     }
 
     #[test]

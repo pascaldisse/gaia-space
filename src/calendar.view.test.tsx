@@ -90,7 +90,23 @@ describe("calendar day agenda", () => {
     expect(host.querySelector(".calendar-legend")?.textContent).toBe("MeetingTaskDeadline");
   });
 
-  test("quick create offers a meeting, a task and a deadline form on the chosen day", async () => {
+  test("calendar filter keeps local items and hides external items from other calendars", async () => {
+stubFetch();
+setProfileId("pa");
+const today = new Date(); const key = dateKey(today);
+replies = { calendar_aggregate: { ok: true, value: [
+{ id: "local", source_id: "local", kind: "task", title: "Local", starts_at: 0, ends_at: null, project_id: null, calendar_id: null, date: key },
+{ id: "work", source_id: "work", kind: "external", title: "Work event", starts_at: 0, ends_at: null, project_id: null, calendar_id: "work", date: key },
+{ id: "personal", source_id: "personal", kind: "external", title: "Personal event", starts_at: 0, ends_at: null, project_id: null, calendar_id: "personal", date: key },
+] }, list_calendars: { ok: true, value: [{ id: "work", profile_id: "pa", name: "Work", color: "#2563eb", visible: true }, { id: "personal", profile_id: "pa", name: "Personal", color: "#2563eb", visible: true }] } };
+const host = mount(); await settle();
+const filter = host.querySelector("select[aria-label='Calendar filter']") as HTMLSelectElement;
+expect(filter).toBeTruthy(); filter.value = "work"; filter.dispatchEvent(new Event("change", { bubbles: true })); await settle();
+expect(host.querySelector(".cal-agenda")?.textContent).toContain("Local");
+expect(host.querySelector(".cal-agenda")?.textContent).toContain("Work event");
+expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Personal event");
+});
+test("quick create offers a meeting, a task and a deadline form on the chosen day", async () => {
     stubFetch();
     setProfileId("pa");
     replies = { calendar_aggregate: { ok: true, value: [] }, list_projects: { ok: true, value: [{ id: "p1", name: "Apollo", key: "AP", description: null, created_by: "pa", archived: false, deadline: null }] } };

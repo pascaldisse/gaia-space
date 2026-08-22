@@ -945,6 +945,8 @@ pub struct CalendarItem {
     pub starts_at: i64,
     pub ends_at: Option<i64>,
     pub project_id: Option<String>,
+    /// Named calendar owning a synced external item; local derived items are unassigned.
+    pub calendar_id: Option<String>,
     /// Set for date-only kinds (task due date, project deadline); `None` for meetings,
     /// which are instants. Clients render the calendar day from this string.
     pub date: Option<String>,
@@ -1041,6 +1043,7 @@ pub fn calendar_aggregate_on(
                 starts_at: occurrence.starts_at,
                 ends_at: Some(occurrence.ends_at),
                 project_id: None,
+                calendar_id: None,
                 date: None,
             });
         }
@@ -1071,6 +1074,7 @@ pub fn calendar_aggregate_on(
             starts_at,
             ends_at: None,
             project_id,
+            calendar_id: None,
             date: Some(date),
         });
     }
@@ -1099,6 +1103,7 @@ pub fn calendar_aggregate_on(
             starts_at,
             ends_at: None,
             project_id: Some(id),
+            calendar_id: None,
             date: Some(date),
         });
     }

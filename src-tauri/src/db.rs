@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 49;
+pub const SCHEMA_VERSION: i64 = 51;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -412,6 +412,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 49 {
         tx.execute_batch(SCHEMA_V49)?;
     }
+    // V51: feed destinations are optional; legacy rows remain unassigned.
+    if version < 51 {
+        add_column_if_missing(&tx, "calendar_feeds", "calendar_id", "TEXT REFERENCES calendars(id) ON DELETE SET NULL")?;
+        tx.execute_batch(SCHEMA_V51)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -735,6 +740,11 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 pub(crate) const SCHEMA_V49: &str = r#"
 CREATE TABLE IF NOT EXISTS calendars (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#2563eb', visible INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS calendars_profile ON calendars(profile_id);
+"#;
+
+/// V51 indexes the optional feed destination used by Calendar filtering.
+pub(crate) const SCHEMA_V51: &str = r#"
+CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id);
 "#;
 
 pub(crate) const SCHEMA_V45: &str = r#"
@@ -1095,7 +1105,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 49);
+        assert_eq!(SCHEMA_VERSION, 51);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
