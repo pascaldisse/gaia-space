@@ -366,7 +366,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
     // V40 keeps legacy doc_type stable and adds an independently versioned body mode.
-    if version < 40 {
+    // Same table-guard rationale as V39: hand-built partial fixtures may lack the table.
+    if version < 40 && table_exists(&tx, "documents")? {
         add_column_if_missing(&tx, "documents", "body_format", "TEXT NOT NULL DEFAULT 'text' CHECK(body_format IN ('text','rich-text','checklist','code'))")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
