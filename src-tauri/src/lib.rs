@@ -28,7 +28,7 @@ pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod ics;
+pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
