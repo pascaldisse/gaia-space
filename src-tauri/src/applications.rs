@@ -1911,6 +1911,161 @@ mod delivery_tests {
         assert_eq!(payload["document"]["title"], "Draft v2");
     }
 
+    /// Registers `app-fanout` plus the given subscriptions, all pointing at the same
+    /// unreachable endpoint (nothing is sent in these tests — only the queue is read).
+    fn register_hooks(app_id: &str, hooks: &[(&str, &str, Option<&str>)]) {
+        save_application(Application {
+            id: app_id.into(),
+            name: "Fan-out app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some("https://example.test/hook".into()),
+            client_id: format!("{app_id}-client"),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        for (id, event_type, filters) in hooks {
+            save_webhook(WebhookSubscription {
+                id: (*id).into(),
+                application_id: app_id.into(),
+                event_type: (*event_type).into(),
+                filters_json: filters.map(|f| f.to_string()),
+                endpoint_uri: "https://example.test/hook".into(),
+                enabled: true,
+                secret: None,
+                max_attempts: 5,
+            })
+            .expect("hook");
+        }
+    }
+
+    fn queued_webhook_ids() -> Vec<String> {
+        let c = db::conn().expect("db");
+        let ids = c
+            .prepare("SELECT webhook_id FROM webhook_deliveries ORDER BY webhook_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        ids
+    }
+
+    fn queued_payload(webhook_id: &str) -> serde_json::Value {
+        let c = db::conn().expect("db");
+        let raw: String = c
+            .query_row(
+                "SELECT payload_json FROM webhook_deliveries WHERE webhook_id=?1",
+                [webhook_id],
+                |r| r.get(0),
+            )
+            .expect("delivery row");
+        serde_json::from_str(&raw).expect("payload json")
+    }
+
+    /// Third domain, same contract: a review write enqueues for the subscription whose
+    /// dot-path filter accepts the review, and for nobody else.
+    #[test]
+    fn a_review_write_enqueues_only_the_matching_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("review-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-review",
+            &[
+                (
+                    "hook-review",
+                    crate::events::REVIEW_CREATED,
+                    Some(r#"{"review.state":"Opened"}"#),
+                ),
+                (
+                    "hook-review-miss",
+                    crate::events::REVIEW_CREATED,
+                    Some(r#"{"review.state":"Merged"}"#),
+                ),
+                ("hook-issue", crate::events::ISSUE_CREATED, None),
+            ],
+        );
+
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO projects(id,name,key,archived,created_at) VALUES('proj','Fan-out','FAN',0,0)",
+            [],
+        )
+        .expect("project");
+        drop(c);
+        crate::review::create_review(crate::review::Review {
+            id: "rev-fanout".into(),
+            project_id: "proj".into(),
+            number: 1,
+            kind: "MR".into(),
+            state: "Opened".into(),
+            source_branch: Some("feature".into()),
+            target_branch: Some("main".into()),
+            title: "Add fan-out".into(),
+            turn_based: true,
+            channel_id: None,
+            repo_path: None,
+        })
+        .expect("review");
+
+        assert_eq!(queued_webhook_ids(), vec!["hook-review".to_string()]);
+        let payload = queued_payload("hook-review");
+        assert_eq!(payload["event"], crate::events::REVIEW_CREATED);
+        assert_eq!(payload["review"]["id"], "rev-fanout");
+        assert_eq!(payload["review"]["title"], "Add fan-out");
+    }
+
+    /// A document save emits the taxonomy name and the pre-taxonomy alias, so both an
+    /// old and a new subscription receive exactly one delivery.
+    #[test]
+    fn a_document_save_serves_both_the_taxonomy_name_and_the_legacy_alias() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("doc-alias-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-doc-alias",
+            &[
+                ("hook-new", crate::events::DOCUMENT_UPDATED, None),
+                ("hook-legacy", crate::events::LEGACY_DOCUMENT_EVENT, None),
+            ],
+        );
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version) VALUES('doc-alias','my-docs','p1','text','Draft','body',1)",
+            [],
+        )
+        .expect("document");
+        drop(c);
+
+        crate::documents::save_document(
+            "doc-alias".into(),
+            "Draft v2".into(),
+            Some("body".into()),
+            None,
+        )
+        .expect("save");
+
+        assert_eq!(
+            queued_webhook_ids(),
+            vec!["hook-legacy".to_string(), "hook-new".to_string()]
+        );
+        assert_eq!(
+            queued_payload("hook-new")["event"],
+            crate::events::DOCUMENT_UPDATED
+        );
+        assert_eq!(
+            queued_payload("hook-legacy")["event"],
+            crate::events::LEGACY_DOCUMENT_EVENT
+        );
+    }
+
     /// Validation runs before any DB access, so these need no database.
     #[test]
     fn undecidable_filters_are_refused_on_save() {
