@@ -43,3 +43,20 @@ describe("webhook event picker", () => {
     expect(host.textContent).toContain("Choose one or more supported event types.");
   });
 });
+
+describe("marketplace and external tracker registration", () => {
+  test("saves a named listing and links the selected app as an external tracker", async () => {
+    const host = await mount();
+    const listingName = host.querySelector<HTMLInputElement>('input[aria-label="Marketplace listing name"]')!;
+    const listingVendor = host.querySelector<HTMLInputElement>('input[aria-label="Marketplace vendor"]')!;
+    listingName.value = "Issue bridge"; listingName.dispatchEvent(new Event("input", { bubbles: true }));
+    listingVendor.value = "Acme"; listingVendor.dispatchEvent(new Event("input", { bubbles: true }));
+    Array.from(host.querySelectorAll("button")).find(button => button.textContent === "+ Listing")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Link external issue tracker")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    const listing = calls.find(call => call.command === "save_marketplace_app")!.args.value;
+    expect(listing.name).toBe("Issue bridge"); expect(listing.vendor).toBe("Acme");
+    const tracker = calls.find(call => call.command === "save_ui_extension")!.args.value;
+    expect(tracker).toMatchObject({ application_id: app.id, extension_type: "ExternalIssueTracker", iframe_url: app.endpoint_uri });
+  });
+});
