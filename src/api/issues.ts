@@ -16,7 +16,7 @@ export type TimeEntry = { id:string; issue_id:string; profile_id:string; entry_d
 export type IssueDetail = { issue:Issue; tags:PlanningTag[]; checklists:Checklist[]; time_total_minutes:number; children:Issue[] };
 const call = <T>(command:string, args:Record<string, unknown> = {}) => invoke<T>(command, args);
 export const planningApi = {
-  issues: (filters: Partial<{project_id:string;text:string;status_id:string;assignee_id:string;tag_id:string;include_archived:boolean}> = {}) => call<Issue[]>("list_issues", filters),
+  issues: (filters: Partial<{project_id:string;text:string;status_id:string;assignee_id:string;tag_id:string;custom_field_id:string;custom_field_value_json:string;include_archived:boolean}> = {}) => call<Issue[]>("list_issues", filters),
   // The server flattens the issue into the detail object (`#[serde(flatten)]`),
   // so accept BOTH shapes and always hand back `{ issue, … }`.
   issue: async (id:string): Promise<IssueDetail|null> => {

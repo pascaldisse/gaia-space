@@ -299,10 +299,12 @@ fn list_issues_on(
     status_id: Option<&str>,
     assignee_id: Option<&str>,
     tag_id: Option<&str>,
+    custom_field_id: Option<&str>,
+    custom_field_value_json: Option<&str>,
     include_archived: bool,
 ) -> Result<Vec<Issue>> {
     let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
-    sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6=1 OR i.archived=0) ORDER BY i.project_id,i.number");
+    sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6 IS NULL OR EXISTS(SELECT 1 FROM cf_values cv WHERE cv.entity_id=i.id AND cv.definition_id=?6 AND (?7 IS NULL OR cv.value_json=?7))) AND (?8=1 OR i.archived=0) ORDER BY i.project_id,i.number");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(
         params![
@@ -311,6 +313,8 @@ fn list_issues_on(
             status_id,
             assignee_id,
             tag_id,
+            custom_field_id,
+            custom_field_value_json,
             include_archived
         ],
         read_issue,
@@ -329,6 +333,8 @@ pub fn list_issues(
     status_id: Option<String>,
     assignee_id: Option<String>,
     tag_id: Option<String>,
+    custom_field_id: Option<String>,
+    custom_field_value_json: Option<String>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Issue>> {
     let c = db::conn()?;
@@ -339,6 +345,8 @@ pub fn list_issues(
         status_id.as_deref(),
         assignee_id.as_deref(),
         tag_id.as_deref(),
+        custom_field_id.as_deref(),
+        custom_field_value_json.as_deref(),
         include_archived.unwrap_or(false),
     )
 }
