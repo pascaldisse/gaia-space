@@ -2702,10 +2702,18 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{secret}");
-        let client_secret = secret["value"]["client_secret"].as_str().unwrap().to_string();
+        let client_secret = secret["value"]["client_secret"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         // A live token from each flow, minted under that secret.
-        let (status, token) = call(cookie("tc"), "issue_app_token", json!({"client_id":"client-y","client_secret":client_secret,"ttl_seconds":60})).await;
+        let (status, token) = call(
+            cookie("tc"),
+            "issue_app_token",
+            json!({"client_id":"client-y","client_secret":client_secret,"ttl_seconds":60}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{token}");
         let app_token = token["value"]["access_token"].as_str().unwrap().to_string();
         let verifier = "verifier-0123456789012345678901234567890123456789";

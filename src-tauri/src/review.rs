@@ -79,7 +79,14 @@ pub struct ReviewStack {
     pub review_ids: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ExternalCheck { pub review_id: String, pub check_name: String, pub status: String, pub details: Option<String>, #[serde(default)] pub updated_at: i64 }
+pub struct ExternalCheck {
+    pub review_id: String,
+    pub check_name: String,
+    pub status: String,
+    pub details: Option<String>,
+    #[serde(default)]
+    pub updated_at: i64,
+}
 #[derive(Debug, Deserialize)]
 pub struct NewReviewStack {
     pub id: String,
@@ -655,7 +662,8 @@ fn stack_cherry_pick_tx(
     let (new_tip, conflicts) = cherry_pick_onto(&repo, &picked, &tip, &committer)?;
     if let Some(new_tip) = new_tip {
         let commit = repo.find_commit(new_tip).map_err(|e| e.to_string())?;
-        repo.branch(&branch, &commit, true).map_err(|e| e.to_string())?;
+        repo.branch(&branch, &commit, true)
+            .map_err(|e| e.to_string())?;
     }
     Ok(RestackStep {
         review_id,
@@ -1113,21 +1121,43 @@ fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOw
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn record_external_check(check: ExternalCheck) -> Result<()> {
-    if check.check_name.trim().is_empty() { return Err("external check needs a name".into()); }
-    if !matches!(check.status.as_str(), "PENDING" | "SUCCEEDED" | "FAILED") { return Err("external check status must be PENDING, SUCCEEDED, or FAILED".into()); }
+    if check.check_name.trim().is_empty() {
+        return Err("external check needs a name".into());
+    }
+    if !matches!(check.status.as_str(), "PENDING" | "SUCCEEDED" | "FAILED") {
+        return Err("external check status must be PENDING, SUCCEEDED, or FAILED".into());
+    }
     db::conn()?.execute("INSERT INTO review_external_checks(review_id,check_name,status,details,updated_at) VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(review_id,check_name) DO UPDATE SET status=excluded.status,details=excluded.details,updated_at=excluded.updated_at", rusqlite::params![check.review_id,check.check_name,check.status,check.details]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_external_checks(review_id: String) -> Result<Vec<ExternalCheck>> {
-    let c=db::conn()?; let mut s=c.prepare("SELECT review_id,check_name,status,details,updated_at FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
-    let checks = s.query_map(rusqlite::params![review_id],|r|Ok(ExternalCheck{review_id:r.get(0)?,check_name:r.get(1)?,status:r.get(2)?,details:r.get(3)?,updated_at:r.get(4)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+    let c = db::conn()?;
+    let mut s=c.prepare("SELECT review_id,check_name,status,details,updated_at FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
+    let checks = s
+        .query_map(rusqlite::params![review_id], |r| {
+            Ok(ExternalCheck {
+                review_id: r.get(0)?,
+                check_name: r.get(1)?,
+                status: r.get(2)?,
+                details: r.get(3)?,
+                updated_at: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(checks)
 }
 /// Operators retract a check that no longer applies; the gate stops waiting on it.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_external_check(review_id: String, check_name: String) -> Result<()> {
-    db::conn()?.execute("DELETE FROM review_external_checks WHERE review_id=?1 AND check_name=?2", rusqlite::params![review_id, check_name]).map_err(|e|e.to_string())?;
+    db::conn()?
+        .execute(
+            "DELETE FROM review_external_checks WHERE review_id=?1 AND check_name=?2",
+            rusqlite::params![review_id, check_name],
+        )
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
@@ -1700,7 +1730,10 @@ mod tests {
 
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
-        for (number, (id, branch)) in [("mr-a", "feat-a"), ("mr-b", "feat-b")].into_iter().enumerate() {
+        for (number, (id, branch)) in [("mr-a", "feat-a"), ("mr-b", "feat-b")]
+            .into_iter()
+            .enumerate()
+        {
             conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES(?1,'demo-project',?4,'MR','Opened',?2,'main','T',?3)", rusqlite::params![id, branch, path, number as i64 + 1]).unwrap();
         }
         conn.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES('st','demo-project',?1,'main','feat-b')", rusqlite::params![path]).unwrap();
@@ -1712,22 +1745,37 @@ mod tests {
         assert!(plan.iter().all(|s| s.conflicts.is_empty() && !s.applied));
         assert_eq!(plan[0].replayed.len(), 1);
         assert_eq!(plan[1].replayed.len(), 1);
-        assert_eq!(branch_commit(&repo, "feat-a").unwrap().id(), before_a, "dry run moved a ref");
+        assert_eq!(
+            branch_commit(&repo, "feat-a").unwrap().id(),
+            before_a,
+            "dry run moved a ref"
+        );
 
         let done = restack_stack_tx(&conn, "st".into(), false, None, None).expect("restack");
         assert!(done.iter().all(|s| s.applied), "steps: {done:?}");
         let main_tip = branch_commit(&repo, "main").unwrap().id();
         let a_tip = branch_commit(&repo, "feat-a").unwrap();
         let b_tip = branch_commit(&repo, "feat-b").unwrap();
-        assert_eq!(a_tip.parent_id(0).unwrap(), main_tip, "feat-a not on main tip");
-        assert_eq!(b_tip.parent_id(0).unwrap(), a_tip.id(), "feat-b not on feat-a tip");
+        assert_eq!(
+            a_tip.parent_id(0).unwrap(),
+            main_tip,
+            "feat-a not on main tip"
+        );
+        assert_eq!(
+            b_tip.parent_id(0).unwrap(),
+            a_tip.id(),
+            "feat-b not on feat-a tip"
+        );
         // Replayed content survives the move.
         assert!(b_tip.tree().unwrap().get_name("a.txt").is_some());
         assert!(b_tip.tree().unwrap().get_name("main2.txt").is_some());
 
         // Idempotent: a second restack finds every member already based correctly.
         let again = restack_stack_tx(&conn, "st".into(), false, None, None).expect("restack twice");
-        assert!(again.iter().all(|s| s.replayed.is_empty()), "steps: {again:?}");
+        assert!(
+            again.iter().all(|s| s.replayed.is_empty()),
+            "steps: {again:?}"
+        );
         assert_eq!(branch_commit(&repo, "feat-b").unwrap().id(), b_tip.id());
 
         drop(db_path);
@@ -1745,14 +1793,25 @@ mod tests {
         let main_tip = branch_commit(&repo, "main").unwrap().id();
         let before = branch_commit(&repo, "feature").unwrap().id();
         let conflicted =
-            stack_cherry_pick_tx(&conn, "mr-c".into(), main_tip.to_string(), None, None).expect("pick");
+            stack_cherry_pick_tx(&conn, "mr-c".into(), main_tip.to_string(), None, None)
+                .expect("pick");
         assert!(!conflicted.applied);
         assert_eq!(conflicted.conflicts, vec!["conflict.txt".to_string()]);
-        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before, "conflict moved the ref");
+        assert_eq!(
+            branch_commit(&repo, "feature").unwrap().id(),
+            before,
+            "conflict moved the ref"
+        );
 
-        let clean = plumb_commit(&repo, "refs/heads/side", Some(main_tip), "side.txt", "side\n");
-        let picked =
-            stack_cherry_pick_tx(&conn, "mr-c".into(), clean.to_string(), None, None).expect("pick");
+        let clean = plumb_commit(
+            &repo,
+            "refs/heads/side",
+            Some(main_tip),
+            "side.txt",
+            "side\n",
+        );
+        let picked = stack_cherry_pick_tx(&conn, "mr-c".into(), clean.to_string(), None, None)
+            .expect("pick");
         assert!(picked.applied);
         let tip = branch_commit(&repo, "feature").unwrap();
         assert_eq!(tip.id().to_string(), picked.new_tip.unwrap());
@@ -1774,14 +1833,30 @@ mod tests {
         conn.execute("INSERT INTO review_external_checks(review_id,check_name,status) VALUES('rx','ci/build','PENDING')", []).unwrap();
         let blocked = evaluate_quality_gate_tx(&conn, "rx").unwrap();
         assert!(!blocked.satisfied);
-        assert!(blocked.reasons.iter().any(|r| r.contains("ci/build")), "reasons: {:?}", blocked.reasons);
+        assert!(
+            blocked.reasons.iter().any(|r| r.contains("ci/build")),
+            "reasons: {:?}",
+            blocked.reasons
+        );
 
-        conn.execute("UPDATE review_external_checks SET status='SUCCEEDED' WHERE review_id='rx'", []).unwrap();
+        conn.execute(
+            "UPDATE review_external_checks SET status='SUCCEEDED' WHERE review_id='rx'",
+            [],
+        )
+        .unwrap();
         assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
 
-        conn.execute("UPDATE review_external_checks SET status='FAILED' WHERE review_id='rx'", []).unwrap();
+        conn.execute(
+            "UPDATE review_external_checks SET status='FAILED' WHERE review_id='rx'",
+            [],
+        )
+        .unwrap();
         assert!(!evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
-        conn.execute("DELETE FROM review_external_checks WHERE review_id='rx' AND check_name='ci/build'", []).unwrap();
+        conn.execute(
+            "DELETE FROM review_external_checks WHERE review_id='rx' AND check_name='ci/build'",
+            [],
+        )
+        .unwrap();
         assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
 
         drop(db_path);
