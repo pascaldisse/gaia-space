@@ -40,3 +40,16 @@ No production code was changed. Temporary audit tests were removed. No V40 migra
 - `bun test` → PASS, 115 pass / 0 fail.
 - `bun run build` → PASS; existing >500 kB chunk warning.
 - `python3 scripts/parity_totals.py --check` → PASS, `TOTAL: rows 356` unchanged.
+
+## Round 3 re-audit — Kali
+**Verdict: MERGEABLE.** Re-applied the prior race against `claim_delivery`; one conditional SQLite `UPDATE` writes a 120-second lease before any HTTP request.
+- 8 concurrent `process_webhook_queue(1)` workers: PASS; exactly 1 sweeper returned a delivery, listener observed exactly initial POST + 1 retry, and attempts became 2.
+- Lease recovery: PASS; forcing `next_attempt_at=unixepoch()-1` after a claim makes the abandoned PENDING row claimable again. Claiming preserves attempts (3 remained 3). SUCCEEDED and `next_attempt_at IS NULL` dead-letter rows cannot be manually claimed.
+- `retry_webhook_delivery(..., respect_backoff=false)` shares `claim_delivery`; it bypasses only backoff, never a live PENDING lease. Sweeper’s conditional claim loses cleanly to it; no second POST/attempt is possible.
+- `open_at` busy timeout: PASS under 8-writer race; no lock error/deadlock observed. Full cargo gate below is the regression check; timeout only waits for SQLite’s writer lock, not an application mutex.
+- V39: PASS. A real fresh V39 copy with `secret`/`max_attempts` removed and `user_version=38` regained both; a hand-built V38 partial DB lacking `webhook_subscriptions` migrated and stamped V39 without error.
+## Round 3 gates
+- `cargo test --manifest-path src-tauri/Cargo.toml delivery_tests::two_sweepers_deliver_a_due_row_exactly_once -- --nocapture` → PASS (8 sweepers)
+- `cargo test --manifest-path src-tauri/Cargo.toml expired_claim_recovers -- --nocapture` → PASS
+- `cargo test --manifest-path src-tauri/Cargo.toml v39_guard_upgrades -- --nocapture` → PASS
+- Full gate rerun: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS, 202 tests (163 lib + 39 server); `cargo check --manifest-path src-tauri/Cargo.toml` → PASS; `bunx tsc --noEmit` → PASS; `bun test` → PASS, 115; `bun run build` → PASS; `python3 scripts/parity_totals.py --check` → PASS, TOTAL 356. Existing four Rust warnings and the >500 kB Vite chunk warning remain.

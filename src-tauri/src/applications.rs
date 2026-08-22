@@ -1181,10 +1181,11 @@ mod delivery_tests {
                 [&failed.id],
             )
             .unwrap();
-        let a = std::thread::spawn(|| process_webhook_queue(1));
-        let b = std::thread::spawn(|| process_webhook_queue(1));
-        let delivered = a.unwrap_join() + b.unwrap_join();
-        assert_eq!(delivered, 1, "exactly one sweeper may own a due delivery");
+        let sweepers: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| process_webhook_queue(1)))
+            .collect();
+        let delivered: usize = sweepers.into_iter().map(JoinCount::unwrap_join).sum();
+        assert_eq!(delivered, 1, "exactly one of eight sweepers may own a due delivery");
         drop(server);
         assert_eq!(*hits.lock().unwrap(), 2, "initial POST + one retry POST");
         let after = list_webhook_deliveries("hook-race".into()).expect("list");
@@ -1198,6 +1199,27 @@ mod delivery_tests {
         fn unwrap_join(self) -> usize {
             self.join().expect("sweeper").expect("sweep").len()
         }
+    }
+
+    #[test]
+    fn expired_claim_recovers_without_spending_an_attempt_and_terminal_rows_stay_unclaimable() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-lease");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let c = db::conn().unwrap();
+        c.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,attempts,next_attempt_at) VALUES ('lease','missing','{}','FAILED',3,unixepoch()-1)", []).unwrap();
+        assert!(claim_delivery("lease", true).unwrap());
+        let claimed: (String, i64, i64) = c.query_row("SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(claimed.0, "PENDING");
+        assert_eq!(claimed.1, 3, "claiming cannot consume an attempt");
+        c.execute("UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'", []).unwrap();
+        assert!(claim_delivery("lease", true).unwrap(), "an abandoned lease becomes claimable");
+        c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
+        assert!(!claim_delivery("lease", false).unwrap());
+        c.execute("UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
+        assert!(!claim_delivery("lease", false).unwrap(), "dead letter stays terminal");
     }
 
     #[test]
