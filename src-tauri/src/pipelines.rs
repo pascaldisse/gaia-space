@@ -1052,6 +1052,32 @@ fn validate_package_path_component(value: &str, field: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Registry package names are multi-segment in real wire protocols: npm scopes
+/// (`@scope/name`) and Maven coordinates (`groupId/artifactId`). Each `/`-separated segment
+/// obeys the single-component rule, and an optional `@` prefix is allowed on the first
+/// segment only, so nothing can escape the registry root.
+fn validate_package_name(value: &str) -> Result<()> {
+    let (segments, scoped) = match value.strip_prefix('@') {
+        Some(rest) => (rest, true),
+        None => (value, false),
+    };
+    let parts: Vec<&str> = segments.split('/').collect();
+    if parts.is_empty() || (scoped && parts.len() < 2) {
+        return Err("invalid package name: scoped names require @scope/name".into());
+    }
+    for part in parts {
+        validate_package_path_component(part, "name")?;
+    }
+    Ok(())
+}
+/// Relative on-disk directory for a package name (each name segment is already validated).
+fn package_name_dir(package_name: &str) -> PathBuf {
+    let mut dir = PathBuf::new();
+    for part in package_name.trim_start_matches('@').split('/') {
+        dir.push(part);
+    }
+    dir
+}
 fn package_base_dir() -> PathBuf {
     std::env::var_os("SPACE_PACKAGE_DIR")
         .map(PathBuf::from)
@@ -1063,6 +1089,14 @@ fn package_base_dir() -> PathBuf {
         })
 }
 /// Independently resolve the filesystem path; lexical validation alone never authorizes a write.
+/// SHA-1 hex digest — the checksum Maven clients fetch as `<file>.sha1` and npm publishes as
+/// `dist.shasum`. Content addressing only; no security claim is made on SHA-1 here.
+pub fn sha1_hex(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
 fn canonical_path_within(base_dir: &Path, path: &Path) -> Result<PathBuf> {
     let canonical_base =
         fs::canonicalize(base_dir).map_err(|e| format!("cannot canonicalize package root: {e}"))?;
@@ -1303,7 +1337,7 @@ fn publish_package_version_tx(
     immutable: Option<bool>,
 ) -> Result<PackageVersion> {
     validate_package_path_component(repository_id, "repository id")?;
-    validate_package_path_component(package_name, "name")?;
+    validate_package_name(package_name)?;
     validate_package_path_component(version, "version")?;
     if let Some(filename) = payload_filename {
         validate_package_path_component(filename, "payload filename")?;
@@ -1331,11 +1365,26 @@ fn publish_package_version_tx(
     meta_object.remove("_file_path");
     meta_object.remove("_file_size");
     meta_object.remove("_format");
+    meta_object.remove("_files");
+    // Assets already stored for this version survive a metadata-only or additional-file
+    // publish (Maven uploads .pom and .jar as separate requests for the same version).
+    let version_id = format!("{repository_id}::{package_name}::{version}");
+    let previous_files = conn
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE id=?1",
+            params![&version_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+        .and_then(|v| v.get("_files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
     if let (Some(filename), Some(content)) = (payload_filename, payload_content) {
         fs::create_dir_all(base_dir).map_err(|e| e.to_string())?;
         let dir = base_dir
             .join(repository_id)
-            .join(package_name)
+            .join(package_name_dir(package_name))
             .join(version);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         canonical_path_within(base_dir, &dir)?;
@@ -1344,6 +1393,21 @@ fn publish_package_version_tx(
         let canonical_file_path = canonical_path_within(base_dir, &file_path)?;
         meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
+        // Real Maven deploys ship several assets per version (.pom, .jar, checksums) and npm
+        // ships one tarball; `_files` is the per-version asset index, `_file_path` stays as
+        // the single-payload compatibility field for existing generic callers.
+        let mut files = previous_files.clone();
+        files.insert(
+            filename.to_string(),
+            json!({
+                "path": canonical_file_path.display().to_string(),
+                "size": content.len(),
+                "sha1": sha1_hex(content),
+            }),
+        );
+        meta["_files"] = Value::Object(files);
+    } else if !previous_files.is_empty() {
+        meta["_files"] = Value::Object(previous_files.clone());
     }
     let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
     meta["_format"] = serde_json::Value::String(format);
@@ -1416,15 +1480,19 @@ pub fn download_registry_bytes(
     filename: &str,
 ) -> Result<Vec<u8>> {
     validate_package_path_component(repository_id, "repository id")?;
-    validate_package_path_component(package_name, "name")?;
+    validate_package_name(package_name)?;
     validate_package_path_component(version, "version")?;
     validate_package_path_component(filename, "payload filename")?;
     let c = db::conn()?;
     let meta: String = c.query_row("SELECT metadata_json FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3", params![repository_id, package_name, version], |r| r.get(0)).map_err(|_| "package version not found".to_string())?;
     let value: Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
     let path = value
-        .get("_file_path")
+        .get("_files")
+        .and_then(Value::as_object)
+        .and_then(|files| files.get(filename))
+        .and_then(|entry| entry.get("path"))
         .and_then(Value::as_str)
+        .or_else(|| value.get("_file_path").and_then(Value::as_str))
         .ok_or_else(|| "package version has no downloadable payload".to_string())?;
     let canonical = canonical_path_within(&package_base_dir(), Path::new(path))?;
     if canonical.file_name().and_then(|v| v.to_str()) != Some(filename) {
@@ -1444,11 +1512,159 @@ pub fn generic_registry_metadata(
         .and_then(|m| serde_json::from_str(&m).ok())
         .unwrap_or_else(|| json!({}));
     if let Some(object) = value.as_object_mut() {
+        strip_internal_metadata(object);
         object.insert("name".into(), json!(package_name));
         object.insert("version".into(), json!(version));
         object.insert("publishedAt".into(), json!(created_at));
     }
     Ok(value)
+}
+/// npm tarball filename convention: unscoped basename + version (`@scope/pkg@1.0.0` →
+/// `pkg-1.0.0.tgz`), which is what `npm pack` produces and what clients request under `/-/`.
+/// Server-owned bookkeeping keys never leave the process in a wire response — they carry
+/// absolute on-disk paths.
+fn strip_internal_metadata(object: &mut serde_json::Map<String, Value>) {
+    for key in ["_file_path", "_file_size", "_files", "_format"] {
+        object.remove(key);
+    }
+}
+pub fn npm_tarball_filename(package_name: &str, version: &str) -> String {
+    let base = package_name.rsplit('/').next().unwrap_or(package_name);
+    format!("{base}-{version}.tgz")
+}
+/// Publishes a real npm packument (`npm publish` / `bun publish` body): one or more entries in
+/// `versions`, the tarball(s) base64-encoded in `_attachments`, and requested `dist-tags`.
+/// Each version lands as its own `package_versions` row with the tarball stored as an asset.
+pub fn npm_publish_document(
+    repository_id: &str,
+    package_name: &str,
+    document: &Value,
+) -> Result<Vec<PackageVersion>> {
+    let versions = document
+        .get("versions")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "npm publish document requires a versions object".to_string())?;
+    if versions.is_empty() {
+        return Err("npm publish document contains no versions".into());
+    }
+    let attachments = document.get("_attachments").and_then(Value::as_object);
+    let requested_tags = document
+        .get("dist-tags")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut published = Vec::new();
+    for (version, manifest) in versions {
+        let mut manifest = manifest.clone();
+        let Some(object) = manifest.as_object_mut() else {
+            return Err("npm version manifest must be a JSON object".into());
+        };
+        if let Some(name) = object.get("name").and_then(Value::as_str) {
+            if name != package_name {
+                return Err("npm manifest name must match URL package".into());
+            }
+        }
+        object.insert("name".into(), json!(package_name));
+        object.insert("version".into(), json!(version));
+        // Tags this publish assigns to this exact version (npm sends `latest` by default).
+        let tags: Vec<String> = requested_tags
+            .iter()
+            .filter(|(_, value)| value.as_str() == Some(version.as_str()))
+            .map(|(tag, _)| tag.clone())
+            .collect();
+        object.insert("_npm_dist_tags".into(), json!(tags));
+        let filename = npm_tarball_filename(package_name, version);
+        let tarball = attachments
+            .and_then(|map| {
+                map.get(&filename)
+                    .or_else(|| map.values().next().filter(|_| map.len() == 1))
+            })
+            .and_then(|entry| entry.get("data").and_then(Value::as_str))
+            .map(|data| {
+                use base64::{engine::general_purpose::STANDARD, Engine};
+                STANDARD
+                    .decode(data.trim())
+                    .map_err(|e| format!("invalid npm _attachments base64: {e}"))
+            })
+            .transpose()?;
+        if let Some(bytes) = tarball.as_deref() {
+            object.insert(
+                "dist".into(),
+                json!({"shasum": sha1_hex(bytes), "tarball": Value::Null}),
+            );
+        }
+        let c = db::conn()?;
+        let stored = publish_package_version_tx(
+            &c,
+            &package_base_dir(),
+            repository_id,
+            package_name,
+            version,
+            Some(&manifest.to_string()),
+            tarball.as_ref().map(|_| filename.as_str()),
+            tarball.as_deref(),
+            None,
+        )?;
+        published.push(stored);
+    }
+    Ok(published)
+}
+/// Builds the packument clients resolve against. `registry_base` is the caller-visible URL of
+/// this repository's npm root, so `dist.tarball` is absolute as npm/bun require.
+pub fn npm_packument(
+    repository_id: &str,
+    package_name: &str,
+    registry_base: &str,
+) -> Result<Value> {
+    let mut document = npm_registry_metadata(repository_id, package_name)?;
+    let base = registry_base.trim_end_matches('/');
+    let tarball_base = format!("{base}/{package_name}/-");
+    let mut tags = serde_json::Map::new();
+    if let Some(latest) = document
+        .get("dist-tags")
+        .and_then(|t| t.get("latest"))
+        .cloned()
+    {
+        tags.insert("latest".into(), latest);
+    }
+    if let Some(versions) = document
+        .get_mut("versions")
+        .and_then(Value::as_object_mut)
+    {
+        for (version, manifest) in versions.iter_mut() {
+            let shasum = manifest
+                .get("dist")
+                .and_then(|d| d.get("shasum"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let filename = npm_tarball_filename(package_name, version);
+            if let Some(object) = manifest.as_object_mut() {
+                strip_internal_metadata(object);
+                object.insert(
+                    "dist".into(),
+                    json!({
+                        "shasum": shasum,
+                        "tarball": format!("{tarball_base}/{filename}"),
+                    }),
+                );
+                for tag in object
+                    .get("_npm_dist_tags")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                {
+                    if let Some(tag) = tag.as_str() {
+                        tags.insert(tag.into(), json!(version));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(object) = document.as_object_mut() {
+        object.insert("dist-tags".into(), Value::Object(tags));
+        object.insert("_id".into(), json!(package_name));
+    }
+    Ok(document)
 }
 pub fn npm_registry_metadata(repository_id: &str, package_name: &str) -> Result<Value> {
     let c = db::conn()?;
@@ -1482,6 +1698,120 @@ pub fn npm_registry_metadata(repository_id: &str, package_name: &str) -> Result<
         time.insert(version, json!(created_at));
     }
     Ok(json!({"name":package_name,"dist-tags":{"latest":latest},"versions":versions,"time":time}))
+}
+/// Maven repository layout → registry coordinates.
+/// `com/example/demo/1.0.0/demo-1.0.0.jar` → (`com.example/demo`, Some("1.0.0"), file), and
+/// `com/example/demo/maven-metadata.xml` → (`com.example/demo`, None, file).
+pub fn maven_coordinates(path: &str) -> Result<(String, Option<String>, String)> {
+    let parts: Vec<&str> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let (filename, rest) = parts
+        .split_last()
+        .ok_or_else(|| "maven path is empty".to_string())?;
+    let artifact_level = *filename == "maven-metadata.xml"
+        || filename.starts_with("maven-metadata.xml.");
+    let needed = if artifact_level { 2 } else { 3 };
+    if rest.len() < needed {
+        return Err("maven path must be groupId/artifactId/version/file".into());
+    }
+    let (version, coords) = if artifact_level {
+        (None, rest)
+    } else {
+        let (version, coords) = rest.split_last().unwrap();
+        (Some((*version).to_string()), coords)
+    };
+    let (artifact_id, group_parts) = coords.split_last().unwrap();
+    let group_id = group_parts.join(".");
+    if group_id.is_empty() {
+        return Err("maven path requires a groupId".into());
+    }
+    Ok((
+        format!("{group_id}/{artifact_id}"),
+        version,
+        (*filename).to_string(),
+    ))
+}
+/// Generates `maven-metadata.xml` for an artifact from the versions actually stored, which is
+/// what Maven reads to resolve `LATEST`/`RELEASE` and snapshot listings.
+pub fn maven_metadata_xml(repository_id: &str, package_name: &str) -> Result<String> {
+    let (group_id, artifact_id) = package_name
+        .split_once('/')
+        .ok_or_else(|| "maven package name must be groupId/artifactId".to_string())?;
+    let c = db::conn()?;
+    let mut statement = c
+        .prepare("SELECT version,created_at FROM package_versions WHERE repository_id=?1 AND package_name=?2 ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![repository_id, package_name], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if rows.is_empty() {
+        return Err("maven artifact not found".into());
+    }
+    let latest = rows.last().map(|(v, _)| v.clone()).unwrap_or_default();
+    let release = rows
+        .iter()
+        .rev()
+        .find(|(v, _)| !v.ends_with("-SNAPSHOT"))
+        .map(|(v, _)| v.clone());
+    let last_updated = rows.last().map(|(_, t)| *t).unwrap_or(0);
+    let versions = rows
+        .iter()
+        .map(|(v, _)| format!("      <version>{v}</version>"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let release_line = release
+        .map(|r| format!("    <release>{r}</release>\n"))
+        .unwrap_or_default();
+    Ok(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<metadata>\n  <groupId>{group_id}</groupId>\n  <artifactId>{artifact_id}</artifactId>\n  <versioning>\n    <latest>{latest}</latest>\n{release_line}    <versions>\n{versions}\n    </versions>\n    <lastUpdated>{last_updated}</lastUpdated>\n  </versioning>\n</metadata>\n"
+    ))
+}
+/// Serves a stored registry asset, computing a `.sha1` companion on demand when the client
+/// uploaded none (Maven always asks for checksums before trusting a download).
+pub fn registry_asset(
+    repository_id: &str,
+    package_name: &str,
+    version: &str,
+    filename: &str,
+) -> Result<Vec<u8>> {
+    match download_registry_bytes(repository_id, package_name, version, filename) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) => {
+            let Some(base) = filename.strip_suffix(".sha1") else {
+                return Err(error);
+            };
+            let bytes = download_registry_bytes(repository_id, package_name, version, base)?;
+            Ok(sha1_hex(&bytes).into_bytes())
+        }
+    }
+}
+/// Resolves which stored version owns an npm tarball filename (`pkg-1.2.3.tgz`).
+pub fn npm_version_for_tarball(
+    repository_id: &str,
+    package_name: &str,
+    filename: &str,
+) -> Result<String> {
+    let c = db::conn()?;
+    let mut statement = c
+        .prepare("SELECT version FROM package_versions WHERE repository_id=?1 AND package_name=?2")
+        .map_err(|e| e.to_string())?;
+    let versions = statement
+        .query_map(params![repository_id, package_name], |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    versions
+        .into_iter()
+        .find(|version| npm_tarball_filename(package_name, version) == filename)
+        .ok_or_else(|| "npm tarball not found".to_string())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 #[allow(clippy::too_many_arguments)]
@@ -1701,6 +2031,40 @@ mod tests {
     fn sweep(path: &Path) {
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn maven_layout_maps_to_registry_coordinates() {
+        assert_eq!(
+            maven_coordinates("com/example/demo/1.0.0/demo-1.0.0.jar").unwrap(),
+            (
+                "com.example/demo".to_string(),
+                Some("1.0.0".to_string()),
+                "demo-1.0.0.jar".to_string()
+            )
+        );
+        assert_eq!(
+            maven_coordinates("com/example/demo/maven-metadata.xml").unwrap(),
+            (
+                "com.example/demo".to_string(),
+                None,
+                "maven-metadata.xml".to_string()
+            )
+        );
+        // Too shallow to be a coordinate, and traversal segments never become path parts.
+        assert!(maven_coordinates("demo-1.0.0.jar").is_err());
+        assert!(validate_package_name("../escape").is_err());
+        assert!(validate_package_name("@scope/name").is_ok());
+        assert!(validate_package_name("@scope").is_err());
+    }
+
+    #[test]
+    fn npm_tarball_name_drops_the_scope() {
+        assert_eq!(
+            npm_tarball_filename("@space/registry-demo", "1.0.0"),
+            "registry-demo-1.0.0.tgz"
+        );
+        assert_eq!(npm_tarball_filename("plain", "2.1.0"), "plain-2.1.0.tgz");
     }
 
     fn script_source(jobs: &[(&str, &[&str])]) -> String {
@@ -1980,7 +2344,16 @@ mod tests {
         let conn = db::migrate_path(&db_path).unwrap();
         conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap();
         let base_dir = temp_dir("unsafe-name");
-        for package_name in ["..", "..%2f", "/tmp/package-escape", "pkg/nested"] {
+        // Multi-segment names are legal wire coordinates (npm `@scope/name`, Maven
+        // `groupId/artifactId`); traversal inside any segment still is not.
+        for package_name in [
+            "..",
+            "..%2f",
+            "/tmp/package-escape",
+            "pkg/../../escape",
+            "pkg//nested",
+            "@scope",
+        ] {
             assert!(
                 publish_package_version_tx(
                     &conn,
@@ -1994,6 +2367,23 @@ mod tests {
                     None
                 )
                 .is_err(),
+                "package name {package_name:?}"
+            );
+        }
+        for package_name in ["@scope/name", "com.example/demo"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    "repo-safe",
+                    package_name,
+                    "1.0.0",
+                    None,
+                    Some("pkg.tgz"),
+                    Some(b"payload"),
+                    None
+                )
+                .is_ok(),
                 "package name {package_name:?}"
             );
         }

@@ -32,3 +32,4 @@ src-tauri/target/
 
 # Legacy Flutter tree keeps its own .gitignore (legacy/flutter/.gitignore)
 .scratch/
+.work/

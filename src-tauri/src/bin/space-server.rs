@@ -167,6 +167,90 @@ fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)>
                 .find_map(|x| x.trim().strip_prefix("space_session="))
         })
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    user_by_session_token(t)
+}
+/// Package clients (npm/bun/Maven) cannot send browser cookies: npm sends
+/// `Authorization: Bearer <token>`, Maven sends HTTP Basic. Registry routes accept those two
+/// in addition to the session cookie — same session/credential checks, no weaker path.
+fn registry_user(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
+    if let Ok(user) = user_by_token(headers) {
+        return Ok(user);
+    }
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    if let Some(token) = authorization
+        .strip_prefix("Bearer ")
+        .or_else(|| authorization.strip_prefix("bearer "))
+    {
+        return user_by_session_token(token.trim());
+    }
+    let encoded = authorization
+        .strip_prefix("Basic ")
+        .or_else(|| authorization.strip_prefix("basic "))
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    use base64::Engine as _;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let decoded = String::from_utf8(decoded).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let (username, password) = decoded
+        .split_once(':')
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    // npm's Basic flavour puts the session token in the password field with any username.
+    if let Ok(user) = user_by_session_token(password) {
+        return Ok(user);
+    }
+    user_by_password(username, password)
+}
+/// Maven (and curl) only send credentials after a challenge, so registry 401s must carry
+/// `WWW-Authenticate`. Wraps `registry_user` into a ready-to-return response on failure.
+fn registry_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> {
+    registry_user(headers).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                header::WWW_AUTHENTICATE,
+                "Basic realm=\"gaia-space registry\"",
+            )],
+            Json(json!({"ok":false,"error":"unauthorized"})),
+        )
+            .into_response()
+    })
+}
+fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let (id, username, password_hash, display_name, profile_id, role) = row;
+    let verified = PasswordHash::new(&password_hash)
+        .ok()
+        .and_then(|parsed| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .ok()
+        })
+        .is_some();
+    if !verified {
+        return Err(err(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    let mut user = User {
+        id,
+        username,
+        display_name,
+        profile_id,
+        account_admin: role == "admin",
+        role,
+    };
+    if user.role != "admin"
+        && platform::is_admin_on(&c, &user.profile_id)
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+    {
+        user.role = "admin".into();
+    }
+    Ok(user)
+}
+fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
     // Every `user.role=="admin"` test below is the *unified* admin predicate
@@ -2046,14 +2130,168 @@ async fn registry_generic_metadata(
 }
 /// npm-compatible package document endpoint. A PUT stores a version manifest; GET returns
 /// the `versions` and `dist-tags.latest` shape clients use for resolution.
-async fn registry_npm_publish(
+/// npm wire protocol entry point. One wildcard route because npm addresses both the packument
+/// (`/{name}`, scoped names arriving as `@scope%2Fname`) and tarballs (`/{name}/-/{file}`).
+async fn registry_npm_put(
     headers: HeaderMap,
-    Path((repository_id, package_name)): Path<(String, String)>,
-    Json(mut manifest): Json<Value>,
+    Path((repository_id, path)): Path<(String, String)>,
+    body: Bytes,
 ) -> axum::response::Response {
-    if let Err(error) = user_by_token(&headers) {
-        return error.into_response();
+    if let Err(response) = registry_auth(&headers) {
+        return response;
     }
+    let package_name = path.trim_matches('/').to_string();
+    let document: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(error) => {
+            return err(StatusCode::BAD_REQUEST, &format!("invalid npm document: {error}"))
+                .into_response()
+        }
+    };
+    // Real `npm publish`/`bun publish` bodies carry `versions` + `_attachments`; the legacy
+    // single-manifest body (top-level `version`) stays supported for existing callers.
+    if document.get("versions").is_some() {
+        return match pipelines::npm_publish_document(&repository_id, &package_name, &document) {
+            Ok(published) => (
+                StatusCode::CREATED,
+                Json(json!({"ok": true, "id": package_name, "versions": published})),
+            )
+                .into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    registry_npm_publish_manifest(repository_id, package_name, document).await
+}
+async fn registry_npm_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let path = path.trim_matches('/').to_string();
+    if let Some((package_name, filename)) = path.split_once("/-/") {
+        let version =
+            match pipelines::npm_version_for_tarball(&repository_id, package_name, filename) {
+                Ok(version) => version,
+                Err(error) => return err(StatusCode::NOT_FOUND, &error).into_response(),
+            };
+        return match pipelines::registry_asset(&repository_id, package_name, &version, filename) {
+            Ok(payload) => (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                payload,
+            )
+                .into_response(),
+            Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+        };
+    }
+    let base = registry_base_url(&headers, &repository_id, "npm");
+    match pipelines::npm_packument(&repository_id, &path, &base) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+/// Absolute URL of one repository's format root, as the client reached it — npm requires
+/// absolute `dist.tarball` values.
+fn registry_base_url(headers: &HeaderMap, repository_id: &str, format: &str) -> String {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    format!("{scheme}://{host}/api/registry/{repository_id}/{format}")
+}
+/// Maven repository-layout endpoint: `PUT`/`GET` of
+/// `/api/registry/{repo}/maven/{groupPath}/{artifactId}/{version}/{file}`, plus generated
+/// `maven-metadata.xml` and on-demand `.sha1` companions.
+async fn registry_maven_put(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let Some(version) = version else {
+        // Clients upload their own maven-metadata.xml; the server generates it instead.
+        return (StatusCode::OK, Json(json!({"ok": true}))).into_response();
+    };
+    let (group_id, artifact_id) = package_name.split_once('/').unwrap_or(("", &package_name));
+    let metadata = json!({
+        "formatMetadata": {
+            "groupId": group_id,
+            "artifactId": artifact_id,
+            "version": version,
+            "snapshot": version.ends_with("-SNAPSHOT"),
+        }
+    });
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        Some(&metadata.to_string()),
+        Some(&filename),
+        Some(&payload),
+    ) {
+        Ok(_) => (StatusCode::CREATED, Json(json!({"ok": true}))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+async fn registry_maven_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let Some(version) = version else {
+        return match pipelines::maven_metadata_xml(&repository_id, &package_name) {
+            Ok(xml) => {
+                let body = if let Some(kind) = filename.strip_prefix("maven-metadata.xml.") {
+                    match kind {
+                        "sha1" => pipelines::sha1_hex(xml.as_bytes()),
+                        _ => return err(StatusCode::NOT_FOUND, "unsupported checksum").into_response(),
+                    }
+                } else {
+                    xml
+                };
+                (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/xml")],
+                    body,
+                )
+                    .into_response()
+            }
+            Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+        };
+    };
+    match pipelines::registry_asset(&repository_id, &package_name, &version, &filename) {
+        Ok(payload) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            payload,
+        )
+            .into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+async fn registry_npm_publish_manifest(
+    repository_id: String,
+    package_name: String,
+    mut manifest: Value,
+) -> axum::response::Response {
     let version = match manifest.get("version").and_then(Value::as_str) {
         Some(value) => value.to_string(),
         None => {
@@ -2088,18 +2326,7 @@ async fn registry_npm_publish(
         Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
     }
 }
-async fn registry_npm_metadata(
-    headers: HeaderMap,
-    Path((repository_id, package_name)): Path<(String, String)>,
-) -> axum::response::Response {
-    if let Err(error) = user_by_token(&headers) {
-        return error.into_response();
-    }
-    match pipelines::npm_registry_metadata(&repository_id, &package_name) {
-        Ok(value) => Json(value).into_response(),
-        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
-    }
-}
+
 
 async fn cmd(
     h: HeaderMap,
@@ -2536,8 +2763,12 @@ async fn main() {
             put(registry_generic_upload).get(registry_generic_download),
         )
         .route(
-            "/api/registry/{repository_id}/npm/{package_name}",
-            put(registry_npm_publish).get(registry_npm_metadata),
+            "/api/registry/{repository_id}/npm/{*path}",
+            put(registry_npm_put).get(registry_npm_get),
+        )
+        .route(
+            "/api/registry/{repository_id}/maven/{*path}",
+            put(registry_maven_put).get(registry_maven_get),
         )
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
