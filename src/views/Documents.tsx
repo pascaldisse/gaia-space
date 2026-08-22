@@ -12,6 +12,7 @@ import {
   type DocumentAccessRecipient,
   type DocumentFolder,
   type DocumentImportSummary,
+  type DocumentBodyFormat,
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 
@@ -226,6 +227,7 @@ export default function Documents() {
 
   // ---- document CRUD ----
   const [newDocTitle, setNewDocTitle] = createSignal("");
+const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentBodyFormat>("text");
   const [selectedDocumentId, setSelectedDocumentId] = createSignal<string | null>(null);
   async function createDocument() {
     const title = newDocTitle().trim();
@@ -240,6 +242,7 @@ export default function Documents() {
       // not to `null` — otherwise it would be written where the tree cannot show it.
       folder_id: selectedFolderId() ?? rootParentId(),
       doc_type: "text",
+      body_format: newDocBodyFormat(),
       title,
       body: "",
       version: 1,
@@ -257,6 +260,10 @@ export default function Documents() {
   }
 
   const selectedDocument = () => scopedDocuments().find((d) => d.id === selectedDocumentId()) ?? null;
+async function changeBodyFormat(doc: Document, bodyFormat: DocumentBodyFormat) {
+if (doc.body_format === bodyFormat) return;
+try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); await refetchDocuments(); } catch (e) { fail(e); }
+}
   // A document URL carries its container, so a cold direct link restores the same tree the
   // in-app click would have opened (tab + project/book selection), not just the id.
   const docRoute = (id:string, container:ContainerType = activeContainer(), cid:string|null = containerId()) =>
@@ -664,6 +671,9 @@ export default function Documents() {
               </div>
               <div class="new-item-row">
                 <input placeholder="New document title" value={newDocTitle()} onInput={(e) => setNewDocTitle(e.currentTarget.value)} />
+                <select aria-label="Document body type" value={newDocBodyFormat()} onChange={(e) => setNewDocBodyFormat(e.currentTarget.value as DocumentBodyFormat)}>
+                  <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
+                </select>
                 <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim()}>
                   + Document
                 </button>
@@ -686,6 +696,9 @@ export default function Documents() {
                 <div class="editor-toolbar">
                   <input class="editor-title" value={editTitle()} onInput={(e) => setEditTitle(e.currentTarget.value)} />
                   <span class="version-chip">v{doc().version}</span>
+<select aria-label="Document body type" value={doc().body_format} onChange={(e) => void changeBodyFormat(doc(), e.currentTarget.value as DocumentBodyFormat)}>
+<option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
+</select>
                   <Show when={doc().archived}>
                     <span class="archived-chip">archived</span>
                   </Show>
@@ -722,7 +735,7 @@ export default function Documents() {
                 </div>
 
                 <div class="editor-panes" classList={{ split: showPreview() }}>
-                  <textarea class="editor-body" value={editBody()} onInput={(e) => setEditBody(e.currentTarget.value)} placeholder="Markdown body…" />
+                  <textarea class="editor-body" value={editBody()} onInput={(e) => setEditBody(e.currentTarget.value)} placeholder={doc().body_format === "checklist" ? "One item per line…" : doc().body_format === "code" ? "Code…" : doc().body_format === "rich-text" ? "Rich text / HTML…" : "Markdown body…"} />
                   <Show when={showPreview()}>
                     <div class="editor-preview" innerHTML={renderedMarkdown()} />
                   </Show>

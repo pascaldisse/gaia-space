@@ -14,7 +14,8 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V36 → feat/w2-auth (B3: OAuth2 authorization-code, TOTP, permanent tokens) ☀
 - V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — merged in master@b9a6f90
-- V39 → feat/w3-docs (document rich types: rich text, checklist, code) ☾
+- V39 → feat/w3-webhooks (claim lease DDL) ☀
+- V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☾
 
 TOTALS (8/8 audited, 356 rows): done 42 · partial 149 · stub 21 · missing 144. Matrix NOT green — steering loop active.
 

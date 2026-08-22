@@ -35,6 +35,8 @@ pub struct Document {
     pub container_id: Option<String>,
     pub folder_id: Option<String>,
     pub doc_type: String,
+    #[serde(default = "default_body_format")]
+    pub body_format: String,
     pub title: String,
     pub body: Option<String>,
     pub version: i64,
@@ -62,6 +64,7 @@ pub struct DocumentAccessRecipient {
     pub access_level: String,
 }
 
+fn default_body_format() -> String { "text".into() }
 fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     Ok(Document {
         id: r.get(0)?,
@@ -69,16 +72,17 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
         container_id: r.get(2)?,
         folder_id: r.get(3)?,
         doc_type: r.get(4)?,
-        title: r.get(5)?,
-        body: r.get(6)?,
-        version: r.get(7)?,
-        archived: r.get(8)?,
-        created_by: r.get(9)?,
+        body_format: r.get(5)?,
+        title: r.get(6)?,
+        body: r.get(7)?,
+        version: r.get(8)?,
+        archived: r.get(9)?,
+        created_by: r.get(10)?,
     })
 }
 
 const DOC_COLUMNS: &str =
-    "id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by";
+    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by";
 
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
@@ -317,13 +321,14 @@ pub fn create_document(document: Document) -> Result<()> {
 pub fn update_document(document: Document) -> Result<()> {
     let c = db::conn()?;
     c.execute(
-        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,title=?6,archived=?7,updated_at=unixepoch() WHERE id=?1",
+        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,body_format=?6,title=?7,archived=?8,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![
             document.id,
             document.container_type,
             document.container_id,
             document.folder_id,
             document.doc_type,
+            document.body_format,
             document.title,
             document.archived
         ],
