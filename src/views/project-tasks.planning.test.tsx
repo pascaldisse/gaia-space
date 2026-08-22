@@ -3,7 +3,8 @@ import { render } from "solid-js/web";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import ProjectTasks from "./ProjectTasks";
-import { navigate, registerViews } from "../router";
+import { navigate, registerViews, route } from "../router";
+import { projectId } from "../session";
 
 let dispose: (() => void) | undefined;
 const realFetch = globalThis.fetch;
@@ -44,7 +45,11 @@ test("project tasks filters persisted issues and links to the matching board", a
 
   expect(host.textContent).toContain("Plan the release");
   expect(host.textContent).toContain("Open board");
-  expect((host.querySelector('a.primary') as HTMLAnchorElement).getAttribute("href")).toContain("boards");
+  const board = host.querySelector('a.primary') as HTMLAnchorElement;
+  expect(board.getAttribute("href")).toContain("boards");
+  board.click();
+  expect(projectId()).toBe("p1");
+  expect(route().view).toBe("Boards");
   const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement;
   tag.value = "t1";
   tag.dispatchEvent(new Event("change", { bubbles: true }));

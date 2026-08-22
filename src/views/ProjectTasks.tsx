@@ -2,7 +2,7 @@ import { createEffect, createResource, createSignal, For, Show } from "solid-js"
 import { planningApi, type Issue } from "../api/issues";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
-import { projectId as sessionProject, projects } from "../session";
+import { projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import "./Issues.css";
 
@@ -26,6 +26,12 @@ export default function ProjectTasks() {
   const [tags] = createResource(selectedProject, id => id ? planningApi.tags(id) : Promise.resolve([]));
   const project = () => (projects() ?? []).find(item => item.id === selectedProject());
   const board = () => ({ view: "Boards", projectId: selectedProject() });
+  const openBoard = (event: MouseEvent) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    setProjectId(selectedProject());
+    navigate({ view: "Boards" });
+  };
 
   return <section class="planning-view project-tasks-view">
     <header class="planning-head">
@@ -34,8 +40,8 @@ export default function ProjectTasks() {
         <p>Issues are the source of truth. Use a board to plan the same work visually.</p>
       </div>
       <div class="planning-actions">
-        <ProjectPicker value={selectedProject()} onChange={id => navigate({ view: "Project Tasks", projectId: id })} />
-        <a class="primary" {...linkProps(board())}>Open board</a>
+        <ProjectPicker value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
+        <a class="primary" {...linkProps(board())} onClick={openBoard}>Open board</a>
       </div>
     </header>
     <div class="issue-layout project-issue-layout">
