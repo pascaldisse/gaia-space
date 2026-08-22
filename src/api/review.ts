@@ -18,6 +18,7 @@ export type Review = {
   title: string;
   turn_based: boolean;
   channel_id: string | null;
+  repo_path: string | null;
 };
 
 export type ReviewParticipant = {
@@ -39,6 +40,14 @@ export type ReviewDiscussion = {
   channel_id: string | null;
 };
 
+export type ProtectedBranchRule = {
+  id: string; project_id: string; branch_pattern: string; regex: boolean;
+  allow_create_json: string | null; allow_push_json: string | null;
+  allow_delete_json: string | null; allow_force_push_json: string | null;
+  allow_merge_json: string | null; linear_history: boolean;
+  bypass_quality_gate_json: string | null;
+};
+
 export type QualityGateRule = {
   id: string;
   project_id: string;
@@ -51,9 +60,12 @@ export type QualityGateRule = {
 export type SafeMergeRun = {
   id: string;
   review_id: string;
-  state: string; // SUCCEEDED | FAILING | ...
+  state: string; // RUNNING | SUCCEEDED | FAILING
   is_dry_run: boolean;
   log: string | null;
+  source_oid: string | null;
+  target_oid: string | null;
+  merge_commit_oid: string | null;
 };
 
 export type QualityGateEvaluation = {
@@ -110,6 +122,10 @@ export const reviewApi = {
   setDiscussionResolved: (id: string, resolved: boolean) =>
     invoke<void>("set_discussion_resolved", { id, resolved }),
 
+  listProtectedBranchRules: (projectId: string) => invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),
+  saveProtectedBranchRule: (rule: ProtectedBranchRule) => invoke<void>("save_protected_branch_rule", { rule }),
+  deleteProtectedBranchRule: (id: string) => invoke<void>("delete_protected_branch_rule", { id }),
+
   listGateRules: (projectId: string) =>
     invoke<QualityGateRule[]>("list_quality_gate_rules", { projectId }),
   createGateRule: (rule: QualityGateRule) => invoke<void>("create_quality_gate_rule", { rule }),
@@ -121,6 +137,6 @@ export const reviewApi = {
   listMergeRuns: (reviewId: string) => invoke<SafeMergeRun[]>("list_safe_merge_runs", { reviewId }),
   dryRunMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string) =>
     invoke<SafeMergeRun>("dry_run_merge", { id, repoPath, reviewId, sourceBranch, targetBranch }),
-  attemptMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string) =>
-    invoke<SafeMergeRun>("attempt_merge", { id, repoPath, reviewId, sourceBranch, targetBranch }),
+  attemptMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string, actorId: string) =>
+    invoke<SafeMergeRun>("attempt_merge", { id, repoPath, reviewId, sourceBranch, targetBranch, actorId }),
 };

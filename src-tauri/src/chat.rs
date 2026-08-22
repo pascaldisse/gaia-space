@@ -697,6 +697,7 @@ mod tests {
             edited_at: None,
             thread_of: None,
             archived: false,
+            mention_ids: Vec::new(),
         };
         create_message_impl(&c, &root).unwrap();
         let reply = Message {
@@ -708,6 +709,7 @@ mod tests {
             edited_at: None,
             thread_of: Some("msg-root".into()),
             archived: false,
+            mention_ids: Vec::new(),
         };
         create_message_impl(&c, &reply).unwrap();
 
@@ -741,6 +743,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                mention_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -773,6 +776,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                mention_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -847,6 +851,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                mention_ids: Vec::new(),
             }
         )
         .is_err());

@@ -12,6 +12,7 @@ import Boards from "./views/Boards";
 import Chat from "./views/Chat";
 import Inbox from "./views/Inbox";
 import Documents from "./views/Documents";
+import Blogs from "./views/Blogs";
 import Calendar from "./views/Calendar";
 import Meetings from "./views/Meetings";
 import ProjectTasks from "./views/ProjectTasks";
@@ -38,7 +39,7 @@ import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } fro
 type View = { name:string; icon:IconName; component:Component };
 const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
-const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
+const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
@@ -48,6 +49,7 @@ const projectSettingsView:View={name:"Project Settings",icon:"settings",componen
 export default function App() {
   const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
+const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const [accountOpen,setAccountOpen]=createSignal(false);
   const [menuOpen,setMenuOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
@@ -64,7 +66,7 @@ export default function App() {
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
-    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
+    const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==="f"){event.preventDefault();setFullTextOpen(open=>!open)} else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
     const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
     window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
     onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
@@ -105,7 +107,7 @@ export default function App() {
           <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
         </Show>
         <main class="workspace"><Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show></main>
-        <Goto open={gotoOpen()} onClose={()=>setGotoOpen(false)} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
+        <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
     </Match>
   </Switch>;

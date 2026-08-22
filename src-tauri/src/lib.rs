@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod blogs;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
@@ -76,6 +78,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             applications::list_devfiles,
+            blogs::list_blog_posts,
+            blogs::get_blog_post,
+            blogs::publish_blog_draft,
+            blogs::archive_blog_post,
             applications::save_devfile,
             applications::delete_devfile,
             applications::open_in_ide,
@@ -226,6 +232,9 @@ pub fn run() {
             review::list_review_discussions,
             review::create_review_discussion,
             review::set_discussion_resolved,
+            review::list_protected_branch_rules,
+            review::save_protected_branch_rule,
+            review::delete_protected_branch_rule,
             review::list_quality_gate_rules,
             review::create_quality_gate_rule,
             review::update_quality_gate_rule,
@@ -306,6 +315,7 @@ pub fn run() {
             personal::save_subscription_setting,
             personal::delete_subscription_setting,
             personal::goto_search,
+            personal::full_text_search,
             personal::dashboard_aggregate,
             calendar_feeds::list_calendar_feeds,
             calendar_feeds::save_calendar_feed,
