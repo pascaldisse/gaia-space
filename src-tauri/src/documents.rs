@@ -1065,6 +1065,266 @@ pub fn move_document_folder(id: String, parent_id: Option<String>) -> Result<()>
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Uploaded files (V43)
+//
+// An upload is an ordinary document with `doc_type='file'`: it lives in the same folder
+// tree, obeys the same container scoping and access rules, and shows up in the same
+// listings. Only the payload is different — the bytes are copied beside the database and
+// referenced by a `document_files` row, so a 50 MB attachment never enters SQLite or a
+// version snapshot. `documents.body` holds a human-readable descriptor, nothing binary.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DocumentFile {
+    pub document_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub size: i64,
+    pub uploaded_by: Option<String>,
+    pub uploaded_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UploadDocumentFileRequest {
+    pub source_path: String,
+    pub container_type: String,
+    pub container_id: Option<String>,
+    pub folder_id: Option<String>,
+    /// Defaults to the file name when omitted.
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub created_by: Option<String>,
+    /// Upload ceiling, a parameter rather than a constant so a deployment can raise it.
+    #[serde(default = "default_max_upload_bytes")]
+    pub max_file_bytes: u64,
+}
+
+fn default_max_upload_bytes() -> u64 {
+    25 * 1024 * 1024
+}
+
+/// Preview payload: base64 for binary types, decoded text for textual ones. Capped, so
+/// opening a huge upload in the UI transfers a preview instead of the whole file.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentFilePreview {
+    pub document_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub size: i64,
+    pub truncated: bool,
+    pub text: Option<String>,
+    pub data_base64: Option<String>,
+}
+
+fn default_preview_bytes() -> u64 {
+    1024 * 1024
+}
+
+/// Content type from the extension only. The file is never executed or interpreted by
+/// the backend; the type exists so the UI can pick a preview, and defaults to the
+/// deliberately inert `application/octet-stream`.
+pub fn mime_for(filename: &str) -> String {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "txt" | "log" => "text/plain",
+        "md" | "markdown" => "text/markdown",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "html" | "htm" => "text/html",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn upload_dir() -> Result<std::path::PathBuf> {
+    let dir = db::data_dir()?.join("document_files");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create upload directory: {e}"))?;
+    Ok(dir)
+}
+
+/// The stored name is generated, never the user's: an upload called `../../space.db`
+/// must not be able to address anything outside the upload directory.
+fn stored_name(document_id: &str, filename: &str) -> String {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()) && e.len() <= 12);
+    match ext {
+        Some(ext) => format!("{document_id}.{ext}"),
+        None => document_id.to_string(),
+    }
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn upload_document_file(request: UploadDocumentFileRequest) -> Result<DocumentFile> {
+    let c = db::conn()?;
+    upload_document_file_tx(&c, &upload_dir()?, request)
+}
+
+pub(crate) fn upload_document_file_tx(
+    c: &rusqlite::Connection,
+    store: &std::path::Path,
+    request: UploadDocumentFileRequest,
+) -> Result<DocumentFile> {
+    let source = std::path::PathBuf::from(&request.source_path);
+    let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
+    if !meta.is_file() {
+        return Err(format!("'{}' is not a file", request.source_path));
+    }
+    if meta.len() > request.max_file_bytes {
+        return Err(format!(
+            "file is {} bytes, over the {} byte upload limit",
+            meta.len(),
+            request.max_file_bytes
+        ));
+    }
+    let filename = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "source path has no file name".to_string())?;
+    let document_id = generated_id("doc");
+    let mime = mime_for(&filename);
+    let target = store.join(stored_name(&document_id, &filename));
+    std::fs::create_dir_all(store).map_err(|e| format!("create upload directory: {e}"))?;
+    std::fs::copy(&source, &target).map_err(|e| format!("store upload: {e}"))?;
+    let title = request
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(&filename)
+        .to_string();
+    let body = format!("{filename} ({} bytes, {mime})", meta.len());
+    // Row first, blob already on disk: an orphaned blob is recoverable, a row pointing
+    // at a missing file is not, so the copy happens before the insert.
+    let insert = c.execute(
+        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'file','text',?5,?6,1,0,?7)",
+        rusqlite::params![
+            document_id,
+            request.container_type,
+            request.container_id,
+            request.folder_id,
+            title,
+            body,
+            request.created_by
+        ],
+    );
+    if let Err(e) = insert {
+        let _ = std::fs::remove_file(&target);
+        return Err(e.to_string());
+    }
+    c.execute(
+        "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
+        rusqlite::params![
+            generated_id("docver"),
+            document_id,
+            body,
+            request.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES(?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![
+            document_id,
+            filename,
+            mime,
+            meta.len() as i64,
+            target.to_string_lossy().to_string(),
+            request.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    get_document_file_tx(c, &document_id)?.ok_or_else(|| "stored upload vanished".into())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_document_file(document_id: String) -> Result<Option<DocumentFile>> {
+    let c = db::conn()?;
+    get_document_file_tx(&c, &document_id)
+}
+
+pub(crate) fn get_document_file_tx(
+    c: &rusqlite::Connection,
+    document_id: &str,
+) -> Result<Option<DocumentFile>> {
+    c.query_row(
+        "SELECT document_id,filename,mime,size,uploaded_by,uploaded_at FROM document_files WHERE document_id=?1",
+        [document_id],
+        |r| {
+            Ok(DocumentFile {
+                document_id: r.get(0)?,
+                filename: r.get(1)?,
+                mime: r.get(2)?,
+                size: r.get(3)?,
+                uploaded_by: r.get(4)?,
+                uploaded_at: r.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn read_document_file(
+    document_id: String,
+    max_bytes: Option<u64>,
+) -> Result<DocumentFilePreview> {
+    let c = db::conn()?;
+    read_document_file_tx(&c, &document_id, max_bytes.unwrap_or_else(default_preview_bytes))
+}
+
+pub(crate) fn read_document_file_tx(
+    c: &rusqlite::Connection,
+    document_id: &str,
+    max_bytes: u64,
+) -> Result<DocumentFilePreview> {
+    let (filename, mime, size, stored_path): (String, String, i64, String) = c
+        .query_row(
+            "SELECT filename,mime,size,stored_path FROM document_files WHERE document_id=?1",
+            [document_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|_| "uploaded file not found".to_string())?;
+    let bytes = std::fs::read(&stored_path).map_err(|e| format!("read upload: {e}"))?;
+    let truncated = bytes.len() as u64 > max_bytes;
+    let slice = &bytes[..bytes.len().min(max_bytes as usize)];
+    // Text previews stay text (readable, diffable); everything else is base64 so the
+    // frontend can hand it straight to an <img>/<object> data URL.
+    let textual = mime.starts_with("text/") || mime == "application/json";
+    let (text, data_base64) = if textual {
+        (Some(String::from_utf8_lossy(slice).to_string()), None)
+    } else {
+        use base64::Engine as _;
+        (
+            None,
+            Some(base64::engine::general_purpose::STANDARD.encode(slice)),
+        )
+    };
+    Ok(DocumentFilePreview {
+        document_id: document_id.to_string(),
+        filename,
+        mime,
+        size,
+        truncated,
+        text,
+        data_base64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1578,5 +1838,154 @@ mod tests {
             readable_folders(&c, "profile-b").is_empty(),
             "a profile with no readable article in a book must see no kb folder at all"
         );
+    }
+
+    fn upload_source(name: &str, bytes: &[u8]) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = import_dir(name);
+        let file = dir.join(name);
+        std::fs::write(&file, bytes).unwrap();
+        let store = dir.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        (file, store)
+    }
+
+    #[test]
+    fn an_upload_becomes_a_document_whose_bytes_live_outside_the_database() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p1','p1','P1',unixepoch())", []).unwrap();
+        let (file, store) = upload_source("notes.txt", b"hello upload");
+        let uploaded = upload_document_file_tx(
+            &c,
+            &store,
+            UploadDocumentFileRequest {
+                source_path: file.to_string_lossy().to_string(),
+                container_type: "my-docs".into(),
+                container_id: Some("p1".into()),
+                folder_id: None,
+                title: None,
+                created_by: Some("p1".into()),
+                max_file_bytes: default_max_upload_bytes(),
+            },
+        )
+        .expect("upload");
+
+        assert_eq!(uploaded.filename, "notes.txt");
+        assert_eq!(uploaded.mime, "text/plain");
+        assert_eq!(uploaded.size, 12);
+        // It is an ordinary document: same table, same folder tree, seeded history.
+        let (doc_type, title, versions): (String, String, i64) = c
+            .query_row(
+                "SELECT d.doc_type,d.title,(SELECT count(*) FROM doc_versions v WHERE v.document_id=d.id) FROM documents d WHERE d.id=?1",
+                [&uploaded.document_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(doc_type, "file");
+        assert_eq!(title, "notes.txt");
+        assert_eq!(versions, 1);
+        // The payload is on disk, not in the row.
+        let stored: String = c
+            .query_row(
+                "SELECT stored_path FROM document_files WHERE document_id=?1",
+                [&uploaded.document_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(std::fs::read(&stored).unwrap(), b"hello upload");
+        assert!(
+            std::path::Path::new(&stored).starts_with(&store),
+            "uploads stay inside the store directory"
+        );
+    }
+
+    #[test]
+    fn a_traversal_filename_cannot_address_anything_outside_the_store() {
+        // The stored name is derived from the generated document id, so a hostile source
+        // file name can only ever contribute an extension.
+        let name = stored_name("doc-abc", "../../space.db");
+        assert_eq!(name, "doc-abc.db");
+        assert!(!stored_name("doc-abc", "../../evil").contains('/'));
+    }
+
+    #[test]
+    fn an_oversized_upload_is_refused_and_stores_nothing() {
+        let c = test_conn();
+        let (file, store) = upload_source("big.bin", &[0u8; 64]);
+        let err = upload_document_file_tx(
+            &c,
+            &store,
+            UploadDocumentFileRequest {
+                source_path: file.to_string_lossy().to_string(),
+                container_type: "my-docs".into(),
+                container_id: Some("p1".into()),
+                folder_id: None,
+                title: None,
+                created_by: None,
+                max_file_bytes: 16,
+            },
+        )
+        .expect_err("over limit");
+        assert!(err.contains("upload limit"), "{err}");
+        assert_eq!(std::fs::read_dir(&store).unwrap().count(), 0);
+        let docs: i64 = c
+            .query_row("SELECT count(*) FROM documents", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(docs, 0, "a refused upload creates no document");
+    }
+
+    #[test]
+    fn previews_return_text_for_text_and_base64_for_binary_and_mark_truncation() {
+        let c = test_conn();
+        let (file, store) = upload_source("notes.txt", b"hello upload");
+        let text_doc = upload_document_file_tx(
+            &c,
+            &store,
+            UploadDocumentFileRequest {
+                source_path: file.to_string_lossy().to_string(),
+                container_type: "my-docs".into(),
+                container_id: Some("p1".into()),
+                folder_id: None,
+                title: Some("Notes".into()),
+                created_by: None,
+                max_file_bytes: default_max_upload_bytes(),
+            },
+        )
+        .expect("upload");
+        let preview = read_document_file_tx(&c, &text_doc.document_id, 1024).expect("preview");
+        assert_eq!(preview.text.as_deref(), Some("hello upload"));
+        assert!(preview.data_base64.is_none());
+        assert!(!preview.truncated);
+
+        let short = read_document_file_tx(&c, &text_doc.document_id, 5).expect("preview");
+        assert_eq!(short.text.as_deref(), Some("hello"));
+        assert!(short.truncated, "a capped preview says so");
+        assert_eq!(short.size, 12, "size stays the full file size");
+
+        let (png, store2) = upload_source("pixel.png", &[0x89, 0x50, 0x4e, 0x47]);
+        let binary_doc = upload_document_file_tx(
+            &c,
+            &store2,
+            UploadDocumentFileRequest {
+                source_path: png.to_string_lossy().to_string(),
+                container_type: "my-docs".into(),
+                container_id: Some("p1".into()),
+                folder_id: None,
+                title: None,
+                created_by: None,
+                max_file_bytes: default_max_upload_bytes(),
+            },
+        )
+        .expect("upload");
+        let preview = read_document_file_tx(&c, &binary_doc.document_id, 1024).expect("preview");
+        assert_eq!(preview.mime, "image/png");
+        assert_eq!(preview.data_base64.as_deref(), Some("iVBORw=="));
+        assert!(preview.text.is_none());
+    }
+
+    #[test]
+    fn an_unknown_extension_previews_as_inert_octet_stream() {
+        assert_eq!(mime_for("thing.weird"), "application/octet-stream");
+        assert_eq!(mime_for("page.html"), "text/html");
+        assert_eq!(mime_for("IMAGE.JPG"), "image/jpeg");
     }
 }
