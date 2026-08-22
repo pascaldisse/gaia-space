@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, calendar_feeds, calls, chat, db, documents, issues, meetings, personal,
+    applications, blogs, calendar_feeds, calls, chat, db, documents, issues, meetings, personal,
     pipelines, platform, review,
 };
 use rand::RngCore;
@@ -900,6 +900,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
         "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
         "goto_search" => CommandPolicy::SearchRead,
+        "list_blog_posts" | "get_blog_post" | "publish_blog_draft" => CommandPolicy::Session,
         "issue_time_total" | "join_channel" | "launch_sprint" | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
         "invite_meeting_participant" => CommandPolicy::MeetingWrite,
@@ -986,8 +987,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_sprint"
         | "update_team"
         | "update_team_membership" => CommandPolicy::Session,
-        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots" | "list_ui_extensions" => CommandPolicy::Session,
-        "save_devfile" | "delete_devfile" | "open_in_ide" | "save_application" | "delete_application" | "save_webhook" | "delete_webhook" | "save_chatbot" | "delete_chatbot" | "save_ui_extension" | "delete_ui_extension" => CommandPolicy::Session,
+        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots"
+        | "list_ui_extensions" => CommandPolicy::Session,
+        "save_devfile"
+        | "delete_devfile"
+        | "open_in_ide"
+        | "save_application"
+        | "delete_application"
+        | "save_webhook"
+        | "delete_webhook"
+        | "save_chatbot"
+        | "delete_chatbot"
+        | "save_ui_extension"
+        | "delete_ui_extension" => CommandPolicy::Session,
         _ => return None,
     })
 }
@@ -1903,22 +1915,22 @@ async fn cmd(
         return absence_delete(&user, &body);
     }
     dispatch!(name.as_str(), body, {
-"list_devfiles" => applications::list_devfiles(project_id: Option<String>),
-"save_devfile" => applications::save_devfile(value: applications::Devfile),
-"delete_devfile" => applications::delete_devfile(id: String),
-"open_in_ide" => applications::open_in_ide(repository: String, ide: String),
-"list_applications" => applications::list_applications(),
-"save_application" => applications::save_application(value: applications::Application),
-"delete_application" => applications::delete_application(id: String),
-"list_webhooks" => applications::list_webhooks(application_id: String),
-"save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
-"delete_webhook" => applications::delete_webhook(id: String),
-"list_chatbots" => applications::list_chatbots(application_id: String),
-"save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
-"delete_chatbot" => applications::delete_chatbot(id: String),
-"list_ui_extensions" => applications::list_ui_extensions(application_id: String),
-"save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
-"delete_ui_extension" => applications::delete_ui_extension(id: String),
+    "list_devfiles" => applications::list_devfiles(project_id: Option<String>),
+    "save_devfile" => applications::save_devfile(value: applications::Devfile),
+    "delete_devfile" => applications::delete_devfile(id: String),
+    "open_in_ide" => applications::open_in_ide(repository: String, ide: String),
+    "list_applications" => applications::list_applications(),
+    "save_application" => applications::save_application(value: applications::Application),
+    "delete_application" => applications::delete_application(id: String),
+    "list_webhooks" => applications::list_webhooks(application_id: String),
+    "save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
+    "delete_webhook" => applications::delete_webhook(id: String),
+    "list_chatbots" => applications::list_chatbots(application_id: String),
+    "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
+    "delete_chatbot" => applications::delete_chatbot(id: String),
+    "list_ui_extensions" => applications::list_ui_extensions(application_id: String),
+    "save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
+    "delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),
@@ -1998,6 +2010,9 @@ async fn cmd(
     "get_role" => platform::get_role(id: String),
     "get_team" => platform::get_team(id: String),
     "goto_search" => personal::goto_search_scoped(query: String, limit: Option<i64>, profile_id: String, allow_all: bool),
+    "list_blog_posts" => blogs::list_blog_posts_scoped(filter: Option<blogs::BlogFilter>, profile_id: String, allow_all: bool),
+    "get_blog_post" => blogs::get_blog_post_scoped(id: String, profile_id: String, allow_all: bool),
+    "publish_blog_draft" => blogs::publish_blog_draft_scoped(input: blogs::PublishBlogDraftInput, profile_id: String, allow_all: bool),
     "invite_meeting_participant" => meetings::invite_meeting_participant(meeting_id: String, profile_id: String),
     "issue_time_total" => issues::issue_time_total(issue_id: String),
     "join_channel" => chat::join_channel(channel_id: String, profile_id: String),

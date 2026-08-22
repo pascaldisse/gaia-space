@@ -7,6 +7,10 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod blogs;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -22,8 +26,6 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
@@ -76,6 +78,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             applications::list_devfiles,
+            blogs::list_blog_posts,
+            blogs::get_blog_post,
+            blogs::publish_blog_draft,
+            blogs::archive_blog_post,
             applications::save_devfile,
             applications::delete_devfile,
             applications::open_in_ide,
