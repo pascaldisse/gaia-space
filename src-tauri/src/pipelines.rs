@@ -196,6 +196,7 @@ pub struct PackageVersion {
     pub package_name: String,
     pub version: String,
     pub metadata_json: Option<String>,
+    pub format_metadata_json: Option<String>,
     pub created_at: i64,
     pub accessed_at: Option<i64>,
     pub downloads: i64,
@@ -1121,7 +1122,7 @@ pub fn list_package_versions(
     let c = db::conn()?;
     let like = format!("%{}%", query.unwrap_or_default());
     let mut s = c
-        .prepare("SELECT id,repository_id,package_name,version,metadata_json,created_at,accessed_at,downloads,pinned FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
+        .prepare("SELECT id,repository_id,package_name,version,metadata_json,format_metadata_json,created_at,accessed_at,downloads,pinned FROM package_versions WHERE repository_id=?1 AND package_name LIKE ?2 ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map(params![repository_id, like], |r| {
@@ -1131,16 +1132,60 @@ pub fn list_package_versions(
                 package_name: r.get(2)?,
                 version: r.get(3)?,
                 metadata_json: r.get(4)?,
-                created_at: r.get(5)?,
-                accessed_at: r.get(6)?,
-                downloads: r.get(7)?,
-                pinned: r.get(8)?,
+                format_metadata_json: r.get(5)?,
+                created_at: r.get(6)?,
+                accessed_at: r.get(7)?,
+                downloads: r.get(8)?,
+                pinned: r.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+
+/// Typed, registry-format projections persisted independently from the generic envelope.
+/// Values not supplied by a transport are deliberately represented as empty/null defaults,
+/// never guessed from a remote registry.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MavenMetadata { group_id: String, artifact_id: String, version: String, checksum: Option<String>, snapshot: bool, deps: Vec<Value> }
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NpmMetadata { manifest: Value, deps: Value }
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NugetMetadata { framework_deps: Value }
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PypiMetadata { files: Value, deps: Value }
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContainerMetadata { oci_manifest: Value, config: Value, history: Value, subject_referrers: Value }
+
+fn field(value: &serde_json::Map<String, Value>, name: &str, fallback: Value) -> Value {
+    value.get(name).cloned().unwrap_or(fallback)
+}
+fn typed_format_metadata(format: &str, package_name: &str, version: &str, metadata: &Value) -> Result<Value> {
+    let object = metadata.as_object().ok_or_else(|| "metadata must be a JSON object".to_string())?;
+    let projection = object.get("formatMetadata").and_then(Value::as_object).unwrap_or(object);
+    let typed = match format {
+        "maven" => json!(MavenMetadata {
+            group_id: field(projection, "groupId", json!(package_name)).as_str().ok_or("maven groupId must be a string")?.into(),
+            artifact_id: field(projection, "artifactId", json!(package_name)).as_str().ok_or("maven artifactId must be a string")?.into(),
+            version: field(projection, "version", json!(version)).as_str().ok_or("maven version must be a string")?.into(),
+            checksum: projection.get("checksum").and_then(Value::as_str).map(str::to_owned),
+            snapshot: field(projection, "snapshot", json!(version.ends_with("-SNAPSHOT"))).as_bool().ok_or("maven snapshot must be boolean")?,
+            deps: field(projection, "deps", json!([])).as_array().ok_or("maven deps must be an array")?.clone(),
+        }),
+        "npm" => json!(NpmMetadata { manifest: field(projection, "manifest", metadata.clone()), deps: field(projection, "deps", json!({})) }),
+        "nuget" => json!(NugetMetadata { framework_deps: field(projection, "frameworkDeps", json!({})) }),
+        "pypi" => json!(PypiMetadata { files: field(projection, "files", json!([])), deps: field(projection, "deps", json!([])) }),
+        "container" => json!(ContainerMetadata { oci_manifest: field(projection, "ociManifest", json!({})), config: field(projection, "config", json!({})), history: field(projection, "history", json!([])), subject_referrers: field(projection, "subjectReferrers", json!([])) }),
+        _ => json!({}),
+    };
+    Ok(typed)
 }
 
 /// Publishes one version: merges caller metadata with `_format`/`_file_path`/`_file_size`
@@ -1202,10 +1247,11 @@ fn publish_package_version_tx(
         meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
     }
+    let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
     meta["_format"] = serde_json::Value::String(format);
     let id = format!("{repository_id}::{package_name}::{version}");
-    conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json", params![id, repository_id, package_name, version, meta.to_string()]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json,format_metadata_json) VALUES(?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json,format_metadata_json=excluded.format_metadata_json", params![id, repository_id, package_name, version, meta.to_string(), format_metadata.to_string()]).map_err(|e| e.to_string())?;
     let created_at: i64 = conn
         .query_row(
             "SELECT created_at FROM package_versions WHERE id=?1",
@@ -1219,6 +1265,7 @@ fn publish_package_version_tx(
         package_name: package_name.into(),
         version: version.into(),
         metadata_json: Some(meta.to_string()),
+        format_metadata_json: Some(format_metadata.to_string()),
         created_at,
         accessed_at: None,
         downloads: 0,

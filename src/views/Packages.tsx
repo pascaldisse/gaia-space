@@ -199,7 +199,7 @@ export default function Packages() {
                     <input placeholder="version" value={pubVersion()} onInput={(e) => setPubVersion(e.currentTarget.value)} />
                     <input placeholder="payload filename (optional)" value={pubFilename()} onInput={(e) => setPubFilename(e.currentTarget.value)} />
                   </div>
-                  <textarea class="meta-input" placeholder="metadata JSON" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
+                  <textarea class="meta-input" placeholder="metadata JSON — use formatMetadata for typed registry fields" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
                   <Show when={pubFilename().trim()}>
                     <textarea class="payload-input" placeholder="payload content (stored as text under app-data/packages/…)" rows="3" value={pubContent()} onInput={(e) => setPubContent(e.currentTarget.value)} />
                   </Show>
@@ -240,7 +240,10 @@ export default function Packages() {
                         <strong>{v().package_name}@{v().version}</strong>
                         <button class="ghost small" onClick={() => setViewingMeta(null)}>×</button>
                       </header>
-                      <pre>{JSON.stringify(JSON.parse(v().metadata_json || "{}"), null, 2)}</pre>
+                      <h4>Format metadata</h4>
+<pre>{JSON.stringify(JSON.parse(v().format_metadata_json || "{}"), null, 2)}</pre>
+<h4>Generic metadata</h4>
+<pre>{JSON.stringify(JSON.parse(v().metadata_json || "{}"), null, 2)}</pre>
                     </div>
                   )}
                 </Show>

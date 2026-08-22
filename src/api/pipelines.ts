@@ -81,7 +81,7 @@ export function allowedDeploymentTransitions(status: string): string[] {
 // ---------- package repositories + versions ----------
 export type PackageRepository = { id: string; project_id: string | null; name: string; format: string; mode: string; description: string | null; archived: boolean; retention_days: number | null; retention_version_count: number | null; retain_downloaded: boolean; access_level: "PRIVATE" | "PROJECT" | "PUBLIC" };
 export type PackageRepositoryAcl = { repository_id: string; profile_id: string; role: "VIEWER" | "WRITER" | "MANAGER" };
-export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean };
+export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; format_metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean };
 
 export const pipelinesApi = {
   // scripts
