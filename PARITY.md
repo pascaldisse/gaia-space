@@ -17,8 +17,9 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V39 → feat/w3-webhooks (webhook_subscriptions.secret + max_attempts; signed delivery + bounded retry) ☀
 - V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☀ — merged
 - V41 → feat/w4-secrot (webhook secret rotation / key-ring) ☀ — merged
+- V45 → feat/w5-prefs (server-persisted dashboard widget preferences) ☀
 
-TOTALS (8/8 audited, 356 rows): done 43 · partial 168 · stub 4 · missing 141. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 43 · partial 169 · stub 4 · missing 140. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -46,7 +47,7 @@ Progress: chat attachment persistence/preview + selected-mention notifications l
 Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
-54 rows — done 5 · partial 24 · stub 2 · missing 23.
+54 rows — done 5 · partial 25 · stub 2 · missing 22.
 Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29 `subscription_scopes`, org/team/project/location/profile/entity targets, wildcard `*` event, precedence scope→setting→default) + Inbox subscription editor rail ⇒ “Subscription editor / personal feeds” stub→partial, “Whole-org/team/project/location subscription targets” missing→partial. Tests: `personal::tests::scoped_subscription_beats_event_default_and_wildcard`, `invalid_subscription_target_is_rejected`.
 Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.
 

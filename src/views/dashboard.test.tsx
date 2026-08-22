@@ -142,7 +142,8 @@ describe("dashboard", () => {
 
     expect(host.querySelector(".calendar-overview")).toBeNull();
     expect(hiddenWidgets()).toEqual(["calendar"]);
-    expect(JSON.parse(localStorage.getItem("space.dashboard.hidden")!)).toEqual(["calendar"]);
+    expect(localStorage.getItem("space.dashboard.hidden")).toBeNull();
+expect(calls.some((call) => call.command === "set_dashboard_preferences" && (call.args?.preferences as { hidden_widgets?: string[] } | undefined)?.hidden_widgets?.includes("calendar"))).toBe(true);
 
     host.querySelector<HTMLInputElement>('input[aria-label="Show Calendar"]')!.click();
     await settle();
@@ -150,7 +151,22 @@ describe("dashboard", () => {
     expect(hiddenWidgets()).toEqual([]);
   });
 
-  test("hidden widget prefs also drop the grid cards", async () => {
+  test("migrates legacy visibility once, then reads server truth", async () => {
+localStorage.setItem("space.dashboard.hidden", JSON.stringify(["calendar"]));
+stubTauriIpc(); setProfileId("me");
+reply = (command) => {
+if (command === "dashboard_aggregate") return dashboard();
+if (command === "calendar_aggregate") return [];
+if (command === "get_dashboard_preferences") return { profile_id: "me", hidden_widgets: [], initialized: false };
+if (command === "set_dashboard_preferences") return { profile_id: "me", hidden_widgets: ["calendar"], initialized: true };
+if (command === "list_profiles") return [{ id: "me", username: "me", display_name: "Me", archived: false }];
+return [];
+};
+const host = await mount();
+expect(host.querySelector(".calendar-overview")).toBeNull();
+expect(calls.filter((call) => call.command === "set_dashboard_preferences")).toHaveLength(1);
+});
+test("hidden widget prefs also drop the grid cards", async () => {
     stubTauriIpc();
     setProfileId("me");
     reply = (command) => {

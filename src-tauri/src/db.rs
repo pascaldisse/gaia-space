@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 43;
+pub const SCHEMA_VERSION: i64 = 45;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -401,6 +401,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 43 && table_exists(&tx, "documents")? {
         tx.execute_batch(SCHEMA_V43)?;
     }
+    // V45: dashboard widget visibility is an account preference, not browser state.
+    // V43 is owned by the documents lane and V44 by its paired lane; preserve gaps.
+    if version < 45 {
+        tx.execute_batch(SCHEMA_V45)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -719,6 +724,13 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 /// `state` is the whole lifecycle: exactly one ACTIVE row signs, any number of RETIRING
 /// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
 /// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
+pub(crate) const SCHEMA_V45: &str = r#"
+CREATE TABLE IF NOT EXISTS user_preferences (
+    profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    dashboard_hidden_widgets TEXT NOT NULL
+);
+"#;
+
 pub(crate) const SCHEMA_V41: &str = r#"
 CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
 CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);
@@ -1065,7 +1077,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 43);
+        assert_eq!(SCHEMA_VERSION, 45);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1083,6 +1095,26 @@ mod tests {
         );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
+    fn v45_dashboard_preferences_upgrade_and_rerun_are_idempotent() {
+        let temp = TempDb::new("gaia-space-v45-dashboard-preferences");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        conn.execute("DROP TABLE user_preferences", []).unwrap();
+        conn.pragma_update(None, "user_version", 44).unwrap();
+        migrate(&conn).expect("v45 creates preferences table");
+        conn.pragma_update(None, "user_version", 44).unwrap();
+        migrate(&conn).expect("v45 rerun is idempotent");
+        let table: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table, "user_preferences");
     }
 
     #[test]
