@@ -1918,6 +1918,40 @@ mod tests {
         let _ = fs::remove_dir_all(path);
     }
 
+    #[test]
+    fn maven_layout_maps_to_registry_coordinates() {
+        assert_eq!(
+            maven_coordinates("com/example/demo/1.0.0/demo-1.0.0.jar").unwrap(),
+            (
+                "com.example/demo".to_string(),
+                Some("1.0.0".to_string()),
+                "demo-1.0.0.jar".to_string()
+            )
+        );
+        assert_eq!(
+            maven_coordinates("com/example/demo/maven-metadata.xml").unwrap(),
+            (
+                "com.example/demo".to_string(),
+                None,
+                "maven-metadata.xml".to_string()
+            )
+        );
+        // Too shallow to be a coordinate, and traversal segments never become path parts.
+        assert!(maven_coordinates("demo-1.0.0.jar").is_err());
+        assert!(validate_package_name("../escape").is_err());
+        assert!(validate_package_name("@scope/name").is_ok());
+        assert!(validate_package_name("@scope").is_err());
+    }
+
+    #[test]
+    fn npm_tarball_name_drops_the_scope() {
+        assert_eq!(
+            npm_tarball_filename("@space/registry-demo", "1.0.0"),
+            "registry-demo-1.0.0.tgz"
+        );
+        assert_eq!(npm_tarball_filename("plain", "2.1.0"), "plain-2.1.0.tgz");
+    }
+
     fn script_source(jobs: &[(&str, &[&str])]) -> String {
         let defs: Vec<ScriptJobDef> = jobs
             .iter()
@@ -2195,7 +2229,16 @@ mod tests {
         let conn = db::migrate_path(&db_path).unwrap();
         conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-safe','safe','npm','HOSTING')",[]).unwrap();
         let base_dir = temp_dir("unsafe-name");
-        for package_name in ["..", "..%2f", "/tmp/package-escape", "pkg/nested"] {
+        // Multi-segment names are legal wire coordinates (npm `@scope/name`, Maven
+        // `groupId/artifactId`); traversal inside any segment still is not.
+        for package_name in [
+            "..",
+            "..%2f",
+            "/tmp/package-escape",
+            "pkg/../../escape",
+            "pkg//nested",
+            "@scope",
+        ] {
             assert!(
                 publish_package_version_tx(
                     &conn,
@@ -2209,6 +2252,23 @@ mod tests {
                     None
                 )
                 .is_err(),
+                "package name {package_name:?}"
+            );
+        }
+        for package_name in ["@scope/name", "com.example/demo"] {
+            assert!(
+                publish_package_version_tx(
+                    &conn,
+                    &base_dir,
+                    "repo-safe",
+                    package_name,
+                    "1.0.0",
+                    None,
+                    Some("pkg.tgz"),
+                    Some(b"payload"),
+                    None
+                )
+                .is_ok(),
                 "package name {package_name:?}"
             );
         }
