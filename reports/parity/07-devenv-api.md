@@ -1,6 +1,7 @@
 # 07 — Dev Environments & Applications API parity audit
 
 Scope: current `src/`, `src/api/`, `src-tauri/src/`; KB §4 gap analysis excluded. `done` requires Rust command wired in `tauri::generate_handler!`, a `src/api/*.ts` caller, and a rendered view. `stub` = persisted/backend declaration but no complete command→API→view path. `src-tauri/src/applications.rs` and schema V14 declare local subsets; none of its commands occur in the handler (`src-tauri/src/lib.rs:75-290`), no `src/api/applications.ts` exists (`src/api/` listing), and no relevant view is statically registered (`src/App.tsx:37-44`).
+WIP:☀ `feat/tree-devenv-api` — devfile/deep-link + apps UI + webhook delivery/retry; 2026-08-22.
 
 |feature|src(KB/legacy)|status|evidence|note|
 |---|---|---|---|---|

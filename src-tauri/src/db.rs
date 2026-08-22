@@ -166,6 +166,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 13 {
         tx.execute_batch(SCHEMA_V13)?;
     }
+    if version < 14 {
+        tx.execute_batch(SCHEMA_V14)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -269,15 +272,15 @@ CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
 "#;
 pub(crate) const SCHEMA_V14: &str = r#"
-CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, UNIQUE(project_id,path));
+CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
 CREATE INDEX IF NOT EXISTS devfiles_project ON devfiles(project_id);
-CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, endpoint_ssl_verification INTEGER NOT NULL DEFAULT 1, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS app_webhooks (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filter_json TEXT, endpoint_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS app_webhooks_application ON app_webhooks(application_id);
-CREATE TABLE IF NOT EXISTS app_chatbots (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL, display_name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS app_chatbots_application ON app_chatbots(application_id);
-CREATE TABLE IF NOT EXISTS app_ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS app_ui_extensions_application ON app_ui_extensions(application_id);
+CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, client_id TEXT NOT NULL UNIQUE, client_credentials_flow_enabled INTEGER NOT NULL DEFAULT 0, code_flow_enabled INTEGER NOT NULL DEFAULT 0, pkce_required INTEGER NOT NULL DEFAULT 0, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filters_json TEXT, endpoint_uri TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS webhook_subscriptions_application ON webhook_subscriptions(application_id);
+CREATE TABLE IF NOT EXISTS chatbot_registrations (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, display_name TEXT NOT NULL, description TEXT, commands_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS chatbot_registrations_application ON chatbot_registrations(application_id);
+CREATE TABLE IF NOT EXISTS ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ui_extensions_application ON ui_extensions(application_id);
 "#;
 pub(crate) const SCHEMA_V13: &str = r#"
 CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
@@ -285,6 +288,7 @@ CREATE INDEX IF NOT EXISTS calendar_feeds_profile ON calendar_feeds(profile_id);
 CREATE TABLE IF NOT EXISTS calendar_feed_events (feed_id TEXT NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE, uid TEXT NOT NULL, occurrence_key TEXT NOT NULL, title TEXT NOT NULL, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day_date TEXT, PRIMARY KEY(feed_id, uid, occurrence_key));
 CREATE INDEX IF NOT EXISTS calendar_feed_events_range ON calendar_feed_events(feed_id, starts_at);
 "#;
+
 pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
@@ -498,6 +502,24 @@ mod tests {
     }
 
     #[test]
+    fn v14_adds_devfiles_and_application_extension_tables() {
+        let temp = TempDb::new("gaia-space-v14-applications");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.pragma_update(None, "user_version", 13).unwrap();
+        migrate(&conn).expect("v14");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 14);
+        conn.execute("INSERT INTO devfiles(id,project_id,path,name,content,generated) VALUES('d','demo-project','.space/dev.devfile.yaml','Dev','schemaVersion: 2.2.0',0)", []).unwrap();
+        conn.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('a','App','Application','client')", []).unwrap();
+        conn.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('w','a','IssueWebhookEvent','https://example.test/hook')", []).unwrap();
+        conn.execute("DELETE FROM applications WHERE id='a'", []).unwrap();
+        let orphaned: i64 = conn.query_row("SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphaned, 0, "extension rows cascade with their application");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -509,19 +531,10 @@ mod tests {
         // Simulate a database stamped at V10 and migrate forward again.
         conn.pragma_update(None, "user_version", 10).unwrap();
         migrate(&conn).expect("v11");
-        let version: i64 = conn
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(
-            version, SCHEMA_VERSION,
-            "schema version is monotonic and lands on head"
-        );
-        assert_eq!(SCHEMA_VERSION, 13);
-        let notes: Option<String> = conn
-            .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
+        assert_eq!(SCHEMA_VERSION, 14);
+        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn
             .query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| {

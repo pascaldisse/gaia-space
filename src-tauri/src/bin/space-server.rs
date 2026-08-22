@@ -1,16 +1,7 @@
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use axum::{
-    extract::{ConnectInfo, Path, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
-    response::IntoResponse,
-    routing::{get, patch, post},
-    Json, Router,
-};
-use gaia_space_lib::{
-    calendar_feeds, calls, chat, db, documents, issues, meetings, personal, pipelines, platform,
-    review,
-};
+use argon2::password_hash::{SaltString, rand_core::OsRng};
+use gaia_space_lib::{applications, db, calendar_feeds, calls, chat, documents, issues, meetings, personal, pipelines, platform, review};
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -986,6 +977,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_sprint"
         | "update_team"
         | "update_team_membership" => CommandPolicy::Session,
+        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots" | "list_ui_extensions" => CommandPolicy::Session,
+        "save_devfile" | "delete_devfile" | "open_in_ide" | "save_application" | "delete_application" | "save_webhook" | "delete_webhook" | "save_chatbot" | "delete_chatbot" | "save_ui_extension" | "delete_ui_extension" => CommandPolicy::Session,
         _ => return None,
     })
 }
@@ -1901,6 +1894,22 @@ async fn cmd(
         return absence_delete(&user, &body);
     }
     dispatch!(name.as_str(), body, {
+"list_devfiles" => applications::list_devfiles(project_id: Option<String>),
+"save_devfile" => applications::save_devfile(value: applications::Devfile),
+"delete_devfile" => applications::delete_devfile(id: String),
+"open_in_ide" => applications::open_in_ide(repository: String, ide: String),
+"list_applications" => applications::list_applications(),
+"save_application" => applications::save_application(value: applications::Application),
+"delete_application" => applications::delete_application(id: String),
+"list_webhooks" => applications::list_webhooks(application_id: String),
+"save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
+"delete_webhook" => applications::delete_webhook(id: String),
+"list_chatbots" => applications::list_chatbots(application_id: String),
+"save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
+"delete_chatbot" => applications::delete_chatbot(id: String),
+"list_ui_extensions" => applications::list_ui_extensions(application_id: String),
+"save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
+"delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),

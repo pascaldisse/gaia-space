@@ -7,10 +7,6 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calendar_feeds;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -27,7 +23,12 @@ pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod personal;
+pub mod calls;
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calendar_feeds;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod ics;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -74,6 +75,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             app_info,
+            applications::list_devfiles,
+            applications::save_devfile,
+            applications::delete_devfile,
+            applications::open_in_ide,
+            applications::list_applications,
+            applications::save_application,
+            applications::delete_application,
+            applications::list_webhooks,
+            applications::save_webhook,
+            applications::delete_webhook,
+            applications::list_chatbots,
+            applications::save_chatbot,
+            applications::delete_chatbot,
+            applications::list_ui_extensions,
+            applications::save_ui_extension,
+            applications::delete_ui_extension,
             git::repo_list,
             git::repo_add,
             git::repo_remove,
