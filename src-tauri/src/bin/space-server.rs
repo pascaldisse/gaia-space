@@ -3706,6 +3706,64 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
+    /// The two-stage rights model is reachable over the HTTP command route, and a
+    /// declaration alone still grants nothing until the scope is approved.
+    #[tokio::test]
+    async fn application_rights_are_two_stage_over_http() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('app-r','App R','Application','client-r')", []).unwrap();
+        drop(c);
+        let (status, seeded) = call(cookie("ta"), "seed_rights", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "seed: {seeded}");
+
+        let (status, declared) = call(
+            cookie("ta"),
+            "update_required_rights",
+            json!({"application_id":"app-r","right_codes_to_add":["Project.CreateIssues"],"right_codes_to_remove":[]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "declare: {declared}");
+        assert_eq!(declared["value"][0]["right_code"], "Project.CreateIssues");
+
+        let (_, pending) = call(
+            cookie("ta"),
+            "scope_approval_status",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project"}),
+        )
+        .await;
+        assert_eq!(pending["value"]["status"], "PENDING");
+
+        let (status, approved) = call(
+            cookie("ta"),
+            "approve_scope",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project","actor":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "approve: {approved}");
+        assert_eq!(approved["value"]["status"], "APPROVED");
+
+        // Independent check: the grant listing agrees with the approval result.
+        let (_, granted) = call(
+            cookie("ta"),
+            "get_authorized_rights",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project"}),
+        )
+        .await;
+        assert_eq!(granted["value"][0]["right_code"], "Project.CreateIssues");
+        assert_eq!(granted["value"][0]["granted_by"], "pa");
+
+        // No session, no rights editor.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "get_required_rights",
+            json!({"application_id":"app-r"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn app_credentials_are_admin_only() {
         let _serial = test_lock();
