@@ -448,6 +448,82 @@ fn registry_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> 
             .into_response()
     })
 }
+/// Authentication says who is calling; it never said *which repository* they may reach.
+/// A package repository that belongs to a project, or that carries its own ACL, is now
+/// enforced on every registry protocol route (☎Kali-VIII B2):
+/// - an account admin reaches everything;
+/// - an ACL row decides: VIEWER reads, WRITER/MANAGER also writes;
+/// - otherwise the owning project decides, through the same predicate the web UI uses;
+/// - a repository with neither a project nor an ACL stays instance-wide, as before — that
+///   is the legacy unowned repository, and narrowing it is a product decision, not a fix.
+#[allow(clippy::result_large_err)]
+fn registry_repo_auth(
+    headers: &HeaderMap,
+    repository_id: &str,
+    write: bool,
+) -> Result<User, axum::response::Response> {
+    let user = registry_auth(headers)?;
+    let denied = || {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok":false,"error":"repository access denied"})),
+        )
+            .into_response()
+    };
+    if user.role == "admin" {
+        return Ok(user);
+    }
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    let role: Option<String> = c
+        .query_row(
+            "SELECT role FROM package_repository_acl WHERE repository_id=?1 AND profile_id=?2",
+            params![repository_id, &user.profile_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "acl lookup failed").into_response())?;
+    if let Some(role) = role {
+        return if write && role == "VIEWER" {
+            Err(denied())
+        } else {
+            Ok(user)
+        };
+    }
+    let acl_exists: i64 = c
+        .query_row(
+            "SELECT count(*) FROM package_repository_acl WHERE repository_id=?1",
+            params![repository_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "acl lookup failed").into_response())?;
+    let project_id: Option<String> = c
+        .query_row(
+            "SELECT project_id FROM package_repositories WHERE id=?1",
+            params![repository_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "repository lookup failed").into_response()
+        })?
+        .flatten();
+    drop(c);
+    match project_id {
+        Some(project_id) => {
+            if project_readable(&user, &project_id).unwrap_or(false) {
+                Ok(user)
+            } else {
+                Err(denied())
+            }
+        }
+        // An explicit ACL that does not name this caller is a refusal, not a fallthrough.
+        None if acl_exists > 0 => Err(denied()),
+        None => Ok(user),
+    }
+}
+
 /// CalDAV deliberately accepts only HTTP Basic credentials. It reuses the same
 /// active-user lookup and Argon2 verification as login and package registries;
 /// calendar software cannot rely on browser cookies or interactive redirects.
@@ -2591,7 +2667,7 @@ async fn registry_npm_put(
     Path((repository_id, path)): Path<(String, String)>,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
         return response;
     }
     let package_name = path.trim_matches('/').to_string();
@@ -2623,7 +2699,7 @@ async fn registry_npm_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     let path = path.trim_matches('/').to_string();
@@ -2670,7 +2746,7 @@ async fn registry_maven_put(
     Path((repository_id, path)): Path<(String, String)>,
     payload: Bytes,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
         return response;
     }
     let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
@@ -2706,7 +2782,7 @@ async fn registry_maven_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
@@ -2753,7 +2829,7 @@ async fn registry_nuget_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     if path.trim_matches('/') == "index.json" {
@@ -2789,7 +2865,7 @@ async fn registry_nuget_put(
     Path((repository_id, path)): Path<(String, String)>,
     payload: Bytes,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
         return response;
     }
     let (package_name, version, filename) = match package_registry::nuget_coordinates(&path) {
@@ -2819,7 +2895,7 @@ async fn registry_pypi_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     let (package_name, filename) = match package_registry::pypi_coordinates(&path) {
@@ -2864,7 +2940,7 @@ async fn registry_composer_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     match package_registry::composer_coordinates(&path) {
@@ -2892,7 +2968,7 @@ async fn registry_oci_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, false) {
         return response;
     }
     let (package_name, target) = match package_registry::oci_coordinates(&path) {
@@ -2944,7 +3020,7 @@ async fn registry_oci_put(
     Path((repository_id, path)): Path<(String, String)>,
     payload: Bytes,
 ) -> axum::response::Response {
-    if let Err(response) = registry_auth(&headers) {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
         return response;
     }
     let (package_name, target) = match package_registry::oci_coordinates(&path) {
@@ -3972,6 +4048,71 @@ mod tests {
         assert_eq!(body["userId"], "pa");
         assert_eq!(body["user_id"], "pa");
         assert_eq!(body["prefix"], "/dep");
+    }
+
+    /// ☎Kali-VIII B2: authentication answered "who", never "which repository". A project's
+    /// package repository is now closed to a logged-in stranger, and an ACL that names a
+    /// reader does not also make them a publisher.
+    #[tokio::test]
+    async fn a_registry_repository_is_not_open_to_every_logged_in_account() {
+        let _serial = test_lock();
+        setup();
+        let package_dir = env::temp_dir().join(format!("gaia-space-registry-acl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&package_dir);
+        env::set_var("SPACE_PACKAGE_DIR", &package_dir);
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('proj-pkg','Packaged','PKG','pa',1)", []).unwrap();
+        c.execute("INSERT INTO package_repositories(id,project_id,name,format,mode) VALUES('repo-owned','proj-pkg','owned','nuget','HOSTING')", []).unwrap();
+        c.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-acl','acl','nuget','HOSTING')", []).unwrap();
+        c.execute("INSERT INTO package_repository_acl(repository_id,profile_id,role) VALUES('repo-acl','pb','VIEWER')", []).unwrap();
+        drop(c);
+
+        // The project's owner reaches it; a logged-in stranger does not.
+        assert_eq!(
+            registry_nuget_get(bearer("ta"), Path(("repo-owned".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            registry_nuget_get(bearer("tb"), Path(("repo-owned".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        // A VIEWER reads but cannot publish; someone the ACL does not name reads nothing.
+        assert_eq!(
+            registry_nuget_get(bearer("tb"), Path(("repo-acl".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            registry_nuget_put(
+                bearer("tb"),
+                Path(("repo-acl".into(), "Pkg/1.0.0/Pkg.1.0.0.nupkg".into())),
+                Bytes::from_static(b"nupkg"),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            registry_nuget_get(bearer("td"), Path(("repo-acl".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        // An account admin still reaches both, and the unowned legacy repository is unchanged.
+        assert_eq!(
+            registry_nuget_get(bearer("tc"), Path(("repo-owned".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        let _ = std::fs::remove_dir_all(&package_dir);
     }
 
     /// NuGet/PyPI/Composer/OCI protocol endpoints, end to end over HTTP: publish through the

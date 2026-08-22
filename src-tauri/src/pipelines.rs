@@ -1355,6 +1355,22 @@ fn publish_package_version_tx(
             |r| r.get(0),
         )
         .map_err(|_| format!("unknown package repository '{repository_id}'"))?;
+    // Immutability is decided BEFORE a single byte is written: the refusal used to come
+    // after the payload had already overwritten the stored file, so a rejected republish
+    // still changed what the tag served (☎Kali-VIII B1).
+    let version_id_guard = format!("{repository_id}::{package_name}::{version}");
+    let existing_immutable: Option<bool> = conn
+        .query_row(
+            "SELECT immutable FROM package_versions WHERE id=?1",
+            params![&version_id_guard],
+            |r| r.get(0),
+        )
+        .ok();
+    if existing_immutable == Some(true) {
+        return Err(format!(
+            "package version {package_name}@{version} is immutable and cannot be republished"
+        ));
+    }
     let mut meta: serde_json::Value = match metadata_json {
         Some(s) if !s.trim().is_empty() => {
             serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?
@@ -1414,19 +1430,7 @@ fn publish_package_version_tx(
     }
     let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
     meta["_format"] = serde_json::Value::String(format);
-    let id = format!("{repository_id}::{package_name}::{version}");
-    let existing_immutable: Option<bool> = conn
-        .query_row(
-            "SELECT immutable FROM package_versions WHERE id=?1",
-            params![&id],
-            |r| r.get(0),
-        )
-        .ok();
-    if existing_immutable == Some(true) {
-        return Err(format!(
-            "package version {package_name}@{version} is immutable and cannot be republished"
-        ));
-    }
+    let id = version_id_guard;
     // Deployment policy is parameterized; callers may override it per publish.
     let immutable = immutable.unwrap_or_else(package_immutable_default);
     conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json,format_metadata_json,immutable) VALUES(?1,?2,?3,?4,?5,?6,?7)
@@ -2020,6 +2024,10 @@ pub fn package_retention_candidates(repository_id: String) -> Result<Vec<Retenti
 }
 
 /// Connection-scoped core of `package_retention_candidates` — pure read, no deletion.
+///
+/// The ordering carries a stable secondary key: two versions published in the same second
+/// otherwise kept or deleted by SQLite's row order, so the same repository could answer
+/// differently on two runs (☎Kali-VIII B3).
 pub fn package_retention_candidates_conn(
     c: &Connection,
     repository_id: &str,
@@ -2028,7 +2036,7 @@ pub fn package_retention_candidates_conn(
     let cutoff = days
         .filter(|value| *value >= 0)
         .map(|value| now_secs() - value * 86_400);
-    let mut statement=c.prepare("SELECT id,package_name,version,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC").map_err(|e|e.to_string())?;
+    let mut statement=c.prepare("SELECT id,package_name,version,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC,id DESC").map_err(|e|e.to_string())?;
     let versions = statement
         .query_map(params![repository_id], |r| {
             Ok((
@@ -2429,6 +2437,76 @@ mod tests {
         assert_eq!(high[0].vulnerabilities[0].cve_id, "CVE-2");
         assert_eq!(severity_rank("moderate"), severity_rank("MEDIUM"));
         assert_eq!(severity_rank("nonsense"), 0);
+        sweep(&db_path);
+    }
+
+    /// ☎Kali-VIII B1: the immutable refusal used to arrive after the payload had already
+    /// been written, so a rejected republish still changed the bytes the tag served.
+    #[test]
+    fn a_refused_republish_does_not_touch_the_stored_bytes() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-im','demo-oci','container','HOSTING')", []).unwrap();
+        let base_dir = temp_dir("packages-immutable");
+        let first = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("manifest.json"),
+            Some(b"manifest-A"),
+            Some(true),
+        )
+        .unwrap();
+        let meta: serde_json::Value = serde_json::from_str(&first.metadata_json.unwrap()).unwrap();
+        let file_path = meta["_file_path"].as_str().unwrap().to_string();
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "manifest-A");
+
+        let refused = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("manifest.json"),
+            Some(b"manifest-B"),
+            Some(true),
+        );
+        assert!(refused.is_err());
+        assert_eq!(
+            fs::read_to_string(&file_path).unwrap(),
+            "manifest-A",
+            "an immutable tag must still serve the bytes it was published with"
+        );
+        sweep(&db_path);
+        sweep(&base_dir);
+    }
+
+    /// ☎Kali-VIII B3: two versions published in the same second must not be kept or deleted
+    /// by SQLite's row order — the answer has to be the same on every run.
+    #[test]
+    fn retention_candidates_are_stable_when_two_versions_share_a_timestamp() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode,retention_version_count) VALUES('repo-ret','demo-npm','npm','HOSTING',1)", []).unwrap();
+        for id in ["repo-ret::pkg::1.0.0", "repo-ret::pkg::1.0.1"] {
+            conn.execute(
+                "INSERT INTO package_versions(id,repository_id,package_name,version,created_at) VALUES(?1,'repo-ret','pkg',?2,1000)",
+                params![id, id.rsplit("::").next().unwrap()],
+            )
+            .unwrap();
+        }
+        let first = package_retention_candidates_conn(&conn, "repo-ret").unwrap();
+        let second = package_retention_candidates_conn(&conn, "repo-ret").unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            first.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+            second.iter().map(|c| c.id.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(first[0].id, "repo-ret::pkg::1.0.0");
         sweep(&db_path);
     }
 
