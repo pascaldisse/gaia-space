@@ -322,11 +322,47 @@ fn seed_rights_on(c: &Connection) -> Result<usize> {
     }
     err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
 }
+/// B4-3: the starting role set. Rights are seeded first because a role is defined by
+/// the rows it points at. Re-running this never rewrites an existing role: once an
+/// administrator has edited `Member`, the seed has no further opinion about it.
+fn seed_default_roles_on(c: &Connection) -> Result<usize> {
+    seed_rights_on(c)?;
+    let mut created = 0;
+    for (name, description, grants) in rights::DEFAULT_ROLES {
+        let existing: Option<String> = c
+            .query_row(
+                "SELECT id FROM roles WHERE name=?1 AND role_type='SYSTEM'",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if existing.is_some() {
+            continue;
+        }
+        let role_id = new_id("role");
+        err(c.execute(
+            "INSERT INTO roles(id,name,description,role_type) VALUES(?1,?2,?3,'SYSTEM')",
+            params![role_id, name, description],
+        ))?;
+        for code in *grants {
+            err(c.execute(
+                "INSERT OR IGNORE INTO role_rights(role_id,right_id) SELECT ?1,id FROM rights WHERE code=?2",
+                params![role_id, code],
+            ))?;
+        }
+        created += 1;
+    }
+    Ok(created)
+}
+
 /// Idempotent: inserting the catalog twice never duplicates a `code` (UNIQUE),
 /// so the total row count converges after the first call.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn seed_rights() -> Result<usize> {
-    seed_rights_on(&db::conn()?)
+    let c = db::conn()?;
+    seed_default_roles_on(&c)?;
+    err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
 }
 
 // ---------------------------------------------------------------------------
@@ -1297,6 +1333,89 @@ mod tests {
             params![role_id, right_id],
         )
         .unwrap();
+    }
+
+    /// The only implication resolver is this one, and it walks persisted descriptors.
+    /// Seeding `Member` (which grants `Project.VcsWrite`, never `Project.VcsRead`) and
+    /// then asking for `VcsRead` exercises the closure end to end, by a path that shares
+    /// no code with `rights::default_implied_rights`.
+    #[test]
+    fn the_seeded_roles_resolve_implied_rights_through_the_persisted_closure() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('ps','ps','PS',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('us','us','x','US','ps','member',0)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            seed_default_roles_on(&c).unwrap(),
+            3,
+            "Admin, Member, Guest"
+        );
+        assert_eq!(
+            seed_default_roles_on(&c).unwrap(),
+            0,
+            "re-seeding creates nothing"
+        );
+        let member: String = c
+            .query_row("SELECT id FROM roles WHERE name='Member'", [], |r| r.get(0))
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('as','?','ps','project','proj1')"
+                .replace('?', &member)
+                .as_str(),
+            [],
+        )
+        .unwrap();
+        assert!(
+            check_right_on(&c, "ps", "Project.VcsWrite", "project", Some("proj1")).unwrap(),
+            "the direct grant holds"
+        );
+        assert!(
+            check_right_on(&c, "ps", "Project.VcsRead", "project", Some("proj1")).unwrap(),
+            "VcsWrite implies VcsRead through the persisted descriptor"
+        );
+        assert!(
+            !check_right_on(&c, "ps", "Project.VcsAdmin", "project", Some("proj1")).unwrap(),
+            "implication points down, never up"
+        );
+        assert!(
+            !check_right_on(&c, "ps", "Project.VcsRead", "project", Some("proj2")).unwrap(),
+            "and it does not cross scopes"
+        );
+    }
+
+    /// Admin holds `Global.Superadmin`, whose seeded descriptor is the whole catalog.
+    #[test]
+    fn the_seeded_admin_role_reaches_every_right() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','PA',0)",
+            [],
+        )
+        .unwrap();
+        seed_default_roles_on(&c).unwrap();
+        let admin: String = c
+            .query_row("SELECT id FROM roles WHERE name='Admin'", [], |r| r.get(0))
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('aa','?','pa','global')"
+                .replace('?', &admin)
+                .as_str(),
+            [],
+        )
+        .unwrap();
+        for (code, ..) in rights::CATALOG {
+            assert!(
+                check_right_on(&c, "pa", code, "project", Some("anything")).unwrap(),
+                "Admin must reach {code}"
+            );
+        }
     }
 
     #[test]

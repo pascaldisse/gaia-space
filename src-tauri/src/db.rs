@@ -196,21 +196,57 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V21)?;
     }
     // V22: CODEOWNERS is read from each MR's source commit; no cache belongs in SQLite.
-    if version < 22 { tx.execute_batch(SCHEMA_V22)?; }
-    if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
-    if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
-    if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
+    if version < 22 {
+        tx.execute_batch(SCHEMA_V22)?;
+    }
+    if version < 23 {
+        tx.execute_batch(SCHEMA_V23)?;
+    }
+    if version < 24 {
+        add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?;
+        tx.execute_batch(SCHEMA_V24)?;
+    }
+    if version < 25 {
+        tx.execute_batch(SCHEMA_V25)?;
+    }
     if version < 26 {
         add_column_if_missing(&tx, "package_repositories", "retention_days", "INTEGER")?;
-        add_column_if_missing(&tx, "package_repositories", "retention_version_count", "INTEGER")?;
-        add_column_if_missing(&tx, "package_repositories", "retain_downloaded", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "package_repositories", "access_level", "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC'))")?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "retention_version_count",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "retain_downloaded",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "access_level",
+            "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC'))",
+        )?;
         add_column_if_missing(&tx, "package_versions", "accessed_at", "INTEGER")?;
-        add_column_if_missing(&tx, "package_versions", "downloads", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "package_versions", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(
+            &tx,
+            "package_versions",
+            "downloads",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_versions",
+            "pinned",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         tx.execute_batch(SCHEMA_V26)?;
     }
-    if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
+    if version < 27 {
+        tx.execute_batch(SCHEMA_V27)?;
+    }
     // V37: right descriptors are additive and guarded individually because test
     // databases may contain a partially-applied migration batch.
     if version < 37 {
@@ -806,7 +842,9 @@ mod tests {
             .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='document_permissions'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(exists, 1);
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
     }
 
@@ -818,7 +856,9 @@ mod tests {
         conn.pragma_update(None, "user_version", 1)
             .expect("v1 version");
         migrate(&conn).expect("migration");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         for table in [
             "todos",
@@ -849,7 +889,9 @@ mod tests {
         conn.pragma_update(None, "user_version", 2)
             .expect("v2 version");
         migrate(&conn).expect("migration");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         let exists: i64 = conn
             .query_row(

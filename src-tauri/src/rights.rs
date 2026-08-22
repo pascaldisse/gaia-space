@@ -407,31 +407,14 @@ pub enum Propagation {
     GlobalToDescendants,
 }
 
-/// True if `granted` transitively contains `requested`. This remains code-based so
-/// catalog rows and descriptors added by a server stay forward-compatible.
-pub fn default_implies(granted: &str, requested: &str) -> bool {
-    if granted == requested || granted == "Global.Superadmin" {
-        return true;
-    }
-    let mut pending = vec![granted];
-    let mut seen = std::collections::BTreeSet::new();
-    while let Some(code) = pending.pop() {
-        if !seen.insert(code) {
-            continue;
-        }
-        for (parent, child) in IMPLIED_RIGHTS {
-            if code == *parent {
-                if *child == requested {
-                    return true;
-                }
-                pending.push(child);
-            }
-        }
-    }
-    false
-}
-
-/// Direct edges only; [`implies`] computes the transitive closure.
+/// Direct edges only, and only as the *seed* of `rights.implied_rights_json`.
+///
+/// There is exactly one implication resolver in the system and it is
+/// `platform::check_right_on`, which walks the persisted descriptors. A second,
+/// code-based closure used to live here; it was deleted because an administrator who
+/// edits `implied_rights_json` must not be silently overruled by a compiled-in graph,
+/// and two closures over the same edges are two answers waiting to disagree.
+/// Direct edges only; the persisted closure in `platform::check_right_on` is transitive.
 pub const IMPLIED_RIGHTS: &[(&str, &str)] = &[
     ("Project.AdminProject", "Project.ViewProject"),
     ("Project.VcsAdmin", "Project.VcsWrite"),
@@ -458,17 +441,108 @@ pub fn default_implied_rights(code: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// B4-3: the roles an empty organization starts with, as `(name, description,
+/// granted right codes)`. These are `SYSTEM` roles — seeded once, editable afterwards
+/// like any other role. Only the direct grants are listed: everything reachable through
+/// `implied_rights_json` comes for free from the resolver, so `Admin` does not restate
+/// the catalog and `Member` does not restate `ViewProject`.
+pub const DEFAULT_ROLES: &[(&str, &str, &[&str])] = &[
+    (
+        "Admin",
+        "Full administration of the organization.",
+        &["Global.Superadmin"],
+    ),
+    (
+        "Member",
+        "Everyday contributor: participates in projects, documents and channels.",
+        &[
+            "Global.OrgMember",
+            "Global.ViewOrganizationInfo",
+            "Global.ViewTeams",
+            "Global.CreateProjects",
+            "Profile.ViewProfile",
+            "Profile.EditProfile",
+            "Profile.ViewAbsences",
+            "Profile.EditAbsences",
+            "Project.ViewProject",
+            "Project.CreateIssues",
+            "Project.EditIssues",
+            "Project.VcsWrite",
+            "Project.EditCodeReview",
+            "Document.EditDocuments",
+            "Channel.PostMessages",
+            "Team.ViewTeamMembers",
+        ],
+    ),
+    (
+        "Guest",
+        "Read-only visitor: sees what is shared, changes nothing.",
+        &[
+            "Profile.ViewProfileBasic",
+            "Project.ViewProject",
+            "Project.VcsRead",
+            "Project.ViewCodeReview",
+            "Document.ViewDocuments",
+            "DocumentFolder.ViewFoldersMetadata",
+            "Channel.ViewChannel",
+        ],
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A default role that names a right the catalog does not define would seed a role
+    /// with a silently missing grant: the join in `set_role_rights` simply finds no row.
     #[test]
-    fn implied_rights_are_transitive_and_directional() {
-        assert!(default_implies("Project.VcsAdmin", "Project.VcsRead"));
-        assert!(default_implies(
-            "Channel.ManageChannel",
-            "Channel.PostMessages"
-        ));
-        assert!(!default_implies("Project.VcsRead", "Project.VcsAdmin"));
+    fn every_default_role_grant_exists_in_the_catalog() {
+        for (role, _, grants) in DEFAULT_ROLES {
+            for code in *grants {
+                assert!(
+                    CATALOG
+                        .iter()
+                        .any(|(catalog_code, ..)| catalog_code == code),
+                    "{role} grants unknown right {code}"
+                );
+            }
+        }
+    }
+
+    /// Guest is the boundary case that matters: a read-only role must not carry a write
+    /// grant, directly or through implication.
+    #[test]
+    fn the_guest_role_grants_nothing_that_writes() {
+        let (_, _, guest) = DEFAULT_ROLES
+            .iter()
+            .find(|(name, ..)| *name == "Guest")
+            .expect("Guest is a default role");
+        for code in *guest {
+            let mut pending = vec![*code];
+            while let Some(current) = pending.pop() {
+                assert!(
+                    current.contains("View") || current.contains("Read"),
+                    "Guest reaches {current} through {code}"
+                );
+                pending.extend(default_implied_rights(current));
+            }
+        }
+    }
+
+    /// The seed carries direct edges only. Transitivity is the resolver's job, and it
+    /// is asserted against the database in `platform`, not here — asserting it twice in
+    /// two implementations is what this module just stopped doing.
+    #[test]
+    fn the_seed_carries_direct_edges_and_no_closure() {
+        assert_eq!(
+            default_implied_rights("Project.VcsAdmin"),
+            vec!["Project.VcsWrite"],
+            "VcsRead is reached through VcsWrite, not seeded directly"
+        );
+        assert!(default_implied_rights("Project.VcsRead").is_empty());
+        assert!(
+            default_implied_rights("Global.Superadmin").len() > IMPLIED_RIGHTS.len(),
+            "superadmin seeds the whole catalog"
+        );
     }
 }
