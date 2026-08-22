@@ -794,6 +794,7 @@ enum CommandPolicy {
     DocumentReadList,
     DocumentRead,
     DocumentWrite,
+    DocumentAccessWrite,
     DocumentFolderCreate,
     DocumentFolderReadList,
     DocumentFolderWrite,
@@ -833,6 +834,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
         "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
+        "list_document_access" => CommandPolicy::DocumentRead,
+        "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
         | "join_meeting_call"
@@ -1144,7 +1147,7 @@ fn nested_id(body: &Value, key: &str) -> Option<String> {
 fn document_id(body: &Value, name: &str) -> Option<String> {
     if name == "update_document" {
         nested_id(body, "document")
-    } else if matches!(name, "restore_doc_version" | "list_doc_versions") {
+    } else if matches!(name, "restore_doc_version" | "list_doc_versions" | "list_document_access" | "update_document_access") {
         arg(body, "document_id").ok()
     } else {
         arg(body, "id").ok()
@@ -1630,6 +1633,17 @@ fn authorize_command(
                 Err(err(StatusCode::FORBIDDEN, "document write denied"))
             }
         }
+        CommandPolicy::DocumentAccessWrite => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if documents::document_access_manageable_by(&id, &user.profile_id, user.role == "admin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "document sharing access denied"))
+            }
+        }
         CommandPolicy::DocumentFolderCreate => {
             bind_folder_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))
         }
@@ -2037,6 +2051,8 @@ async fn cmd(
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
+    "list_document_access" => documents::list_document_access(document_id: String),
+    "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
     "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),

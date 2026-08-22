@@ -52,6 +52,16 @@ pub struct DocVersion {
     pub created_at: i64,
 }
 
+/// An explicit, document-scoped grant. Project documents retain their project
+/// membership policy; these grants make a private document shareable by a person
+/// or a whole team without widening the rest of its folder tree.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DocumentAccessRecipient {
+    pub recipient_type: String,
+    pub recipient_id: String,
+    pub access_level: String,
+}
+
 fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     Ok(Document {
         id: r.get(0)?,
@@ -73,14 +83,28 @@ const DOC_COLUMNS: &str =
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
 /// readable by its creator or any member of the attached project.
-const DOCUMENT_READ_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))))";
-const DOCUMENT_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)))";
+const DOCUMENT_EXPLICIT_READ_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
+const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND dp.access_level='editor' AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
+/// The web gateway embeds these predicates into every document read/write query.
+/// Explicit grants are additive for a private document; moving it to a project leaves
+/// the rows behind but project membership remains the sole effective access policy.
+const DOCUMENT_READ_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (d.container_type='my-docs' AND ";
+const DOCUMENT_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)) OR (d.container_type='my-docs' AND ";
+
+fn document_read_scope() -> String {
+    format!("{DOCUMENT_READ_SCOPE}{DOCUMENT_EXPLICIT_READ_SCOPE}))")
+}
+
+fn document_write_scope() -> String {
+    format!("{DOCUMENT_WRITE_SCOPE}{DOCUMENT_EXPLICIT_WRITE_SCOPE}))")
+}
 
 pub fn document_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
     c.query_row(
         &format!(
-            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {DOCUMENT_READ_SCOPE})"
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {})",
+            document_read_scope()
         ),
         rusqlite::params![profile_id, id],
         |row| row.get(0),
@@ -92,7 +116,8 @@ pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Resul
     let c = db::conn()?;
     c.query_row(
         &format!(
-            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {DOCUMENT_WRITE_SCOPE})"
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
+            document_write_scope()
         ),
         rusqlite::params![profile_id, is_admin, id],
         |row| row.get(0),
@@ -102,7 +127,7 @@ pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Resul
 
 pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
     let c = db::conn()?;
-    let mut s = c.prepare(&format!("SELECT {DOC_COLUMNS} FROM documents d WHERE {DOCUMENT_READ_SCOPE} ORDER BY d.updated_at DESC")).map_err(|e| e.to_string())?;
+    let mut s = c.prepare(&format!("SELECT {DOC_COLUMNS} FROM documents d WHERE {} ORDER BY d.updated_at DESC", document_read_scope())).map_err(|e| e.to_string())?;
     let rows = s
         .query_map([profile_id], row_to_document)
         .map_err(|e| e.to_string())?
@@ -114,12 +139,87 @@ pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
 pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
     let c = db::conn()?;
     c.query_row(
-        &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {DOCUMENT_READ_SCOPE}"),
+        &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {}", document_read_scope()),
         rusqlite::params![profile_id, id],
         row_to_document,
     )
     .optional()
     .map_err(|e| e.to_string())
+}
+
+pub fn document_access_manageable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
+    if is_admin {
+        return Ok(true);
+    }
+    let c = db::conn()?;
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1 AND created_by=?2)",
+        rusqlite::params![id, profile_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_document_access(document_id: String) -> Result<Vec<DocumentAccessRecipient>> {
+    let c = db::conn()?;
+    let mut s = c
+        .prepare("SELECT recipient_type,recipient_id,access_level FROM document_permissions WHERE document_id=?1 ORDER BY recipient_type,recipient_id")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([document_id], |r| {
+            Ok(DocumentAccessRecipient {
+                recipient_type: r.get(0)?,
+                recipient_id: r.get(1)?,
+                access_level: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+/// Replaces a document's explicit share list atomically. Only private documents use
+/// these rows at authorization time; project containers deliberately retain inherited
+/// project access (§2.1 move semantics).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_document_access(
+    document_id: String,
+    permissions: Vec<DocumentAccessRecipient>,
+) -> Result<()> {
+    for permission in &permissions {
+        if !matches!(permission.recipient_type.as_str(), "profile" | "team")
+            || !matches!(permission.access_level.as_str(), "viewer" | "editor")
+            || permission.recipient_id.trim().is_empty()
+        {
+            return Err("invalid document access recipient".into());
+        }
+    }
+    let mut c = db::conn()?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let private: bool = tx
+        .query_row(
+            "SELECT container_type='my-docs' FROM documents WHERE id=?1",
+            [&document_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Document not found".to_string())?;
+    if !private {
+        return Err("only private documents can have explicit sharing".into());
+    }
+    tx.execute("DELETE FROM document_permissions WHERE document_id=?1", [&document_id])
+        .map_err(|e| e.to_string())?;
+    for permission in permissions {
+        tx.execute(
+            "INSERT INTO document_permissions(document_id,recipient_type,recipient_id,access_level) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![document_id, permission.recipient_type, permission.recipient_id, permission.access_level],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -685,6 +785,55 @@ mod tests {
             .unwrap()
             .collect::<std::result::Result<_, _>>()
             .unwrap()
+    }
+
+    fn scoped_doc_ids(c: &rusqlite::Connection, profile: &str, write: bool) -> Vec<String> {
+        let scope = if write { document_write_scope() } else { document_read_scope() };
+        let sql = format!("SELECT d.id FROM documents d WHERE {scope} ORDER BY d.id");
+        let mut statement = c.prepare(&sql).unwrap();
+        let params: &[&dyn rusqlite::ToSql] = if write { &[&profile, &false] } else { &[&profile] };
+        statement
+            .query_map(params, |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn explicit_document_grants_are_scoped_and_editor_only_for_writes() {
+        let c = test_conn();
+        for id in ["owner", "viewer", "editor", "stranger"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,0)",
+                [id],
+            )
+            .unwrap();
+        }
+        c.execute("INSERT INTO teams(id,name) VALUES('team-editors','Editors')", [])
+            .unwrap();
+        c.execute(
+            "INSERT INTO team_memberships(id,profile_id,team_id) VALUES('membership-editor','editor','team-editors')",
+            [],
+        )
+        .unwrap();
+        for id in ["shared-view", "shared-edit"] {
+            c.execute(
+                "INSERT INTO documents(id,container_type,doc_type,title,version,archived,created_by) VALUES(?1,'my-docs','text',?1,1,0,'owner')",
+                [id],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO document_permissions(document_id,recipient_type,recipient_id,access_level) VALUES('shared-view','profile','viewer','viewer'),('shared-edit','team','team-editors','editor')",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(scoped_doc_ids(&c, "viewer", false), vec!["shared-view"]);
+        assert!(scoped_doc_ids(&c, "viewer", true).is_empty(), "a viewer cannot write");
+        assert_eq!(scoped_doc_ids(&c, "editor", false), vec!["shared-edit"]);
+        assert_eq!(scoped_doc_ids(&c, "editor", true), vec!["shared-edit"]);
+        assert!(scoped_doc_ids(&c, "stranger", false).is_empty(), "ungranted profiles see nothing");
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,
