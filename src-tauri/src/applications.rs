@@ -368,6 +368,9 @@ pub fn delete_application(id: String) -> Result<()> {
 }
 fn app_exists(id: &str) -> Result<()> {
     let c = db::conn()?;
+    app_exists_on(&c, id)
+}
+fn app_exists_on(c: &rusqlite::Connection, id: &str) -> Result<()> {
     let found: bool = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM applications WHERE id=?1)",
@@ -2543,4 +2546,269 @@ mod delivery_tests {
         );
         assert!(with_filter(r#"{"issue..id":"x"}"#).is_err());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Typed application payloads (KB §3.2 #5, §2.2 payloads SDK) + per-app signing keys.
+//
+// Space's app SDK receives one closed family of payloads on the application's own
+// endpoint, discriminated by a `className` field. Modelling it as a serde-tagged enum
+// means an unknown or malformed payload is rejected at the boundary instead of being
+// forwarded as opaque JSON, and the same type is what the dispatcher serialises.
+// ---------------------------------------------------------------------------
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "className")]
+pub enum ApplicationPayload {
+    /// First contact after installation: the app exchanges these for its own tokens.
+    InitPayload {
+        #[serde(rename = "serverUrl")]
+        server_url: String,
+        #[serde(rename = "clientId")]
+        client_id: String,
+        #[serde(rename = "clientSecret", default)]
+        client_secret: Option<String>,
+        #[serde(rename = "userId", default)]
+        user_id: Option<String>,
+        #[serde(default)]
+        state: Option<String>,
+    },
+    /// A subscribed domain event, carried to the app endpoint rather than a webhook URL.
+    WebhookRequestPayload {
+        #[serde(rename = "webhookId")]
+        webhook_id: String,
+        #[serde(rename = "eventType")]
+        event_type: String,
+        payload: serde_json::Value,
+    },
+    /// A chat message addressed to the app's bot.
+    MessagePayload {
+        #[serde(rename = "userId")]
+        user_id: String,
+        #[serde(rename = "channelId")]
+        channel_id: String,
+        #[serde(rename = "messageId", default)]
+        message_id: Option<String>,
+        text: String,
+    },
+    /// Slash-command discovery: the app answers with its flat `CommandDetail` list.
+    ListCommandsPayload {
+        #[serde(rename = "userId")]
+        user_id: String,
+        #[serde(default)]
+        prefix: Option<String>,
+    },
+    /// A click on an app-contributed menu/context action.
+    MenuActionPayload {
+        #[serde(rename = "actionId")]
+        action_id: String,
+        #[serde(rename = "userId")]
+        user_id: String,
+        #[serde(default)]
+        context: Option<String>,
+    },
+    /// Link unfurling for domains the app claims.
+    UnfurlActionPayload {
+        #[serde(rename = "userId")]
+        user_id: String,
+        links: Vec<String>,
+    },
+    /// Escape hatch for app-defined interactions that are not a modelled surface.
+    CustomPayload {
+        #[serde(rename = "userId", default)]
+        user_id: Option<String>,
+        data: serde_json::Value,
+    },
+    /// Terminal payload: the installation is gone and the app should drop its state.
+    ApplicationUninstalledPayload {
+        #[serde(rename = "serverUrl")]
+        server_url: String,
+        #[serde(rename = "userId", default)]
+        user_id: Option<String>,
+    },
+    /// Issue-tracker integrations: an external issue reference resolved by the app.
+    ExternalIssuePayload {
+        #[serde(rename = "issueIds")]
+        issue_ids: Vec<String>,
+        action: String,
+    },
+}
+
+impl ApplicationPayload {
+    /// Closed set of accepted discriminators — the SDK contract, in one place.
+    pub const CLASS_NAMES: [&'static str; 9] = [
+        "InitPayload",
+        "WebhookRequestPayload",
+        "MessagePayload",
+        "ListCommandsPayload",
+        "MenuActionPayload",
+        "UnfurlActionPayload",
+        "CustomPayload",
+        "ApplicationUninstalledPayload",
+        "ExternalIssuePayload",
+    ];
+    /// The wire discriminator, identical to the serde tag; used for the dispatch header
+    /// and for the recorded result so a caller can tell which surface it hit.
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            Self::InitPayload { .. } => "InitPayload",
+            Self::WebhookRequestPayload { .. } => "WebhookRequestPayload",
+            Self::MessagePayload { .. } => "MessagePayload",
+            Self::ListCommandsPayload { .. } => "ListCommandsPayload",
+            Self::MenuActionPayload { .. } => "MenuActionPayload",
+            Self::UnfurlActionPayload { .. } => "UnfurlActionPayload",
+            Self::CustomPayload { .. } => "CustomPayload",
+            Self::ApplicationUninstalledPayload { .. } => "ApplicationUninstalledPayload",
+            Self::ExternalIssuePayload { .. } => "ExternalIssuePayload",
+        }
+    }
+}
+
+/// Public half of an application's signing key pair. The private key is never returned
+/// by any command: it exists only to sign outbound payloads.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct AppSigningKey {
+    pub application_id: String,
+    pub key_id: String,
+    pub public_key: String,
+    pub previous_key_id: Option<String>,
+    pub previous_public_key: Option<String>,
+    pub created_at: i64,
+}
+
+/// Outcome of one dispatch attempt against the application's own endpoint.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct AppDispatch {
+    pub application_id: String,
+    pub class_name: String,
+    pub endpoint_uri: String,
+    pub key_id: String,
+    pub signature: String,
+    pub timestamp: i64,
+    pub response_status: Option<i64>,
+    pub response_body: Option<String>,
+    pub error: Option<String>,
+}
+
+fn read_signing_key(r: &rusqlite::Row<'_>) -> rusqlite::Result<AppSigningKey> {
+    Ok(AppSigningKey {
+        application_id: r.get(0)?,
+        key_id: r.get(1)?,
+        public_key: r.get(2)?,
+        previous_key_id: r.get(3)?,
+        previous_public_key: r.get(4)?,
+        created_at: r.get(5)?,
+    })
+}
+
+fn generated_key_pair() -> Result<(String, String, String)> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
+        .map_err(|_| "could not generate a signing key".to_string())?;
+    let pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
+        .map_err(|_| "generated signing key is unusable".to_string())?;
+    use ring::signature::KeyPair;
+    let public = STANDARD.encode(pair.public_key().as_ref());
+    let key_id = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(pair.public_key().as_ref()))[..16].to_string()
+    };
+    Ok((key_id, STANDARD.encode(pkcs8.as_ref()), public))
+}
+
+/// Ensure the application has a key pair, creating one on first use. Returns the public
+/// view; callers that need to sign go through `signing_pair_on`.
+pub(crate) fn app_signing_key_on(
+    c: &rusqlite::Connection,
+    application_id: &str,
+) -> Result<AppSigningKey> {
+    app_exists_on(c, application_id)?;
+    let existing: Option<AppSigningKey> = c
+        .query_row(
+            "SELECT application_id,key_id,public_key,previous_key_id,previous_public_key,created_at FROM app_signing_keys WHERE application_id=?1",
+            [application_id],
+            read_signing_key,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(found) = existing {
+        return Ok(found);
+    }
+    let (key_id, private_key, public_key) = generated_key_pair()?;
+    c.execute(
+        "INSERT INTO app_signing_keys(application_id,key_id,private_key,public_key,created_at) VALUES(?1,?2,?3,?4,unixepoch())",
+        params![application_id, key_id, private_key, public_key],
+    )
+    .map_err(|e| e.to_string())?;
+    app_signing_key_on(c, application_id)
+}
+
+/// Rotate: a fresh pair becomes current and the retired public key stays visible so a
+/// receiver that cached the old key can still validate a payload signed a moment ago.
+pub(crate) fn rotate_app_signing_key_on(
+    c: &rusqlite::Connection,
+    application_id: &str,
+) -> Result<AppSigningKey> {
+    let current = app_signing_key_on(c, application_id)?;
+    let (key_id, private_key, public_key) = generated_key_pair()?;
+    c.execute(
+        "UPDATE app_signing_keys SET key_id=?2,private_key=?3,public_key=?4,previous_key_id=?5,previous_public_key=?6,created_at=unixepoch() WHERE application_id=?1",
+        params![application_id, key_id, private_key, public_key, current.key_id, current.public_key],
+    )
+    .map_err(|e| e.to_string())?;
+    app_signing_key_on(c, application_id)
+}
+
+/// Ed25519 over `{timestamp}.{body}` — the timestamp is inside the signed message, so a
+/// captured body cannot be replayed under a fresh header.
+pub(crate) fn sign_app_payload(
+    c: &rusqlite::Connection,
+    application_id: &str,
+    timestamp: i64,
+    body: &str,
+) -> Result<(String, String)> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let key = app_signing_key_on(c, application_id)?;
+    let private: String = c
+        .query_row(
+            "SELECT private_key FROM app_signing_keys WHERE application_id=?1",
+            [application_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let pkcs8 = STANDARD
+        .decode(private.as_bytes())
+        .map_err(|_| "stored signing key is not valid base64".to_string())?;
+    let pair = ring::signature::Ed25519KeyPair::from_pkcs8(&pkcs8)
+        .map_err(|_| "stored signing key is unusable".to_string())?;
+    let signature = pair.sign(format!("{timestamp}.{body}").as_bytes());
+    Ok((key.key_id, format!("ed25519={}", STANDARD.encode(signature.as_ref()))))
+}
+
+/// Verification path an app SDK mirrors: base64 public key, the same `{ts}.{body}`
+/// message, and the `ed25519=` prefixed signature.
+pub fn verify_app_payload_signature(
+    public_key: &str,
+    timestamp: i64,
+    body: &str,
+    signature: &str,
+) -> bool {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let Some(raw) = signature.strip_prefix("ed25519=") else {
+        return false;
+    };
+    let (Ok(key), Ok(sig)) = (
+        STANDARD.decode(public_key.as_bytes()),
+        STANDARD.decode(raw.as_bytes()),
+    ) else {
+        return false;
+    };
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
+        .verify(format!("{timestamp}.{body}").as_bytes(), &sig)
+        .is_ok()
+}
+
+/// Canonical JSON body for a payload: exactly what gets signed and sent.
+pub(crate) fn dispatch_body(payload: &ApplicationPayload) -> Result<String> {
+    serde_json::to_string(payload).map_err(|e| e.to_string())
 }

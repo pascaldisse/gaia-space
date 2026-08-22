@@ -55,6 +55,8 @@ rand = "0.8"
 hex = "0.4"
 chacha20poly1305 = "0.11.0"
 sha1 = "0.10"
+# Ed25519 signing of outbound typed application payloads (payload_dispatch.rs).
+ring = "0.17"
 # PKCE S256 challenge digests (oauth.rs).
 sha2 = "0.10"
 base64 = "0.23.1"

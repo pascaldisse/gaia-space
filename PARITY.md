@@ -21,6 +21,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V45 → feat/w5-ide-discovery (IDE sessions/opened repositories) ☀ — merged
 - V46 → feat/w5-prefs (server-persisted dashboard widget preferences) ☀ — merged
 - V49/V51 → feat/w5-caldav (named calendars · feed attribution) ☀ — merged
+- V52 → feat/w6-payload (per-app Ed25519 signing keys for typed application payload dispatch) ☀
 
 TOTALS (8/8 audited, 356 rows): done 44 · partial 171 · stub 4 · missing 137. Matrix NOT green — steering loop active.
 
