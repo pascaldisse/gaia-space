@@ -135,3 +135,7 @@ pub(crate) fn dispatch_with(
     }
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "payload_dispatch_tests.rs"]
+mod payload_dispatch_tests;
