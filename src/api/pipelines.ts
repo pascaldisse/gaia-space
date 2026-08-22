@@ -23,6 +23,10 @@ export type ScriptDef = { jobs: ScriptJobDef[] };
 export type PipelineScript = { id: string; project_id: string; repository: string | null; path: string; source: string; archived: boolean };
 export type Job = { id: string; script_id: string; name: string; trigger_type: string; archived: boolean };
 export type JobRun = { id: string; job_id: string; status: string; log: string | null; triggered_at: number; started_at: number | null; finished_at: number | null };
+export type Worker = { id: string; name: string; os: string; tags_json: string; status: "ONLINE" | "OFFLINE" | "DISABLED"; registered_at: number; last_seen_at: number };
+export type JobArtifact = { id: string; job_run_id: string; name: string; size_bytes: number; created_at: number };
+export type JobArtifactInput = { id: string; job_run_id: string; name: string; content: number[] };
+export type TestReport = { id: string; job_run_id: string; suite: string; test_name: string; status: "PASSED" | "FAILED" | "SKIPPED"; duration_ms: number | null; message: string | null; created_at: number };
 
 export const JOB_TRIGGER_TYPES = ["MANUAL", "GIT_PUSH", "SCHEDULE", "GIT_BRANCH_DELETED", "CODE_REVIEW_OPENED", "CODE_REVIEW_CLOSED", "SAFE_MERGE"] as const;
 export const RUN_TERMINAL_STATUSES = ["FINISHED", "TERMINATED", "FAILED", "SKIPPED"];
@@ -91,6 +95,12 @@ export const pipelinesApi = {
   listJobRunsForScript: (scriptId: string) => invoke<JobRun[]>("list_job_runs_for_script", { scriptId }),
   triggerScript: (scriptId: string) => invoke<JobRun[]>("trigger_pipeline_script", { scriptId }),
   triggerOnPush: (scriptId: string, repository: string, branch: string) => invoke<JobRun[]>("trigger_pipeline_on_push", { scriptId, repository, branch }),
+  registerWorker: (worker: Worker) => invoke<Worker>("register_worker", { worker }),
+  listWorkers: () => invoke<Worker[]>("list_workers"),
+  createJobArtifact: (input: JobArtifactInput) => invoke<JobArtifact>("create_job_artifact", { input }),
+  listJobArtifacts: (jobRunId: string) => invoke<JobArtifact[]>("list_job_artifacts", { jobRunId }),
+  saveTestReport: (report: TestReport) => invoke<void>("save_test_report", { report }),
+  listTestReports: (jobRunId: string) => invoke<TestReport[]>("list_test_reports", { jobRunId }),
 
   // deploy targets
   listDeployTargets: () => invoke<DeployTarget[]>("list_deploy_targets"),

@@ -85,6 +85,42 @@ pub struct Job {
     pub archived: bool,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Worker {
+    pub id: String,
+    pub name: String,
+    pub os: String,
+    pub tags_json: String,
+    pub status: String,
+    pub registered_at: i64,
+    pub last_seen_at: i64,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JobArtifact {
+    pub id: String,
+    pub job_run_id: String,
+    pub name: String,
+    pub size_bytes: i64,
+    pub created_at: i64,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JobArtifactInput {
+    pub id: String,
+    pub job_run_id: String,
+    pub name: String,
+    pub content: Vec<u8>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TestReport {
+    pub id: String,
+    pub job_run_id: String,
+    pub suite: String,
+    pub test_name: String,
+    pub status: String,
+    pub duration_ms: Option<i64>,
+    pub message: Option<String>,
+    pub created_at: i64,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JobRun {
     pub id: String,
     pub job_id: String,
@@ -410,6 +446,122 @@ pub fn list_job_runs_for_script(script_id: String) -> Result<Vec<JobRun>> {
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn register_worker(worker: Worker) -> Result<Worker> {
+    if worker.name.trim().is_empty() || worker.os.trim().is_empty() {
+        return Err("worker name and os are required".into());
+    }
+    serde_json::from_str::<Vec<String>>(&worker.tags_json)
+        .map_err(|_| "worker tags_json must be a JSON string array")?;
+    let c = db::conn()?;
+    let now = now_secs();
+    c.execute("INSERT INTO workers(id,name,os,tags_json,status,registered_at,last_seen_at) VALUES(?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name,os=excluded.os,tags_json=excluded.tags_json,status=excluded.status,last_seen_at=excluded.last_seen_at",params![worker.id,worker.name,worker.os,worker.tags_json,worker.status,now]).map_err(|e|e.to_string())?;
+    c.query_row(
+        "SELECT id,name,os,tags_json,status,registered_at,last_seen_at FROM workers WHERE id=?1",
+        params![worker.id],
+        |r| {
+            Ok(Worker {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                os: r.get(2)?,
+                tags_json: r.get(3)?,
+                status: r.get(4)?,
+                registered_at: r.get(5)?,
+                last_seen_at: r.get(6)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_workers() -> Result<Vec<Worker>> {
+    let c = db::conn()?;
+    let mut q=c.prepare("SELECT id,name,os,tags_json,status,registered_at,last_seen_at FROM workers ORDER BY name").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok(Worker {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                os: r.get(2)?,
+                tags_json: r.get(3)?,
+                status: r.get(4)?,
+                registered_at: r.get(5)?,
+                last_seen_at: r.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_job_artifact(input: JobArtifactInput) -> Result<JobArtifact> {
+    if input.name.trim().is_empty() {
+        return Err("artifact name is required".into());
+    };
+    let c = db::conn()?;
+    let now = now_secs();
+    let size = input.content.len() as i64;
+    c.execute("INSERT INTO job_artifacts(id,job_run_id,name,content,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![input.id,input.job_run_id,input.name,input.content,size,now]).map_err(|e|e.to_string())?;
+    Ok(JobArtifact {
+        id: input.id,
+        job_run_id: input.job_run_id,
+        name: input.name,
+        size_bytes: size,
+        created_at: now,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_job_artifacts(job_run_id: String) -> Result<Vec<JobArtifact>> {
+    let c = db::conn()?;
+    let mut q=c.prepare("SELECT id,job_run_id,name,size_bytes,created_at FROM job_artifacts WHERE job_run_id=?1 ORDER BY created_at DESC").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map(params![job_run_id], |r| {
+            Ok(JobArtifact {
+                id: r.get(0)?,
+                job_run_id: r.get(1)?,
+                name: r.get(2)?,
+                size_bytes: r.get(3)?,
+                created_at: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_test_report(report: TestReport) -> Result<()> {
+    if !matches!(report.status.as_str(), "PASSED" | "FAILED" | "SKIPPED") {
+        return Err("test report status must be PASSED, FAILED, or SKIPPED".into());
+    };
+    let c = db::conn()?;
+    c.execute("INSERT INTO test_reports(id,job_run_id,suite,test_name,status,duration_ms,message,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![report.id,report.job_run_id,report.suite,report.test_name,report.status,report.duration_ms,report.message,report.created_at]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_test_reports(job_run_id: String) -> Result<Vec<TestReport>> {
+    let c = db::conn()?;
+    let mut q=c.prepare("SELECT id,job_run_id,suite,test_name,status,duration_ms,message,created_at FROM test_reports WHERE job_run_id=?1 ORDER BY suite,test_name").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map(params![job_run_id], |r| {
+            Ok(TestReport {
+                id: r.get(0)?,
+                job_run_id: r.get(1)?,
+                suite: r.get(2)?,
+                test_name: r.get(3)?,
+                status: r.get(4)?,
+                duration_ms: r.get(5)?,
+                message: r.get(6)?,
+                created_at: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
 }
 
 // ---------- real local executor: parallel jobs, sequential steps, real processes ----------

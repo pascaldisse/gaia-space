@@ -14,6 +14,9 @@ import {
   type PipelineScript,
   type ScriptJobDef,
   type DeployTarget,
+  type JobRun,
+  type Worker,
+  type TestReport,
 } from "../api/pipelines";
 import "./Pipelines.css";
 
@@ -259,6 +262,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                   </ul>
                 </Show>
               </section>
+              <WorkerRunPanel runs={() => runs() ?? []} setError={props.setError} />
             </section>
           )}
         </Show>
@@ -267,6 +271,18 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
   );
 }
 
+function WorkerRunPanel(props: { runs: () => JobRun[]; setError: (value: string | null) => void }) {
+  const [workers, { refetch: refetchWorkers }] = createResource(() => pipelinesApi.listWorkers());
+  const [name, setName] = createSignal("");
+  const [runId, setRunId] = createSignal<string | null>(null);
+  createEffect(() => { if (!runId() && props.runs().length) setRunId(props.runs()[0].id); });
+  const [artifacts, { refetch: refetchArtifacts }] = createResource(runId, id => id ? pipelinesApi.listJobArtifacts(id) : Promise.resolve([]));
+  const [reports, { refetch: refetchReports }] = createResource(runId, id => id ? pipelinesApi.listTestReports(id) : Promise.resolve([]));
+  async function register(e: SubmitEvent) { e.preventDefault(); try { await pipelinesApi.registerWorker({ id: newId("worker"), name: name().trim(), os: navigator.platform || "unknown", tags_json: "[]", status: "ONLINE", registered_at: 0, last_seen_at: 0 }); setName(""); refetchWorkers(); } catch (error) { props.setError(String(error)); } }
+  async function artifact() { const id = runId(); if (!id) return; try { await pipelinesApi.createJobArtifact({ id: newId("artifact"), job_run_id: id, name: "build.txt", content: Array.from(new TextEncoder().encode("artifact")) }); refetchArtifacts(); } catch (error) { props.setError(String(error)); } }
+  async function report() { const id = runId(); if (!id) return; try { const value: TestReport = { id: newId("test"), job_run_id: id, suite: "manual", test_name: "reported test", status: "PASSED", duration_ms: 0, message: null, created_at: Math.floor(Date.now() / 1000) }; await pipelinesApi.saveTestReport(value); refetchReports(); } catch (error) { props.setError(String(error)); } }
+  return <section class="runs-section"><h3>Workers · artifacts · test reports</h3><form class="new-script-form" onSubmit={register}><input placeholder="worker name" value={name()} onInput={e => setName(e.currentTarget.value)} /><button class="ghost">Register worker</button></form><p class="hint">{workers()?.map((worker: Worker) => `${worker.name} (${worker.os})`).join(", ") || "No workers."}</p><select value={runId() ?? ""} onChange={e => setRunId(e.currentTarget.value || null)}><For each={props.runs()}>{run => <option value={run.id}>{run.job_id} · {run.status}</option>}</For></select><button class="ghost small" onClick={artifact}>Add artifact</button><button class="ghost small" onClick={report}>Add test report</button><p class="hint">Artifacts: {artifacts()?.map(a => a.name).join(", ") || "none"}; tests: {reports()?.map(r => `${r.test_name} ${r.status}`).join(", ") || "none"}</p></section>;
+}
 function Deployments(props: { projects: () => { id: string; name: string }[] | undefined; setError: (e: string | null) => void }) {
   const [targets, { refetch: refetchTargets }] = createResource(() => pipelinesApi.listDeployTargets());
   const [selectedId, setSelectedId] = createSignal<string | null>(null);

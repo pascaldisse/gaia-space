@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -22,8 +24,6 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
@@ -264,6 +264,12 @@ pub fn run() {
             pipelines::list_jobs_for_script,
             pipelines::list_job_runs,
             pipelines::list_job_runs_for_script,
+            pipelines::register_worker,
+            pipelines::list_workers,
+            pipelines::create_job_artifact,
+            pipelines::list_job_artifacts,
+            pipelines::save_test_report,
+            pipelines::list_test_reports,
             pipelines::trigger_pipeline_script,
             pipelines::trigger_pipeline_on_push,
             pipelines::list_deploy_targets,

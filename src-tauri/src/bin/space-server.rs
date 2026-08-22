@@ -862,9 +862,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "create_deploy_target"
         | "create_entity_channel" => CommandPolicy::Session,
         "create_document_folder" => CommandPolicy::DocumentFolderCreate,
-        "create_message" | "create_package_repository" | "create_pipeline_script" => {
-            CommandPolicy::Session
-        }
+        "create_job_artifact"
+        | "create_message"
+        | "create_package_repository"
+        | "create_pipeline_script"
+        | "register_worker"
+        | "save_test_report" => CommandPolicy::Session,
         "create_profile"
         | "create_quality_gate_rule"
         | "create_review"
@@ -918,7 +921,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_deployments_for_target" => CommandPolicy::Session,
         "list_document_folders" => CommandPolicy::DocumentFolderReadList,
         "list_documents" => CommandPolicy::DocumentReadList,
-        "list_job_runs" | "list_job_runs_for_script" => CommandPolicy::Session,
+        "list_job_artifacts"
+        | "list_job_runs"
+        | "list_job_runs_for_script"
+        | "list_test_reports"
+        | "list_workers" => CommandPolicy::Session,
         "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
@@ -994,8 +1001,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_sprint"
         | "update_team"
         | "update_team_membership" => CommandPolicy::Session,
-        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots" | "list_ui_extensions" => CommandPolicy::Session,
-        "save_devfile" | "delete_devfile" | "open_in_ide" | "save_application" | "delete_application" | "save_webhook" | "delete_webhook" | "save_chatbot" | "delete_chatbot" | "save_ui_extension" | "delete_ui_extension" => CommandPolicy::Session,
+        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots"
+        | "list_ui_extensions" => CommandPolicy::Session,
+        "save_devfile"
+        | "delete_devfile"
+        | "open_in_ide"
+        | "save_application"
+        | "delete_application"
+        | "save_webhook"
+        | "delete_webhook"
+        | "save_chatbot"
+        | "delete_chatbot"
+        | "save_ui_extension"
+        | "delete_ui_extension" => CommandPolicy::Session,
         _ => return None,
     })
 }
@@ -2022,22 +2040,22 @@ async fn cmd(
         return absence_delete(&user, &body);
     }
     dispatch!(name.as_str(), body, {
-"list_devfiles" => applications::list_devfiles(project_id: Option<String>),
-"save_devfile" => applications::save_devfile(value: applications::Devfile),
-"delete_devfile" => applications::delete_devfile(id: String),
-"open_in_ide" => applications::open_in_ide(repository: String, ide: String),
-"list_applications" => applications::list_applications(),
-"save_application" => applications::save_application(value: applications::Application),
-"delete_application" => applications::delete_application(id: String),
-"list_webhooks" => applications::list_webhooks(application_id: String),
-"save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
-"delete_webhook" => applications::delete_webhook(id: String),
-"list_chatbots" => applications::list_chatbots(application_id: String),
-"save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
-"delete_chatbot" => applications::delete_chatbot(id: String),
-"list_ui_extensions" => applications::list_ui_extensions(application_id: String),
-"save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
-"delete_ui_extension" => applications::delete_ui_extension(id: String),
+    "list_devfiles" => applications::list_devfiles(project_id: Option<String>),
+    "save_devfile" => applications::save_devfile(value: applications::Devfile),
+    "delete_devfile" => applications::delete_devfile(id: String),
+    "open_in_ide" => applications::open_in_ide(repository: String, ide: String),
+    "list_applications" => applications::list_applications(),
+    "save_application" => applications::save_application(value: applications::Application),
+    "delete_application" => applications::delete_application(id: String),
+    "list_webhooks" => applications::list_webhooks(application_id: String),
+    "save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
+    "delete_webhook" => applications::delete_webhook(id: String),
+    "list_chatbots" => applications::list_chatbots(application_id: String),
+    "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
+    "delete_chatbot" => applications::delete_chatbot(id: String),
+    "list_ui_extensions" => applications::list_ui_extensions(application_id: String),
+    "save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
+    "delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),
@@ -2068,6 +2086,7 @@ async fn cmd(
     "create_issue" => issues::create_issue(input: issues::IssueInput),
     "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
+    "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
     "create_message" => chat::create_message(message: chat::Message),
     "create_package_repository" => pipelines::create_package_repository(repo: pipelines::PackageRepository),
     "create_pipeline_script" => pipelines::create_pipeline_script(script: pipelines::PipelineScript),
@@ -2142,6 +2161,9 @@ async fn cmd(
     "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, include_archived: Option<bool>),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
+    "list_job_artifacts" => pipelines::list_job_artifacts(job_run_id: String),
+    "list_test_reports" => pipelines::list_test_reports(job_run_id: String),
+    "list_workers" => pipelines::list_workers(),
     "list_jobs" => pipelines::list_jobs(),
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
     "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
@@ -2197,7 +2219,9 @@ async fn cmd(
     "remove_team_membership" => platform::remove_team_membership(id: String),
     "restore_doc_version" => documents::restore_doc_version(document_id: String, version: i64, actor: Option<String>),
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
+    "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
     "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
+    "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),

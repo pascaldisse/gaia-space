@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -172,6 +172,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 15 {
         tx.execute_batch(SCHEMA_V15)?;
     }
+    if version < 16 {
+        tx.execute_batch(SCHEMA_V16)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -273,6 +276,13 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+pub(crate) const SCHEMA_V16: &str = r#"
+CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, os TEXT NOT NULL, tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'ONLINE' CHECK(status IN ('ONLINE','OFFLINE','DISABLED')), registered_at INTEGER NOT NULL DEFAULT (unixepoch()), last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS job_artifacts (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, name TEXT NOT NULL, content BLOB NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS job_artifacts_run ON job_artifacts(job_run_id);
+CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, suite TEXT NOT NULL, test_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PASSED','FAILED','SKIPPED')), duration_ms INTEGER, message TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS test_reports_run ON test_reports(job_run_id);
 "#;
 pub(crate) const SCHEMA_V15: &str = r#"
 ALTER TABLE package_repositories ADD COLUMN retention_days INTEGER;
