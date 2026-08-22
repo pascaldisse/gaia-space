@@ -1045,6 +1045,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_webhook"
         | "deliver_webhook"
         | "retry_webhook_delivery"
+        | "process_webhook_queue"
         | "save_chatbot"
         | "delete_chatbot"
         | "save_ui_extension"
@@ -2180,6 +2181,7 @@ async fn cmd(
     "delete_webhook" => applications::delete_webhook(id: String),
     "deliver_webhook" => applications::deliver_webhook(webhook_id: String, payload_json: String),
     "retry_webhook_delivery" => applications::retry_webhook_delivery(id: String),
+    "process_webhook_queue" => applications::process_webhook_queue(limit: i64),
     "list_webhook_deliveries" => applications::list_webhook_deliveries(webhook_id: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),

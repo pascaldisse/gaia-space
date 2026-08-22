@@ -111,6 +111,7 @@ pub fn run() {
             applications::delete_webhook,
             applications::deliver_webhook,
             applications::retry_webhook_delivery,
+            applications::process_webhook_queue,
             applications::list_webhook_deliveries,
             applications::list_chatbots,
             applications::save_chatbot,

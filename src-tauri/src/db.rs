@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 38;
+pub const SCHEMA_VERSION: i64 = 39;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -24,6 +24,9 @@ pub fn enforce_foreign_keys(conn: &Connection) -> Result<()> {
 /// silently reintroduce orphan junction rows.
 pub fn open_at(path: impl AsRef<Path>) -> Result<Connection> {
     let conn = Connection::open(path.as_ref())?;
+    // Concurrent writers (webhook queue sweepers, the HTTP server's per-request
+    // connections) must wait for the write lock instead of failing the caller.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     enforce_foreign_keys(&conn)?;
     Ok(conn)
 }
@@ -346,6 +349,21 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V37 databases.
     if version < 38 {
         tx.execute_batch(SCHEMA_V38)?;
+    }
+    // V39: a webhook endpoint cannot trust an unsigned POST, and a failing endpoint
+    // must stop being retried at some point. Both facts are per-subscription state, so
+    // they are columns on `webhook_subscriptions`, added individually because older
+    // databases may already carry a partially-applied batch.
+    // `webhook_subscriptions` may be absent in hand-built partial databases (test
+    // fixtures pinned to an old user_version), so the additive step is table-guarded.
+    if version < 39 && table_exists(&tx, "webhook_subscriptions")? {
+        add_column_if_missing(&tx, "webhook_subscriptions", "secret", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "webhook_subscriptions",
+            "max_attempts",
+            "INTEGER NOT NULL DEFAULT 5",
+        )?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -676,6 +694,14 @@ INSERT INTO role_assignments(id,role_id,profile_id,team_id,scope_type,scope_id,c
 DROP TABLE role_assignments_v36;
 "#;
 
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -987,7 +1013,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 38);
+        assert_eq!(SCHEMA_VERSION, 39);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1518,5 +1544,34 @@ mod v38_recording_migration_tests {
                 .collect()
         };
         assert_eq!(ddl(&upgraded), ddl(&fresh));
+    }
+}
+
+#[cfg(test)]
+mod v39_webhook_migration_tests {
+    use super::*;
+
+    #[test]
+    fn v39_guard_upgrades_a_v38_copy_and_tolerates_a_partial_database_without_the_table() {
+        let copy = open_in_memory().unwrap();
+        migrate(&copy).unwrap();
+        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN secret", []).unwrap();
+        copy.execute("ALTER TABLE webhook_subscriptions DROP COLUMN max_attempts", []).unwrap();
+        copy.pragma_update(None, "user_version", 38).unwrap();
+        migrate(&copy).unwrap();
+        let columns = |conn: &Connection| -> Vec<String> {
+            conn.prepare("PRAGMA table_info(webhook_subscriptions)").unwrap()
+                .query_map([], |row| row.get(1)).unwrap()
+                .collect::<std::result::Result<Vec<String>, _>>().unwrap()
+        };
+        let upgraded = columns(&copy);
+        assert!(upgraded.contains(&"secret".into()));
+        assert!(upgraded.contains(&"max_attempts".into()));
+
+        let partial = open_in_memory().unwrap();
+        partial.pragma_update(None, "user_version", 38).unwrap();
+        migrate(&partial).unwrap();
+        assert_eq!(partial.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert!(!table_exists(&partial, "webhook_subscriptions").unwrap());
     }
 }

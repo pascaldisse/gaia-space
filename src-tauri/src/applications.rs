@@ -112,6 +112,15 @@ pub struct WebhookSubscription {
     pub filters_json: Option<String>,
     pub endpoint_uri: String,
     pub enabled: bool,
+    /// Shared secret for the HMAC-SHA256 request signature. `None` = unsigned endpoint.
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Attempts after which a delivery is dead-lettered (`next_attempt_at` cleared).
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: i64,
+}
+fn default_max_attempts() -> i64 {
+    5
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WebhookDelivery {
@@ -229,12 +238,34 @@ fn webhook(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookSubscription> {
         filters_json: r.get(3)?,
         endpoint_uri: r.get(4)?,
         enabled: r.get(5)?,
+        secret: r.get(6)?,
+        max_attempts: r.get(7)?,
     })
+}
+/// HMAC-SHA256 over `{timestamp}.{payload}` — the timestamp is inside the MAC so a
+/// captured body cannot be replayed under a fresh header.
+pub(crate) fn webhook_signature(secret: &str, timestamp: i64, payload: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let key = secret.as_bytes();
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.map(|v| v ^ 0x36));
+    inner.update(format!("{timestamp}.{payload}").as_bytes());
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(k.map(|v| v ^ 0x5c));
+    outer.update(inner);
+    format!("sha256={:x}", outer.finalize())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_webhooks(application_id: String) -> Result<Vec<WebhookSubscription>> {
     let c = db::conn()?;
-    let mut q=c.prepare("SELECT id,application_id,event_type,filters_json,endpoint_uri,enabled FROM webhook_subscriptions WHERE application_id=?1 ORDER BY event_type").map_err(|e|e.to_string())?;
+    let mut q=c.prepare("SELECT id,application_id,event_type,filters_json,endpoint_uri,enabled,secret,max_attempts FROM webhook_subscriptions WHERE application_id=?1 ORDER BY event_type").map_err(|e|e.to_string())?;
     let rows = q
         .query_map([application_id], webhook)
         .map_err(|e| e.to_string())?
@@ -253,9 +284,12 @@ pub fn save_webhook(value: WebhookSubscription) -> Result<WebhookSubscription> {
         serde_json::from_str::<serde_json::Value>(filters)
             .map_err(|_| "webhook filters must be JSON".to_string())?;
     }
+    if value.max_attempts < 1 {
+        return Err("webhook max attempts must be at least 1".into());
+    }
     app_exists(&value.application_id)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,filters_json,endpoint_uri,enabled) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET event_type=excluded.event_type,filters_json=excluded.filters_json,endpoint_uri=excluded.endpoint_uri,enabled=excluded.enabled",params![value.id,value.application_id,value.event_type,value.filters_json,value.endpoint_uri,value.enabled]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,filters_json,endpoint_uri,enabled,secret,max_attempts) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET event_type=excluded.event_type,filters_json=excluded.filters_json,endpoint_uri=excluded.endpoint_uri,enabled=excluded.enabled,secret=excluded.secret,max_attempts=excluded.max_attempts",params![value.id,value.application_id,value.event_type,value.filters_json,value.endpoint_uri,value.enabled,value.secret,value.max_attempts]).map_err(|e|e.to_string())?;
     Ok(value)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -282,19 +316,31 @@ fn read_delivery(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookDelivery> {
 fn delivery_backoff(attempts: i64) -> i64 {
     30 * (1_i64 << attempts.clamp(0, 5))
 }
+/// `None` = dead letter: the budget is spent, so no future time is written and the
+/// queue sweeper can never pick the row up again.
+fn retry_schedule(attempts_done: i64, max_attempts: i64) -> Option<i64> {
+    if attempts_done >= max_attempts {
+        None
+    } else {
+        Some(delivery_backoff(attempts_done))
+    }
+}
 fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
     let c = db::conn()?;
-    let (webhook_id, endpoint_uri, enabled, payload): (String,String,bool,String) = c.query_row("SELECT d.webhook_id,w.endpoint_uri,w.enabled,d.payload_json FROM webhook_deliveries d JOIN webhook_subscriptions w ON w.id=d.webhook_id WHERE d.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|_|"webhook delivery not found".to_string())?;
+    let (webhook_id, endpoint_uri, enabled, payload, secret, max_attempts, attempt): (String,String,bool,String,Option<String>,i64,i64) = c.query_row("SELECT d.webhook_id,w.endpoint_uri,w.enabled,d.payload_json,w.secret,w.max_attempts,d.attempts FROM webhook_deliveries d JOIN webhook_subscriptions w ON w.id=d.webhook_id WHERE d.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).map_err(|_|"webhook delivery not found".to_string())?;
     if !enabled {
         return Err("webhook is disabled".into());
     }
-    let attempt: i64 = c
-        .query_row(
-            "SELECT attempts FROM webhook_deliveries WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    if attempt >= max_attempts {
+        return Err("webhook delivery exhausted its attempts".into());
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as i64;
+    let signature = secret
+        .as_deref()
+        .map(|s| webhook_signature(s, timestamp, &payload));
     let result = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -303,6 +349,11 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
         .post(&endpoint_uri)
         .header("content-type", "application/json")
         .header("x-gaia-space-webhook", &webhook_id)
+        .header("x-gaia-space-timestamp", timestamp.to_string())
+        .header(
+            "x-gaia-space-signature",
+            signature.clone().unwrap_or_default(),
+        )
         .body(payload)
         .send();
     match result {
@@ -310,12 +361,12 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
             c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',attempts=?2,response_status=?3,last_error=NULL,delivered_at=unixepoch(),next_attempt_at=NULL WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16())]).map_err(|e|e.to_string())?;
         }
         Ok(response) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=?3,last_error=?4,next_attempt_at=unixepoch()+?5 WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16()),format!("HTTP {}",response.status()),next]).map_err(|e|e.to_string())?;
+            let next = retry_schedule(attempt + 1, max_attempts);
+            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=?3,last_error=?4,next_attempt_at=CASE WHEN ?5 IS NULL THEN NULL ELSE unixepoch()+?5 END WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16()),format!("HTTP {}",response.status()),next]).map_err(|e|e.to_string())?;
         }
         Err(error) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=NULL,last_error=?3,next_attempt_at=unixepoch()+?4 WHERE id=?1",params![id,attempt+1,error.to_string(),next]).map_err(|e|e.to_string())?;
+            let next = retry_schedule(attempt + 1, max_attempts);
+            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=NULL,last_error=?3,next_attempt_at=CASE WHEN ?4 IS NULL THEN NULL ELSE unixepoch()+?4 END WHERE id=?1",params![id,attempt+1,error.to_string(),next]).map_err(|e|e.to_string())?;
         }
     }
     c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[id],read_delivery).map_err(|e|e.to_string())
@@ -338,7 +389,66 @@ pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<Webho
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn retry_webhook_delivery(id: String) -> Result<WebhookDelivery> {
+    if !claim_delivery(&id, false)? {
+        // dead-lettered, already succeeded, or in flight elsewhere
+        let c = db::conn()?;
+        return c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[&id],read_delivery)
+            .map_err(|_| "webhook delivery not found".to_string())
+            .and_then(|d| Err(format!("webhook delivery {} is not retryable ({})", d.id, d.status)));
+    }
     deliver_delivery(&id)
+}
+/// How long a claimed delivery stays invisible to other sweepers. A sweeper that
+/// dies mid-POST loses the lease and the row becomes due again — no row is stranded.
+const CLAIM_LEASE_SECS: i64 = 120;
+/// Take exclusive ownership of a delivery. One UPDATE, so two concurrent sweepers
+/// cannot both win: SQLite serialises the writes and the loser sees zero rows changed.
+/// A row is claimable unless it already succeeded, is dead-lettered
+/// (`next_attempt_at IS NULL`), or carries a live lease.
+/// `respect_backoff=false` is the operator's "retry now": it skips the waiting time but
+/// still refuses a row another worker is actively delivering.
+fn claim_delivery(id: &str, respect_backoff: bool) -> Result<bool> {
+    let c = db::conn()?;
+    let changed = c
+        .execute(
+            "UPDATE webhook_deliveries SET status='PENDING',next_attempt_at=unixepoch()+?2 \
+             WHERE id=?1 AND status<>'SUCCEEDED' AND next_attempt_at IS NOT NULL \
+             AND ((?3 = 0 AND status<>'PENDING') OR next_attempt_at<=unixepoch())",
+            params![id, CLAIM_LEASE_SECS, i64::from(respect_backoff)],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+/// Deliveries that are due now: inside their attempt budget (`next_attempt_at` non-NULL
+/// = not dead-lettered), past their backoff, and not held by a live claim lease.
+pub fn due_webhook_deliveries(limit: i64) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id FROM webhook_deliveries WHERE status IN ('FAILED','PENDING') AND next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch() ORDER BY next_attempt_at LIMIT ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([limit], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+/// One sweep of the retry queue. Returns the deliveries it touched; a delivery whose
+/// redelivery errors out is reported, not propagated — one bad endpoint must not stop
+/// the sweep.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn process_webhook_queue(limit: i64) -> Result<Vec<WebhookDelivery>> {
+    let limit = limit.clamp(1, 100);
+    let mut out = Vec::new();
+    for id in due_webhook_deliveries(limit)? {
+        if !claim_delivery(&id, true)? {
+            continue; // another sweeper owns it
+        }
+        if let Ok(delivery) = deliver_delivery(&id) {
+            out.push(delivery);
+        }
+    }
+    Ok(out)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_webhook_deliveries(webhook_id: String) -> Result<Vec<WebhookDelivery>> {
@@ -926,6 +1036,8 @@ mod delivery_tests {
             filters_json: Some("{}".into()),
             endpoint_uri: endpoint,
             enabled: true,
+            secret: Some("shhh".into()),
+            max_attempts: 5,
         })
         .expect("hook");
         let failed = deliver_webhook("hook-delivery".into(), r#"{"issue":"GAIA-7"}"#.into())
@@ -936,6 +1048,192 @@ mod delivery_tests {
         assert_eq!(succeeded.status, "SUCCEEDED");
         assert_eq!(succeeded.attempts, 2);
         server.join().expect("server");
-        assert!(body.lock().unwrap().contains("GAIA-7"));
+        let request = body.lock().unwrap().clone();
+        assert!(request.contains("GAIA-7"));
+        // signature is present and is the HMAC of the timestamp the server saw
+        let timestamp: i64 = header(&request, "x-gaia-space-timestamp")
+            .parse()
+            .expect("ts");
+        assert_eq!(
+            header(&request, "x-gaia-space-signature"),
+            webhook_signature("shhh", timestamp, r#"{"issue":"GAIA-7"}"#)
+        );
+    }
+
+    fn header(request: &str, name: &str) -> String {
+        request
+            .lines()
+            .find_map(|l| {
+                l.to_ascii_lowercase()
+                    .starts_with(name)
+                    .then(|| l.split_once(':').unwrap().1.trim().to_string())
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn attempts_budget_dead_letters_and_the_sweeper_skips_dead_rows() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-deadletter");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        // a port nobody listens on: every attempt is a transport error
+        let endpoint = {
+            let l = TcpListener::bind("127.0.0.1:0").expect("port");
+            let a = l.local_addr().unwrap();
+            drop(l);
+            format!("http://{a}")
+        };
+        save_application(Application {
+            id: "app-dead".into(),
+            name: "Dead app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "dead-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-dead".into(),
+            application_id: "app-dead".into(),
+            event_type: "IssueWebhookEvent".into(),
+            filters_json: None,
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: None,
+            max_attempts: 1,
+        })
+        .expect("hook");
+        let dead = deliver_webhook("hook-dead".into(), "{}".into()).expect("delivery");
+        assert_eq!(dead.status, "FAILED");
+        assert_eq!(dead.attempts, 1);
+        assert!(dead.next_attempt_at.is_none(), "budget spent = dead letter");
+        assert!(due_webhook_deliveries(10).unwrap().is_empty());
+        assert!(process_webhook_queue(10).unwrap().is_empty());
+        assert!(
+            retry_webhook_delivery(dead.id).is_err(),
+            "no retry past budget"
+        );
+    }
+
+    #[test]
+    fn two_sweepers_deliver_a_due_row_exactly_once() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-race");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
+        listener.set_nonblocking(false).ok();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let hits = Arc::new(Mutex::new(0_usize));
+        let counted = hits.clone();
+        let server = std::thread::spawn(move || {
+            // first request = the initial delivery, then anything the sweepers send
+            for _ in 0..3 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0_u8; 2048];
+                let _ = stream.read(&mut buf);
+                *counted.lock().unwrap() += 1;
+                let _ = stream.write_all(
+                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        save_application(Application {
+            id: "app-race".into(),
+            name: "Race app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "race-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-race".into(),
+            application_id: "app-race".into(),
+            event_type: "IssueWebhookEvent".into(),
+            filters_json: None,
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: None,
+            max_attempts: 5,
+        })
+        .expect("hook");
+        let failed = deliver_webhook("hook-race".into(), "{}".into()).expect("delivery");
+        assert_eq!(failed.attempts, 1);
+        // make it due right now
+        db::conn()
+            .unwrap()
+            .execute(
+                "UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id=?1",
+                [&failed.id],
+            )
+            .unwrap();
+        let sweepers: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| process_webhook_queue(1)))
+            .collect();
+        let delivered: usize = sweepers.into_iter().map(JoinCount::unwrap_join).sum();
+        assert_eq!(delivered, 1, "exactly one of eight sweepers may own a due delivery");
+        drop(server);
+        assert_eq!(*hits.lock().unwrap(), 2, "initial POST + one retry POST");
+        let after = list_webhook_deliveries("hook-race".into()).expect("list");
+        assert_eq!(after[0].attempts, 2);
+    }
+
+    trait JoinCount {
+        fn unwrap_join(self) -> usize;
+    }
+    impl JoinCount for std::thread::JoinHandle<Result<Vec<WebhookDelivery>>> {
+        fn unwrap_join(self) -> usize {
+            self.join().expect("sweeper").expect("sweep").len()
+        }
+    }
+
+    #[test]
+    fn expired_claim_recovers_without_spending_an_attempt_and_terminal_rows_stay_unclaimable() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-lease");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let c = db::conn().unwrap();
+        c.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,attempts,next_attempt_at) VALUES ('lease','missing','{}','FAILED',3,unixepoch()-1)", []).unwrap();
+        assert!(claim_delivery("lease", true).unwrap());
+        let claimed: (String, i64, i64) = c.query_row("SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id='lease'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(claimed.0, "PENDING");
+        assert_eq!(claimed.1, 3, "claiming cannot consume an attempt");
+        c.execute("UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id='lease'", []).unwrap();
+        assert!(claim_delivery("lease", true).unwrap(), "an abandoned lease becomes claimable");
+        c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
+        assert!(!claim_delivery("lease", false).unwrap());
+        c.execute("UPDATE webhook_deliveries SET status='FAILED',next_attempt_at=NULL WHERE id='lease'", []).unwrap();
+        assert!(!claim_delivery("lease", false).unwrap(), "dead letter stays terminal");
+    }
+
+    #[test]
+    fn max_attempts_must_be_positive() {
+        assert!(save_webhook(WebhookSubscription {
+            id: "h".into(),
+            application_id: "a".into(),
+            event_type: "E".into(),
+            filters_json: None,
+            endpoint_uri: "https://example.test".into(),
+            enabled: true,
+            secret: None,
+            max_attempts: 0,
+        })
+        .is_err());
     }
 }
