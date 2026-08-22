@@ -439,6 +439,95 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
     Ok(())
 }
 
+// ---------- protected branches: per-action allow-lists ----------
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProtectedBranchRule {
+    pub id: String,
+    pub project_id: String,
+    pub branch_pattern: String,
+    pub regex: bool,
+    pub allow_create_json: Option<String>,
+    pub allow_push_json: Option<String>,
+    pub allow_delete_json: Option<String>,
+    pub allow_force_push_json: Option<String>,
+    pub allow_merge_json: Option<String>,
+    pub linear_history: bool,
+    pub bypass_quality_gate_json: Option<String>,
+}
+fn protected_rows_tx(conn: &Connection, project_id: &str) -> Result<Vec<ProtectedBranchRule>> {
+    let mut s=conn.prepare("SELECT id,project_id,branch_pattern,regex,allow_create_json,allow_push_json,allow_delete_json,allow_force_push_json,allow_merge_json,linear_history,bypass_quality_gate_json FROM protected_branch_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e|e.to_string())?;
+    let rows = s
+        .query_map(rusqlite::params![project_id], |r| {
+            Ok(ProtectedBranchRule {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                branch_pattern: r.get(2)?,
+                regex: r.get(3)?,
+                allow_create_json: r.get(4)?,
+                allow_push_json: r.get(5)?,
+                allow_delete_json: r.get(6)?,
+                allow_force_push_json: r.get(7)?,
+                allow_merge_json: r.get(8)?,
+                linear_history: r.get(9)?,
+                bypass_quality_gate_json: r.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_protected_branch_rules(project_id: String) -> Result<Vec<ProtectedBranchRule>> {
+    protected_rows_tx(&db::conn()?, &project_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_protected_branch_rule(rule: ProtectedBranchRule) -> Result<()> {
+    let c = db::conn()?;
+    c.execute("INSERT INTO protected_branch_rules(id,project_id,branch_pattern,regex,allow_create_json,allow_push_json,allow_delete_json,allow_force_push_json,allow_merge_json,linear_history,bypass_quality_gate_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(id) DO UPDATE SET branch_pattern=excluded.branch_pattern,regex=excluded.regex,allow_create_json=excluded.allow_create_json,allow_push_json=excluded.allow_push_json,allow_delete_json=excluded.allow_delete_json,allow_force_push_json=excluded.allow_force_push_json,allow_merge_json=excluded.allow_merge_json,linear_history=excluded.linear_history,bypass_quality_gate_json=excluded.bypass_quality_gate_json", rusqlite::params![rule.id,rule.project_id,rule.branch_pattern,rule.regex,rule.allow_create_json,rule.allow_push_json,rule.allow_delete_json,rule.allow_force_push_json,rule.allow_merge_json,rule.linear_history,rule.bypass_quality_gate_json]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_protected_branch_rule(id: String) -> Result<()> {
+    db::conn()?
+        .execute(
+            "DELETE FROM protected_branch_rules WHERE id=?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn principal_allowed(json: &Option<String>, actor: &str) -> bool {
+    json.as_ref()
+        .and_then(|x| serde_json::from_str::<Vec<String>>(x).ok())
+        .is_some_and(|v| v.iter().any(|p| p == actor))
+}
+fn protection_matches(rule: &ProtectedBranchRule, branch: &str) -> bool {
+    if rule.regex {
+        return false;
+    }
+    branch_matches(&rule.branch_pattern, branch)
+}
+fn enforce_merge_permission_tx(
+    conn: &Connection,
+    project_id: &str,
+    branch: &str,
+    actor: &str,
+) -> Result<()> {
+    for rule in protected_rows_tx(conn, project_id)?
+        .iter()
+        .filter(|r| protection_matches(r, branch))
+    {
+        if !principal_allowed(&rule.allow_merge_json, actor) {
+            return Err(format!(
+                "{actor} is not allowed to merge protected branch '{}'",
+                rule.branch_pattern
+            ));
+        }
+    }
+    Ok(())
+}
+
 // ---------- quality gates: rules CRUD + live evaluation ----------
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -781,11 +870,13 @@ pub fn attempt_merge(
     review_id: String,
     source_branch: String,
     target_branch: String,
+    actor_id: String,
 ) -> Result<SafeMergeRun> {
     let (conflicted, conflicts, source_oid, target_oid) =
         merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
     let project_id = review_project_tx(&c, &review_id)?;
+    enforce_merge_permission_tx(&c, &project_id, &target_branch, &actor_id)?;
     let (_, ci_reasons) = ci_status_tx(&c, &project_id)?;
     if conflicted {
         return record_merge_run_tx(

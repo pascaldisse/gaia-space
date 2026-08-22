@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -22,8 +24,6 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
@@ -226,6 +226,9 @@ pub fn run() {
             review::list_review_discussions,
             review::create_review_discussion,
             review::set_discussion_resolved,
+            review::list_protected_branch_rules,
+            review::save_protected_branch_rule,
+            review::delete_protected_branch_rule,
             review::list_quality_gate_rules,
             review::create_quality_gate_rule,
             review::update_quality_gate_rule,

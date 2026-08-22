@@ -212,7 +212,7 @@ export default function Reviews() {
     const p = diffRepoPath();
     if (!r || !p || !r.source_branch || !r.target_branch) return;
     try {
-      await reviewApi.attemptMerge(newId("merge"), p, r.id, r.source_branch, r.target_branch);
+      await reviewApi.attemptMerge(newId("merge"), p, r.id, r.source_branch, r.target_branch, actingProfileId());
       refetchMergeRuns();
       refetchReviews();
     } catch (err) {

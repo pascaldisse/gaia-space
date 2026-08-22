@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -179,6 +179,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "safe_merge_runs", "target_oid", "TEXT")?;
         add_column_if_missing(&tx, "safe_merge_runs", "merge_commit_oid", "TEXT")?;
     }
+    if version < 17 {
+        tx.execute_batch(SCHEMA_V17)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -280,6 +283,15 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+pub(crate) const SCHEMA_V17: &str = r#"
+CREATE TABLE IF NOT EXISTS protected_branch_rules (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ branch_pattern TEXT NOT NULL, regex INTEGER NOT NULL DEFAULT 0,
+ allow_create_json TEXT, allow_push_json TEXT, allow_delete_json TEXT, allow_force_push_json TEXT,
+ allow_merge_json TEXT, linear_history INTEGER NOT NULL DEFAULT 0, bypass_quality_gate_json TEXT
+);
+CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_branch_rules(project_id, branch_pattern);
 "#;
 pub(crate) const SCHEMA_V15: &str = r#"
 CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE, payload_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), attempts INTEGER NOT NULL DEFAULT 0, response_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), delivered_at INTEGER, next_attempt_at INTEGER);
