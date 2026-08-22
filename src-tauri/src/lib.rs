@@ -243,6 +243,8 @@ pub fn run() {
             review::delete_protected_branch_rule,
             review::create_review_stack,
             review::list_review_stacks,
+            review::stack_cherry_pick,
+            review::restack_stack,
             review::record_external_check,
             review::list_external_checks,
             review::delete_external_check,

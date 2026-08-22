@@ -6,6 +6,7 @@ import {
   type Review,
   type ReviewDiscussion,
   type ExternalCheckStatus,
+  type RestackStep,
 } from "../api/review";
 import { Diff } from "../Diff";
 import { useDeepLink, linkProps, route } from "../router";
@@ -194,6 +195,34 @@ export default function Reviews() {
       await reviewApi.deleteGateRule(id);
       refetchGateRules();
       refetchGateEval();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // ---------- stacked merge requests (cherry-pick / restack) ----------
+  const [stacks, { refetch: refetchStacks }] = createResource(
+    () => selected()?.project_id,
+    (id) => (id ? reviewApi.listStacks(id) : Promise.resolve([])),
+  );
+  const [restackSteps, setRestackSteps] = createSignal<RestackStep[]>([]);
+  const [pickOid, setPickOid] = createSignal("");
+  async function runRestack(stackId: string, dryRun: boolean) {
+    try {
+      setRestackSteps(await reviewApi.restackStack(stackId, dryRun));
+      if (!dryRun) refetchStacks();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function runCherryPick(e: SubmitEvent) {
+    e.preventDefault();
+    const id = selectedId();
+    if (!id || !pickOid().trim()) return;
+    try {
+      const step = await reviewApi.stackCherryPick(id, pickOid().trim());
+      setRestackSteps([step]);
+      setPickOid("");
     } catch (err) {
       setError(String(err));
     }
@@ -441,6 +470,43 @@ export default function Reviews() {
                     <button class="ghost">Report check</button>
                   </form>
                 </details>
+              </section>
+
+              <section class="review-stacks">
+                <h3>Stack</h3>
+                <p class="hint">Restack replays each member onto its predecessor's new tip through libgit2's in-memory index, then moves the branch refs — the working directory is never touched. A conflicting member stops the run before any ref below it moves.</p>
+                <ul class="stack-list">
+                  <For each={stacks()?.filter((s) => s.review_ids.includes(review().id))} fallback={<li class="hint">This merge request is not in a stack.</li>}>
+                    {(stack) => (
+                      <li>
+                        <code>{stack.source_branch} → {stack.target_branch}</code>
+                        <span class="hint">{stack.review_ids.length} member(s)</span>
+                        <button class="ghost small" onClick={() => runRestack(stack.id, true)}>Preview restack</button>
+                        <button class="ghost small" onClick={() => runRestack(stack.id, false)}>Restack</button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+                <form class="new-rule-form" onSubmit={runCherryPick}>
+                  <input class="grow" placeholder="commit sha to cherry-pick onto this MR's source branch" value={pickOid()} onInput={(e) => setPickOid(e.currentTarget.value)} />
+                  <button class="ghost">Cherry-pick</button>
+                </form>
+                <Show when={restackSteps().length}>
+                  <ul class="restack-steps">
+                    <For each={restackSteps()}>
+                      {(step) => (
+                        <li classList={{ conflicted: step.conflicts.length > 0 }}>
+                          <code>{step.branch}</code> onto <code>{step.onto_branch}</code>
+                          <span class="hint">
+                            {step.conflicts.length
+                              ? `conflicts: ${step.conflicts.join(", ")}`
+                              : `${step.replayed.length} commit(s) ${step.applied ? "replayed" : "planned"}${step.new_tip ? ` → ${step.new_tip.slice(0, 8)}` : ""}`}
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
               </section>
 
               <section class="safe-merge">
