@@ -5,6 +5,8 @@
 // never compiles them; it's a thin webview pointed at a live server instead
 // (see `run()` below).
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod actor;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod blogs;
@@ -303,6 +305,8 @@ pub fn run() {
             calls::join_meeting_call,
             calls::start_meeting_recording,
             calls::stop_meeting_recording,
+            calls::list_meeting_recordings,
+            calls::recording_actor_status,
             pipelines::list_pipeline_scripts,
             pipelines::create_pipeline_script,
             pipelines::update_pipeline_script,

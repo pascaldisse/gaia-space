@@ -13,14 +13,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V35 → reserved ☾
 - V36 → feat/w2-auth (B3: OAuth2 authorization-code, TOTP, permanent tokens) ☀
 - V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
-
-MIGRATION RESERVATIONS (take a number only after adding a row here):
-- V29, V31 → feat/w2-feeds-oauth (scoped feeds; app OAuth/marketplace) — merges first
-- V32, V33 → feat/w2-pkg (typed registry metadata; immutability + CVE ledger)
-- V34 → feat/w2-docs (document publish + KB book grants)
-- V35 → reserved ☾
-- V36 → feat/w2-auth (B3: OAuth2 authorization-code, TOTP, permanent tokens) ☀
-- V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
+- V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — V39 NOT to be taken by any other lane until V38 merges
 
 TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
 
