@@ -19,7 +19,7 @@ WIP:☀ `feat/tree-devenv-api` — devfile/deep-link + apps UI + webhook deliver
 |RD routes: configurations CRUD, environments/details/timeline, open-in-IDE, logs|KB §2.1 routing|stub|`src-tauri/src/applications.rs:67-125`; `src-tauri/src/lib.rs:75-290`; `src/router.ts:25-34`|Backend devfile/list/deep-link declarations only; handler, API, router, and views absent.|
 |RD permission group: create/manage/view/join/connect/warmup/settings/policy/debug|KB §2.1 rights|partial|`src-tauri/src/platform.rs:455-614`; `src/api/platform.ts:50-70`; `src/views/Admin.tsx:129-177`|Generic rights are stored, checked, wrapped, and shown; all named RD rights absent.|
 |`DEV_ENVIRONMENTS` project feature and DevEnvironment pin/menu hooks|KB §2.1 feature/pin/hooks|missing|`src/router.ts:25-34`; `src/nav.ts:10-20`; `src-tauri/src/db.rs:187-220`|No feature flag, pin kind, start-coding hook, or admin navigation item.|
-|Local IDE connections/opened-repository state|KB §2.1 `IdeConnectionId`/`OnlineIde`|stub|`src-tauri/src/applications.rs:111-125`; `src-tauri/src/lib.rs:75-290`; `src/views/Repos.tsx:1-103`|`open_in_ide` returns a fixed Gateway deep-link only; no handler/API/view or IDE/session discovery.|
+|Local IDE connections/opened-repository state|KB §2.1 `IdeConnectionId`/`OnlineIde`|partial|`src-tauri/src/applications.rs:78-91`; `src-tauri/src/lib.rs:88-95`; `src/api/applications.ts:22`; `src/views/Applications.tsx:23,31`; `src/App.tsx:42`|Devfile CRUD and click-gated IDE deep-link are handler→API→Applications-view wired; no IDE/session discovery or opened-repository state.|
 |Five app extension surfaces: HTTP API, webhooks, chatbot commands, UI extensions, Kotlin/.NET SDK|KB §3.2 #1|stub|`src-tauri/src/applications.rs:222-398`; `src-tauri/src/lib.rs:75-290`; `src/App.tsx:37-44`|Local records cover portions of webhook/chatbot/UI-extension registration; no wiring, HTTP app API, payload callbacks, or SDK.|
 |Four app types and five installation paths|KB §3.2 #2|stub|`src-tauri/src/applications.rs:171-196`; `src-tauri/src/db.rs:274`; `src-tauri/src/lib.rs:75-290`|Four stored/validated type strings; no handler/API/view and no five installation paths.|
 |App OAuth flows and endpoint-authenticity credentials|KB §3.2 #3|partial|`src-tauri/src/applications.rs` (rotate_app_secret/issue_app_token/verify_app_token); `src-tauri/src/db.rs` SCHEMA_V31; `src/views/Applications.tsx`|client_credentials grant with argon2-hashed secret+token, TTL, rotation-revokes-tokens, revoke/list; PKCE/code flow and signing/keystore credentials still absent.|
@@ -51,18 +51,18 @@ WIP:☀ `feat/tree-devenv-api` — devfile/deep-link + apps UI + webhook deliver
 ## Totals
 
 - done: 0
-- partial: 6
-- stub: 19
-- missing: 17
+- partial: 10
+- stub: 17
+- missing: 15
 - rows: 42
 
 ## Five worst gaps
 
-1. No complete Dev Environments path: V14 devfile/deep-link backend declarations are not handler-wired, wrapped, routed, or rendered; cloud lifecycle remains absent.
-2. All V14 applications commands are unreachable from Tauri and lack `src/api`/view callers, so registry, webhook, chatbot, and extension records are stubs.
+1. No complete cloud Dev Environments path: devfile CRUD and click-gated local IDE handoff are wired, but VM/container lifecycle, environment detail/timeline, and IDE-session discovery remain absent.
+2. Application registry/webhook/chatbot/extension CRUD is reachable; automatic domain-event delivery, chatbot callback dispatch, and concrete extension contracts remain incomplete.
 3. No app OAuth/credential/key model or external HTTP application API; app installation/marketplace/ownership also absent.
 4. No executable webhook system: generic persisted subscription fields lack domain events, payload/signing, external delivery, history, and retry.
-5. Native chat and generic rights are functional foundations, but no slash-command/app callback contract or app required-rights/context-approval layer connects to them.
+5. §20 route audit: generic rights are command→API→Admin complete, but the named RD permission group remains absent; it is a partial foundation, not an isolated RD route.
 
 ## Crown implementation note — 2026-08-22
 - WIP:☀ completed · commits `b0dc34c` → `8e3a220`.
