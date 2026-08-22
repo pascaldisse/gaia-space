@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 26;
+pub const SCHEMA_VERSION: i64 = 27;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -201,6 +201,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
     if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
     if version < 26 { tx.execute_batch(SCHEMA_V26)?; }
+    if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -331,6 +332,14 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 /// an MR source branch advances.
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+/// Auth-only credentials; V26 is owned by packages.
+pub(crate) const SCHEMA_V27: &str = r#"
+CREATE TABLE IF NOT EXISTS permanent_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS permanent_tokens_user_active ON permanent_tokens(user_id, revoked_at);
+CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, email TEXT, role_id TEXT NOT NULL REFERENCES roles(id), project_id TEXT NOT NULL REFERENCES projects(id), invited_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER, max_uses INTEGER NOT NULL DEFAULT 1 CHECK(max_uses > 0), uses INTEGER NOT NULL DEFAULT 0 CHECK(uses >= 0));
+CREATE INDEX IF NOT EXISTS invitations_active ON invitations(expires_at, uses);
+CREATE TABLE IF NOT EXISTS user_totp (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret_sealed TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, enrolled_at INTEGER NOT NULL);
 "#;
 pub(crate) const SCHEMA_V26: &str = r#"
 ALTER TABLE package_repositories ADD COLUMN retention_days INTEGER;
@@ -677,7 +686,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 26);
+        assert_eq!(SCHEMA_VERSION, 27);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
