@@ -30,6 +30,8 @@ pub mod meetings;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod auth_security;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
@@ -37,6 +39,8 @@ pub mod pipelines;
 pub mod platform;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod review;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod rights;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod secretbox;
 
@@ -286,7 +290,14 @@ pub fn run() {
             pipelines::list_jobs_for_script,
             pipelines::list_job_runs,
             pipelines::list_job_runs_for_script,
+            pipelines::register_worker,
+            pipelines::list_workers,
+            pipelines::create_job_artifact,
+            pipelines::list_job_artifacts,
+            pipelines::save_test_report,
+            pipelines::list_test_reports,
             pipelines::trigger_pipeline_script,
+            pipelines::trigger_pipeline_on_push,
             pipelines::list_deploy_targets,
             pipelines::create_deploy_target,
             pipelines::update_deploy_target,
@@ -300,6 +311,12 @@ pub fn run() {
             pipelines::delete_package_repository,
             pipelines::list_package_versions,
             pipelines::publish_package_version,
+            pipelines::download_package_payload,
+            pipelines::list_package_repository_acl,
+            pipelines::set_package_repository_acl,
+            pipelines::remove_package_repository_acl,
+            pipelines::apply_package_retention,
+            pipelines::set_package_version_pinned,
             pipelines::delete_package_version,
             personal::list_todos,
             personal::list_project_todos,

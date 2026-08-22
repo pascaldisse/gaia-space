@@ -14,7 +14,7 @@
 //!   `team`, `membership`, ...) rather than Space's richer per-domain identifier
 //!   types (`IssueTrackerIdentifier` etc.) — one flat namespace, callers agree on
 //!   the string.
-use crate::db;
+use crate::{db, rights};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -268,345 +268,6 @@ pub fn remove_team_membership(id: String) -> Result<()> {
 /// (code, title, description, right_type, right_group) — a representative subset
 /// of Space's ~150 concrete `Right` classes, one row per RightType (scope).
 /// Codes are namespaced `<RightType>.<Name>` so they stay unique across types.
-const RIGHTS_CATALOG: &[(&str, &str, &str, &str, &str)] = &[
-    (
-        "Global.Superadmin",
-        "Superadmin",
-        "Full organization administration.",
-        "Global",
-        "Permissions",
-    ),
-    (
-        "Global.CreateProjects",
-        "Create projects",
-        "Create new projects in the organization.",
-        "Global",
-        "Project",
-    ),
-    (
-        "Global.AddNewProfile",
-        "Add member profile",
-        "Add a new member account.",
-        "Global",
-        "Members",
-    ),
-    (
-        "Global.AddNewTeam",
-        "Add team",
-        "Create a new team in the org directory.",
-        "Global",
-        "Teams",
-    ),
-    (
-        "Global.EditRoles",
-        "Edit roles",
-        "Create/edit custom roles and their rights.",
-        "Global",
-        "Permissions",
-    ),
-    (
-        "Global.ViewRoles",
-        "View roles",
-        "View the roles catalog.",
-        "Global",
-        "Permissions",
-    ),
-    (
-        "Global.ViewTeams",
-        "View teams",
-        "View the team directory.",
-        "Global",
-        "Teams",
-    ),
-    (
-        "Global.EditOrganizationInfo",
-        "Edit organization info",
-        "Edit org name/logo/settings.",
-        "Global",
-        "Organization",
-    ),
-    (
-        "Global.ViewOrganizationInfo",
-        "View organization info",
-        "View org name/logo/settings.",
-        "Global",
-        "Organization",
-    ),
-    (
-        "Global.ManageAuthModule",
-        "Manage auth modules",
-        "Configure login modules.",
-        "Global",
-        "AuthenticationModules",
-    ),
-    (
-        "Global.EditCustomFields",
-        "Edit global custom fields",
-        "Manage cross-entity custom field definitions.",
-        "Global",
-        "GlobalCustomFields",
-    ),
-    (
-        "Global.OrgMember",
-        "Organization member",
-        "Baseline membership right held by every account.",
-        "Global",
-        "Members",
-    ),
-    (
-        "Project.ViewProject",
-        "View project",
-        "View a project and its contents.",
-        "Project",
-        "Project",
-    ),
-    (
-        "Project.AdminProject",
-        "Administer project",
-        "Manage project settings and membership.",
-        "Project",
-        "Project",
-    ),
-    (
-        "Project.VcsRead",
-        "Read repository",
-        "Read a project's Git repositories.",
-        "Project",
-        "VcsRepositories",
-    ),
-    (
-        "Project.VcsWrite",
-        "Write repository",
-        "Push to a project's Git repositories.",
-        "Project",
-        "VcsRepositories",
-    ),
-    (
-        "Project.VcsAdmin",
-        "Administer repository",
-        "Manage repository settings/branch protection.",
-        "Project",
-        "VcsRepositories",
-    ),
-    (
-        "Project.ViewCodeReview",
-        "View code review",
-        "View merge requests/code reviews.",
-        "Project",
-        "CodeReview",
-    ),
-    (
-        "Project.CreateCodeReview",
-        "Create code review",
-        "Open merge requests/code reviews.",
-        "Project",
-        "CodeReview",
-    ),
-    (
-        "Project.EditCodeReview",
-        "Edit code review",
-        "Edit/merge code reviews.",
-        "Project",
-        "CodeReview",
-    ),
-    (
-        "Project.ViewSecretKeys",
-        "View secrets",
-        "View project secret names.",
-        "Project",
-        "ProjectSecrets",
-    ),
-    (
-        "Project.CreateSecrets",
-        "Create secrets",
-        "Create project secrets.",
-        "Project",
-        "ProjectSecrets",
-    ),
-    (
-        "Project.ViewParameters",
-        "View parameters",
-        "View automation parameters.",
-        "Project",
-        "ProjectParameters",
-    ),
-    (
-        "Project.ModifyParameters",
-        "Modify parameters",
-        "Edit automation parameters.",
-        "Project",
-        "ProjectParameters",
-    ),
-    (
-        "Team.ViewTeamMembers",
-        "View team members",
-        "View a team's member list.",
-        "Team",
-        "TeamMembers",
-    ),
-    (
-        "Team.ManageTeamMembers",
-        "Manage team members",
-        "Add/remove team members.",
-        "Team",
-        "TeamMembers",
-    ),
-    (
-        "Team.EditTeam",
-        "Edit team",
-        "Edit team name/description/parent.",
-        "Team",
-        "Teams",
-    ),
-    (
-        "Team.DeleteTeam",
-        "Delete team",
-        "Archive/delete a team.",
-        "Team",
-        "Teams",
-    ),
-    (
-        "Profile.ViewProfile",
-        "View profile",
-        "View a member's full profile.",
-        "Profile",
-        "Members",
-    ),
-    (
-        "Profile.ViewProfileBasic",
-        "View basic profile",
-        "View a member's basic info.",
-        "Profile",
-        "Members",
-    ),
-    (
-        "Profile.EditProfile",
-        "Edit profile",
-        "Edit a member's profile.",
-        "Profile",
-        "Members",
-    ),
-    (
-        "Profile.DeleteProfile",
-        "Delete profile",
-        "Remove a member profile.",
-        "Profile",
-        "Members",
-    ),
-    (
-        "Profile.ViewAbsences",
-        "View absences",
-        "View a member's absences.",
-        "Profile",
-        "MemberAbsences",
-    ),
-    (
-        "Profile.EditAbsences",
-        "Edit absences",
-        "Edit a member's absences.",
-        "Profile",
-        "MemberAbsences",
-    ),
-    (
-        "Profile.ApproveAbsences",
-        "Approve absences",
-        "Approve a member's absence requests.",
-        "Profile",
-        "MemberAbsences",
-    ),
-    (
-        "Profile.CreatePermanentTokens",
-        "Create permanent tokens",
-        "Create personal permanent tokens.",
-        "Profile",
-        "MemberPermanentTokens",
-    ),
-    (
-        "Profile.SetUpTwoFactorAuthentication",
-        "Set up 2FA",
-        "Enable two-factor authentication.",
-        "Profile",
-        "TwoFactorAuthentication",
-    ),
-    (
-        "Channel.ViewChannel",
-        "View channel",
-        "View a chat channel and its messages.",
-        "Channel",
-        "Channels",
-    ),
-    (
-        "Channel.PostMessages",
-        "Post messages",
-        "Send messages in a channel.",
-        "Channel",
-        "Chat",
-    ),
-    (
-        "Channel.ManageChannel",
-        "Manage channel",
-        "Edit channel settings/membership.",
-        "Channel",
-        "Channels",
-    ),
-    (
-        "Channel.DeleteChannel",
-        "Delete channel",
-        "Archive/delete a channel.",
-        "Channel",
-        "Channels",
-    ),
-    (
-        "Document.ViewDocuments",
-        "View documents",
-        "View documents in a container.",
-        "Document",
-        "Documents",
-    ),
-    (
-        "Document.CreateDocuments",
-        "Create documents",
-        "Create new documents.",
-        "Document",
-        "Documents",
-    ),
-    (
-        "Document.EditDocuments",
-        "Edit documents",
-        "Edit document content.",
-        "Document",
-        "Documents",
-    ),
-    (
-        "Document.DeleteDocumentsForever",
-        "Delete documents forever",
-        "Permanently delete documents.",
-        "Document",
-        "Documents",
-    ),
-    (
-        "Document.ManageDocuments",
-        "Manage documents",
-        "Move/archive/share documents.",
-        "Document",
-        "Documents",
-    ),
-    (
-        "DocumentFolder.ViewFoldersMetadata",
-        "View folder metadata",
-        "View folder names/hierarchy.",
-        "DocumentFolder",
-        "Documents",
-    ),
-    (
-        "DocumentFolder.ManageDocumentFolders",
-        "Manage folders",
-        "Create/rename/move folders.",
-        "DocumentFolder",
-        "Documents",
-    ),
-];
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Right {
     pub id: String,
@@ -638,7 +299,7 @@ pub fn list_rights() -> Result<Vec<Right>> {
     Ok(rows)
 }
 fn seed_rights_on(c: &Connection) -> Result<usize> {
-    for (code, title, description, right_type, right_group) in RIGHTS_CATALOG {
+    for (code, title, description, right_type, right_group) in rights::CATALOG {
         err(c.execute(
             "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group) VALUES(?1,?2,?3,?4,?5,?6)",
             params![new_id("right"), code, title, description, right_type, right_group],
@@ -908,6 +569,23 @@ pub fn check_right(
         scope_id.as_deref(),
     )
 }
+/// Enforcement helper for operational handlers. Account administrators are an
+/// explicit break-glass path; all other grants resolve through the catalog.
+pub fn require_right_on(
+    c: &Connection,
+    profile_id: &str,
+    right: rights::Right,
+    scope_type: &str,
+    scope_id: Option<&str>,
+) -> Result<()> {
+    if is_admin_on(c, profile_id)?
+        || check_right_on(c, profile_id, right.code(), scope_type, scope_id)?
+    {
+        Ok(())
+    } else {
+        Err(format!("missing right {}", right.code()))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -1048,7 +726,13 @@ pub fn is_admin_on(c: &Connection, profile_id: &str) -> Result<bool> {
     if by_account {
         return Ok(true);
     }
-    check_right_on(c, profile_id, "Global.Superadmin", "global", None)
+    check_right_on(
+        c,
+        profile_id,
+        rights::Right::Superadmin.code(),
+        "global",
+        None,
+    )
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1652,11 +1336,11 @@ mod tests {
         let first = seed_rights_on(&c).unwrap();
         let second = seed_rights_on(&c).unwrap();
         assert_eq!(first, second);
-        assert_eq!(first, RIGHTS_CATALOG.len());
+        assert_eq!(first, rights::CATALOG.len());
         let distinct_codes: i64 = c
             .query_row("SELECT count(DISTINCT code) FROM rights", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(distinct_codes as usize, RIGHTS_CATALOG.len());
+        assert_eq!(distinct_codes as usize, rights::CATALOG.len());
     }
 
     #[test]

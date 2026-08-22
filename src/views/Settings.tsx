@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon";
 import { isMobileServer, openServerSetup } from "../mobile";
 import { NAV_GROUPS, defaultView, hiddenGroups, navLayout, setDefaultView, setNavLayout, toggleGroup } from "../nav";
 import { calendarFeedsApi } from "../api/calendar-feeds";
+import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { humanError, profileId } from "../session";
 import "./Settings.css";
 
@@ -66,6 +67,15 @@ function ConnectedCalendars() {
   </div>;
 }
 
+function SecuritySettings() {
+const [tokens, { refetch }] = createResource(() => permanentTokensApi.list());
+const [name, setName] = createSignal(""); const [oneTime, setOneTime] = createSignal(""); const [error, setError] = createSignal(""); const [busy, setBusy] = createSignal(false);
+const [twoFactor, { refetch: reloadTwoFactor }] = createResource(() => twoFactorApi.status());
+const createToken = async (event: SubmitEvent) => { event.preventDefault(); if (!name().trim()) return; setBusy(true); setError(""); try { const created = await permanentTokensApi.create(name().trim()); setOneTime(created.token); setName(""); refetch(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
+const enableTwoFactor = async () => { setBusy(true); setError(""); try { const enrollment = await twoFactorApi.enroll(); const code = window.prompt(`Save this secret in your authenticator, then enter its code:\n${enrollment.secret}`); if (!code) return; await twoFactorApi.confirm(code); reloadTwoFactor(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
+const disableTwoFactor = async () => { const code = window.prompt("Enter a current authenticator code to disable two-factor authentication."); if (!code) return; setBusy(true); setError(""); try { await twoFactorApi.disable(code); reloadTwoFactor(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
+return <div class="settings-card"><h2>Security</h2><Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show><h3>Two-factor authentication</h3><p class="settings-hint">{twoFactor()?.enabled ? "An authenticator code is required when you sign in." : "Protect your password sign-in with an RFC 6238 authenticator."}</p><button type="button" disabled={busy()} onClick={() => void (twoFactor()?.enabled ? disableTwoFactor() : enableTwoFactor())}>{twoFactor()?.enabled ? "Disable two-factor authentication" : "Set up two-factor authentication"}</button><h3>Permanent tokens</h3><p class="settings-hint">Use a token for scripts. Its value is shown only once and is never stored in plaintext.</p><Show when={oneTime()}><p class="calendar-error" role="status">Copy now: <code>{oneTime()}</code></p></Show><form class="feed-connect" onSubmit={createToken}><input aria-label="Token name" placeholder="Token name" value={name()} onInput={e => setName(e.currentTarget.value)} /><button type="submit" class="primary" disabled={busy()}>Create token</button></form><ul class="settings-groups feed-list"><For each={tokens() ?? []}>{token => <li class="settings-option feed-row"><span><strong>{token.name}</strong><em class="settings-sub">Created {when(token.created_at)} · last used {when(token.last_used_at)}</em></span><button type="button" class="danger" disabled={busy()} onClick={() => void permanentTokensApi.revoke(token.id).then(() => refetch()).catch(reason => setError(humanError(reason)))}>Revoke</button></li>}</For><Show when={!tokens.loading && (tokens() ?? []).length === 0}><li class="settings-sub">No permanent tokens.</li></Show></ul></div>;
+}
 /** User settings — navigation layout is per-user, stored locally, default = the shipped grouped view. */
 export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
@@ -101,6 +111,7 @@ export default function Settings() {
     </div>
 
     <ConnectedCalendars />
+<SecuritySettings />
 
     <Show when={isMobileServer()}><div class="settings-card">
       <h2>Server</h2>

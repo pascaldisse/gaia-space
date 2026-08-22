@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 25;
+pub const SCHEMA_VERSION: i64 = 27;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -200,6 +200,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
     if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
     if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
+    if version < 26 { tx.execute_batch(SCHEMA_V26)?; }
+    if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -331,6 +333,31 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
 "#;
+/// Auth-only credentials; V26 is owned by packages.
+pub(crate) const SCHEMA_V27: &str = r#"
+CREATE TABLE IF NOT EXISTS permanent_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS permanent_tokens_user_active ON permanent_tokens(user_id, revoked_at);
+CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, email TEXT, role_id TEXT NOT NULL REFERENCES roles(id), project_id TEXT NOT NULL REFERENCES projects(id), invited_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER, max_uses INTEGER NOT NULL DEFAULT 1 CHECK(max_uses > 0), uses INTEGER NOT NULL DEFAULT 0 CHECK(uses >= 0));
+CREATE INDEX IF NOT EXISTS invitations_active ON invitations(expires_at, uses);
+CREATE TABLE IF NOT EXISTS user_totp (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret_sealed TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, enrolled_at INTEGER NOT NULL);
+"#;
+pub(crate) const SCHEMA_V26: &str = r#"
+ALTER TABLE package_repositories ADD COLUMN retention_days INTEGER;
+ALTER TABLE package_repositories ADD COLUMN retention_version_count INTEGER;
+ALTER TABLE package_repositories ADD COLUMN retain_downloaded INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE package_repositories ADD COLUMN access_level TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC'));
+ALTER TABLE package_versions ADD COLUMN accessed_at INTEGER;
+ALTER TABLE package_versions ADD COLUMN downloads INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE package_versions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS package_repository_acl (repository_id TEXT NOT NULL REFERENCES package_repositories(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK(role IN ('VIEWER','WRITER','MANAGER')), PRIMARY KEY(repository_id, profile_id));
+CREATE INDEX IF NOT EXISTS package_versions_retention ON package_versions(repository_id, created_at);
+CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, os TEXT NOT NULL, tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'ONLINE' CHECK(status IN ('ONLINE','OFFLINE','DISABLED')), registered_at INTEGER NOT NULL DEFAULT (unixepoch()), last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS job_artifacts (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, name TEXT NOT NULL, content BLOB NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS job_artifacts_run ON job_artifacts(job_run_id);
+CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, suite TEXT NOT NULL, test_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PASSED','FAILED','SKIPPED')), duration_ms INTEGER, message TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS test_reports_run ON test_reports(job_run_id);
+"#;
+
 pub(crate) const SCHEMA_V25: &str = r#"
 CREATE TABLE IF NOT EXISTS board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
 "#;
@@ -385,15 +412,15 @@ CREATE INDEX IF NOT EXISTS blog_posts_author ON blog_posts(author_id,published_a
 CREATE TABLE IF NOT EXISTS blog_aliases (post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE, alias TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(post_id,alias));
 "#;
 pub(crate) const SCHEMA_V14: &str = r#"
-CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
+CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, UNIQUE(project_id,path));
 CREATE INDEX IF NOT EXISTS devfiles_project ON devfiles(project_id);
-CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, client_id TEXT NOT NULL UNIQUE, client_credentials_flow_enabled INTEGER NOT NULL DEFAULT 0, code_flow_enabled INTEGER NOT NULL DEFAULT 0, pkce_required INTEGER NOT NULL DEFAULT 0, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS webhook_subscriptions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filters_json TEXT, endpoint_uri TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS webhook_subscriptions_application ON webhook_subscriptions(application_id);
-CREATE TABLE IF NOT EXISTS chatbot_registrations (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, display_name TEXT NOT NULL, description TEXT, commands_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS chatbot_registrations_application ON chatbot_registrations(application_id);
-CREATE TABLE IF NOT EXISTS ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ui_extensions_application ON ui_extensions(application_id);
+CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, endpoint_ssl_verification INTEGER NOT NULL DEFAULT 1, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_webhooks (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filter_json TEXT, endpoint_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_webhooks_application ON app_webhooks(application_id);
+CREATE TABLE IF NOT EXISTS app_chatbots (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL, display_name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_chatbots_application ON app_chatbots(application_id);
+CREATE TABLE IF NOT EXISTS app_ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS app_ui_extensions_application ON app_ui_extensions(application_id);
 "#;
 pub(crate) const SCHEMA_V13: &str = r#"
 CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
@@ -401,7 +428,6 @@ CREATE INDEX IF NOT EXISTS calendar_feeds_profile ON calendar_feeds(profile_id);
 CREATE TABLE IF NOT EXISTS calendar_feed_events (feed_id TEXT NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE, uid TEXT NOT NULL, occurrence_key TEXT NOT NULL, title TEXT NOT NULL, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day_date TEXT, PRIMARY KEY(feed_id, uid, occurrence_key));
 CREATE INDEX IF NOT EXISTS calendar_feed_events_range ON calendar_feed_events(feed_id, starts_at);
 "#;
-
 pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
@@ -660,7 +686,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 25);
+        assert_eq!(SCHEMA_VERSION, 27);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

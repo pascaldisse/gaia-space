@@ -37,8 +37,8 @@ export type DirectoryUser = Pick<User, "username" | "display_name" | "profile_id
 export const authApi = {
   me: () => req<{ user: User }>("api/auth/me"),
   directory: () => req<DirectoryUser[]>("api/directory"),
-  login: (username: string, password: string) =>
-    req<{ user: User }>("api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  login: (username: string, password: string, totp_code?: string) =>
+    req<{ user: User }>("api/auth/login", { method: "POST", body: JSON.stringify({ username, password, totp_code }) }),
   logout: () => req<void>("api/auth/logout", { method: "POST" }),
   changePassword: (current: string, next: string) =>
     req<void>("api/auth/password", { method: "POST", body: JSON.stringify({ current, next }) }),
@@ -59,4 +59,19 @@ export const usersApi = {
   update: (id: string, patch: UpdateUserInput) =>
     req<User>(`api/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   remove: (id: string) => req<void>(`api/users/${id}`, { method: "DELETE" }),
+};
+export type PermanentToken = { id: string; name: string; created_at: number; expires_at: number | null; last_used_at: number | null };
+export const permanentTokensApi = {
+  list: () => req<PermanentToken[]>("api/auth/tokens"),
+  create: (name: string, expires_at?: number) => req<{ token: string; record: PermanentToken }>("api/auth/tokens", { method: "POST", body: JSON.stringify({ name, expires_at }) }),
+  revoke: (id: string) => req<void>(`api/auth/tokens/${id}`, { method: "DELETE" }),
+};
+export const twoFactorApi = {
+  status: () => req<{ enabled: boolean }>("api/auth/2fa"),
+  enroll: () => req<{ secret: string; otpauth_uri: string }>("api/auth/2fa/enroll", { method: "POST" }),
+  confirm: (code: string) => req<void>("api/auth/2fa/confirm", { method: "POST", body: JSON.stringify({ code }) }),
+  disable: (code: string) => req<void>("api/auth/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }),
+};
+export const invitationsApi = {
+  accept: (token: string, username: string, display_name: string, password: string) => req<{ user_id: string }>("api/invitations/accept", { method: "POST", body: JSON.stringify({ token, username, display_name, password }) }),
 };

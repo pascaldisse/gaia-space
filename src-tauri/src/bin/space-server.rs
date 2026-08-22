@@ -1,10 +1,11 @@
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{
+    body::Bytes,
     extract::{ConnectInfo, Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use gaia_space_lib::{
@@ -842,6 +843,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "join_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
+        | "trigger_pipeline_on_push"
         | "review_diff"
         | "dry_run_merge"
         | "attempt_merge"
@@ -864,9 +866,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "create_deploy_target"
         | "create_entity_channel" => CommandPolicy::Session,
         "create_document_folder" => CommandPolicy::DocumentFolderCreate,
-        "create_message" | "create_package_repository" | "create_pipeline_script" => {
-            CommandPolicy::Session
-        }
+        "create_job_artifact"
+        | "create_message"
+        | "create_package_repository"
+        | "create_pipeline_script"
+        | "register_worker"
+        | "save_test_report" => CommandPolicy::Session,
         "create_profile"
         | "create_quality_gate_rule"
         | "create_review_stack"
@@ -886,6 +891,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_message"
         | "delete_package_repository" => CommandPolicy::Session,
         "delete_package_version"
+        | "remove_package_repository_acl"
+        | "download_package_payload"
         | "delete_pipeline_script"
         | "delete_planning_tag"
         | "delete_quality_gate_rule"
@@ -920,12 +927,17 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_deployments_for_target" => CommandPolicy::Session,
         "list_document_folders" => CommandPolicy::DocumentFolderReadList,
         "list_documents" => CommandPolicy::DocumentReadList,
-        "list_job_runs" | "list_job_runs_for_script" => CommandPolicy::Session,
+        "list_job_artifacts"
+        | "list_job_runs"
+        | "list_job_runs_for_script"
+        | "list_test_reports"
+        | "list_workers" => CommandPolicy::Session,
         "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
         "list_meetings" => CommandPolicy::MeetingReadList,
         "list_package_repositories"
+        | "list_package_repository_acl"
         | "list_package_versions"
         | "list_pipeline_scripts"
         | "list_planning_tags"
@@ -950,9 +962,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_time_tracking_entries"
         | "livekit_server_status"
         | "mark_channel_read" => CommandPolicy::Session,
-        "move_issue_on_board" | "publish_package_version" | "remove_channel_member" => {
-            CommandPolicy::Session
-        }
+        "apply_package_retention"
+        | "move_issue_on_board"
+        | "publish_package_version"
+        | "remove_channel_member"
+        | "set_package_repository_acl"
+        | "set_package_version_pinned" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
@@ -1224,6 +1239,7 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
+fn require_catalog_right(user: &User, right: gaia_space_lib::rights::Right, scope_type: &str, scope_id: Option<&str>) -> Result<(), (StatusCode, Json<Value>)> { let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; platform::require_right_on(&c,&user.profile_id,right,scope_type,scope_id).map_err(|_|err(StatusCode::FORBIDDEN,"right required")) }
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
 fn authorize_command(
@@ -1316,13 +1332,9 @@ fn authorize_command(
                 .and_then(|input| input.get("project_id").or_else(|| input.get("projectId")))
                 .and_then(Value::as_str)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "project_id is required"))?;
-            if project_readable(user, project_id)
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
-            {
-                Ok(())
-            } else {
-                Err(err(StatusCode::FORBIDDEN, "project access denied"))
-            }
+            if !project_readable(user, project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
+            if name == "create_issue" { require_catalog_right(user, gaia_space_lib::rights::Right::CreateIssue, "project", Some(project_id))?; }
+            Ok(())
         }
         // Only the owner or an admin decides who belongs to a project.
         CommandPolicy::ProjectMemberAdmin => {
@@ -1608,9 +1620,7 @@ fn authorize_command(
             _ => unreachable!("identity-write policy must name an identity-write command"),
         }
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
-        CommandPolicy::DocumentCreate => {
-            bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))
-        }
+        CommandPolicy::DocumentCreate => { bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?; require_catalog_right(user, gaia_space_lib::rights::Right::CreateDocument, "global", None) }
         CommandPolicy::DocumentReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -1741,6 +1751,7 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::Session => {
+            if name == "create_message" { let message=body.get("message").ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid message"))?; let channel_id:String=arg(message,"channel_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?; if !chat_channel_access(&user.profile_id,&channel_id){return Err(err(StatusCode::FORBIDDEN,"channel access denied"));} require_catalog_right(user,gaia_space_lib::rights::Right::PostMessage,"channel",Some(&channel_id))?; }
             if matches!(
                 name,
                 "list_messages"
@@ -1887,6 +1898,117 @@ fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
         Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
     }
 }
+/// Generic registry protocol: binary upload/download plus a server-normalized metadata
+/// endpoint. It deliberately shares `pipelines` validation and ownership of filesystem paths.
+async fn registry_generic_upload(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version, filename)): Path<(String, String, String, String)>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    let metadata = headers
+        .get("x-package-metadata")
+        .and_then(|v| v.to_str().ok());
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        metadata,
+        Some(&filename),
+        Some(&payload),
+    ) {
+        Ok(value) => (StatusCode::CREATED, Json(json!(value))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+async fn registry_generic_download(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version, filename)): Path<(String, String, String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::download_registry_bytes(&repository_id, &package_name, &version, &filename) {
+        Ok(payload) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            payload,
+        )
+            .into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+async fn registry_generic_metadata(
+    headers: HeaderMap,
+    Path((repository_id, package_name, version)): Path<(String, String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::generic_registry_metadata(&repository_id, &package_name, &version) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+/// npm-compatible package document endpoint. A PUT stores a version manifest; GET returns
+/// the `versions` and `dist-tags.latest` shape clients use for resolution.
+async fn registry_npm_publish(
+    headers: HeaderMap,
+    Path((repository_id, package_name)): Path<(String, String)>,
+    Json(mut manifest): Json<Value>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    let version = match manifest.get("version").and_then(Value::as_str) {
+        Some(value) => value.to_string(),
+        None => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "npm manifest requires string version",
+            )
+            .into_response()
+        }
+    };
+    if let Some(name) = manifest.get("name").and_then(Value::as_str) {
+        if name != package_name {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "npm manifest name must match URL package",
+            )
+            .into_response();
+        }
+    }
+    if let Some(object) = manifest.as_object_mut() {
+        object.insert("name".into(), json!(package_name));
+    }
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        Some(&manifest.to_string()),
+        None,
+        None,
+    ) {
+        Ok(value) => (StatusCode::CREATED, Json(json!(value))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+async fn registry_npm_metadata(
+    headers: HeaderMap,
+    Path((repository_id, package_name)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(error) = user_by_token(&headers) {
+        return error.into_response();
+    }
+    match pipelines::npm_registry_metadata(&repository_id, &package_name) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+
 async fn cmd(
     h: HeaderMap,
     Path(name): Path<String>,
@@ -2002,6 +2124,7 @@ async fn cmd(
     "create_issue" => issues::create_issue(input: issues::IssueInput),
     "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
+    "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
     "create_message" => chat::create_message(message: chat::Message),
     "create_package_repository" => pipelines::create_package_repository(repo: pipelines::PackageRepository),
     "create_pipeline_script" => pipelines::create_pipeline_script(script: pipelines::PipelineScript),
@@ -2083,6 +2206,9 @@ async fn cmd(
     "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
+    "list_job_artifacts" => pipelines::list_job_artifacts(job_run_id: String),
+    "list_test_reports" => pipelines::list_test_reports(job_run_id: String),
+    "list_workers" => pipelines::list_workers(),
     "list_jobs" => pipelines::list_jobs(),
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
     "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
@@ -2090,6 +2216,7 @@ async fn cmd(
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
+    "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
     "list_package_versions" => pipelines::list_package_versions(repository_id: String, query: Option<String>),
     "list_pipeline_scripts" => pipelines::list_pipeline_scripts(),
     "list_planning_tags" => issues::list_planning_tags(project_id: String),
@@ -2130,15 +2257,20 @@ async fn cmd(
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
+    "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>),
+    "download_package_payload" => pipelines::download_package_payload(repository_id: String, package_name: String, version: String, filename: String),
     "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
+    "remove_package_repository_acl" => pipelines::remove_package_repository_acl(repository_id: String, profile_id: String),
     "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
     "remove_issue_link" => issues::remove_issue_link(id: String),
     "remove_reaction" => chat::remove_reaction(message_id: String, profile_id: String, emoji: String),
     "remove_team_membership" => platform::remove_team_membership(id: String),
     "restore_doc_version" => documents::restore_doc_version(document_id: String, version: i64, actor: Option<String>),
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
+    "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
     "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
+    "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
@@ -2150,12 +2282,15 @@ async fn cmd(
     "seed_rights" => platform::seed_rights(),
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
+    "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
+    "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
+    "trigger_pipeline_on_push" => pipelines::trigger_pipeline_on_push(script_id: String, repository: String, branch: String),
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
@@ -2216,6 +2351,18 @@ async fn main() {
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
+        .route(
+            "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
+            get(registry_generic_metadata),
+        )
+        .route(
+            "/api/registry/{repository_id}/generic/{package_name}/{version}/{filename}",
+            put(registry_generic_upload).get(registry_generic_download),
+        )
+        .route(
+            "/api/registry/{repository_id}/npm/{package_name}",
+            put(registry_npm_publish).get(registry_npm_metadata),
+        )
         .route("/api/cmd/{command}", post(cmd))
         .with_state(App::new());
     let port = env::var("SPACE_PORT")
