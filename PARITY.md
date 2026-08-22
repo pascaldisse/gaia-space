@@ -4,6 +4,8 @@ Sources: docs/space-knowledge-base/01→08 (KB) + legacy/flutter/ (legacy). Stat
 
 Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 99 pass/0 fail · vite build ✓.
 
+LEDGER (衝突禁 · same-domain double-start forbidden): ☀build-crown → 07→01→02→04→06→08 · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (worktree ../gaia-space-auth, branch feat/parity-05-auth).
+
 TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
