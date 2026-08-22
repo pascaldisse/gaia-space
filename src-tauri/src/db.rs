@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -171,6 +171,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 15 {
         tx.execute_batch(SCHEMA_V15)?;
+    }
+    // V16: safe-merge runs retain the exact refs checked before finalization.
+    if version < 16 {
+        add_column_if_missing(&tx, "reviews", "repo_path", "TEXT")?;
+        add_column_if_missing(&tx, "safe_merge_runs", "source_oid", "TEXT")?;
+        add_column_if_missing(&tx, "safe_merge_runs", "target_oid", "TEXT")?;
+        add_column_if_missing(&tx, "safe_merge_runs", "merge_commit_oid", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()

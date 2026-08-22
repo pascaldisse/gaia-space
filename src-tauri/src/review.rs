@@ -28,6 +28,7 @@ pub struct Review {
     pub title: String,
     pub turn_based: bool,
     pub channel_id: Option<String>,
+    pub repo_path: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewParticipant {
@@ -64,6 +65,9 @@ pub struct SafeMergeRun {
     pub state: String,
     pub is_dry_run: bool,
     pub log: Option<String>,
+    pub source_oid: Option<String>,
+    pub target_oid: Option<String>,
+    pub merge_commit_oid: Option<String>,
 }
 
 /// Input for opening a merge request against a registered repo's *real* branches.
@@ -106,7 +110,7 @@ pub struct QualityGateEvaluation {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_reviews() -> Result<Vec<Review>> {
     let c = db::conn()?;
-    let mut s=c.prepare("SELECT id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id FROM reviews ORDER BY project_id,number").map_err(|e|e.to_string())?;
+    let mut s=c.prepare("SELECT id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id,repo_path FROM reviews ORDER BY project_id,number").map_err(|e|e.to_string())?;
     let rows = s
         .query_map([], |r| {
             Ok(Review {
@@ -120,6 +124,7 @@ pub fn list_reviews() -> Result<Vec<Review>> {
                 title: r.get(7)?,
                 turn_based: r.get(8)?,
                 channel_id: r.get(9)?,
+                repo_path: r.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -266,10 +271,11 @@ fn open_merge_request_tx(conn: &Connection, req: &NewMergeRequest) -> Result<Rev
         title: req.title.clone(),
         turn_based: true,
         channel_id: Some(req.channel_id.clone()),
+        repo_path: Some(req.repo_path.clone()),
     };
     conn.execute(
-        "INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-        rusqlite::params![review.id, review.project_id, review.number, review.kind, review.state, review.source_branch, review.target_branch, review.title, review.turn_based, review.channel_id],
+        "INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id,repo_path)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        rusqlite::params![review.id, review.project_id, review.number, review.kind, review.state, review.source_branch, review.target_branch, review.title, review.turn_based, review.channel_id, review.repo_path],
     )
     .map_err(|e| e.to_string())?;
     // Author: no accept/reject state, waiting on reviewers (their_turn=false).
@@ -605,8 +611,7 @@ pub fn evaluate_quality_gate(review_id: String) -> Result<QualityGateEvaluation>
     evaluate_quality_gate_tx(&c, &review_id)
 }
 
-// ---------- safe merge: dry-run only, real merge commit is test-only (see module doc) ----------
-
+// ---------- safe merge: snapshot → CI completion → atomic ref finalization ----------
 fn open(path: &str) -> Result<Repository> {
     Repository::open(path).map_err(|e| format!("open {path}: {e}"))
 }
@@ -617,14 +622,13 @@ fn branch_commit<'a>(repo: &'a Repository, name: &str) -> Result<git2::Commit<'a
         .peel_to_commit()
         .map_err(|e| e.to_string())
 }
-/// In-memory merge preview only: `merge_commits` builds a result `Index` without ever
-/// touching the working directory, the on-disk index, or any ref. Safe against a
-/// user-registered repo. Never add a checkout/write call to this function.
+/// Builds a merge result entirely in libgit2's in-memory index. It never checks out a
+/// worktree. The returned oids are a TOCTOU guard: finalization refuses stale refs.
 fn merge_preview(
     repo_path: &str,
     source_branch: &str,
     target_branch: &str,
-) -> Result<(bool, Vec<String>)> {
+) -> Result<(bool, Vec<String>, String, String)> {
     let repo = open(repo_path)?;
     let source = branch_commit(&repo, source_branch)?;
     let target = branch_commit(&repo, target_branch)?;
@@ -640,39 +644,69 @@ fn merge_preview(
             }
         }
     }
-    Ok((!conflicts.is_empty(), conflicts))
+    Ok((
+        !conflicts.is_empty(),
+        conflicts,
+        source.id().to_string(),
+        target.id().to_string(),
+    ))
+}
+/// A safe merge waits until every configured project Automation job has a completed
+/// green latest run. Projects without configured jobs have no CI requirement.
+fn ci_status_tx(conn: &Connection, project_id: &str) -> Result<(bool, Vec<String>)> {
+    let mut statement = conn.prepare(
+        "SELECT j.name, r.status FROM jobs j JOIN pipeline_scripts p ON p.id=j.script_id \
+         LEFT JOIN job_runs r ON r.id=(SELECT jr.id FROM job_runs jr WHERE jr.job_id=j.id ORDER BY jr.triggered_at DESC LIMIT 1) \
+         WHERE p.project_id=?1 AND p.archived=0 AND j.archived=0 ORDER BY j.name",
+    ).map_err(|e| e.to_string())?;
+    let jobs: Vec<(String, Option<String>)> = statement
+        .query_map(rusqlite::params![project_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut reasons = Vec::new();
+    for (name, status) in jobs {
+        match status.as_deref() {
+            Some("FINISHED") => {}
+            Some("FAILED") | Some("TERMINATED") => reasons.push(format!("CI job '{name}' failed")),
+            Some(status) => reasons.push(format!("CI job '{name}' is {status}; waiting")),
+            None => reasons.push(format!("CI job '{name}' has no run; waiting")),
+        }
+    }
+    Ok((reasons.is_empty(), reasons))
 }
 fn record_merge_run_tx(
     conn: &Connection,
     id: &str,
     review_id: &str,
-    conflicted: bool,
-    conflicts: &[String],
-    note: &str,
+    state: &str,
+    is_dry_run: bool,
+    log: String,
+    source_oid: Option<&str>,
+    target_oid: Option<&str>,
+    merge_commit_oid: Option<&str>,
 ) -> Result<SafeMergeRun> {
-    let state = if conflicted { "FAILING" } else { "SUCCEEDED" };
-    let log = if conflicted {
-        format!("{note} — conflicts in: {}", conflicts.join(", "))
-    } else {
-        format!("{note} — no conflicts, fast-mergeable")
-    };
     conn.execute(
-        "INSERT INTO safe_merge_runs(id,review_id,state,is_dry_run,log,finished_at) VALUES(?1,?2,?3,1,?4,unixepoch())",
-        rusqlite::params![id, review_id, state, log],
-    )
-    .map_err(|e| e.to_string())?;
+        "INSERT INTO safe_merge_runs(id,review_id,state,is_dry_run,log,source_oid,target_oid,merge_commit_oid,finished_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",
+        rusqlite::params![id, review_id, state, is_dry_run, log, source_oid, target_oid, merge_commit_oid],
+    ).map_err(|e| e.to_string())?;
     Ok(SafeMergeRun {
-        id: id.to_string(),
-        review_id: review_id.to_string(),
-        state: state.to_string(),
-        is_dry_run: true,
+        id: id.into(),
+        review_id: review_id.into(),
+        state: state.into(),
+        is_dry_run,
         log: Some(log),
+        source_oid: source_oid.map(Into::into),
+        target_oid: target_oid.map(Into::into),
+        merge_commit_oid: merge_commit_oid.map(Into::into),
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_safe_merge_runs(review_id: String) -> Result<Vec<SafeMergeRun>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,review_id,state,is_dry_run,log FROM safe_merge_runs WHERE review_id=?1 ORDER BY started_at DESC").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,review_id,state,is_dry_run,log,source_oid,target_oid,merge_commit_oid FROM safe_merge_runs WHERE review_id=?1 ORDER BY started_at DESC").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
             Ok(SafeMergeRun {
@@ -681,6 +715,9 @@ pub fn list_safe_merge_runs(review_id: String) -> Result<Vec<SafeMergeRun>> {
                 state: r.get(2)?,
                 is_dry_run: r.get(3)?,
                 log: r.get(4)?,
+                source_oid: r.get(5)?,
+                target_oid: r.get(6)?,
+                merge_commit_oid: r.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -688,8 +725,16 @@ pub fn list_safe_merge_runs(review_id: String) -> Result<Vec<SafeMergeRun>> {
         .map_err(|e| e.to_string());
     rows
 }
-/// Explicit Dry Run button: in-memory merge check (see `merge_preview`), recorded to
-/// `safe_merge_runs` with `is_dry_run=1`.
+fn review_project_tx(conn: &Connection, review_id: &str) -> Result<String> {
+    conn.query_row(
+        "SELECT project_id FROM reviews WHERE id=?1",
+        rusqlite::params![review_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+/// Snapshot the merge result and current refs. A non-green CI leaves a RUNNING record,
+/// so callers can poll and retry finalization without ever writing repository state.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dry_run_merge(
     id: String,
@@ -698,15 +743,37 @@ pub fn dry_run_merge(
     source_branch: String,
     target_branch: String,
 ) -> Result<SafeMergeRun> {
-    let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
+    let (conflicted, conflicts, source_oid, target_oid) =
+        merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
-    record_merge_run_tx(&c, &id, &review_id, conflicted, &conflicts, "dry run")
+    let (_, ci_reasons) = ci_status_tx(&c, &review_project_tx(&c, &review_id)?)?;
+    let (state, log) = if conflicted {
+        (
+            "FAILING",
+            format!("dry run — conflicts in: {}", conflicts.join(", ")),
+        )
+    } else if !ci_reasons.is_empty() {
+        (
+            "RUNNING",
+            format!("dry run mergeable; {}", ci_reasons.join("; ")),
+        )
+    } else {
+        ("SUCCEEDED", "dry run mergeable; CI green".into())
+    };
+    record_merge_run_tx(
+        &c,
+        &id,
+        &review_id,
+        state,
+        true,
+        log,
+        Some(&source_oid),
+        Some(&target_oid),
+        None,
+    )
 }
-/// The "Merge" button in the UI. HARD CONSTRAINT: never mutates a user-registered repo —
-/// this runs the exact same in-memory `merge_preview` as `dry_run_merge` and returns the
-/// same verdict; it never checks out, writes a ref, or commits. Real merge execution only
-/// exists under `#[cfg(test)]` (see `tests::execute_real_merge_in_test`) against throwaway
-/// repos. The UI must show an "execution disabled (safety)" notice next to this result.
+/// Final merge is deliberate, ref-only Git plumbing: no checkout or worktree mutation.
+/// It rechecks CI and both branch tips immediately before updating the target ref.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn attempt_merge(
     id: String,
@@ -715,18 +782,93 @@ pub fn attempt_merge(
     source_branch: String,
     target_branch: String,
 ) -> Result<SafeMergeRun> {
-    let (conflicted, conflicts) = merge_preview(&repo_path, &source_branch, &target_branch)?;
+    let (conflicted, conflicts, source_oid, target_oid) =
+        merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
+    let project_id = review_project_tx(&c, &review_id)?;
+    let (_, ci_reasons) = ci_status_tx(&c, &project_id)?;
+    if conflicted {
+        return record_merge_run_tx(
+            &c,
+            &id,
+            &review_id,
+            "FAILING",
+            false,
+            format!("merge blocked — conflicts in: {}", conflicts.join(", ")),
+            Some(&source_oid),
+            Some(&target_oid),
+            None,
+        );
+    }
+    if !ci_reasons.is_empty() {
+        return record_merge_run_tx(
+            &c,
+            &id,
+            &review_id,
+            "RUNNING",
+            false,
+            format!("merge waiting for CI: {}", ci_reasons.join("; ")),
+            Some(&source_oid),
+            Some(&target_oid),
+            None,
+        );
+    }
+    let repo = open(&repo_path)?;
+    let source = branch_commit(&repo, &source_branch)?;
+    let target = branch_commit(&repo, &target_branch)?;
+    if source.id().to_string() != source_oid || target.id().to_string() != target_oid {
+        return Err("branch changed during safe-merge verification; run dry run again".into());
+    }
+    let mut index = repo
+        .merge_commits(&target, &source, None)
+        .map_err(|e| e.to_string())?;
+    if index.has_conflicts() {
+        return Err("merge became conflicted during finalization; run dry run again".into());
+    }
+    let tree_oid = index.write_tree_to(&repo).map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+    let signature = git2::Signature::now("gaia-space safe merge", "noreply@gaia.space")
+        .map_err(|e| e.to_string())?;
+    let merge_oid = repo
+        .commit(
+            None,
+            &signature,
+            &signature,
+            "Safe merge",
+            &tree,
+            &[&target, &source],
+        )
+        .map_err(|e| e.to_string())?;
+    // Re-read the ref just before its update; a concurrent target movement is never overwritten.
+    if branch_commit(&repo, &target_branch)?.id().to_string() != target_oid {
+        return Err(
+            "target branch changed before finalization; merge commit left unreachable".into(),
+        );
+    }
+    repo.reference(
+        &format!("refs/heads/{target_branch}"),
+        merge_oid,
+        false,
+        "gaia-space safe merge",
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE reviews SET state='Merged' WHERE id=?1",
+        rusqlite::params![review_id],
+    )
+    .map_err(|e| e.to_string())?;
     record_merge_run_tx(
         &c,
         &id,
         &review_id,
-        conflicted,
-        &conflicts,
-        "merge (execution disabled — safety: dry-run verdict only)",
+        "SUCCEEDED",
+        false,
+        format!("merged as {merge_oid}; CI green"),
+        Some(&source_oid),
+        Some(&target_oid),
+        Some(&merge_oid.to_string()),
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -907,7 +1049,7 @@ mod tests {
         let (dir, _repo) = conflicting_repo("dry-run-conflict");
         let path = dir.to_string_lossy().to_string();
 
-        let (conflicted, conflicts) =
+        let (conflicted, conflicts, source_oid, target_oid) =
             merge_preview(&path, "feature", "main").expect("merge_preview");
         assert!(conflicted);
         assert!(
@@ -918,8 +1060,18 @@ mod tests {
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('r3','demo-project',3,'MR','Opened','T')", []).unwrap();
-        let run = record_merge_run_tx(&conn, "run-1", "r3", conflicted, &conflicts, "dry run")
-            .expect("record");
+        let run = record_merge_run_tx(
+            &conn,
+            "run-1",
+            "r3",
+            "FAILING",
+            true,
+            format!("dry run — conflicts in: {}", conflicts.join(", ")),
+            Some(&source_oid),
+            Some(&target_oid),
+            None,
+        )
+        .expect("record");
         assert_eq!(run.state, "FAILING");
         assert!(run.log.unwrap().contains("conflict.txt"));
 

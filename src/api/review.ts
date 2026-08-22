@@ -18,6 +18,7 @@ export type Review = {
   title: string;
   turn_based: boolean;
   channel_id: string | null;
+  repo_path: string | null;
 };
 
 export type ReviewParticipant = {
@@ -51,9 +52,12 @@ export type QualityGateRule = {
 export type SafeMergeRun = {
   id: string;
   review_id: string;
-  state: string; // SUCCEEDED | FAILING | ...
+  state: string; // RUNNING | SUCCEEDED | FAILING
   is_dry_run: boolean;
   log: string | null;
+  source_oid: string | null;
+  target_oid: string | null;
+  merge_commit_oid: string | null;
 };
 
 export type QualityGateEvaluation = {
