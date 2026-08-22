@@ -172,6 +172,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 15 {
         tx.execute_batch(SCHEMA_V15)?;
     }
+    if version < 16 {
+        tx.execute_batch(SCHEMA_V16)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
