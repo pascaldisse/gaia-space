@@ -63,3 +63,18 @@ Scope: KB §1–§4 feature overview + data-model capabilities; legacy Flutter `
 |External ICS feed subscription/sync|KB §4.2 source URL/ICS support|done|`src-tauri/src/calendar_feeds.rs:59-153,193-221`; `src/api/calendar-feeds.ts:17-24`; `src/views/Settings.tsx:12-66`; `src/views/Calendar.tsx:203-205`|Sealed URL, fetch/parse/cache/sync/delete, settings controls and read-only calendar items are end-to-end.|
 |CalDAV export/sync credentials|KB §4.1|done|`src-tauri/src/bin/space-server.rs` `caldav_auth`, `caldav_collection`, `caldav_calendar`; `src/views/Settings.tsx:70-74`; `space-server::tests::caldav_basic_auth_exports_only_the_requested_named_calendar`|HTTP Basic reuses active-user Argon2 verification; each owned named calendar has PROPFIND discovery and read-only REPORT/GET `.ics` VEVENT export. No write/sync-back surface.|
 |Shared recurrence/calendar event declaration model|KB §4.2|partial|`src-tauri/src/meetings.rs:261-412`; `src-tauri/src/personal.rs:434-458`; `src/api/meetings.ts:16`|Meeting RRULE expansion feeds calendar; no generic CalendarEvent declarations or event source/type model beyond string `kind`.|
+
+---
+
+## Appendix — §04 evidence notes (merged from former `reports/parity/04-collaboration.md`, 2026-08-22)
+
+
+### Chat attachments + mentions — partial
+- Attachment store → `message_attachments`; SQLite durable data-URL payload; 10 MiB cap; `src-tauri/src/chat.rs`
+- Preview → image/video/audio/download; `src/views/Chat.tsx`
+- Mention autocomplete → composer + thread composer; selected recipient IDs → `message_mentions`; notification hook → `notifications(event_type='chat.mention')`
+- Gates → cargo check ✓ · tsc ✓ · bun test 110/0 ✓ · vite ✓
+
+### Document sharing + per-document ACL — UNVERIFIED / not implemented
+- Existing document-scoped role/rights engine identified: `role_assignments.scope_type='document'`; `Document.ViewDocuments`/`Document.EditDocuments`.
+- No ACL UI/API landed in this commit set.
