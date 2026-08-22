@@ -262,6 +262,180 @@ pub(crate) fn webhook_signature(secret: &str, timestamp: i64, payload: &str) -> 
     outer.update(inner);
     format!("sha256={:x}", outer.finalize())
 }
+/// Metadata of one key-ring entry. The secret value itself is never returned: it is
+/// shown exactly once, at rotation, and the ring is afterwards only describable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WebhookSecretMeta {
+    pub id: String,
+    pub webhook_id: String,
+    pub state: String,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+}
+/// Result of a rotation — the only moment `secret` crosses the boundary.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RotatedWebhookSecret {
+    pub webhook_id: String,
+    pub secret: String,
+    /// When the superseded secret stops being co-signed. `None` = there was none.
+    pub previous_expires_at: Option<i64>,
+    pub overlap_seconds: i64,
+}
+/// Overlap window default: configurable, never hard-coded at a call site.
+pub(crate) const DEFAULT_SECRET_OVERLAP_SECONDS: i64 = 86_400;
+pub(crate) fn default_overlap_seconds() -> i64 {
+    std::env::var("GAIA_SPACE_WEBHOOK_SECRET_OVERLAP_SECONDS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .unwrap_or(DEFAULT_SECRET_OVERLAP_SECONDS)
+}
+fn now_secs() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as i64)
+}
+fn webhook_exists(c: &rusqlite::Connection, webhook_id: &str) -> Result<()> {
+    let found: i64 = c
+        .query_row(
+            "SELECT count(*) FROM webhook_subscriptions WHERE id=?1",
+            [webhook_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if found == 0 {
+        return Err("webhook not found".into());
+    }
+    Ok(())
+}
+/// Drops RETIRING rows whose overlap has elapsed. Cleanup happens on the delivery and
+/// listing paths rather than on a timer: the ring is only ever wrong at the moment it
+/// is read, so reading is the honest place to make it right.
+pub(crate) fn prune_expired_secrets(c: &rusqlite::Connection, webhook_id: &str) -> Result<()> {
+    c.execute(
+        "DELETE FROM webhook_secrets WHERE webhook_id=?1 AND state='RETIRING' AND expires_at IS NOT NULL AND expires_at<=unixepoch()",
+        [webhook_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+/// Every secret a receiver may legitimately still be validating against, ACTIVE first.
+/// Falls back to the legacy `webhook_subscriptions.secret` when the ring is empty, so a
+/// subscription that was never rotated keeps signing exactly as it did before V41.
+pub(crate) fn signing_secrets(
+    c: &rusqlite::Connection,
+    webhook_id: &str,
+    legacy: Option<&str>,
+) -> Result<Vec<String>> {
+    prune_expired_secrets(c, webhook_id)?;
+    let mut q = c
+        .prepare("SELECT secret FROM webhook_secrets WHERE webhook_id=?1 ORDER BY CASE state WHEN 'ACTIVE' THEN 0 ELSE 1 END, created_at DESC")
+        .map_err(|e| e.to_string())?;
+    let ring = q
+        .query_map([webhook_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if ring.is_empty() {
+        return Ok(legacy
+            .filter(|s| !s.is_empty())
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default());
+    }
+    Ok(ring)
+}
+pub(crate) fn rotate_webhook_secret_on(
+    c: &rusqlite::Connection,
+    webhook_id: &str,
+    overlap_seconds: Option<i64>,
+) -> Result<RotatedWebhookSecret> {
+    webhook_exists(c, webhook_id)?;
+    let overlap = overlap_seconds.unwrap_or_else(default_overlap_seconds);
+    if overlap < 0 {
+        return Err("webhook secret overlap must not be negative".into());
+    }
+    prune_expired_secrets(c, webhook_id)?;
+    let now = now_secs()?;
+    let expires_at = now + overlap;
+    // The previous ACTIVE keeps signing for the overlap window; with overlap 0 it is
+    // already expired the instant it is written and the next read prunes it.
+    let retired = c
+        .execute(
+            "UPDATE webhook_secrets SET state='RETIRING',expires_at=?2 WHERE webhook_id=?1 AND state='ACTIVE'",
+            params![webhook_id, expires_at],
+        )
+        .map_err(|e| e.to_string())?;
+    // A subscription that predates the ring carries its only secret in the column; it
+    // must join the ring as RETIRING or rotation would cut live receivers off.
+    if retired == 0 {
+        let legacy: Option<String> = c
+            .query_row(
+                "SELECT secret FROM webhook_subscriptions WHERE id=?1",
+                [webhook_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        if let Some(legacy) = legacy.filter(|s| !s.is_empty()) {
+            c.execute("INSERT OR IGNORE INTO webhook_secrets(id,webhook_id,secret,state,created_at,expires_at) VALUES(?1,?2,?3,'RETIRING',?4,?5)",params![format!("whsec-{}-legacy",webhook_id),webhook_id,legacy,now,expires_at]).map_err(|e|e.to_string())?;
+        }
+    }
+    let secret = crate::auth_security::opaque("spwh_");
+    c.execute("INSERT INTO webhook_secrets(id,webhook_id,secret,state,created_at,expires_at) VALUES(?1,?2,?3,'ACTIVE',?4,NULL)",params![format!("whsec-{}",crate::auth_security::opaque("")),webhook_id,secret,now]).map_err(|e|e.to_string())?;
+    // Keep the legacy column pointing at the current signing key so any reader that
+    // still consults it (older clients, `list_webhooks`) is not left on a dead secret.
+    c.execute(
+        "UPDATE webhook_subscriptions SET secret=?2 WHERE id=?1",
+        params![webhook_id, secret],
+    )
+    .map_err(|e| e.to_string())?;
+    let ring_had_previous = retired > 0
+        || c.query_row::<i64, _, _>(
+            "SELECT count(*) FROM webhook_secrets WHERE webhook_id=?1 AND state='RETIRING'",
+            [webhook_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?
+            > 0;
+    Ok(RotatedWebhookSecret {
+        webhook_id: webhook_id.into(),
+        secret,
+        previous_expires_at: ring_had_previous.then_some(expires_at),
+        overlap_seconds: overlap,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn rotate_webhook_secret(
+    webhook_id: String,
+    overlap_seconds: Option<i64>,
+) -> Result<RotatedWebhookSecret> {
+    rotate_webhook_secret_on(&db::conn()?, &webhook_id, overlap_seconds)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_webhook_secrets(webhook_id: String) -> Result<Vec<WebhookSecretMeta>> {
+    let c = db::conn()?;
+    webhook_exists(&c, &webhook_id)?;
+    prune_expired_secrets(&c, &webhook_id)?;
+    let mut q = c
+        .prepare("SELECT id,webhook_id,state,created_at,expires_at FROM webhook_secrets WHERE webhook_id=?1 ORDER BY CASE state WHEN 'ACTIVE' THEN 0 ELSE 1 END, created_at DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([webhook_id], |r| {
+            Ok(WebhookSecretMeta {
+                id: r.get(0)?,
+                webhook_id: r.get(1)?,
+                state: r.get(2)?,
+                created_at: r.get(3)?,
+                expires_at: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_webhooks(application_id: String) -> Result<Vec<WebhookSubscription>> {
     let c = db::conn()?;
@@ -423,9 +597,19 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_secs() as i64;
-    let signature = secret
-        .as_deref()
-        .map(|s| webhook_signature(s, timestamp, &payload));
+    // Key ring: the ACTIVE secret owns the canonical signature header, every still-valid
+    // RETIRING secret is co-signed into a second header. A receiver mid-rotation accepts
+    // a match in either, so the cutover never drops a delivery.
+    let ring = signing_secrets(&c, &webhook_id, secret.as_deref())?;
+    let signatures: Vec<String> = ring
+        .iter()
+        .map(|s| webhook_signature(s, timestamp, &payload))
+        .collect();
+    let signature = signatures.first().cloned();
+    let additional = signatures
+        .get(1..)
+        .map(|rest| rest.join(","))
+        .unwrap_or_default();
     let result = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -440,6 +624,7 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
             "x-gaia-space-signature",
             signature.clone().unwrap_or_default(),
         )
+        .header("x-gaia-space-signature-retiring", additional)
         .body(payload)
         .send();
     match result {

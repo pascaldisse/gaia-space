@@ -1062,6 +1062,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // The redirect allowlist decides where a code is delivered: it is a credential
         // surface, so it answers to the same admin gate as the secrets themselves.
         | "register_redirect_uri"
+        // A webhook secret is an application credential like any other: minting one or
+        // enumerating the ring answers to the same admin gate.
+        | "rotate_webhook_secret"
+        | "list_webhook_secrets"
         | "list_redirect_uris" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
@@ -2413,6 +2417,8 @@ async fn cmd(
     "retry_webhook_delivery" => applications::retry_webhook_delivery(id: String),
     "process_webhook_queue" => applications::process_webhook_queue(limit: i64),
     "list_webhook_deliveries" => applications::list_webhook_deliveries(webhook_id: String),
+    "rotate_webhook_secret" => applications::rotate_webhook_secret(webhook_id: String, overlap_seconds: Option<i64>),
+    "list_webhook_secrets" => applications::list_webhook_secrets(webhook_id: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
