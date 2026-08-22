@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, devenv, documents, events, issues,
+    applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents, events,
+    issues,
     meetings,
     oauth, payload_dispatch, personal, pipelines, platform, review,
 };
@@ -1405,6 +1406,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_webhooks"
         | "list_webhook_deliveries"
         | "list_chatbots"
+        | "list_chatbot_commands"
         | "list_ui_extensions" => CommandPolicy::Session,
         "save_devfile"
         | "delete_devfile"
@@ -2870,6 +2872,7 @@ async fn cmd(
     "application_payload_classes" => payload_dispatch::application_payload_classes(),
     "dispatch_application_payload" => payload_dispatch::dispatch_application_payload(application_id: String, payload_json: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
+    "list_chatbot_commands" => chatbot::list_chatbot_commands(chatbot_id: String, user_id: String, prefix: Option<String>),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
     "list_ui_extensions" => applications::list_ui_extensions(application_id: String),

@@ -15,6 +15,8 @@ pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod chatbot;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
@@ -136,6 +138,7 @@ pub fn run() {
             applications::rotate_webhook_secret,
             applications::list_webhook_secrets,
             applications::list_chatbots,
+            chatbot::list_chatbot_commands,
             applications::save_chatbot,
             applications::delete_chatbot,
             applications::list_ui_extensions,

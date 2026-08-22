@@ -9,6 +9,8 @@ export type WebhookDelivery={id:string;webhook_id:string;payload_json:string;sta
 export type WebhookSecretMeta={id:string;webhook_id:string;state:"ACTIVE"|"RETIRING";created_at:number;expires_at:number|null};
 /** `secret` is presented exactly once, here; the listing never repeats it. */
 export type RotatedWebhookSecret={webhook_id:string;secret:string;previous_expires_at:number|null;overlap_seconds:number};
+export type CommandDetail={name:string;description:string};
+export type CommandListing={chatbot_id:string;application_id:string;commands:CommandDetail[];source:"app"|"registration";error:string|null};
 export type ChatbotRegistration={id:string;application_id:string;display_name:string;description:string|null;commands_json:string;enabled:boolean};
 export type UiExtension={id:string;application_id:string;extension_type:string;display_name:string;unique_code:string;iframe_url:string|null;enabled:boolean};
 export type AppSshKey={application_id:string;fingerprint:string;public_key:string;comment:string;created_at:number};
@@ -53,5 +55,6 @@ installMarketplaceApp:(value:AppInstall)=>call<AppInstall>("install_marketplace_
  webhooks:(application_id:string)=>call<WebhookSubscription[]>("list_webhooks",{applicationId:application_id}), saveWebhook:(value:WebhookSubscription)=>call<WebhookSubscription>("save_webhook",{value}), deleteWebhook:(id:string)=>call<void>("delete_webhook",{id}), deliverWebhook:(webhook_id:string,payload_json:string)=>call<WebhookDelivery>("deliver_webhook",{webhookId:webhook_id,payloadJson:payload_json}), retryWebhookDelivery:(id:string)=>call<WebhookDelivery>("retry_webhook_delivery",{id}), processWebhookQueue:(limit=25)=>call<WebhookDelivery[]>("process_webhook_queue",{limit}), webhookDeliveries:(webhook_id:string)=>call<WebhookDelivery[]>("list_webhook_deliveries",{webhookId:webhook_id}),
 rotateWebhookSecret:(webhook_id:string,overlap_seconds?:number)=>call<RotatedWebhookSecret>("rotate_webhook_secret",{webhookId:webhook_id,overlapSeconds:overlap_seconds??null}), webhookSecrets:(webhook_id:string)=>call<WebhookSecretMeta[]>("list_webhook_secrets",{webhookId:webhook_id}),
  chatbots:(application_id:string)=>call<ChatbotRegistration[]>("list_chatbots",{applicationId:application_id}), saveChatbot:(value:ChatbotRegistration)=>call<ChatbotRegistration>("save_chatbot",{value}), deleteChatbot:(id:string)=>call<void>("delete_chatbot",{id}),
+ chatbotCommands:(chatbot_id:string,user_id:string,prefix?:string)=>call<CommandListing>("list_chatbot_commands",{chatbotId:chatbot_id,userId:user_id,prefix:prefix??null}),
  extensions:(application_id:string)=>call<UiExtension[]>("list_ui_extensions",{applicationId:application_id}), saveExtension:(value:UiExtension)=>call<UiExtension>("save_ui_extension",{value}), deleteExtension:(id:string)=>call<void>("delete_ui_extension",{id}),
 };
