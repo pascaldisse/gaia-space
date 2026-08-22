@@ -3,11 +3,16 @@ import { render } from "solid-js/web";
 import type { Meeting } from "../api/meetings";
 
 const calls: string[] = [];
+const remoteAudioAttachments: HTMLMediaElement[] = [];
 const devices = [{ deviceId: "mic-1", label: "Studio microphone" }];
 const participant = (isLocal: boolean) => ({
   identity: isLocal ? "me" : "them", name: isLocal ? "Me" : "Them", isLocal,
   getTrackPublication: () => undefined,
 });
+const remoteParticipant = {
+  ...participant(false),
+  getTrackPublication: (source: string) => source === "microphone" ? { audioTrack: { attach: (element: HTMLMediaElement) => remoteAudioAttachments.push(element), detach: () => undefined } } : undefined,
+};
 class FakeRoom {
   static getLocalDevices = async () => devices as MediaDeviceInfo[];
   localParticipant = {
@@ -16,7 +21,7 @@ class FakeRoom {
     setCameraEnabled: async (enabled: boolean) => { calls.push(`camera:${enabled}`); },
     setScreenShareEnabled: async (enabled: boolean) => { calls.push(`screen:${enabled}`); },
   };
-  remoteParticipants = new Map();
+  remoteParticipants = new Map([["them", remoteParticipant]]);
   listeners = new Map<string, ((...args: any[]) => void)[]>();
   on(event: string, listener: (...args: any[]) => void) { this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]); }
   async connect() { this.listeners.get("connection")?.forEach(listener => listener("connected")); }
@@ -33,7 +38,7 @@ const { default: CallPanel } = await import("./CallPanel");
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
 const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, archived: false };
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; delete (window as any).__TAURI_INTERNALS__; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
 
 test("joining exposes native media controls, device selectors, and a clean leave", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
@@ -45,7 +50,9 @@ test("joining exposes native media controls, device selectors, and a clean leave
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
   expect(calls).toEqual(["microphone:true", "camera:true"]);
-  expect(host.textContent).toContain("1 participant");
+  expect(host.textContent).toContain("2 participants");
+  expect(remoteAudioAttachments).toHaveLength(1);
+  expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
   expect(host.querySelectorAll("select")).toHaveLength(3);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
