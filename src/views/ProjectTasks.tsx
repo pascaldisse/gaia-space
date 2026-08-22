@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Issue } from "../api/issues";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
@@ -15,6 +15,7 @@ export default function ProjectTasks() {
   const [tagId, setTagId] = createSignal("");
   const [assigneeId, setAssigneeId] = createSignal("");
   const [selected, setSelected] = createSignal<Issue>();
+  createEffect(() => { selectedProject(); setSelected(undefined); });
   const [issues, { refetch }] = createResource(
     () => [selectedProject(), text(), statusId(), tagId(), assigneeId()] as const,
     ([project_id, query, status_id, tag_id, assignee_id]) => project_id

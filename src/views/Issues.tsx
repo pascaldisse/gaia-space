@@ -42,6 +42,11 @@ export default function Issues() {
     select(issue);
     linkEntity("issue", issue.id, { projectId: issue.project_id }, true);
   };
+  const followIssue = (event: MouseEvent, issue: Issue) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    openInUrl(issue);
+  };
   useDeepLink("issue", async id => {
     const fromList = issues()?.find(issue => issue.id === id);
     if (fromList) { select(fromList); return; }
@@ -130,7 +135,7 @@ export default function Issues() {
         <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
         <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
         <ul class="issue-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
-          <a class="issue-row" {...linkProps(issueRoute(issue))} onClick={event => { event.preventDefault(); openInUrl(issue); }}>
+          <a class="issue-row" {...linkProps(issueRoute(issue))} onClick={event => followIssue(event, issue)}>
             <span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong>
             <Show when={issue.status_id}>{id => <span class="status-name">{statuses()?.find(status => status.id === id())?.name ?? "Status"}</span>}</Show>
             <Show when={issue.due_date}>{date => <time>{date()}</time>}</Show>
