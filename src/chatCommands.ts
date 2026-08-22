@@ -66,18 +66,31 @@ export async function mapWithLimit<T, R>(
   cancelled: () => boolean = () => false,
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
+  // Presence is tracked separately: `undefined` is a legal result, and filtering on it
+  // would silently drop that answer and shift every later one (☎Kali-VIII A2).
+  const filled: boolean[] = new Array(items.length).fill(false);
   let next = 0;
+  // One rejection stops the whole fan-out: without this the other workers keep pulling
+  // items and calling out to bot endpoints long after the caller has been rejected
+  // (☎Kali-VIII A3).
+  let stopped = false;
   const worker = async () => {
     while (next < items.length) {
       const index = next++;
-      if (cancelled()) return;
-      results[index] = await fn(items[index]);
+      if (stopped || cancelled()) return;
+      try {
+        results[index] = await fn(items[index]);
+        filled[index] = true;
+      } catch (e) {
+        stopped = true;
+        throw e;
+      }
     }
   };
   await Promise.all(
     Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker),
   );
-  return results.filter((value) => value !== undefined) as R[];
+  return results.filter((_, index) => filled[index]);
 }
 
 /** Picking an entry completes the command and leaves the caret after a space. */

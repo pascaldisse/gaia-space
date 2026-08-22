@@ -23,6 +23,11 @@ fn conn() -> rusqlite::Connection {
     std::env::set_var(crate::payload_dispatch::ALLOW_PRIVATE_ENDPOINTS_ENV, "1");
     let c = crate::db::open_in_memory().unwrap();
     crate::db::migrate(&c).unwrap();
+    c.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES('u1','u1','User One',1)",
+        [],
+    )
+    .unwrap();
     c.execute("INSERT INTO applications(id,name,application_type,client_id,endpoint_uri) VALUES('app','App','Application','client-1','https://app.example/endpoint')", []).unwrap();
     c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('bare','Bare','Application','client-2')", []).unwrap();
     c.execute("INSERT INTO chatbot_registrations(id,application_id,display_name,commands_json,enabled) VALUES('bot','app','Deploy bot','[{\"name\":\"deploy\",\"description\":\"declared\"},{\"name\":\"decommission\",\"description\":\"declared\"},{\"name\":\"help\",\"description\":\"declared\"}]',1)", []).unwrap();
@@ -146,4 +151,19 @@ fn a_disabled_chatbot_answers_nothing() {
         list_commands_on(&c, "ghost", "u1", None, answering).unwrap_err(),
         "chatbot not found"
     );
+}
+
+/// ☎Kali-VIII A1: the desktop IPC caller has no session to be rebound from, so the
+/// identity announced to a third-party endpoint is checked here — an invented profile
+/// never reaches a bot, and no payload is dispatched for it.
+#[test]
+fn an_invented_typist_is_never_announced_to_a_bot() {
+    let _guard = env_lock();
+    let c = conn();
+    *last_body().lock().unwrap() = None;
+    assert_eq!(
+        list_commands_on(&c, "bot", "not-a-profile", Some("/de"), answering).unwrap_err(),
+        "unknown profile"
+    );
+    assert!(last_body().lock().unwrap().is_none());
 }

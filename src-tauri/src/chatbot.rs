@@ -92,6 +92,20 @@ pub(crate) fn list_commands_on(
     if !bot.enabled {
         return Err("chatbot is disabled".into());
     }
+    // The typed-by identity is announced to a third party (the bot's endpoint), so it
+    // must name a real, live profile whatever the caller is. The web chokepoint already
+    // rebinds it to the session; this refusal is what the desktop IPC caller — which has
+    // no session to rebind from — runs into, so an arbitrary string never reaches a bot.
+    let known: i64 = c
+        .query_row(
+            "SELECT count(*) FROM profiles WHERE id=?1 AND coalesce(archived,0)=0",
+            [user_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if known == 0 {
+        return Err("unknown profile".into());
+    }
     let prefix = prefix.map(str::to_string);
     let payload = ApplicationPayload::ListCommandsPayload {
         user_id: user_id.to_string(),

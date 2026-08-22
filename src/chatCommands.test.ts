@@ -92,4 +92,26 @@ describe("slash command discovery", () => {
     expect(cancelledAfter).toBeLessThan(12);
     expect(partial.length).toBeLessThan(12);
   });
+
+  it("keeps an undefined answer in its place instead of dropping it", async () => {
+    const kept = await mapWithLimit([1, 2, 3], 2, async (n) =>
+      n === 2 ? undefined : n,
+    );
+    expect(kept).toEqual([1, undefined, 3]);
+  });
+
+  it("stops calling out once one call has failed", async () => {
+    let calls = 0;
+    const attempt = mapWithLimit(Array.from({ length: 20 }, (_, i) => i), 2, async (n) => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (n === 0) throw new Error("endpoint down");
+      return n;
+    });
+    await expect(attempt).rejects.toThrow("endpoint down");
+    const seenAtFailure = calls;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBeLessThanOrEqual(seenAtFailure + 1);
+    expect(calls).toBeLessThan(20);
+  });
 });
