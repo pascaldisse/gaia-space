@@ -399,7 +399,7 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
     write_assignees(&c, &id, &people)?;
     drop(c);
     let issue = get_issue(id)?.ok_or_else(|| "Created issue was not found".to_string())?;
-    issue_event("issue.created", &issue);
+    issue_event(crate::events::ISSUE_CREATED, &issue);
     Ok(issue)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -415,7 +415,7 @@ pub fn update_issue(issue: Issue) -> Result<Issue> {
     write_assignees(&c, &issue.id, &people)?;
     drop(c);
     let saved = get_issue(issue.id)?.ok_or_else(|| "Issue not found".to_string())?;
-    issue_event("issue.updated", &saved);
+    issue_event(crate::events::ISSUE_UPDATED, &saved);
     Ok(saved)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -428,7 +428,7 @@ pub fn archive_issue(id: String, archived: bool) -> Result<()> {
     drop(c);
     // The command returns nothing, so the payload has to be read back for the event.
     if let Some(issue) = get_issue(id)? {
-        issue_event("issue.archived", &issue);
+        issue_event(crate::events::ISSUE_ARCHIVED, &issue);
     }
     Ok(())
 }

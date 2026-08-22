@@ -416,7 +416,10 @@ pub fn save_document(
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
-    document_event("DocumentWebhookEvent", &doc);
+    // Taxonomy name first; the pre-taxonomy alias is re-emitted so subscriptions
+    // stored before `events.rs` existed keep firing.
+    document_event(crate::events::DOCUMENT_UPDATED, &doc);
+    document_event(crate::events::LEGACY_DOCUMENT_EVENT, &doc);
     Ok(doc)
 }
 

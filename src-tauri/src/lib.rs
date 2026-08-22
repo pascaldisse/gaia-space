@@ -21,6 +21,8 @@ mod debug_server;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod documents;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod events;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ics;
@@ -265,6 +267,7 @@ pub fn run() {
             documents::move_document,
             documents::archive_document,
             documents::save_document,
+            events::list_event_types,
             documents::list_doc_versions,
             documents::restore_doc_version,
             documents::list_document_access,

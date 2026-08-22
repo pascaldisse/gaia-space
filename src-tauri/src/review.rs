@@ -170,13 +170,36 @@ pub fn get_review(id: String) -> Result<Option<Review>> {
 pub fn create_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params![review.id,review.project_id,review.number,review.kind,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
+    review_event(crate::events::REVIEW_CREATED, &review);
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE reviews SET state=?2,source_branch=?3,target_branch=?4,title=?5,turn_based=?6,channel_id=?7 WHERE id=?1",rusqlite::params![review.id,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
+    review_event(crate::events::REVIEW_UPDATED, &review);
     Ok(())
+}
+
+/// Webhook fan-out envelope: `{"event": …, "review": …}`; filters address it by
+/// dot-path, e.g. `"review.state"`. Best effort after the write — a subscriber
+/// problem must never undo a review change.
+fn review_event(event_type: &str, review: &Review) {
+    let payload = serde_json::json!({ "event": event_type, "review": review });
+    if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
+        eprintln!("webhook fan-out for {event_type} failed: {e}");
+    }
+}
+
+/// Same envelope, read back by id so the payload is the stored row rather than the
+/// caller's copy. A vanished review is silently skipped: the event is optional, the
+/// write already happened.
+fn review_event_by_id(event_type: &str, review_id: &str) {
+    match get_review(review_id.to_string()) {
+        Ok(Some(review)) => review_event(event_type, &review),
+        Ok(None) => {}
+        Err(e) => eprintln!("webhook fan-out for {event_type} failed: {e}"),
+    }
 }
 
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------
@@ -344,7 +367,9 @@ pub fn open_merge_request(req: NewMergeRequest) -> Result<Review> {
         ));
     }
     let c = db::conn()?;
-    open_merge_request_tx(&c, &req)
+    let review = open_merge_request_tx(&c, &req)?;
+    review_event(crate::events::REVIEW_CREATED, &review);
+    Ok(review)
 }
 
 /// Unified diff for the review: merge-base(target,source) tree vs. source tip tree —
@@ -1551,10 +1576,14 @@ pub fn attempt_merge(
             "target branch changed before finalization; merge commit left unreachable".into(),
         );
     }
+    // `force = true` is required: the target branch ref already exists, and advancing an
+    // existing ref is the whole point. The safety is not in this flag but in the
+    // `target_oid` re-read directly above — a target that moved aborts before we get here,
+    // so the forced write only ever fast-forwards the tip we just verified.
     repo.reference(
         &format!("refs/heads/{target_branch}"),
         merge_oid,
-        false,
+        true,
         "gaia-space safe merge",
     )
     .map_err(|e| e.to_string())?;
@@ -1564,6 +1593,7 @@ pub fn attempt_merge(
     )
     .map_err(|e| e.to_string())?;
     let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
+    review_event_by_id(crate::events::REVIEW_MERGED, &review_id);
     record_merge_run_tx(
         &c,
         &id,

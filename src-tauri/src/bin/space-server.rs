@@ -9,8 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, documents, issues, meetings, oauth,
-    personal, pipelines, platform, review,
+    applications, blogs, calendar_feeds, calls, chat, db, documents, events, issues, meetings,
+    oauth, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -1247,6 +1247,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_team_membership" => CommandPolicy::Session,
         "list_devfiles"
         | "list_applications"
+        | "list_event_types"
         | "list_webhooks"
         | "list_webhook_deliveries"
         | "list_chatbots"
@@ -2547,6 +2548,7 @@ async fn cmd(
     "list_redirect_uris" => oauth::list_redirect_uris_cmd(application_id: String),
     "save_application" => applications::save_application(value: applications::Application),
     "delete_application" => applications::delete_application(id: String),
+    "list_event_types" => events::list_event_types(),
     "list_webhooks" => applications::list_webhooks(application_id: String),
     "save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
     "delete_webhook" => applications::delete_webhook(id: String),

@@ -696,8 +696,12 @@ pub(crate) fn enqueue_event(event_type: &str, payload: &serde_json::Value) -> Re
             continue;
         }
         let id = new_delivery_id()?;
+        // `next_attempt_at` must be written, not left NULL: `due_webhook_deliveries`
+        // selects on `next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch()`, so a
+        // NULL here would enqueue a row the sweeper and the ticker can never claim — the
+        // fan-out would be queue-visible but undeliverable. Due immediately.
         c.execute(
-            "INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status) VALUES(?1,?2,?3,'PENDING')",
+            "INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,next_attempt_at) VALUES(?1,?2,?3,'PENDING',unixepoch())",
             params![id, webhook_id, body],
         )
         .map_err(|e| e.to_string())?;
@@ -1938,6 +1942,397 @@ mod delivery_tests {
         let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
         assert_eq!(payload["event"], "DocumentWebhookEvent");
         assert_eq!(payload["document"]["title"], "Draft v2");
+    }
+
+    /// Registers `app-fanout` plus the given subscriptions, all pointing at the same
+    /// unreachable endpoint (nothing is sent in these tests — only the queue is read).
+    fn register_hooks(app_id: &str, hooks: &[(&str, &str, Option<&str>)]) {
+        save_application(Application {
+            id: app_id.into(),
+            name: "Fan-out app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some("https://example.test/hook".into()),
+            client_id: format!("{app_id}-client"),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        for (id, event_type, filters) in hooks {
+            save_webhook(WebhookSubscription {
+                id: (*id).into(),
+                application_id: app_id.into(),
+                event_type: (*event_type).into(),
+                filters_json: filters.map(|f| f.to_string()),
+                endpoint_uri: "https://example.test/hook".into(),
+                enabled: true,
+                secret: None,
+                max_attempts: 5,
+            })
+            .expect("hook");
+        }
+    }
+
+    fn queued_webhook_ids() -> Vec<String> {
+        let c = db::conn().expect("db");
+        let ids = c
+            .prepare("SELECT webhook_id FROM webhook_deliveries ORDER BY webhook_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        ids
+    }
+
+    fn queued_payload(webhook_id: &str) -> serde_json::Value {
+        let c = db::conn().expect("db");
+        let raw: String = c
+            .query_row(
+                "SELECT payload_json FROM webhook_deliveries WHERE webhook_id=?1",
+                [webhook_id],
+                |r| r.get(0),
+            )
+            .expect("delivery row");
+        serde_json::from_str(&raw).expect("payload json")
+    }
+
+    /// Third domain, same contract: a review write enqueues for the subscription whose
+    /// dot-path filter accepts the review, and for nobody else.
+    #[test]
+    fn a_review_write_enqueues_only_the_matching_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("review-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-review",
+            &[
+                (
+                    "hook-review",
+                    crate::events::REVIEW_CREATED,
+                    Some(r#"{"review.state":"Opened"}"#),
+                ),
+                (
+                    "hook-review-miss",
+                    crate::events::REVIEW_CREATED,
+                    Some(r#"{"review.state":"Merged"}"#),
+                ),
+                ("hook-issue", crate::events::ISSUE_CREATED, None),
+            ],
+        );
+
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO projects(id,name,key,archived,created_at) VALUES('proj','Fan-out','FAN',0,0)",
+            [],
+        )
+        .expect("project");
+        drop(c);
+        crate::review::create_review(crate::review::Review {
+            id: "rev-fanout".into(),
+            project_id: "proj".into(),
+            number: 1,
+            kind: "MR".into(),
+            state: "Opened".into(),
+            source_branch: Some("feature".into()),
+            target_branch: Some("main".into()),
+            title: "Add fan-out".into(),
+            turn_based: true,
+            channel_id: None,
+            repo_path: None,
+        })
+        .expect("review");
+
+        assert_eq!(queued_webhook_ids(), vec!["hook-review".to_string()]);
+        let payload = queued_payload("hook-review");
+        assert_eq!(payload["event"], crate::events::REVIEW_CREATED);
+        assert_eq!(payload["review"]["id"], "rev-fanout");
+        assert_eq!(payload["review"]["title"], "Add fan-out");
+    }
+
+    /// A document save emits the taxonomy name and the pre-taxonomy alias, so both an
+    /// old and a new subscription receive exactly one delivery.
+    #[test]
+    fn a_document_save_serves_both_the_taxonomy_name_and_the_legacy_alias() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("doc-alias-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-doc-alias",
+            &[
+                ("hook-new", crate::events::DOCUMENT_UPDATED, None),
+                ("hook-legacy", crate::events::LEGACY_DOCUMENT_EVENT, None),
+            ],
+        );
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version) VALUES('doc-alias','my-docs','p1','text','Draft','body',1)",
+            [],
+        )
+        .expect("document");
+        drop(c);
+
+        crate::documents::save_document(
+            "doc-alias".into(),
+            "Draft v2".into(),
+            Some("body".into()),
+            None,
+        )
+        .expect("save");
+
+        assert_eq!(
+            queued_webhook_ids(),
+            vec!["hook-legacy".to_string(), "hook-new".to_string()]
+        );
+        assert_eq!(
+            queued_payload("hook-new")["event"],
+            crate::events::DOCUMENT_UPDATED
+        );
+        assert_eq!(
+            queued_payload("hook-legacy")["event"],
+            crate::events::LEGACY_DOCUMENT_EVENT
+        );
+    }
+
+    /// Fourth domain: a real `git::repo_commit` in a throwaway repo must enqueue for a
+    /// `git.commit` subscription whose filter addresses the commit envelope.
+    #[test]
+    fn a_git_commit_enqueues_the_matching_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("git-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        // Throwaway repo under target/, never a user-registered path; swept at both ends.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-repos")
+            .join(format!("git-fanout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("repo dir");
+        let repo = git2::Repository::init(&dir).expect("init");
+        {
+            let mut config = repo.config().expect("config");
+            config.set_str("user.name", "Fan Out").expect("name");
+            config
+                .set_str("user.email", "fanout@example.test")
+                .expect("email");
+        }
+        std::fs::write(dir.join("a.txt"), "hello").expect("file");
+        let path = dir.to_string_lossy().to_string();
+        crate::git::repo_stage(path.clone(), vec!["a.txt".into()]).expect("stage");
+
+        register_hooks(
+            "app-git",
+            &[
+                (
+                    "hook-git",
+                    crate::events::GIT_COMMIT,
+                    Some(&format!(r#"{{"commit.repo_path":"{path}"}}"#)),
+                ),
+                (
+                    "hook-git-miss",
+                    crate::events::GIT_COMMIT,
+                    Some(r#"{"commit.repo_path":"/nowhere"}"#),
+                ),
+            ],
+        );
+
+        let oid = crate::git::repo_commit(path.clone(), "first".into()).expect("commit");
+
+        let queued = queued_webhook_ids();
+        let payload = queued_payload("hook-git");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(queued, vec!["hook-git".to_string()]);
+        assert_eq!(payload["event"], crate::events::GIT_COMMIT);
+        assert_eq!(payload["commit"]["id"], oid);
+        assert_eq!(payload["commit"]["message"], "first");
+    }
+
+    /// Builds a throwaway repo with `main` and a non-conflicting `feature` branch,
+    /// under `target/test-repos/` — never a user-registered repo.
+    fn merge_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-repos")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+        let commit = |branch_ref: &str, parent: Option<git2::Oid>, file: &str, body: &str| {
+            let blob = repo.blob(body.as_bytes()).unwrap();
+            let mut builder = match parent {
+                Some(p) => {
+                    let tree = repo.find_commit(p).unwrap().tree().unwrap();
+                    repo.treebuilder(Some(&tree)).unwrap()
+                }
+                None => repo.treebuilder(None).unwrap(),
+            };
+            builder.insert(file, blob, 0o100644).unwrap();
+            let tree_oid = builder.write().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let parents: Vec<git2::Commit> = parent
+                .map(|p| vec![repo.find_commit(p).unwrap()])
+                .unwrap_or_default();
+            let refs: Vec<&git2::Commit> = parents.iter().collect();
+            repo.commit(Some(branch_ref), &sig, &sig, "msg", &tree, &refs)
+                .unwrap()
+        };
+        let base = commit("refs/heads/main", None, "base.txt", "base\n");
+        repo.reference("refs/heads/feature", base, false, "create feature")
+            .unwrap();
+        commit("refs/heads/feature", Some(base), "extra.txt", "extra\n");
+        dir
+    }
+
+    /// The whole chain, observed rather than assumed: a real `review::attempt_merge`
+    /// against a real repository fires `review.merged`, the queue sweeper POSTs it to a
+    /// real socket, and the bytes that arrive carry the merged review plus a signature
+    /// this test recomputes independently from the timestamp the receiver saw.
+    ///
+    /// This is the test that retires two UNVERIFIED claims at once: "no delivery observed
+    /// against a live receiver" and "`review.merged` has no unit coverage".
+    #[test]
+    fn a_real_merge_reaches_a_live_receiver_with_a_verifiable_signature() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("merge-e2e");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let dir = merge_repo("merge-e2e");
+        let repo_path = dir.to_string_lossy().to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(String::new()));
+        let captured = seen.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("webhook request");
+            let mut buf = [0_u8; 8192];
+            let n = stream.read(&mut buf).expect("read request");
+            *captured.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+            stream
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .expect("response");
+        });
+
+        save_application(Application {
+            id: "app-merge".into(),
+            name: "Merge app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "merge-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-merge".into(),
+            application_id: "app-merge".into(),
+            event_type: crate::events::REVIEW_MERGED.into(),
+            filters_json: Some(r#"{"review.target_branch":"main"}"#.into()),
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: Some("merge-secret".into()),
+            max_attempts: 5,
+        })
+        .expect("hook");
+
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO projects(id,name,key,archived,created_at) VALUES('proj-merge','E2E','E2E',0,0)",
+            [],
+        )
+        .expect("project");
+        c.execute(
+            "INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based) \
+             VALUES('rev-merge','proj-merge',1,'MR','Opened','feature','main','Ship it',1)",
+            [],
+        )
+        .expect("review");
+        drop(c);
+
+        let run = crate::review::attempt_merge(
+            "run-merge".into(),
+            repo_path,
+            "rev-merge".into(),
+            "feature".into(),
+            "main".into(),
+            "actor-1".into(),
+        )
+        .expect("attempt_merge");
+        assert_eq!(run.state, "SUCCEEDED", "log: {:?}", run.log);
+
+        let delivered = process_webhook_queue(10).expect("sweep");
+        assert_eq!(delivered.len(), 1, "exactly one merged-review delivery");
+        assert_eq!(delivered[0].status, "SUCCEEDED");
+        server.join().expect("server");
+
+        let request = seen.lock().unwrap().clone();
+        let body = request
+            .split_once("\r\n\r\n")
+            .expect("request has a body")
+            .1;
+        let payload: serde_json::Value = serde_json::from_str(body).expect("body is json");
+        assert_eq!(payload["event"], crate::events::REVIEW_MERGED);
+        assert_eq!(payload["review"]["id"], "rev-merge");
+        assert_eq!(
+            payload["review"]["state"], "Merged",
+            "the receiver sees the stored post-merge state, not the caller's stale copy"
+        );
+        assert_eq!(payload["review"]["target_branch"], "main");
+
+        let timestamp: i64 = header(&request, "x-gaia-space-timestamp")
+            .parse()
+            .expect("ts");
+        assert_eq!(
+            header(&request, "x-gaia-space-signature"),
+            webhook_signature("merge-secret", timestamp, body),
+            "signature must be the HMAC of the exact bytes the receiver read"
+        );
+        assert_eq!(
+            header(&request, "x-gaia-space-delivery-id"),
+            delivered[0].id
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Independent of the end-to-end test above and of any HTTP: whatever `enqueue_event`
+    /// writes must be immediately visible to `due_webhook_deliveries`. A row that is
+    /// queued but never due is the failure mode that let "fan-out works" and "nothing is
+    /// ever delivered" both be true at once.
+    #[test]
+    fn an_enqueued_event_is_immediately_due_for_the_sweeper() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("enqueue-due");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        register_hooks(
+            "app-due",
+            &[("hook-due", crate::events::ISSUE_CREATED, None)],
+        );
+
+        let created = enqueue_event(
+            crate::events::ISSUE_CREATED,
+            &serde_json::json!({"event": crate::events::ISSUE_CREATED, "issue": {"id": "i1"}}),
+        )
+        .expect("enqueue");
+        assert_eq!(created.len(), 1);
+        assert_eq!(
+            due_webhook_deliveries(10).expect("due"),
+            created,
+            "a freshly enqueued delivery must be claimable right away"
+        );
     }
 
     /// Validation runs before any DB access, so these need no database.

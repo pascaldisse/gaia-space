@@ -293,7 +293,31 @@ pub fn repo_commit(path: String, message: String) -> Result<String> {
     let oid = repo
         .commit(Some("HEAD"), &sig, &sig, &message, &tree, &parent_refs)
         .map_err(|e| e.to_string())?;
+    let branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().ok().map(str::to_string));
+    commit_event(&path, &oid.to_string(), &message, branch.as_deref());
     Ok(oid.to_string())
+}
+
+/// Webhook fan-out envelope for a commit: `{"event": …, "commit": {…}}`; filters
+/// address it by dot-path, e.g. `"commit.branch"`. Best effort **after** the commit
+/// object exists — a subscriber problem must never fail a write the repo already has.
+fn commit_event(repo_path: &str, oid: &str, message: &str, branch: Option<&str>) {
+    let event_type = crate::events::GIT_COMMIT;
+    let payload = serde_json::json!({
+        "event": event_type,
+        "commit": {
+            "repo_path": repo_path,
+            "id": oid,
+            "message": message,
+            "branch": branch,
+        }
+    });
+    if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
+        eprintln!("webhook fan-out for {event_type} failed: {e}");
+    }
 }
 
 #[cfg(test)]
