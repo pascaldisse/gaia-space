@@ -117,3 +117,10 @@
 .co-agenda li>button small{font-size:11px;color:var(--text-faint)}
 .co-label{color:#f0a3b3!important}
 @media(max-width:760px){.co-body{grid-template-columns:1fr}.co-body>.mini-cal{border-right:0;border-bottom:1px solid var(--surface-border);box-shadow:0 1px 0 rgba(0,0,0,.25)}}
+
+/* Dashboard personalization (widget visibility prefs) */
+.dashboard-customize { margin: 0 0 12px; font-size: 13px; }
+.dashboard-customize > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.dashboard-customize .dc-count { opacity: .7; font-size: 12px; }
+.dashboard-customize .dc-options { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 0 0; }
+.dashboard-customize .dc-option { display: flex; align-items: center; gap: 6px; }

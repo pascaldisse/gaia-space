@@ -4,6 +4,7 @@ import { calendarEntries, dateKey } from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { DASHBOARD_WIDGETS, hiddenWidgets, toggleWidget, widgetVisible } from "../dashboardPrefs";
 import { navigate } from "../router";
 import { humanError, profileId } from "../session";
 import "./Dashboard.css";
@@ -96,6 +97,16 @@ export default function Dashboard() {
       </Show>
       <Show when={!failure() && dashboard()}>
         {(data) => <>
+          <details class="dashboard-customize">
+            <summary>Customize widgets<Show when={hiddenWidgets().length}><span class="dc-count">{hiddenWidgets().length} hidden</span></Show></summary>
+            <div class="dc-options"><For each={DASHBOARD_WIDGETS}>{(widget) =>
+              <label class="dc-option">
+                <input type="checkbox" checked={widgetVisible(widget.id)} aria-label={`Show ${widget.label}`} onChange={() => toggleWidget(widget.id)} />
+                <span>{widget.label}</span>
+              </label>
+            }</For></div>
+          </details>
+          <Show when={widgetVisible("today")}>
           <section class="today-next">
             <header class="tn-head">
               <div class="tn-title">
@@ -130,7 +141,9 @@ export default function Dashboard() {
               </section>
             </div>
           </section>
+          </Show>
 
+          <Show when={widgetVisible("calendar")}>
           <section class="calendar-overview">
             <header class="co-head"><div class="co-title"><span class="co-icon">□</span><div><h2>Calendar</h2><p>Your rolling schedule.</p></div></div></header>
             <div class="co-body">
@@ -144,17 +157,18 @@ export default function Dashboard() {
               </aside>
             </div>
           </section>
+          </Show>
 
           <div class="dashboard-grid">
-            <DashboardSection title="Assigned issues" count={data().assigned_issues.length} empty="No issues assigned to you yet." target="Issues">
+            <Show when={widgetVisible("issues")}><DashboardSection title="Assigned issues" count={data().assigned_issues.length} empty="No issues assigned to you yet." target="Issues">
               <For each={data().assigned_issues}>{(issue) => <article class="ov-card"><strong class="ov-card-title">#{issue.number} {issue.title}</strong><Show when={issue.due_date}><span class="ov-tag due">Due {issue.due_date}</span></Show></article>}</For>
-            </DashboardSection>
-            <DashboardSection title="Inbox" count={data().unread_notifications.length} empty="Your inbox is clear." target="Inbox">
+            </DashboardSection></Show>
+            <Show when={widgetVisible("inbox")}><DashboardSection title="Inbox" count={data().unread_notifications.length} empty="Your inbox is clear." target="Inbox">
               <For each={data().unread_notifications}>{(notice) => <article class="ov-card"><strong class="ov-card-title">{notice.title}</strong><Show when={notice.body}><p>{notice.body}</p></Show></article>}</For>
-            </DashboardSection>
-            <DashboardSection title="Absences" count={data().current_absences.length} empty="Nobody is away right now." target="Absences">
+            </DashboardSection></Show>
+            <Show when={widgetVisible("absences")}><DashboardSection title="Absences" count={data().current_absences.length} empty="Nobody is away right now." target="Absences">
               <For each={data().current_absences}>{(absence) => <article class="ov-card"><strong class="ov-card-title">{absence.profile_id}</strong><span class="ov-tag reason">{absence.reason_type}</span></article>}</For>
-            </DashboardSection>
+            </DashboardSection></Show>
           </div>
         </>}
       </Show>

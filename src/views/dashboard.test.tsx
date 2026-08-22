@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { render } from "solid-js/web";
 import { invoke } from "../api/invoke";
 import { dateKey } from "../calendar";
+import { resetDashboardPrefs, hiddenWidgets } from "../dashboardPrefs";
 import { setProfileId } from "../session";
 
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
@@ -47,6 +48,7 @@ afterEach(() => {
   reply = () => [];
   delete window.__TAURI_INTERNALS__;
   setProfileId("");
+  resetDashboardPrefs();
 });
 
 describe("dashboard", () => {
@@ -110,5 +112,48 @@ describe("dashboard", () => {
     await settle();
     expect(host.querySelector(".co-agenda")?.textContent).toContain("Selected day");
     expect(host.querySelector(".co-agenda")?.textContent).toContain("Ship overview");
+  });
+
+  test("hiding a widget removes it and persists the choice", async () => {
+    stubTauriIpc();
+    setProfileId("me");
+    reply = (command) => {
+      if (command === "dashboard_aggregate") return dashboard();
+      if (command === "calendar_aggregate") return [];
+      if (command === "list_profiles") return [{ id: "me", username: "me", display_name: "Me", archived: false }];
+      return [];
+    };
+    const host = await mount();
+    expect(host.querySelector(".calendar-overview")).not.toBeNull();
+
+    const toggle = host.querySelector<HTMLInputElement>('input[aria-label="Show Calendar"]')!;
+    expect(toggle.checked).toBe(true);
+    toggle.click();
+    await settle();
+
+    expect(host.querySelector(".calendar-overview")).toBeNull();
+    expect(hiddenWidgets()).toEqual(["calendar"]);
+    expect(JSON.parse(localStorage.getItem("space.dashboard.hidden")!)).toEqual(["calendar"]);
+
+    host.querySelector<HTMLInputElement>('input[aria-label="Show Calendar"]')!.click();
+    await settle();
+    expect(host.querySelector(".calendar-overview")).not.toBeNull();
+    expect(hiddenWidgets()).toEqual([]);
+  });
+
+  test("hidden widget prefs also drop the grid cards", async () => {
+    stubTauriIpc();
+    setProfileId("me");
+    reply = (command) => {
+      if (command === "dashboard_aggregate") return dashboard();
+      if (command === "calendar_aggregate") return [];
+      if (command === "list_profiles") return [{ id: "me", username: "me", display_name: "Me", archived: false }];
+      return [];
+    };
+    const host = await mount();
+    host.querySelector<HTMLInputElement>('input[aria-label="Show Inbox"]')!.click();
+    await settle();
+    expect(host.textContent).not.toContain("Your inbox is clear.");
+    expect(host.textContent).toContain("Nobody is away right now.");
   });
 });
