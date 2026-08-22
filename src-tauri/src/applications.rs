@@ -323,7 +323,7 @@ pub(crate) fn prune_expired_secrets(c: &rusqlite::Connection, webhook_id: &str) 
 /// Every secret a receiver may legitimately still be validating against, ACTIVE first.
 /// Falls back to the legacy `webhook_subscriptions.secret` when the ring is empty, so a
 /// subscription that was never rotated keeps signing exactly as it did before V41.
-pub(crate) fn signing_secrets(
+pub fn signing_secrets(
     c: &rusqlite::Connection,
     webhook_id: &str,
     legacy: Option<&str>,
@@ -1298,6 +1298,100 @@ mod tests {
             .unwrap()
             .url
             .starts_with("jetbrains://"));
+    }
+}
+
+#[cfg(test)]
+mod secret_ring_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Minimal fixture: only the two tables the ring touches, so the test cannot pass
+    /// by accident through some other subsystem's defaults.
+    fn ring_db(legacy: Option<&str>) -> Connection {
+        let c = Connection::open_in_memory().expect("memory db");
+        c.execute_batch("CREATE TABLE webhook_subscriptions (id TEXT PRIMARY KEY, secret TEXT);")
+            .unwrap();
+        c.execute_batch(crate::db::SCHEMA_V41).unwrap();
+        c.execute(
+            "INSERT INTO webhook_subscriptions(id,secret) VALUES('w1',?1)",
+            [legacy],
+        )
+        .unwrap();
+        c
+    }
+
+    #[test]
+    fn rotation_keeps_the_old_secret_valid_inside_the_overlap() {
+        let c = ring_db(Some("old-secret"));
+        let rotated = rotate_webhook_secret_on(&c, "w1", Some(3_600)).expect("rotate");
+        let ring = signing_secrets(&c, "w1", None).expect("ring");
+        assert_eq!(ring.first().map(String::as_str), Some(rotated.secret.as_str()));
+        assert!(
+            ring.iter().any(|s| s == "old-secret"),
+            "the superseded secret co-signs during overlap: {ring:?}"
+        );
+        assert!(rotated.previous_expires_at.is_some());
+    }
+
+    #[test]
+    fn an_elapsed_overlap_drops_the_old_secret() {
+        let c = ring_db(Some("old-secret"));
+        rotate_webhook_secret_on(&c, "w1", Some(0)).expect("rotate");
+        // Independent path: assert against the stored rows, not against the same reader.
+        c.execute(
+            "UPDATE webhook_secrets SET expires_at=unixepoch()-1 WHERE state='RETIRING'",
+            [],
+        )
+        .unwrap();
+        let ring = signing_secrets(&c, "w1", None).expect("ring");
+        assert_eq!(ring.len(), 1, "only the ACTIVE secret survives: {ring:?}");
+        assert!(!ring.iter().any(|s| s == "old-secret"));
+        let rows: i64 = c
+            .query_row("SELECT count(*) FROM webhook_secrets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "expired rows are deleted, not merely hidden");
+    }
+
+    #[test]
+    fn a_second_rotation_retires_the_first_rotated_secret() {
+        let c = ring_db(None);
+        let first = rotate_webhook_secret_on(&c, "w1", Some(3_600)).expect("first");
+        let second = rotate_webhook_secret_on(&c, "w1", Some(3_600)).expect("second");
+        assert_ne!(first.secret, second.secret);
+        let ring = signing_secrets(&c, "w1", None).expect("ring");
+        assert_eq!(ring[0], second.secret);
+        assert!(ring.contains(&first.secret));
+        let active: i64 = c
+            .query_row(
+                "SELECT count(*) FROM webhook_secrets WHERE state='ACTIVE'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(active, 1, "exactly one signing key at a time");
+    }
+
+    #[test]
+    fn an_empty_ring_falls_back_to_the_legacy_column() {
+        let c = ring_db(Some("legacy"));
+        assert_eq!(
+            signing_secrets(&c, "w1", Some("legacy")).unwrap(),
+            vec!["legacy".to_string()]
+        );
+    }
+
+    #[test]
+    fn rotating_an_unknown_webhook_is_refused() {
+        let c = ring_db(None);
+        assert!(rotate_webhook_secret_on(&c, "nope", None).is_err());
+    }
+
+    #[test]
+    fn the_overlap_default_is_configurable_not_hard_coded() {
+        // No env var set in-process: the documented default answers.
+        std::env::remove_var("GAIA_SPACE_WEBHOOK_SECRET_OVERLAP_SECONDS");
+        assert_eq!(default_overlap_seconds(), DEFAULT_SECRET_OVERLAP_SECONDS);
     }
 }
 
