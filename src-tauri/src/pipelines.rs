@@ -1353,16 +1353,16 @@ fn publish_package_version_tx(
     // half). `IMMEDIATE` takes the write lock up front, so the loser waits instead of
     // racing. A caller that is already inside a transaction keeps its own.
     let guard: Option<rusqlite::Transaction<'_>> = conn.unchecked_transaction().ok();
-    if guard.is_some() {
-        // A deferred transaction only takes the write lock at its first write, which would
-        // leave the check itself racy; this no-op write promotes it now, so a concurrent
-        // publisher of the same version waits rather than overwriting.
-        conn.execute(
-            "UPDATE package_repositories SET id=id WHERE id=?1",
-            params![repository_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
+    // The write lock is taken unconditionally, not only when this call opened the
+    // transaction: a caller that is already inside one (npm packument publish) would
+    // otherwise run the whole check→write→upsert with no lock at all (☎Kali-VIII round 4).
+    // A deferred transaction only locks at its first write, so this no-op write promotes
+    // it now and a concurrent publisher of the same version waits instead of overwriting.
+    conn.execute(
+        "UPDATE package_repositories SET id=id WHERE id=?1",
+        params![repository_id],
+    )
+    .map_err(|e| e.to_string())?;
     let format: String = conn
         .query_row(
             "SELECT format FROM package_repositories WHERE id=?1",
@@ -1423,6 +1423,7 @@ fn publish_package_version_tx(
     // Assets already stored for this version survive a metadata-only or additional-file
     // publish (Maven uploads .pom and .jar as separate requests for the same version).
     let version_id = format!("{repository_id}::{package_name}::{version}");
+    let mut pending_rename: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
     let previous_files = conn
         .query_row(
             "SELECT metadata_json FROM package_versions WHERE id=?1",
@@ -1443,8 +1444,14 @@ fn publish_package_version_tx(
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         canonical_path_within(base_dir, &dir)?;
         let file_path = dir.join(filename);
-        fs::write(&file_path, content).map_err(|e| e.to_string())?;
-        let canonical_file_path = canonical_path_within(base_dir, &file_path)?;
+        // Written under a temporary name and renamed only once the row is committed: the
+        // payload used to land on disk before metadata validation and the upsert, so a
+        // rejected publish left an orphan file the version never referenced
+        // (☎Kali-VIII round 4).
+        let staged_path = dir.join(format!(".{filename}.staged-{}", std::process::id()));
+        fs::write(&staged_path, content).map_err(|e| e.to_string())?;
+        pending_rename = Some((staged_path, file_path.clone()));
+        let canonical_file_path = canonical_path_within(base_dir, &dir)?.join(filename);
         meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
         // Real Maven deploys ship several assets per version (.pom, .jar, checksums) and npm
@@ -1463,22 +1470,47 @@ fn publish_package_version_tx(
     } else if !previous_files.is_empty() {
         meta["_files"] = Value::Object(previous_files.clone());
     }
-    let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
+    // From here every failure must take the staged payload with it.
+    let cleanup = |result: Result<()>| -> Result<()> {
+        if result.is_err() {
+            if let Some((staged, _)) = pending_rename.as_ref() {
+                let _ = fs::remove_file(staged);
+            }
+        }
+        result
+    };
+    let format_metadata = match typed_format_metadata(&format, package_name, version, &meta) {
+        Ok(value) => value,
+        Err(e) => {
+            cleanup(Err(e))?;
+            unreachable!("cleanup returns the error it was given")
+        }
+    };
     meta["_format"] = serde_json::Value::String(format);
     let id = version_id_guard;
     // Deployment policy is parameterized; callers may override it per publish.
     let immutable = immutable.unwrap_or_else(package_immutable_default);
     conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json,format_metadata_json,immutable) VALUES(?1,?2,?3,?4,?5,?6,?7)
-         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json,format_metadata_json=excluded.format_metadata_json,immutable=excluded.immutable", params![id, repository_id, package_name, version, meta.to_string(), format_metadata.to_string(), immutable]).map_err(|e| e.to_string())?;
-    let created_at: i64 = conn
-        .query_row(
-            "SELECT created_at FROM package_versions WHERE id=?1",
-            params![id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json,format_metadata_json=excluded.format_metadata_json,immutable=excluded.immutable", params![id, repository_id, package_name, version, meta.to_string(), format_metadata.to_string(), immutable]).map_err(|e| e.to_string()).or_else(|e| -> Result<usize> { cleanup(Err(e))?; Ok(0) })?;
+    let created_at: i64 = match conn.query_row(
+        "SELECT created_at FROM package_versions WHERE id=?1",
+        params![id],
+        |r| r.get(0),
+    ) {
+        Ok(value) => value,
+        Err(e) => {
+            cleanup(Err(e.to_string()))?;
+            unreachable!("cleanup returns the error it was given")
+        }
+    };
     if let Some(guard) = guard {
-        guard.commit().map_err(|e| e.to_string())?;
+        if let Err(e) = guard.commit() {
+            cleanup(Err(e.to_string()))?;
+        }
+    }
+    // The row is durable, so the bytes may take their final name.
+    if let Some((staged, final_path)) = pending_rename.take() {
+        fs::rename(&staged, &final_path).map_err(|e| e.to_string())?;
     }
     Ok(PackageVersion {
         id,
@@ -2476,6 +2508,42 @@ mod tests {
         assert_eq!(severity_rank("moderate"), severity_rank("MEDIUM"));
         assert_eq!(severity_rank("nonsense"), 0);
         sweep(&db_path);
+    }
+
+    /// ☎Kali-VIII round 4: a publish that is rejected after the bytes arrived must leave
+    /// nothing behind — an orphan file no version references is still a file the next
+    /// republish, retention pass and disk quota have to reason about.
+    #[test]
+    fn a_rejected_publish_leaves_no_orphan_payload_on_disk() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-mvn','demo-maven','maven','HOSTING')", []).unwrap();
+        let base_dir = temp_dir("packages-orphan");
+        let refused = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-mvn",
+            "com.example:demo",
+            "1.0.0",
+            Some(r#"{"formatMetadata":{"groupId":1}}"#),
+            Some("demo-1.0.0.jar"),
+            Some(b"jar-bytes"),
+            None,
+        );
+        assert!(refused.is_err(), "invalid typed metadata must be refused");
+        let dir = base_dir
+            .join("repo-mvn")
+            .join(package_name_dir("com.example:demo"))
+            .join("1.0.0");
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .map(|entries| entries.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        assert!(
+            leftovers.is_empty(),
+            "a refused publish must not leave bytes behind, found {leftovers:?}"
+        );
+        sweep(&db_path);
+        sweep(&base_dir);
     }
 
     /// ☎Kali-VIII B1: the immutable refusal used to arrive after the payload had already

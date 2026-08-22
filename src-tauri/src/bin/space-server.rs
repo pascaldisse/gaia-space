@@ -463,19 +463,25 @@ fn registry_repo_auth(
     write: bool,
 ) -> Result<User, axum::response::Response> {
     let user = registry_auth(headers)?;
-    let denied = || {
-        (
+    match repository_access(&user, repository_id, write) {
+        Ok(true) => Ok(user),
+        Ok(false) => Err((
             StatusCode::FORBIDDEN,
             Json(json!({"ok":false,"error":"repository access denied"})),
         )
-            .into_response()
-    };
-    if user.role == "admin" {
-        return Ok(user);
+            .into_response()),
+        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()),
     }
-    let c = db::conn().map_err(|_| {
-        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
-    })?;
+}
+
+/// The one answer to "may this account reach this package repository?", shared by the
+/// registry protocol routes and by `/api/cmd` — those were two doors to the same room,
+/// and only one of them was locked (☎Kali-VIII round 4).
+fn repository_access(user: &User, repository_id: &str, write: bool) -> Result<bool, String> {
+    if user.role == "admin" {
+        return Ok(true);
+    }
+    let c = db::conn()?;
     let role: Option<String> = c
         .query_row(
             "SELECT role FROM package_repository_acl WHERE repository_id=?1 AND profile_id=?2",
@@ -483,13 +489,9 @@ fn registry_repo_auth(
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "acl lookup failed").into_response())?;
+        .map_err(|e| e.to_string())?;
     if let Some(role) = role {
-        return if write && role == "VIEWER" {
-            Err(denied())
-        } else {
-            Ok(user)
-        };
+        return Ok(!(write && role == "VIEWER"));
     }
     let acl_exists: i64 = c
         .query_row(
@@ -497,7 +499,7 @@ fn registry_repo_auth(
             params![repository_id],
             |r| r.get(0),
         )
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "acl lookup failed").into_response())?;
+        .map_err(|e| e.to_string())?;
     let project_id: Option<String> = c
         .query_row(
             "SELECT project_id FROM package_repositories WHERE id=?1",
@@ -505,33 +507,26 @@ fn registry_repo_auth(
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| {
-            err(StatusCode::INTERNAL_SERVER_ERROR, "repository lookup failed").into_response()
-        })?
+        .map_err(|e| e.to_string())?
         .flatten();
     drop(c);
     match project_id {
         Some(project_id) => {
-            if !project_readable(&user, &project_id).unwrap_or(false) {
-                return Err(denied());
+            if !project_readable(user, &project_id)? {
+                return Ok(false);
             }
-            // Reading a project's repository is membership; publishing into it is not
-            // (☎Kali-VIII round 3): a member without a WRITER/MANAGER ACL row must not be
-            // able to push a release. Only the project's owner (or an admin, handled above)
-            // publishes without an explicit grant.
-            let owns = project_owner(&project_id)
-                .unwrap_or(None)
-                .is_some_and(|owner| owner == user.profile_id);
-            if write && !owns {
-                return Err(denied());
-            }
-            Ok(user)
+            // Reading a project's repository is membership; publishing into it is not: only
+            // the owner (or an explicit WRITER/MANAGER grant) pushes a release.
+            let owns = project_owner(&project_id)?.is_some_and(|owner| owner == user.profile_id);
+            Ok(!write || owns)
         }
         // An explicit ACL that does not name this caller is a refusal, not a fallthrough.
-        None if acl_exists > 0 => Err(denied()),
-        None => Ok(user),
+        None if acl_exists > 0 => Ok(false),
+        // A repository with neither a project nor an ACL stays instance-wide, as before.
+        None => Ok(true),
     }
 }
+
 
 /// CalDAV deliberately accepts only HTTP Basic credentials. It reuses the same
 /// active-user lookup and Argon2 verification as login and package registries;
@@ -1299,6 +1294,8 @@ fn chat_can_manage(profile_id: &str, channel_id: &str) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CommandPolicy {
     Session,
+    PackageRepositoryRead,
+    PackageRepositoryWrite,
     TodoRead,
     TodoCreate,
     TodoOwnerWrite,
@@ -1538,15 +1535,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_thread_replies"
         | "list_time_tracking_entries"
         | "livekit_server_status"
-        | "mark_channel_read"
-        | "package_retention_candidates"
-        | "repository_vulnerability_report" => CommandPolicy::Session,
+        | "mark_channel_read" => CommandPolicy::Session,
+        // ☎Kali-VIII round 4: the registry HTTP routes were gated while `/api/cmd` still
+        // reached the very same publish with a bare session, so the ACL was a front door
+        // with an open back one. Every command that writes a repository's contents now
+        // resolves that repository and asks the same question.
         "apply_package_retention"
-        | "move_issue_on_board"
         | "publish_package_version"
-        | "remove_channel_member"
         | "set_package_repository_acl"
-        | "set_package_version_pinned" => CommandPolicy::Session,
+        | "set_package_version_pinned" => CommandPolicy::PackageRepositoryWrite,
+        "package_retention_candidates" | "repository_vulnerability_report" => {
+            CommandPolicy::PackageRepositoryRead
+        }
+        "move_issue_on_board" | "remove_channel_member" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
@@ -2449,6 +2450,31 @@ fn authorize_command(
             put_arg(body, "profile_id", json!(user.profile_id));
             put_arg(body, "allow_all", json!(user.role == "admin"));
             Ok(())
+        }
+        CommandPolicy::PackageRepositoryRead | CommandPolicy::PackageRepositoryWrite => {
+            let write = policy == CommandPolicy::PackageRepositoryWrite;
+            // The repository is named differently by each command; a write whose target
+            // cannot be identified is refused rather than allowed.
+            let repository_id = arg::<String>(body, "repository_id")
+                .ok()
+                .or_else(|| {
+                    body.get("entry")
+                        .and_then(|entry| arg::<String>(entry, "repository_id").ok())
+                })
+                .or_else(|| {
+                    // A version id is `repository::package::version`.
+                    arg::<String>(body, "id")
+                        .ok()
+                        .and_then(|id| id.split("::").next().map(str::to_string))
+                })
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `repository_id`"))?;
+            if repository_access(user, &repository_id, write)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "repository access denied"))
+            }
         }
         CommandPolicy::Session => {
             if name == "create_message" {
@@ -4057,6 +4083,35 @@ mod tests {
         assert_eq!(body["userId"], "pa");
         assert_eq!(body["user_id"], "pa");
         assert_eq!(body["prefix"], "/dep");
+    }
+
+    /// ☎Kali-VIII round 4: the registry routes were gated while `/api/cmd` reached the same
+    /// publish with a bare session. Both doors now ask the same question.
+    #[tokio::test]
+    async fn the_command_endpoint_cannot_publish_into_a_repository_the_caller_may_not_write() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('proj-cmd','Cmd','CMD','pa',1)", []).unwrap();
+        c.execute("INSERT INTO package_repositories(id,project_id,name,format,mode) VALUES('repo-cmd','proj-cmd','cmd','npm','HOSTING')", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('proj-cmd','pb')", []).unwrap();
+        drop(c);
+        let publish = json!({
+            "repositoryId": "repo-cmd",
+            "packageName": "left-pad",
+            "version": "1.0.0",
+            "metadataJson": null,
+            "payloadFilename": null,
+            "payloadContent": null,
+            "immutable": null
+        });
+        // A member of the project may read it, but publishing is the owner's or a grantee's.
+        let (status, _) = call(cookie("tb"), "publish_package_version", publish.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("td"), "package_retention_candidates", json!({"repositoryId": "repo-cmd"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("ta"), "publish_package_version", publish).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     /// ☎Kali-VIII B2: authentication answered "who", never "which repository". A project's
