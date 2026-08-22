@@ -21,7 +21,7 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 |Team membership: member + team + role + lead/manager/dates/approval/archive|KB §2.5|partial|`src-tauri/src/db.rs:190`; `src-tauri/src/platform.rs:121-261`; `src-tauri/src/lib.rs:94-97`; `src/api/platform.ts:5-8,41-48`; `src/views/Members.tsx:172-196,397-490`|Data/API carry fields; UI only adds role and removes membership; no editing of lead/manager/dates/approval/archive.|
 |Membership pending-edit/approver workflow|KB §2.5|missing|`src-tauri/src/platform.rs:5-12`; `src-tauri/src/db.rs:190`|Source explicitly documents this omission; no fields, commands, or UI.|
 |Team-associated channel, disbanding, external identity and org-chart metadata|KB §2.5|partial|`src-tauri/src/db.rs:189`; `src-tauri/src/platform.rs:106-120`; `src/api/platform.ts:4`; `src/views/Members.tsx:339-395`|Schema has `channel_id`; API/view omit it and lack disbanded, emails, external ID, default manager, map/location behavior.|
-|App/OAuth authorized contexts and per-right approve/deny consent|KB §2.3|missing|`src-tauri/src/platform.rs:490-615`; `src/views/Admin.tsx:143-175`|Generic role assignment is not app authorization; no application, context review, approval state, dependencies, or consent UI.|
+|App/OAuth authorized contexts and per-right approve/deny consent|KB §2.3|partial|`src-tauri/src/app_rights.rs:168-360`; `src-tauri/src/db.rs:794-811`; `src/views/Applications.tsx` Required & authorized rights controls|Applications declare required rights and an admin grants/revokes individual declared rights by context, with explicit APPROVED/PARTIAL/PENDING status. OAuth authorization-code consent, dependencies, and a generic scope-string request flow remain absent.|
 |Password login, cookie session, logout, and current-user gate|KB §1, §3.2, §3.8|done|`src-tauri/src/bin/space-server.rs:40-62,1120`; `src/api/auth.ts:37-45`; `src/session.ts:68-111`; `src/components/Login.tsx:5-46`; `src/components/AccountFooter.tsx:4-44`|Real Argon2 verification and server session path are wired for web mode.|
 |Account directory/admin lifecycle and password reset/change|KB §2.5, §3.2|done|`src-tauri/src/bin/space-server.rs:63-181,1120`; `src/api/auth.ts:47-61`; `src/views/Users.tsx:12-185`; `src/components/AccountFooter.tsx:4-44`|Admin create/edit/deactivate/delete/reset plus self password change are wired.|
 |Multiple password/federated/OAuth2/LDAP auth modules; ordering and TTL configuration|KB §3.2|missing|`src-tauri/src/bin/space-server.rs:50-82,1120`; `src/api/auth.ts:37-45`; `src/components/Login.tsx:5-46`|Only local username/password routes; no module model/configuration or SSO.|
@@ -40,5 +40,5 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 ## Counts
 
 - done: 4
-- partial: 15
-- missing: 13
+- partial: 16
+- missing: 12
