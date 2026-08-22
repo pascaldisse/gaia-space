@@ -16,6 +16,7 @@ import {
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
+import { blogsApi, type BlogPost } from "../api/blogs";
 
 const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
   { key: "my-docs", label: "My Documents" },
@@ -323,6 +324,49 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   );
   const [showSharing, setShowSharing] = createSignal(false);
 
+  // ---- blog draft workflow ----
+  // A personal document is the draft; publishing promotes it into a blog article that
+  // keeps pointing back at the draft (`draft_id`), so the control is state, not a wish:
+  // the article's existence — archived or not — decides which button is shown.
+  const [blogArticle, { refetch: refetchBlogArticle }] = createResource(selectedDocumentId, async (id) => {
+    if (!id) return null;
+    try {
+      const posts = await blogsApi.list({ include_archived: true });
+      return posts.find((p) => p.draft_id === id) ?? null;
+    } catch {
+      return null; // blog surface unavailable: publishing simply is not offered
+    }
+  });
+  const canPublishToBlog = () => {
+    const doc = selectedDocument();
+    return !!doc && doc.container_type === "my-docs" && !doc.archived && doc.created_by === actingProfileId();
+  };
+  async function publishDraftToBlog() {
+    const doc = selectedDocument();
+    const author = actingProfileId();
+    if (!doc || !author) return;
+    try {
+      await blogsApi.publish({
+        draft_id: doc.id,
+        author_id: author,
+        team_id: null,
+        project_id: activeContainer() === "project" ? selectedProjectId() : null,
+        location_id: null,
+      });
+      await refetchBlogArticle();
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function setBlogArchived(post: BlogPost, archived: boolean) {
+    try {
+      await blogsApi.archive(post.id, archived, actingProfileId());
+      await refetchBlogArticle();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   // ---- publication (public link) ----
   const [publication, { refetch: refetchPublication }] = createResource(selectedDocumentId, (id) =>
     id ? documentsApi.getPublication(id) : Promise.resolve(null),
@@ -518,11 +562,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   }
 
   let richArea: HTMLDivElement | undefined;
+  // Seed from the in-progress buffer when there is one, else from the stored row: the
+  // ref can run before the buffer-sync effect has copied the freshly selected document.
+  const richSeed = () => sanitizeRichHtml(editBody() || selectedDocument()?.body || "");
   // The contenteditable is only re-seeded when the *document* changes: writing back on
   // every keystroke would move the caret to the end of the node on each input event.
   createEffect((prevId: string | null | undefined) => {
     const id = selectedDocumentId();
-    if (id !== prevId && richArea) richArea.innerHTML = sanitizeRichHtml(editBody());
+    if (id !== prevId && richArea) richArea.innerHTML = richSeed();
     return id;
   }, null);
 
@@ -558,7 +605,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           contentEditable
           ref={(el) => {
             richArea = el;
-            el.innerHTML = sanitizeRichHtml(editBody());
+            el.innerHTML = richSeed();
           }}
           onInput={(e) => setEditBody(sanitizeRichHtml(e.currentTarget.innerHTML))}
           // Paste is the main injection route: force plain text, never foreign markup.
@@ -898,6 +945,24 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                         </Show>
                       </>
                     )}
+                  </Show>
+                  <Show when={canPublishToBlog()}>
+                    <Show when={blogArticle()} fallback={
+                      <button class="ghost small" onClick={publishDraftToBlog} title="Publish this draft as a blog article">
+                        Publish to Blog
+                      </button>
+                    }>
+                      {(post) => (
+                        <>
+                          <span class="blog-chip" classList={{ archived: post().archived }}>
+                            {post().archived ? "blog: archived" : "blog article"}
+                          </span>
+                          <button class="ghost small" onClick={() => setBlogArchived(post(), !post().archived)}>
+                            {post().archived ? "restore article" : "unpublish"}
+                          </button>
+                        </>
+                      )}
+                    </Show>
                   </Show>
                   <button class="primary" onClick={saveDocument}>
                     Save version

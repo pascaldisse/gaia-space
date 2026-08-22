@@ -467,3 +467,5 @@
 .rich-editable { overflow: auto; font-family: inherit; font-size: 1em; outline: none; }
 .rich-editable:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .rich-editable :first-child { margin-top: 0; }
+.blog-chip { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15em 0.5em; border-radius: 1em; background: var(--accent); color: #fff; }
+.blog-chip.archived { background: var(--dk-line); color: var(--text-muted); }
