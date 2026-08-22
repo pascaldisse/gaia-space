@@ -3596,6 +3596,62 @@ mod tests {
 
     /// Regression (☾Kali): app credential commands were `Session`, so any logged-in
     /// member could rotate another application's secret or mint/verify its tokens.
+    /// The dev environment lifecycle must be drivable over `/api/cmd`, not only in-process:
+    /// create → activity → idle sweep → resume, with the session gate in front of it.
+    #[tokio::test]
+    async fn dev_environment_lifecycle_is_reachable_over_http() {
+        let _serial = test_lock();
+        setup();
+
+        let (status, created) = call(
+            cookie("ta"),
+            "create_dev_environment",
+            json!({"input":{"id":"env-http","project_id":"demo-project","owner_id":"pa","name":"HTTP env","idle_timeout_minutes":0}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "create: {created}");
+        assert_eq!(created["value"]["state"], "STARTING");
+
+        let (status, touched) =
+            call(cookie("ta"), "touch_dev_environment", json!({"id":"env-http"})).await;
+        assert_eq!(status, StatusCode::OK, "touch: {touched}");
+        assert_eq!(touched["value"]["state"], "RUNNING");
+
+        // Timeout 0 means the sweep must take it immediately.
+        let (status, swept) = call(cookie("ta"), "hibernate_idle_dev_environments", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "sweep: {swept}");
+        assert_eq!(swept["value"][0]["id"], "env-http");
+        assert_eq!(swept["value"][0]["state"], "HIBERNATED");
+        assert!(swept["value"][0]["persisted_worktree"].is_string());
+
+        let (status, resumed) = call(
+            cookie("ta"),
+            "resume_dev_environment",
+            json!({"id":"env-http","actor_id":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "resume: {resumed}");
+        assert_eq!(resumed["value"]["state"], "RUNNING");
+
+        // Independent check: the listing agrees with the command results.
+        let (_, listed) = call(
+            cookie("ta"),
+            "list_dev_environments",
+            json!({"project_id":"demo-project"}),
+        )
+        .await;
+        assert_eq!(listed["value"][0]["state"], "RUNNING");
+
+        // No session, no lifecycle.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "list_dev_environments",
+            json!({"project_id":"demo-project"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn app_credentials_are_admin_only() {
         let _serial = test_lock();
