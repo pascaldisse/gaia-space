@@ -9,7 +9,9 @@ pub const SCHEMA_VERSION: i64 = 14;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn set_db_path(p: PathBuf) { let _ = DB_PATH.set(p); }
+pub fn set_db_path(p: PathBuf) {
+    let _ = DB_PATH.set(p);
+}
 
 /// Every connection enforces foreign keys: junction rows (e.g. `todo_assignees`)
 /// must never survive their parent row. SQLite defaults this pragma to OFF.
@@ -49,7 +51,10 @@ impl TempDb {
         let base = std::env::temp_dir();
         let mut attempt: u64 = 0;
         loop {
-            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
             let dir = base.join(format!("{prefix}-{}-{nanos}-{attempt}", std::process::id()));
             match std::fs::create_dir(&dir) {
                 Ok(()) => {
@@ -61,22 +66,34 @@ impl TempDb {
             }
         }
     }
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 #[cfg(test)]
 impl AsRef<Path> for TempDb {
-    fn as_ref(&self) -> &Path { &self.path }
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
 }
 
 #[cfg(test)]
 impl Drop for TempDb {
-    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 pub fn conn() -> Result<Connection, String> {
-    let path = DB_PATH.get().cloned().or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from)).ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let path = DB_PATH
+        .get()
+        .cloned()
+        .or_else(|| std::env::var_os("SPACE_DB").map(PathBuf::from))
+        .ok_or_else(|| "database path unavailable; call set_db_path or set SPACE_DB".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let conn = open_at(path).map_err(|e| e.to_string())?;
     migrate(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
@@ -296,13 +313,23 @@ UPDATE users SET profile_id = 'profile-' || id
    AND EXISTS (SELECT 1 FROM profiles p WHERE p.id = 'profile-' || users.id);
 "#;
 
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let found = stmt.query_map([], |row| row.get::<_, String>(1))?
+    let found = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
         .collect::<std::result::Result<Vec<_>, _>>()?
         .iter()
         .any(|name| name == column);
-    if !found { conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?; }
+    if !found {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+        ))?;
+    }
     Ok(())
 }
 
@@ -312,26 +339,71 @@ mod tests {
     use std::collections::BTreeSet;
 
     type SchemaObject = (String, String, String, Option<String>);
-    type ForeignKey = (String, i64, i64, String, String, String, String, String, String);
+    type ForeignKey = (
+        String,
+        i64,
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    );
 
     fn normalized_schema_objects(conn: &Connection) -> BTreeSet<SchemaObject> {
         let mut statement = conn.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger') AND name NOT LIKE 'sqlite_%'").unwrap();
-        statement.query_map([], |row| Ok((
-            row.get(0)?, row.get(1)?, row.get(2)?,
-            row.get::<_, Option<String>>(3)?.map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" ")),
-        ))).unwrap().collect::<std::result::Result<_, _>>().unwrap()
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get::<_, Option<String>>(3)?
+                        .map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" ")),
+                ))
+            })
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap()
     }
 
     fn foreign_key_rows(conn: &Connection) -> BTreeSet<ForeignKey> {
-        let mut tables = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
-        let tables = tables.query_map([], |row| row.get::<_, String>(0)).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
-        tables.into_iter().flat_map(|table| {
-            let mut statement = conn.prepare(&format!("PRAGMA foreign_key_list({table})")).unwrap();
-            statement.query_map([], |row| Ok((
-                table.clone(), row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-            ))).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap()
-        }).collect()
+        let mut tables = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .unwrap();
+        let tables = tables
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .flat_map(|table| {
+                let mut statement = conn
+                    .prepare(&format!("PRAGMA foreign_key_list({table})"))
+                    .unwrap();
+                statement
+                    .query_map([], |row| {
+                        Ok((
+                            table.clone(),
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    })
+                    .unwrap()
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .collect()
     }
     #[test]
     fn v12_gives_issues_many_assignees_and_carries_the_single_one_over() {
@@ -339,25 +411,52 @@ mod tests {
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
-        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)", []).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)",
+            [],
+        )
+        .unwrap();
         conn.execute("INSERT INTO issues(id,project_id,number,title,description,assignee_id,archived) VALUES('legacy-issue','demo-project',99,'Legacy',NULL,'pa',0)", []).unwrap();
         conn.execute("DELETE FROM issue_assignees", []).unwrap();
         // Simulate a database stamped at V11 and migrate forward again.
         conn.pragma_update(None, "user_version", 11).unwrap();
         migrate(&conn).expect("v12");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         // The single assignee that existed before is now a row in the junction.
         let carried: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue' AND profile_id='pa'", [], |r| r.get(0)).unwrap();
         assert_eq!(carried, 1, "the existing assignee survives the migration");
         // A second person can now work the same issue.
-        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pb','pb','Pb',0)", []).unwrap();
-        conn.execute("INSERT INTO issue_assignees(issue_id,profile_id) VALUES('legacy-issue','pb')", []).unwrap();
-        let people: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'", [], |r| r.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pb','pb','Pb',0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO issue_assignees(issue_id,profile_id) VALUES('legacy-issue','pb')",
+            [],
+        )
+        .unwrap();
+        let people: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(people, 2);
         // Deleting the issue takes its assignment rows with it.
-        conn.execute("DELETE FROM issues WHERE id='legacy-issue'", []).unwrap();
-        let orphans: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM issues WHERE id='legacy-issue'", [])
+            .unwrap();
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(orphans, 0, "junction rows never survive their issue");
         migrate(&conn).expect("idempotent");
     }
@@ -368,17 +467,33 @@ mod tests {
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
-        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)", []).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','Pa',0)",
+            [],
+        )
+        .unwrap();
         // Simulate a database stamped at V12 and migrate forward again.
         conn.pragma_update(None, "user_version", 12).unwrap();
         migrate(&conn).expect("v13");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         conn.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,created_at,event_count) VALUES('f1','pa','Mine','sealed',0,0)", []).unwrap();
         conn.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('f1','u1','1','x',0,NULL,NULL)", []).unwrap();
-        conn.execute("DELETE FROM calendar_feeds WHERE id='f1'", []).unwrap();
-        let orphans: i64 = conn.query_row("SELECT count(*) FROM calendar_feed_events WHERE feed_id='f1'", [], |r| r.get(0)).unwrap();
-        assert_eq!(orphans, 0, "junction-shaped cache rows never survive their feed");
+        conn.execute("DELETE FROM calendar_feeds WHERE id='f1'", [])
+            .unwrap();
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM calendar_feed_events WHERE feed_id='f1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            orphans, 0,
+            "junction-shaped cache rows never survive their feed"
+        );
         migrate(&conn).expect("idempotent");
     }
 
@@ -389,17 +504,34 @@ mod tests {
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
         conn.execute("INSERT INTO todos(id,profile_id,content,done) VALUES('legacy','default-org','Legacy row',0)", []).unwrap();
-        conn.execute("UPDATE todos SET notes=NULL WHERE id='legacy'", []).unwrap();
+        conn.execute("UPDATE todos SET notes=NULL WHERE id='legacy'", [])
+            .unwrap();
         // Simulate a database stamped at V10 and migrate forward again.
         conn.pragma_update(None, "user_version", 10).unwrap();
         migrate(&conn).expect("v11");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "schema version is monotonic and lands on head"
+        );
         assert_eq!(SCHEMA_VERSION, 13);
-        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        let notes: Option<String> = conn
+            .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
-        let content: String = conn.query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
-        assert_eq!(content, "Legacy row", "migration never rewrites existing rows");
+        let content: String = conn
+            .query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            content, "Legacy row",
+            "migration never rewrites existing rows"
+        );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
     }
@@ -418,12 +550,35 @@ mod tests {
         conn.pragma_update(None, "user_version", 8).unwrap();
         migrate(&conn).expect("v9");
 
-        let bjarne: String = conn.query_row("SELECT profile_id FROM users WHERE id='u-bj'", [], |r| r.get(0)).unwrap();
-        let jannes: String = conn.query_row("SELECT profile_id FROM users WHERE id='u-ja'", [], |r| r.get(0)).unwrap();
-        assert_eq!(bjarne, "profile-bj", "an existing matching profile is reused, not duplicated");
-        assert_eq!(jannes, "profile-u-ja", "a user without a profile gets a personal one");
-        let org_users: i64 = conn.query_row("SELECT count(*) FROM users WHERE profile_id='default-org'", [], |r| r.get(0)).unwrap();
-        assert_eq!(org_users, 0, "no account may author as the organization profile");
+        let bjarne: String = conn
+            .query_row("SELECT profile_id FROM users WHERE id='u-bj'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let jannes: String = conn
+            .query_row("SELECT profile_id FROM users WHERE id='u-ja'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            bjarne, "profile-bj",
+            "an existing matching profile is reused, not duplicated"
+        );
+        assert_eq!(
+            jannes, "profile-u-ja",
+            "a user without a profile gets a personal one"
+        );
+        let org_users: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM users WHERE profile_id='default-org'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            org_users, 0,
+            "no account may author as the organization profile"
+        );
         let shared: i64 = conn.query_row("SELECT count(*) FROM (SELECT profile_id FROM users GROUP BY profile_id HAVING count(*) > 1)", [], |r| r.get(0)).unwrap();
         assert_eq!(shared, 0, "one profile per account");
     }
@@ -433,12 +588,28 @@ mod tests {
         let temp = TempDb::new("gaia-space-v1-upgrade");
         let conn = open_at(&temp).expect("v1 database");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
-        conn.pragma_update(None, "user_version", 1).expect("v1 version");
+        conn.pragma_update(None, "user_version", 1)
+            .expect("v1 version");
         migrate(&conn).expect("migration");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
-        for table in ["todos", "absences", "notifications", "subscription_settings", "member_locations", "todo_assignees"] {
-            let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |row| row.get(0)).unwrap();
+        for table in [
+            "todos",
+            "absences",
+            "notifications",
+            "subscription_settings",
+            "member_locations",
+            "todo_assignees",
+        ] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
             assert_eq!(exists, 1, "{table}");
         }
         drop(conn);
@@ -450,11 +621,20 @@ mod tests {
         let conn = open_in_memory().expect("db");
         conn.execute_batch(SCHEMA_V1).expect("v1 schema");
         conn.execute_batch(SCHEMA_V2).expect("v2 schema");
-        conn.pragma_update(None, "user_version", 2).expect("v2 version");
+        conn.pragma_update(None, "user_version", 2)
+            .expect("v2 version");
         migrate(&conn).expect("migration");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
-        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'", [], |row| row.get(0)).unwrap();
+        let exists: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='todo_assignees'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(exists, 1);
     }
 
@@ -468,7 +648,13 @@ mod tests {
         drifted.pragma_update(None, "user_version", 4).unwrap();
         migrate(&drifted).unwrap();
         for table in ["users", "sessions", "todo_assignees"] {
-            let exists: i64 = drifted.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |r| r.get(0)).unwrap();
+            let exists: i64 = drifted
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
             assert_eq!(exists, 1, "{table}");
         }
         assert!(drifted.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('todo','missing','x','missing')", []).is_err(), "V6 FK holds");
@@ -477,11 +663,13 @@ mod tests {
         let fresh = open_in_memory().unwrap();
         migrate(&fresh).unwrap();
         assert_eq!(
-            normalized_schema_objects(&drifted), normalized_schema_objects(&fresh),
+            normalized_schema_objects(&drifted),
+            normalized_schema_objects(&fresh),
             "V4-to-V7 migration must retain every table, index, and trigger",
         );
         assert_eq!(
-            foreign_key_rows(&drifted), foreign_key_rows(&fresh),
+            foreign_key_rows(&drifted),
+            foreign_key_rows(&fresh),
             "V4-to-V7 migration must retain every table foreign key",
         );
     }
