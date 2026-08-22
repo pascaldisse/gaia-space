@@ -23,6 +23,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V49/V51 → feat/w5-caldav (named calendars · feed attribution) ☀ — merged
 - V52 → feat/w6-payload (per-app Ed25519 signing keys for typed application payload dispatch) ☀
 - V53 → feat/w7-personal (to-do content kind; absence confidentiality + availability) ☀Kali
+- V54 → feat/w7-keys (application SSH/GPG public-key records + revocation) ☀Kali
 
 TOTALS (8/8 audited, 356 rows): done 50 · partial 172 · stub 4 · missing 130. Matrix NOT green — steering loop active.
 
