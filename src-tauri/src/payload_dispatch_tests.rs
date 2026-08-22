@@ -31,20 +31,29 @@ fn samples() -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Captured outbound request, so the transport stub can be a plain `fn`.
-fn captured() -> &'static Mutex<Vec<(String, String, String, String, i64)>> {
-    static CAPTURED: OnceLock<Mutex<Vec<(String, String, String, String, i64)>>> = OnceLock::new();
+/// One captured outbound request: endpoint, class name, signature, body, timestamp.
+struct Sent {
+    endpoint: String,
+    class_name: String,
+    signature: String,
+    body: String,
+    timestamp: i64,
+}
+
+/// Captured outbound requests, so the transport stub can be a plain `fn`.
+fn captured() -> &'static Mutex<Vec<Sent>> {
+    static CAPTURED: OnceLock<Mutex<Vec<Sent>>> = OnceLock::new();
     CAPTURED.get_or_init(|| Mutex::new(Vec::new()))
 }
 
 fn record(endpoint: &str, headers: &Headers, body: &str) -> Result<(i64, String), String> {
-    captured().lock().unwrap().push((
-        endpoint.to_string(),
-        headers.class_name.clone(),
-        headers.signature.clone(),
-        body.to_string(),
-        headers.timestamp,
-    ));
+    captured().lock().unwrap().push(Sent {
+        endpoint: endpoint.to_string(),
+        class_name: headers.class_name.clone(),
+        signature: headers.signature.clone(),
+        body: body.to_string(),
+        timestamp: headers.timestamp,
+    });
     Ok((200, "{\"ok\":true}".into()))
 }
 
@@ -72,18 +81,23 @@ fn every_payload_class_round_trips_and_dispatches_signed() {
         assert_eq!(result.response_status, Some(200));
         assert!(result.error.is_none(), "{class_name}: {:?}", result.error);
         let sent = captured().lock().unwrap().pop().expect("one request");
-        assert_eq!(sent.0, "https://app.example/endpoint");
-        assert_eq!(sent.1, class_name);
+        assert_eq!(sent.endpoint, "https://app.example/endpoint");
+        assert_eq!(sent.class_name, class_name);
         // Independent verification path: the public key alone validates what was sent.
         assert!(
-            verify_app_payload_signature(&key.public_key, sent.4, &sent.3, &sent.2),
+            verify_app_payload_signature(
+                &key.public_key,
+                sent.timestamp,
+                &sent.body,
+                &sent.signature
+            ),
             "{class_name} signature must verify under the published public key"
         );
         assert!(!verify_app_payload_signature(
             &key.public_key,
-            sent.4,
-            &format!("{} ", sent.3),
-            &sent.2
+            sent.timestamp,
+            &format!("{} ", sent.body),
+            &sent.signature
         ));
     }
 }
