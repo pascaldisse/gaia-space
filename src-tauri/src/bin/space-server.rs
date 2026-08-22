@@ -519,11 +519,10 @@ fn registry_repo_auth(
             // (☎Kali-VIII round 3): a member without a WRITER/MANAGER ACL row must not be
             // able to push a release. Only the project's owner (or an admin, handled above)
             // publishes without an explicit grant.
-            if write
-                && !project_owner(&project_id)
-                    .unwrap_or(None)
-                    .is_some_and(|owner| owner == user.profile_id)
-            {
+            let owns = project_owner(&project_id)
+                .unwrap_or(None)
+                .is_some_and(|owner| owner == user.profile_id);
+            if write && !owns {
                 return Err(denied());
             }
             Ok(user)
