@@ -464,3 +464,70 @@ mod tests {
             .starts_with("jetbrains://"));
     }
 }
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn webhook_delivery_posts_then_retries_after_an_http_failure() {
+        let temp = db::TempDb::new("webhook-delivery");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let body = Arc::new(Mutex::new(String::new()));
+        let captured = body.clone();
+        let server = std::thread::spawn(move || {
+            for status in ["500 Internal Server Error", "204 No Content"] {
+                let (mut stream, _) = listener.accept().expect("webhook request");
+                let mut request = [0_u8; 4096];
+                let n = stream.read(&mut request).expect("read request");
+                *captured.lock().unwrap() = String::from_utf8_lossy(&request[..n]).into_owned();
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("response");
+            }
+        });
+        save_application(Application {
+            id: "app-delivery".into(),
+            name: "Delivery app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "delivery-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-delivery".into(),
+            application_id: "app-delivery".into(),
+            event_type: "IssueWebhookEvent".into(),
+            filters_json: Some("{}".into()),
+            endpoint_uri: endpoint,
+            enabled: true,
+        })
+        .expect("hook");
+        let failed = deliver_webhook("hook-delivery".into(), r#"{"issue":"GAIA-7"}"#.into())
+            .expect("first delivery record");
+        assert_eq!(failed.status, "FAILED");
+        assert_eq!(failed.attempts, 1);
+        let succeeded = retry_webhook_delivery(failed.id).expect("retry");
+        assert_eq!(succeeded.status, "SUCCEEDED");
+        assert_eq!(succeeded.attempts, 2);
+        server.join().expect("server");
+        assert!(body.lock().unwrap().contains("GAIA-7"));
+    }
+}
