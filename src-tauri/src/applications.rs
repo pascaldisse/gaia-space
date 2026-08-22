@@ -1469,7 +1469,7 @@ mod tests {
     #[test]
     fn ide_session_reads_opened_repositories() {
         let c = db::open_in_memory().unwrap();
-        c.execute_batch(crate::db::SCHEMA_V43).unwrap();
+        db::migrate(&c).unwrap();
         c.execute(
             "INSERT INTO ide_connections(id,ide,connected,last_seen_at) VALUES('i','Fleet',1,9)",
             [],
