@@ -2066,6 +2066,60 @@ mod delivery_tests {
         );
     }
 
+    /// Fourth domain: a real `git::repo_commit` in a throwaway repo must enqueue for a
+    /// `git.commit` subscription whose filter addresses the commit envelope.
+    #[test]
+    fn a_git_commit_enqueues_the_matching_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("git-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        // Throwaway repo under target/, never a user-registered path; swept at both ends.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-repos")
+            .join(format!("git-fanout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("repo dir");
+        let repo = git2::Repository::init(&dir).expect("init");
+        {
+            let mut config = repo.config().expect("config");
+            config.set_str("user.name", "Fan Out").expect("name");
+            config
+                .set_str("user.email", "fanout@example.test")
+                .expect("email");
+        }
+        std::fs::write(dir.join("a.txt"), "hello").expect("file");
+        let path = dir.to_string_lossy().to_string();
+        crate::git::repo_stage(path.clone(), vec!["a.txt".into()]).expect("stage");
+
+        register_hooks(
+            "app-git",
+            &[
+                (
+                    "hook-git",
+                    crate::events::GIT_COMMIT,
+                    Some(&format!(r#"{{"commit.repo_path":"{path}"}}"#)),
+                ),
+                (
+                    "hook-git-miss",
+                    crate::events::GIT_COMMIT,
+                    Some(r#"{"commit.repo_path":"/nowhere"}"#),
+                ),
+            ],
+        );
+
+        let oid = crate::git::repo_commit(path.clone(), "first".into()).expect("commit");
+
+        let queued = queued_webhook_ids();
+        let payload = queued_payload("hook-git");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(queued, vec!["hook-git".to_string()]);
+        assert_eq!(payload["event"], crate::events::GIT_COMMIT);
+        assert_eq!(payload["commit"]["id"], oid);
+        assert_eq!(payload["commit"]["message"], "first");
+    }
+
     /// Validation runs before any DB access, so these need no database.
     #[test]
     fn undecidable_filters_are_refused_on_save() {
