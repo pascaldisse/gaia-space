@@ -317,6 +317,11 @@
   font-size: 0.78em;
   color: var(--text-muted);
 }
+.public-link {
+  font-size: var(--dk-fs-xs);
+  color: var(--text-muted);
+  font-family: var(--dk-font-mono, monospace);
+}
 .archived-chip {
   background: var(--status-danger-bg);
   color: var(--dk-danger-ink);

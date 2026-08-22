@@ -88,16 +88,24 @@ const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permi
 /// The web gateway embeds these predicates into every document read/write query.
 /// Explicit grants are additive for a private document; moving it to a project leaves
 /// the rows behind but project membership remains the sole effective access policy.
+/// A KB document carries its book id in `container_id`, so a grant on the book folder
+/// is the whole enforcement surface for "editor teams" on a book (§2.3).
+const BOOK_READ_SCOPE: &str = "(d.container_type='kb' AND EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))) OR ";
+const BOOK_WRITE_SCOPE: &str = "(d.container_type='kb' AND EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND bp.access_level='editor' AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))) OR ";
+/// A published document is readable by anyone holding its public link; publishing is
+/// the only way a document leaves its container's access policy.
+const PUBLISHED_READ_SCOPE: &str = "d.published=1 OR ";
+
 const DOCUMENT_READ_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (d.container_type='my-docs' AND ";
 const DOCUMENT_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)) OR (d.container_type='my-docs' AND ";
 const DOCUMENT_OWNER_WRITE_SCOPE: &str = "(d.created_by=?1 OR (d.container_type='project' AND d.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND p.created_by=?1) OR ?2=1)))";
 
 fn document_read_scope() -> String {
-    format!("{DOCUMENT_READ_SCOPE}{DOCUMENT_EXPLICIT_READ_SCOPE}))")
+    format!("({PUBLISHED_READ_SCOPE}{BOOK_READ_SCOPE}{DOCUMENT_READ_SCOPE}{DOCUMENT_EXPLICIT_READ_SCOPE})))")
 }
 
 fn document_write_scope() -> String {
-    format!("{DOCUMENT_WRITE_SCOPE}{DOCUMENT_EXPLICIT_WRITE_SCOPE}))")
+    format!("({BOOK_WRITE_SCOPE}{DOCUMENT_WRITE_SCOPE}{DOCUMENT_EXPLICIT_WRITE_SCOPE})))")
 }
 
 pub fn document_readable_by(id: &str, profile_id: &str) -> Result<bool> {
@@ -522,6 +530,187 @@ pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
     rows
 }
 
+// ---------- publication (public links) and KB book grants ----------
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DocumentPublication {
+    pub document_id: String,
+    pub published: bool,
+    pub published_at: Option<i64>,
+    pub public_slug: Option<String>,
+}
+
+/// Lowercase, hyphen-joined, ASCII-alphanumeric only — a link that survives copy/paste.
+fn slugify(title: &str) -> String {
+    let mut slug = String::new();
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.trim_matches('-').to_string()
+}
+
+fn publication_row(c: &rusqlite::Connection, document_id: &str) -> Result<DocumentPublication> {
+    c.query_row(
+        "SELECT id,published,published_at,public_slug FROM documents WHERE id=?1",
+        [document_id],
+        |r| {
+            Ok(DocumentPublication {
+                document_id: r.get(0)?,
+                published: r.get(1)?,
+                published_at: r.get(2)?,
+                public_slug: r.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Document not found".to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_document_publication(document_id: String) -> Result<DocumentPublication> {
+    let c = db::conn()?;
+    publication_row(&c, &document_id)
+}
+
+/// Publishes or unpublishes a document. Unpublishing keeps the slug so the same link
+/// works again if the document is republished; only `published` gates public reads.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn publish_document(
+    document_id: String,
+    published: bool,
+    slug: Option<String>,
+) -> Result<DocumentPublication> {
+    let c = db::conn()?;
+    publish_document_tx(&c, document_id, published, slug)
+}
+
+fn publish_document_tx(
+    c: &rusqlite::Connection,
+    document_id: String,
+    published: bool,
+    slug: Option<String>,
+) -> Result<DocumentPublication> {
+    let current = publication_row(c, &document_id)?;
+    let mut slug = match slug.map(|s| slugify(&s)).filter(|s| !s.is_empty()) {
+        Some(slug) => slug,
+        None => match current.public_slug.clone() {
+            Some(existing) => existing,
+            None => {
+                let title: String = c
+                    .query_row("SELECT title FROM documents WHERE id=?1", [&document_id], |r| r.get(0))
+                    .map_err(|e| e.to_string())?;
+                let base = slugify(&title);
+                if base.is_empty() { "document".to_string() } else { base }
+            }
+        },
+    };
+    // Slugs are globally unique: suffix the base until the index accepts it.
+    let base = slug.clone();
+    let mut suffix = 1;
+    loop {
+        let taken: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE public_slug=?1 AND id<>?2)",
+                rusqlite::params![slug, document_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !taken {
+            break;
+        }
+        suffix += 1;
+        slug = format!("{base}-{suffix}");
+    }
+    c.execute(
+        "UPDATE documents SET published=?2, published_at=CASE WHEN ?2=1 THEN coalesce(published_at,unixepoch()) ELSE published_at END, public_slug=?3 WHERE id=?1",
+        rusqlite::params![document_id, published, slug],
+    )
+    .map_err(|e| e.to_string())?;
+    publication_row(c, &document_id)
+}
+
+/// Resolves a public link. Archived or unpublished documents are not public.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_public_document(slug: String) -> Result<Option<Document>> {
+    let c = db::conn()?;
+    get_public_document_tx(&c, slug)
+}
+
+fn get_public_document_tx(c: &rusqlite::Connection, slug: String) -> Result<Option<Document>> {
+    c.query_row(
+        &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.public_slug=?1 AND d.published=1 AND d.archived=0"),
+        [slug],
+        row_to_document,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_book_access(book_id: String) -> Result<Vec<DocumentAccessRecipient>> {
+    let c = db::conn()?;
+    let mut s = c
+        .prepare("SELECT recipient_type,recipient_id,access_level FROM document_folder_permissions WHERE folder_id=?1 ORDER BY recipient_type,recipient_id")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([book_id], |r| {
+            Ok(DocumentAccessRecipient {
+                recipient_type: r.get(0)?,
+                recipient_id: r.get(1)?,
+                access_level: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+/// Replaces a book's grant list atomically (same shape as document sharing).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_book_access(
+    book_id: String,
+    permissions: Vec<DocumentAccessRecipient>,
+) -> Result<()> {
+    for permission in &permissions {
+        if !matches!(permission.recipient_type.as_str(), "profile" | "team")
+            || !matches!(permission.access_level.as_str(), "viewer" | "editor")
+            || permission.recipient_id.trim().is_empty()
+        {
+            return Err("invalid book access recipient".into());
+        }
+    }
+    let mut c = db::conn()?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let is_book: bool = tx
+        .query_row(
+            "SELECT container_type='kb' AND parent_id IS NULL FROM document_folders WHERE id=?1",
+            [&book_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Book not found".to_string())?;
+    if !is_book {
+        return Err("only a top-level knowledge-base folder is a book".into());
+    }
+    tx.execute("DELETE FROM document_folder_permissions WHERE folder_id=?1", [&book_id])
+        .map_err(|e| e.to_string())?;
+    for permission in permissions {
+        tx.execute(
+            "INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![book_id, permission.recipient_type, permission.recipient_id, permission.access_level],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
 // ---------- local-folder / Confluence-export import ----------
 // A Confluence space export and a plain notes directory are the same shape on disk: a
 // tree of directories holding .md/.html files. Import mirrors that tree into
@@ -844,6 +1033,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn publishing_mints_a_unique_slug_and_only_published_docs_resolve_publicly() {
+        let c = test_conn();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body) VALUES('d1','my-docs','p1','text','My First Page!','a')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body) VALUES('d2','my-docs','p1','text','My First Page!','b')", []).unwrap();
+
+        let first = publish_document_tx(&c, "d1".into(), true, None).expect("publish");
+        assert!(first.published);
+        assert_eq!(first.public_slug.as_deref(), Some("my-first-page"));
+        assert!(first.published_at.is_some());
+        let second = publish_document_tx(&c, "d2".into(), true, None).expect("publish");
+        assert_eq!(second.public_slug.as_deref(), Some("my-first-page-2"), "slug collision");
+
+        let public = get_public_document_tx(&c, "my-first-page".into()).unwrap();
+        assert_eq!(public.map(|d| d.id), Some("d1".to_string()));
+
+        // Unpublishing keeps the slug but closes the link.
+        let closed = publish_document_tx(&c, "d1".into(), false, None).expect("unpublish");
+        assert!(!closed.published);
+        assert_eq!(closed.public_slug.as_deref(), Some("my-first-page"));
+        assert!(get_public_document_tx(&c, "my-first-page".into()).unwrap().is_none());
+
+        // Archived documents are never public either.
+        c.execute("UPDATE documents SET archived=1 WHERE id='d2'", []).unwrap();
+        assert!(get_public_document_tx(&c, "my-first-page-2".into()).unwrap().is_none());
+    }
+
+    #[test]
+    fn book_grants_and_publication_widen_the_read_scope() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reader','reader','Reader',unixepoch())", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('owner','owner','Owner',unixepoch())", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,name) VALUES('book','kb',NULL,'Handbook')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES('kbdoc','kb','book','book','text','Article','owner')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES('priv','my-docs','owner','text','Private','owner')", []).unwrap();
+
+        let readable = |id: &str| -> bool {
+            c.query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {})", document_read_scope()),
+                rusqlite::params!["reader", id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(!readable("kbdoc"), "kb doc readable without a grant");
+        assert!(!readable("priv"));
+
+        c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','reader','viewer')", []).unwrap();
+        assert!(readable("kbdoc"), "book grant not honoured");
+        assert!(!readable("priv"), "book grant leaked outside the book");
+
+        publish_document_tx(&c, "priv".into(), true, None).unwrap();
+        assert!(readable("priv"), "published doc not readable");
     }
 
     #[test]

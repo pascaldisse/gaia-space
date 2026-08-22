@@ -314,6 +314,22 @@ export default function Documents() {
     id ? documentsApi.listDocumentAccess(id) : Promise.resolve([]),
   );
   const [showSharing, setShowSharing] = createSignal(false);
+
+  // ---- publication (public link) ----
+  const [publication, { refetch: refetchPublication }] = createResource(selectedDocumentId, (id) =>
+    id ? documentsApi.getPublication(id) : Promise.resolve(null),
+  );
+  async function togglePublished() {
+    const id = selectedDocumentId();
+    const current = publication();
+    if (!id || !current) return;
+    try {
+      await documentsApi.publishDocument(id, !current.published);
+      await refetchPublication();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
   const [shareRecipientType, setShareRecipientType] = createSignal<"profile" | "team">("profile");
   const [shareRecipientId, setShareRecipientId] = createSignal("");
   const [shareAccessLevel, setShareAccessLevel] = createSignal<"viewer" | "editor">("viewer");
@@ -687,6 +703,18 @@ export default function Documents() {
                     <button class="ghost small" aria-expanded={showSharing()} onClick={() => setShowSharing((open) => !open)}>
                       {showSharing() ? "hide sharing" : "Share"}
                     </button>
+                  </Show>
+                  <Show when={publication()}>
+                    {(pub) => (
+                      <>
+                        <button class="ghost small" onClick={togglePublished}>
+                          {pub().published ? "unpublish" : "publish"}
+                        </button>
+                        <Show when={pub().published && pub().public_slug}>
+                          <span class="public-link" title="public link path">/public/{pub().public_slug}</span>
+                        </Show>
+                      </>
+                    )}
                   </Show>
                   <button class="primary" onClick={saveDocument}>
                     Save version

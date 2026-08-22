@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 27;
+pub const SCHEMA_VERSION: i64 = 29;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -211,6 +211,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V26)?;
     }
     if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
+    if version < 29 {
+        add_column_if_missing(&tx, "documents", "published", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&tx, "documents", "published_at", "INTEGER")?;
+        add_column_if_missing(&tx, "documents", "public_slug", "TEXT")?;
+        tx.execute_batch(SCHEMA_V29)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -343,6 +349,13 @@ pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
 "#;
 /// Auth-only credentials; V26 is owned by packages.
+/// Document publication (public link) and KB book grants. A book is the top-level
+/// 'kb' folder and a KB document carries its book id in `container_id`, so a grant on
+/// the book row is the whole enforcement surface.
+pub(crate) const SCHEMA_V29: &str = r#"
+CREATE UNIQUE INDEX IF NOT EXISTS documents_public_slug ON documents(public_slug) WHERE public_slug IS NOT NULL;
+CREATE TABLE IF NOT EXISTS document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
+"#;
 pub(crate) const SCHEMA_V27: &str = r#"
 CREATE TABLE IF NOT EXISTS permanent_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER);
 CREATE INDEX IF NOT EXISTS permanent_tokens_user_active ON permanent_tokens(user_id, revoked_at);
@@ -688,7 +701,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 27);
+        assert_eq!(SCHEMA_VERSION, 29);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
