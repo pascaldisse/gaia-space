@@ -394,10 +394,14 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
 "#;
-/// V36: OAuth2 authorization-code flow (oauth.rs). Redirect URIs are an exact-match
+/// V36: OAuth2 authorization-code flow (oauth.rs). `app_secrets` is shared with the
+/// client_credentials grant of `feat/w2-feeds-oauth` (V31) and is declared here with the
+/// identical DDL: whichever migration runs first creates it, the other is a no-op.
+/// Redirect URIs are an exact-match
 /// allowlist; codes and access tokens keep only their Argon2 digest at rest, and a
 /// code row is retired by `consumed_at` on first use.
 pub(crate) const SCHEMA_V36: &str = r#"
+CREATE TABLE IF NOT EXISTS app_secrets (application_id TEXT PRIMARY KEY REFERENCES applications(id) ON DELETE CASCADE, secret_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS oauth_redirect_uris (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, PRIMARY KEY(application_id, redirect_uri));
 CREATE TABLE IF NOT EXISTS oauth_auth_codes (id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', code_challenge TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER);
 CREATE INDEX IF NOT EXISTS oauth_auth_codes_expiry ON oauth_auth_codes(expires_at, consumed_at);

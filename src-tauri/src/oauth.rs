@@ -1,6 +1,7 @@
 //! OAuth2 authorization-code flow with PKCE (RFC 6749 §4.1, RFC 7636).
 //!
-//! Registration reuses `applications` (client_id, code_flow_enabled, pkce_required);
+//! Registration reuses `applications` (client_id, code_flow_enabled) plus `app_secrets`
+//! for confidential clients; PKCE S256 is mandatory for every code client;
 //! this module adds the exact-match redirect-URI allowlist, single-use authorization
 //! codes, and bearer access tokens. Every credential is Argon2-hashed at rest and its
 //! plaintext leaves exactly once, at mint time. A code carries its own row id
@@ -152,25 +153,68 @@ pub struct AuthorizeGrant {
 }
 struct Client {
     id: String,
-    pkce_required: bool,
+    /// Argon2 digest of the registered client secret; empty = public client.
+    secret_hash: String,
 }
 fn code_client(client_id: &str) -> Result<Client> {
     let c = db::conn()?;
-    let row: Option<(String, bool, bool)> = c
+    let row: Option<(String, bool, String)> = c
         .query_row(
-            "SELECT id,code_flow_enabled,pkce_required FROM applications WHERE client_id=?1 AND archived=0",
+            "SELECT a.id,a.code_flow_enabled,coalesce(s.secret_hash,'') FROM applications a LEFT JOIN app_secrets s ON s.application_id=a.id WHERE a.client_id=?1 AND a.archived=0",
             [client_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((id, code_flow_enabled, pkce_required)) = row else {
+    let Some((id, code_flow_enabled, secret_hash)) = row else {
         return Err("unknown client_id".into());
     };
     if !code_flow_enabled {
         return Err("authorization-code flow is disabled for this application".into());
     }
-    Ok(Client { id, pkce_required })
+    Ok(Client { id, secret_hash })
+}
+
+/// Registers/rotates the client secret of a confidential client. Plaintext is returned
+/// once and never stored. Sibling lane `feat/w2-feeds-oauth` owns the same `app_secrets`
+/// table for client_credentials (`applications::rotate_app_secret_on`); after that merge
+/// this helper collapses into it — the table DDL here is byte-identical on purpose.
+pub fn rotate_client_secret(application_id: &str) -> Result<String> {
+    let c = db::conn()?;
+    let known: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM applications WHERE id=?1)",
+            [application_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !known {
+        return Err("application not found".into());
+    }
+    let raw = format!("spcs_{}", secret(32));
+    c.execute(
+        "INSERT INTO app_secrets(application_id,secret_hash,created_at) VALUES(?1,?2,unixepoch()) ON CONFLICT(application_id) DO UPDATE SET secret_hash=excluded.secret_hash,created_at=unixepoch()",
+        params![application_id, hash(&raw)?],
+    )
+    .map_err(|e| e.to_string())?;
+    // Rotation retires outstanding grants: an old secret must not keep access.
+    c.execute(
+        "UPDATE oauth_access_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL",
+        [application_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(raw)
+}
+
+/// RFC 6749 §2.3/§4.1.3: a confidential client MUST authenticate at the token endpoint.
+/// PKCE reinforces a public client; it never substitutes for the secret.
+fn authenticate_client(client: &Client, offered: Option<&str>) -> Result<()> {
+    match (client.secret_hash.is_empty(), offered) {
+        (true, None) => Ok(()),
+        (true, Some(_)) => Err("this client is public and takes no client_secret".into()),
+        (false, Some(secret)) if matches(secret, &client.secret_hash) => Ok(()),
+        (false, _) => Err("invalid client credentials".into()),
+    }
 }
 fn redirect_allowed(application_id: &str, redirect_uri: &str) -> Result<bool> {
     db::conn()?
@@ -195,18 +239,18 @@ pub fn authorize(
     if !redirect_allowed(&client.id, &req.redirect_uri)? {
         return Err("redirect_uri is not registered for this application".into());
     }
+    // PKCE is unconditional, not a per-application option: a code with no challenge is
+    // a bearer credential in a redirect, and `pkce_required=0` apps would mint tokens
+    // from a stolen code plus the public client_id alone.
     let challenge = match (&req.code_challenge, req.code_challenge_method.as_deref()) {
         (Some(challenge), method) if !challenge.trim().is_empty() => {
             // S256 only: `plain` re-exposes the verifier to whoever stole the code.
             if method.unwrap_or("plain") != "S256" {
                 return Err("code_challenge_method must be S256".into());
             }
-            Some(challenge.trim().to_string())
+            challenge.trim().to_string()
         }
-        _ if client.pkce_required => {
-            return Err("code_challenge is required for this application".into())
-        }
-        _ => None,
+        _ => return Err("code_challenge (S256) is required".into()),
     };
     let (code_id, code_secret) = (id("ac"), secret(32));
     let raw = format!("{code_id}.{code_secret}");
@@ -232,6 +276,9 @@ pub struct TokenRequest {
     pub redirect_uri: String,
     #[serde(default)]
     pub code_verifier: Option<String>,
+    /// Required for confidential clients (those with a registered secret).
+    #[serde(default)]
+    pub client_secret: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenResponse {
@@ -251,6 +298,9 @@ pub fn exchange_code(req: &TokenRequest, cfg: OAuthConfig) -> Result<TokenRespon
         return Err("unsupported grant_type".into());
     }
     let client = code_client(&req.client_id)?;
+    // Client authentication comes first, before the code row is even read: otherwise
+    // anyone who learns a code's id half can burn a stranger's code (denial of service).
+    authenticate_client(&client, req.client_secret.as_deref().map(str::trim))?;
     let (code_id, code_secret) = req
         .code
         .split_once('.')
@@ -407,6 +457,7 @@ mod tests {
             code: code.into(),
             redirect_uri: "https://client.example/cb".into(),
             code_verifier: verifier.map(str::to_string),
+            client_secret: None,
         }
     }
 
@@ -458,10 +509,11 @@ mod tests {
     }
 
     #[test]
-    fn pkce_is_mandatory_when_the_application_demands_it() {
+    fn pkce_is_mandatory_for_every_code_client() {
         with_db(|| {
-            app("c3", true);
-            assert!(authorize("u1", &request("c3", None), OAuthConfig::default()).is_err());
+            app("c3", false);
+            let err = authorize("u1", &request("c3", None), OAuthConfig::default()).unwrap_err();
+            assert!(err.contains("code_challenge"), "{err}");
         });
     }
 
@@ -469,7 +521,7 @@ mod tests {
     fn an_unregistered_redirect_uri_is_refused() {
         with_db(|| {
             app("c4", false);
-            let mut req = request("c4", None);
+            let mut req = request("c4", Some(&s256(VERIFIER)));
             req.redirect_uri = "https://client.example/cb/evil".into();
             assert!(
                 authorize("u1", &req, OAuthConfig::default()).is_err(),
@@ -483,8 +535,8 @@ mod tests {
         with_db(|| {
             app("c5", false);
             let cfg = OAuthConfig::default();
-            let grant = authorize("u1", &request("c5", None), cfg).unwrap();
-            let mut req = token_request("c5", &grant.code, None);
+            let grant = authorize("u1", &request("c5", Some(&s256(VERIFIER))), cfg).unwrap();
+            let mut req = token_request("c5", &grant.code, Some(VERIFIER));
             req.redirect_uri = "https://client.example/other".into();
             assert!(exchange_code(&req, cfg).is_err());
         });
@@ -498,7 +550,7 @@ mod tests {
                 code_ttl_secs: 1,
                 ..OAuthConfig::default()
             };
-            let grant = authorize("u1", &request("c6", None), cfg).unwrap();
+            let grant = authorize("u1", &request("c6", Some(&s256(VERIFIER))), cfg).unwrap();
             db::conn()
                 .unwrap()
                 .execute(
@@ -506,7 +558,7 @@ mod tests {
                     [grant.code.split_once('.').unwrap().0],
                 )
                 .unwrap();
-            let err = exchange_code(&token_request("c6", &grant.code, None), cfg).unwrap_err();
+            let err = exchange_code(&token_request("c6", &grant.code, Some(VERIFIER)), cfg).unwrap_err();
             assert!(err.contains("expired"), "{err}");
         });
     }
@@ -515,7 +567,7 @@ mod tests {
     fn the_code_plaintext_is_never_stored() {
         with_db(|| {
             app("c7", false);
-            let grant = authorize("u1", &request("c7", None), OAuthConfig::default()).unwrap();
+            let grant = authorize("u1", &request("c7", Some(&s256(VERIFIER))), OAuthConfig::default()).unwrap();
             let secret = grant.code.split_once('.').unwrap().1;
             let hits: i64 = db::conn()
                 .unwrap()
@@ -526,6 +578,73 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(hits, 0, "only the Argon2 digest is at rest");
+        });
+    }
+
+    /// RFC 6749 §4.1.3: a confidential client's secret is a second, independent factor.
+    /// A wrong or missing secret mints nothing — and, because authentication precedes the
+    /// code lookup, it does not consume the victim's code either.
+    #[test]
+    fn a_confidential_client_must_authenticate_and_a_bad_secret_burns_nothing() {
+        with_db(|| {
+            let app_id = app("c8", false);
+            let client_secret = rotate_client_secret(&app_id).unwrap();
+            let cfg = OAuthConfig::default();
+            let grant = authorize("u1", &request("c8", Some(&s256(VERIFIER))), cfg).unwrap();
+            let with_secret = |secret: Option<&str>| {
+                let mut req = token_request("c8", &grant.code, Some(VERIFIER));
+                req.client_secret = secret.map(str::to_string);
+                req
+            };
+            assert!(
+                exchange_code(&with_secret(None), cfg).is_err(),
+                "a missing client_secret mints nothing"
+            );
+            assert!(
+                exchange_code(&with_secret(Some("spcs_wrong")), cfg).is_err(),
+                "a wrong client_secret mints nothing"
+            );
+            let minted: i64 = db::conn()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM oauth_access_tokens WHERE application_id=?1",
+                    [&app_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(minted, 0);
+            let consumed: Option<i64> = db::conn()
+                .unwrap()
+                .query_row(
+                    "SELECT consumed_at FROM oauth_auth_codes WHERE id=?1",
+                    [grant.code.split_once('.').unwrap().0],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(consumed, None, "an unauthenticated caller cannot burn the code");
+            let token = exchange_code(&with_secret(Some(&client_secret)), cfg).unwrap();
+            assert_eq!(token.token_type, "Bearer");
+        });
+    }
+
+    #[test]
+    fn a_public_client_takes_no_secret_and_rotation_revokes_live_tokens() {
+        with_db(|| {
+            let app_id = app("c9", false);
+            let cfg = OAuthConfig::default();
+            let grant = authorize("u1", &request("c9", Some(&s256(VERIFIER))), cfg).unwrap();
+            let mut req = token_request("c9", &grant.code, Some(VERIFIER));
+            req.client_secret = Some("uninvited".into());
+            assert!(exchange_code(&req, cfg).is_err(), "a public client takes no secret");
+            req.client_secret = None;
+            let token = exchange_code(&req, cfg).unwrap();
+            assert!(access_token_owner(&token.access_token).unwrap().is_some());
+            rotate_client_secret(&app_id).unwrap();
+            assert_eq!(
+                access_token_owner(&token.access_token).unwrap(),
+                None,
+                "rotating the secret retires tokens minted under the old one"
+            );
         });
     }
 
