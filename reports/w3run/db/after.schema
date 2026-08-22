@@ -1,0 +1,180 @@
+CREATE TABLE profiles (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, email TEXT, avatar_url TEXT, external INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, parent_id TEXT REFERENCES teams(id), channel_id TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE team_memberships (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), team_id TEXT NOT NULL REFERENCES teams(id), role_id TEXT REFERENCES roles(id), lead INTEGER NOT NULL DEFAULT 0, manager_id TEXT REFERENCES profiles(id), since_date TEXT, till_date TEXT, requires_approval INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE roles (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, parent_id TEXT REFERENCES roles(id), role_type TEXT NOT NULL DEFAULT 'CUSTOM', archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE rights (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT, right_type TEXT NOT NULL, right_group TEXT, flags INTEGER NOT NULL DEFAULT 0, implied_rights_json TEXT NOT NULL DEFAULT '[]', feature_gate TEXT, propagation TEXT NOT NULL DEFAULT 'NONE', descriptor_json TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE role_rights (role_id TEXT NOT NULL REFERENCES roles(id), right_id TEXT NOT NULL REFERENCES rights(id), PRIMARY KEY(role_id, right_id));
+CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, key TEXT NOT NULL UNIQUE, description TEXT, created_by TEXT REFERENCES profiles(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, deadline TEXT);
+CREATE TABLE cf_definitions (id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, cf_type TEXT NOT NULL, name TEXT NOT NULL, constraints_json TEXT, default_json TEXT, ordering INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE cf_values (definition_id TEXT NOT NULL REFERENCES cf_definitions(id), entity_id TEXT NOT NULL, value_json TEXT NOT NULL, PRIMARY KEY(definition_id, entity_id));
+CREATE TABLE issue_statuses (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, color TEXT NOT NULL DEFAULT '#6b7280', ordering INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE issues (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT, status_id TEXT REFERENCES issue_statuses(id), assignee_id TEXT REFERENCES profiles(id), created_by TEXT REFERENCES profiles(id), due_date TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), priority TEXT, UNIQUE(project_id, number));
+CREATE TABLE boards (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL, backlog_type TEXT NOT NULL DEFAULT 'manual', archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE board_columns (id TEXT PRIMARY KEY, board_id TEXT NOT NULL REFERENCES boards(id), name TEXT NOT NULL, ordering INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE column_statuses (column_id TEXT NOT NULL REFERENCES board_columns(id), status_id TEXT NOT NULL REFERENCES issue_statuses(id), PRIMARY KEY(column_id, status_id));
+CREATE TABLE sprints (id TEXT PRIMARY KEY, board_id TEXT NOT NULL REFERENCES boards(id), name TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'PLANNED', starts_on TEXT, ends_on TEXT, description TEXT, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE swimlanes (id TEXT PRIMARY KEY, board_id TEXT NOT NULL REFERENCES boards(id), sprint_id TEXT REFERENCES sprints(id), name TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, ordering INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE issue_board_positions (issue_id TEXT NOT NULL REFERENCES issues(id), board_id TEXT NOT NULL REFERENCES boards(id), sprint_id TEXT REFERENCES sprints(id), swimlane_id TEXT REFERENCES swimlanes(id), position INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(issue_id, board_id));
+CREATE TABLE planning_tags (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), parent_id TEXT REFERENCES planning_tags(id), name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE issue_tags (issue_id TEXT NOT NULL REFERENCES issues(id), tag_id TEXT NOT NULL REFERENCES planning_tags(id), PRIMARY KEY(issue_id, tag_id));
+CREATE TABLE checklists (id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id), title TEXT NOT NULL, ordering INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE checklist_items (id TEXT PRIMARY KEY, checklist_id TEXT NOT NULL REFERENCES checklists(id), parent_id TEXT REFERENCES checklist_items(id), item_text TEXT NOT NULL, item_done INTEGER NOT NULL DEFAULT 0, ordering INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE time_tracking_entries (id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id), profile_id TEXT NOT NULL REFERENCES profiles(id), entry_date TEXT NOT NULL, duration_minutes INTEGER NOT NULL, description TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE issue_links (id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id), linked_issue_id TEXT NOT NULL REFERENCES issues(id), link_type TEXT NOT NULL);
+CREATE TABLE channels (id TEXT PRIMARY KEY, content_type TEXT NOT NULL CHECK(content_type IN ('dm','private','public','entity-bound')), name TEXT, description TEXT, project_id TEXT REFERENCES projects(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE channel_members (channel_id TEXT NOT NULL REFERENCES channels(id), profile_id TEXT NOT NULL REFERENCES profiles(id), administrator INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(channel_id, profile_id));
+CREATE TABLE messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL REFERENCES channels(id), author_id TEXT REFERENCES profiles(id), text TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), edited_at INTEGER, thread_of TEXT REFERENCES messages(id), archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE reactions (message_id TEXT NOT NULL REFERENCES messages(id), profile_id TEXT NOT NULL REFERENCES profiles(id), emoji TEXT NOT NULL, PRIMARY KEY(message_id, profile_id, emoji));
+CREATE TABLE read_state (channel_id TEXT NOT NULL REFERENCES channels(id), profile_id TEXT NOT NULL REFERENCES profiles(id), message_id TEXT REFERENCES messages(id), read_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(channel_id, profile_id));
+CREATE TABLE reviews (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), number INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('MR','commit-set')), state TEXT NOT NULL, source_branch TEXT, target_branch TEXT, title TEXT NOT NULL, turn_based INTEGER NOT NULL DEFAULT 0, channel_id TEXT REFERENCES channels(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), repo_path TEXT, UNIQUE(project_id, number));
+CREATE TABLE review_participants (review_id TEXT NOT NULL REFERENCES reviews(id), profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL, state TEXT CHECK(state IN ('accepted','rejected','waiting')), their_turn INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id));
+CREATE TABLE review_discussions (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id), file_path TEXT NOT NULL, line_start INTEGER, line_end INTEGER, revision TEXT, resolved INTEGER NOT NULL DEFAULT 0, channel_id TEXT REFERENCES channels(id));
+CREATE TABLE quality_gate_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), branch_pattern TEXT NOT NULL, min_approvals INTEGER NOT NULL DEFAULT 0, required_reviewers_json TEXT, codeowners_required INTEGER NOT NULL DEFAULT 0, external_checks_json TEXT);
+CREATE TABLE safe_merge_runs (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id), state TEXT NOT NULL, is_dry_run INTEGER NOT NULL DEFAULT 0, log TEXT, started_at INTEGER NOT NULL DEFAULT (unixepoch()), finished_at INTEGER, source_oid TEXT, target_oid TEXT, merge_commit_oid TEXT);
+CREATE TABLE document_folders (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, parent_id TEXT REFERENCES document_folders(id), name TEXT NOT NULL, description TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE documents (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, folder_id TEXT REFERENCES document_folders(id), doc_type TEXT NOT NULL CHECK(doc_type IN ('text','file')), title TEXT NOT NULL, body TEXT, version INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), published INTEGER NOT NULL DEFAULT 0, published_at INTEGER, public_slug TEXT);
+CREATE TABLE doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
+CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
+CREATE TABLE pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE jobs (id TEXT PRIMARY KEY, script_id TEXT NOT NULL REFERENCES pipeline_scripts(id), name TEXT NOT NULL, trigger_type TEXT NOT NULL DEFAULT 'MANUAL', archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE job_runs (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), status TEXT NOT NULL CHECK(status IN ('SCHEDULED','PENDING','READY_TO_START','RUNNING','FINISHING','FINISHED','TERMINATING','TERMINATED','HIBERNATING','HIBERNATED','RESTARTING','FAILED','SKIPPED')), log TEXT, triggered_at INTEGER NOT NULL DEFAULT (unixepoch()), started_at INTEGER, finished_at INTEGER);
+CREATE TABLE deploy_targets (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL, target_key TEXT NOT NULL, description TEXT, manual_control INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, UNIQUE(project_id, target_key));
+CREATE TABLE deployments (id TEXT PRIMARY KEY, target_id TEXT NOT NULL REFERENCES deploy_targets(id), version TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('SCHEDULED','DEPLOYING','FAILED','CURRENT','OBSOLETE','HANGING')), description TEXT, job_run_id TEXT REFERENCES job_runs(id), scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER);
+CREATE TABLE package_repositories (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id), name TEXT NOT NULL, format TEXT NOT NULL CHECK(format IN ('maven','npm','nuget','pypi','dart','container','composer','file')), mode TEXT NOT NULL DEFAULT 'HOSTING', description TEXT, archived INTEGER NOT NULL DEFAULT 0, retention_days INTEGER, retention_version_count INTEGER, retain_downloaded INTEGER NOT NULL DEFAULT 1, access_level TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC')));
+CREATE TABLE package_versions (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES package_repositories(id), package_name TEXT NOT NULL, version TEXT NOT NULL, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), accessed_at INTEGER, downloads INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, format_metadata_json TEXT, immutable INTEGER NOT NULL DEFAULT 0, UNIQUE(repository_id, package_name, version));
+CREATE TABLE todos (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), content TEXT NOT NULL, due_date TEXT, done INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), project_id TEXT REFERENCES projects(id), notes TEXT, CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL)));
+CREATE TABLE absences (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), reason_type TEXT NOT NULL, date_from TEXT NOT NULL, date_to TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), CHECK(date_to >= date_from));
+CREATE TABLE notifications (id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, entity_type TEXT, entity_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), read_at INTEGER, CHECK((entity_type IS NULL) = (entity_id IS NULL)));
+CREATE TABLE subscription_settings (profile_id TEXT NOT NULL REFERENCES profiles(id), event_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type));
+CREATE TABLE member_locations (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), location TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('Region','Campus','Building','Floor','Room','ConferenceRoom')), created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX todos_profile_done_due ON todos(profile_id, done, due_date);
+CREATE INDEX absences_dates ON absences(date_from, date_to);
+CREATE INDEX notifications_recipient_read ON notifications(recipient_id, read_at, created_at);
+CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL CHECK(role IN ('admin','member')), active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX sessions_user_id ON sessions(user_id);
+CREATE TABLE todo_assignees (todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(todo_id, profile_id));
+CREATE INDEX todo_assignees_profile ON todo_assignees(profile_id);
+CREATE INDEX todos_project_id ON todos(project_id);
+CREATE TABLE project_members (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(project_id, profile_id));
+CREATE INDEX project_members_profile ON project_members(profile_id);
+CREATE TABLE issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
+CREATE INDEX issue_assignees_profile ON issue_assignees(profile_id);
+CREATE TABLE calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX calendar_feeds_profile ON calendar_feeds(profile_id);
+CREATE TABLE calendar_feed_events (feed_id TEXT NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE, uid TEXT NOT NULL, occurrence_key TEXT NOT NULL, title TEXT NOT NULL, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day_date TEXT, PRIMARY KEY(feed_id, uid, occurrence_key));
+CREATE INDEX calendar_feed_events_range ON calendar_feed_events(feed_id, starts_at);
+CREATE TABLE devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
+CREATE INDEX devfiles_project ON devfiles(project_id);
+CREATE TABLE applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, client_id TEXT NOT NULL UNIQUE, client_credentials_flow_enabled INTEGER NOT NULL DEFAULT 0, code_flow_enabled INTEGER NOT NULL DEFAULT 0, pkce_required INTEGER NOT NULL DEFAULT 0, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE webhook_subscriptions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filters_json TEXT, endpoint_uri TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX webhook_subscriptions_application ON webhook_subscriptions(application_id);
+CREATE TABLE chatbot_registrations (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, display_name TEXT NOT NULL, description TEXT, commands_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX chatbot_registrations_application ON chatbot_registrations(application_id);
+CREATE TABLE ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX ui_extensions_application ON ui_extensions(application_id);
+CREATE TABLE blog_posts (id TEXT PRIMARY KEY, draft_id TEXT REFERENCES documents(id), title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', author_id TEXT NOT NULL REFERENCES profiles(id), team_id TEXT REFERENCES teams(id), project_id TEXT REFERENCES projects(id), location_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), published_at INTEGER NOT NULL DEFAULT (unixepoch()), archived INTEGER NOT NULL DEFAULT 0, archived_by TEXT REFERENCES profiles(id), archived_at INTEGER);
+CREATE INDEX blog_posts_published ON blog_posts(published_at DESC);
+CREATE INDEX blog_posts_author ON blog_posts(author_id,published_at DESC);
+CREATE TABLE blog_aliases (post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE, alias TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(post_id,alias));
+CREATE TABLE message_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, data_url TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX message_attachments_message ON message_attachments(message_id);
+CREATE TABLE message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(message_id, profile_id));
+CREATE INDEX message_mentions_profile ON message_mentions(profile_id);
+CREATE UNIQUE INDEX blog_posts_draft_once ON blog_posts(draft_id) WHERE draft_id IS NOT NULL;
+CREATE VIRTUAL TABLE search_index USING fts5(entity_type UNINDEXED, entity_id UNINDEXED, title, body, breadcrumb)
+/* search_index(entity_type,entity_id,title,body,breadcrumb) */;
+CREATE TABLE IF NOT EXISTS 'search_index_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE IF NOT EXISTS 'search_index_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS 'search_index_content'(id INTEGER PRIMARY KEY, c0, c1, c2, c3, c4);
+CREATE TABLE IF NOT EXISTS 'search_index_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE IF NOT EXISTS 'search_index_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TRIGGER search_issues_ai AFTER INSERT ON issues WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('issue',new.id,new.title,coalesce(new.description,''),'Issue · ' || new.project_id); END;
+CREATE TRIGGER search_issues_au AFTER UPDATE ON issues BEGIN DELETE FROM search_index WHERE entity_type='issue' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'issue',new.id,new.title,coalesce(new.description,''),'Issue · ' || new.project_id WHERE new.archived=0; END;
+CREATE TRIGGER search_issues_ad AFTER DELETE ON issues BEGIN DELETE FROM search_index WHERE entity_type='issue' AND entity_id=old.id; END;
+CREATE TRIGGER search_documents_ai AFTER INSERT ON documents WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('document',new.id,new.title,coalesce(new.body,''),'Document · ' || new.container_type); END;
+CREATE TRIGGER search_documents_au AFTER UPDATE ON documents BEGIN DELETE FROM search_index WHERE entity_type='document' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'document',new.id,new.title,coalesce(new.body,''),'Document · ' || new.container_type WHERE new.archived=0; END;
+CREATE TRIGGER search_documents_ad AFTER DELETE ON documents BEGIN DELETE FROM search_index WHERE entity_type='document' AND entity_id=old.id; END;
+CREATE TRIGGER search_messages_ai AFTER INSERT ON messages WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('message',new.id,'Message',new.text,'Chat · ' || new.channel_id); END;
+CREATE TRIGGER search_messages_au AFTER UPDATE ON messages BEGIN DELETE FROM search_index WHERE entity_type='message' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'message',new.id,'Message',new.text,'Chat · ' || new.channel_id WHERE new.archived=0; END;
+CREATE TRIGGER search_messages_ad AFTER DELETE ON messages BEGIN DELETE FROM search_index WHERE entity_type='message' AND entity_id=old.id; END;
+CREATE TRIGGER search_blogs_ai AFTER INSERT ON blog_posts WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('blog',new.id,new.title,new.body,'Blog'); END;
+CREATE TRIGGER search_blogs_au AFTER UPDATE ON blog_posts BEGIN DELETE FROM search_index WHERE entity_type='blog' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'blog',new.id,new.title,new.body,'Blog' WHERE new.archived=0; END;
+CREATE TRIGGER search_blogs_ad AFTER DELETE ON blog_posts BEGIN DELETE FROM search_index WHERE entity_type='blog' AND entity_id=old.id; END;
+CREATE TABLE webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE, payload_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), attempts INTEGER NOT NULL DEFAULT 0, response_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), delivered_at INTEGER, next_attempt_at INTEGER);
+CREATE INDEX webhook_deliveries_webhook_created ON webhook_deliveries(webhook_id, created_at DESC);
+CREATE INDEX webhook_deliveries_pending ON webhook_deliveries(status, next_attempt_at);
+CREATE TABLE protected_branch_rules (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ branch_pattern TEXT NOT NULL, regex INTEGER NOT NULL DEFAULT 0,
+ allow_create_json TEXT, allow_push_json TEXT, allow_delete_json TEXT, allow_force_push_json TEXT,
+ allow_merge_json TEXT, linear_history INTEGER NOT NULL DEFAULT 0, bypass_quality_gate_json TEXT
+);
+CREATE INDEX protected_branch_rules_project_pattern ON protected_branch_rules(project_id, branch_pattern);
+CREATE TABLE document_permissions (
+ document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')),
+ recipient_id TEXT NOT NULL,
+ access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')),
+ PRIMARY KEY(document_id, recipient_type, recipient_id)
+);
+CREATE INDEX document_permissions_document ON document_permissions(document_id);
+CREATE INDEX reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+CREATE TABLE review_stacks (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ repo_path TEXT NOT NULL, target_branch TEXT NOT NULL, source_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE review_stack_items (
+ stack_id TEXT NOT NULL REFERENCES review_stacks(id) ON DELETE CASCADE,
+ review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+ ordering INTEGER NOT NULL, PRIMARY KEY(stack_id, review_id), UNIQUE(stack_id, ordering)
+);
+CREATE INDEX review_stack_items_review ON review_stack_items(review_id);
+CREATE TABLE review_external_checks (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, check_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), details TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(review_id,check_name));
+CREATE TABLE board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
+CREATE TABLE package_repository_acl (repository_id TEXT NOT NULL REFERENCES package_repositories(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK(role IN ('VIEWER','WRITER','MANAGER')), PRIMARY KEY(repository_id, profile_id));
+CREATE INDEX package_versions_retention ON package_versions(repository_id, created_at);
+CREATE TABLE workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, os TEXT NOT NULL, tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'ONLINE' CHECK(status IN ('ONLINE','OFFLINE','DISABLED')), registered_at INTEGER NOT NULL DEFAULT (unixepoch()), last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE job_artifacts (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, name TEXT NOT NULL, content BLOB NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX job_artifacts_run ON job_artifacts(job_run_id);
+CREATE TABLE test_reports (id TEXT PRIMARY KEY, job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE, suite TEXT NOT NULL, test_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PASSED','FAILED','SKIPPED')), duration_ms INTEGER, message TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX test_reports_run ON test_reports(job_run_id);
+CREATE TABLE permanent_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX permanent_tokens_user_active ON permanent_tokens(user_id, revoked_at);
+CREATE TABLE invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, email TEXT, role_id TEXT NOT NULL REFERENCES roles(id), project_id TEXT NOT NULL REFERENCES projects(id), invited_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER, max_uses INTEGER NOT NULL DEFAULT 1 CHECK(max_uses > 0), uses INTEGER NOT NULL DEFAULT 0 CHECK(uses >= 0));
+CREATE INDEX invitations_active ON invitations(expires_at, uses);
+CREATE TABLE user_totp (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret_sealed TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, enrolled_at INTEGER NOT NULL);
+CREATE TABLE subscription_scopes (profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, event_type TEXT NOT NULL, target_type TEXT NOT NULL CHECK(target_type IN ('org','team','project','location','profile','entity')), target_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type, target_type, target_id));
+CREATE INDEX subscription_scopes_target ON subscription_scopes(target_type, target_id);
+CREATE TABLE app_secrets (application_id TEXT PRIMARY KEY REFERENCES applications(id) ON DELETE CASCADE, secret_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE app_tokens (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, token_hash TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER, revoked_at INTEGER);
+CREATE INDEX app_tokens_app_active ON app_tokens(application_id, revoked_at);
+CREATE TABLE marketplace_apps (id TEXT PRIMARY KEY, name TEXT NOT NULL, vendor TEXT NOT NULL, description TEXT, capabilities_json TEXT NOT NULL DEFAULT '[]', compatibility TEXT, listing_url TEXT);
+CREATE TABLE app_installs (id TEXT PRIMARY KEY, marketplace_app_id TEXT REFERENCES marketplace_apps(id) ON DELETE CASCADE, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, install_kind TEXT NOT NULL CHECK(install_kind IN ('MARKETPLACE','LINK','MANUAL','JENKINS','TEAMCITY')), installed_by TEXT, installed_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(marketplace_app_id, application_id));
+CREATE TABLE package_vulnerabilities (
+ id TEXT PRIMARY KEY, package_version_id TEXT NOT NULL REFERENCES package_versions(id) ON DELETE CASCADE,
+ cve_id TEXT NOT NULL, severity TEXT NOT NULL, affected_range TEXT NOT NULL, title TEXT, description TEXT,
+ UNIQUE(package_version_id, cve_id, affected_range)
+);
+CREATE INDEX package_vulnerabilities_version ON package_vulnerabilities(package_version_id);
+CREATE UNIQUE INDEX documents_public_slug ON documents(public_slug) WHERE public_slug IS NOT NULL;
+CREATE TABLE document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
+CREATE TABLE oauth_redirect_uris (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, PRIMARY KEY(application_id, redirect_uri));
+CREATE TABLE oauth_auth_codes (id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', code_challenge TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER);
+CREATE INDEX oauth_auth_codes_expiry ON oauth_auth_codes(expires_at, consumed_at);
+CREATE TABLE oauth_access_tokens (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, scope TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX oauth_access_tokens_user_active ON oauth_access_tokens(user_id, revoked_at);
+CREATE TABLE role_assignments (
+    id TEXT PRIMARY KEY,
+    role_id TEXT NOT NULL REFERENCES roles(id),
+    profile_id TEXT REFERENCES profiles(id),
+    team_id TEXT REFERENCES teams(id),
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('global','project','team','profile','channel','document','documentFolder')),
+    scope_id TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE meeting_recordings (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, egress_id TEXT, status TEXT NOT NULL CHECK(status IN ('starting','recording','stopping','stopped','failed')), filepath TEXT, started_by TEXT REFERENCES profiles(id), started_at INTEGER NOT NULL DEFAULT (unixepoch()), stopped_at INTEGER, stop_attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT);
+CREATE UNIQUE INDEX meeting_recordings_active ON meeting_recordings(meeting_id) WHERE status IN ('starting','recording','stopping');
+CREATE INDEX meeting_recordings_meeting ON meeting_recordings(meeting_id, started_at);

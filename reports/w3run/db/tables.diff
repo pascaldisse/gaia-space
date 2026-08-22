@@ -1,0 +1,64 @@
+0a1,5
+> CREATE TABLE 
+> CREATE TABLE 
+> CREATE TABLE 
+> CREATE TABLE 
+> CREATE TABLE 
+1a7,13
+> CREATE TABLE app_installs
+> CREATE TABLE app_secrets
+> CREATE TABLE app_tokens
+> CREATE TABLE applications
+> CREATE TABLE blog_aliases
+> CREATE TABLE blog_posts
+> CREATE TABLE board_card_settings
+3a16,17
+> CREATE TABLE calendar_feed_events
+> CREATE TABLE calendar_feeds
+7a22
+> CREATE TABLE chatbot_registrations
+12a28
+> CREATE TABLE devfiles
+13a30
+> CREATE TABLE document_folder_permissions
+14a32
+> CREATE TABLE document_permissions
+15a34,35
+> CREATE TABLE invitations
+> CREATE TABLE issue_assignees
+20a41
+> CREATE TABLE job_artifacts
+22a44
+> CREATE TABLE marketplace_apps
+23a46
+> CREATE TABLE meeting_recordings
+25a49,50
+> CREATE TABLE message_attachments
+> CREATE TABLE message_mentions
+27a53,55
+> CREATE TABLE oauth_access_tokens
+> CREATE TABLE oauth_auth_codes
+> CREATE TABLE oauth_redirect_uris
+28a57
+> CREATE TABLE package_repository_acl
+29a59,60
+> CREATE TABLE package_vulnerabilities
+> CREATE TABLE permanent_tokens
+34a66
+> CREATE TABLE protected_branch_rules
+38a71
+> CREATE TABLE review_external_checks
+39a73,74
+> CREATE TABLE review_stack_items
+> CREATE TABLE review_stacks
+47a83
+> CREATE TABLE subscription_scopes
+51a88
+> CREATE TABLE test_reports
+54a92,93
+> CREATE TABLE ui_extensions
+> CREATE TABLE user_totp
+55a95,97
+> CREATE TABLE webhook_deliveries
+> CREATE TABLE webhook_subscriptions
+> CREATE TABLE workers
