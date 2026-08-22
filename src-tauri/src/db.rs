@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 29;
+pub const SCHEMA_VERSION: i64 = 31;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -213,6 +213,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
     // V29: subscriptions gain a target scope (org/team/project/location/profile/entity).
     if version < 29 { tx.execute_batch(SCHEMA_V29)?; }
+    // V31: application OAuth credentials/tokens and the marketplace install model.
+    if version < 31 { tx.execute_batch(SCHEMA_V31)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -343,6 +345,15 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 /// an MR source branch advances.
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+/// App OAuth (client_credentials) + marketplace metadata and install records.
+/// Secrets and tokens are stored hashed; plaintext leaves only at creation.
+pub(crate) const SCHEMA_V31: &str = r#"
+CREATE TABLE IF NOT EXISTS app_secrets (application_id TEXT PRIMARY KEY REFERENCES applications(id) ON DELETE CASCADE, secret_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS app_tokens (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, token_hash TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS app_tokens_app_active ON app_tokens(application_id, revoked_at);
+CREATE TABLE IF NOT EXISTS marketplace_apps (id TEXT PRIMARY KEY, name TEXT NOT NULL, vendor TEXT NOT NULL, description TEXT, capabilities_json TEXT NOT NULL DEFAULT '[]', compatibility TEXT, listing_url TEXT);
+CREATE TABLE IF NOT EXISTS app_installs (id TEXT PRIMARY KEY, marketplace_app_id TEXT REFERENCES marketplace_apps(id) ON DELETE CASCADE, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, install_kind TEXT NOT NULL CHECK(install_kind IN ('MARKETPLACE','LINK','MANUAL','JENKINS','TEAMCITY')), installed_by TEXT, installed_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(marketplace_app_id, application_id));
 "#;
 /// Personal feeds: a subscription can be scoped to a subject, not only an event type.
 pub(crate) const SCHEMA_V29: &str = r#"
@@ -695,7 +706,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 29);
+        assert_eq!(SCHEMA_VERSION, 31);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

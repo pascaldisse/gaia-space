@@ -7,7 +7,18 @@ export type WebhookSubscription={id:string;application_id:string;event_type:stri
 export type WebhookDelivery={id:string;webhook_id:string;payload_json:string;status:"PENDING"|"SUCCEEDED"|"FAILED";attempts:number;response_status:number|null;last_error:string|null;created_at:number;delivered_at:number|null;next_attempt_at:number|null};
 export type ChatbotRegistration={id:string;application_id:string;display_name:string;description:string|null;commands_json:string;enabled:boolean};
 export type UiExtension={id:string;application_id:string;extension_type:string;display_name:string;unique_code:string;iframe_url:string|null;enabled:boolean};
+export type AppSecret={application_id:string;client_id:string;client_secret:string};
+export type AppToken={id:string;application_id:string;scope:string;expires_at:number|null;access_token:string|null};
+export type MarketplaceApp={id:string;name:string;vendor:string;description:string|null;capabilities_json:string;compatibility:string|null;listing_url:string|null};
+export type AppInstall={id:string;marketplace_app_id:string|null;application_id:string;install_kind:"MARKETPLACE"|"LINK"|"MANUAL"|"JENKINS"|"TEAMCITY";installed_by:string|null;installed_at:number};
 export const applicationsApi={
+rotateAppSecret:(application_id:string)=>call<AppSecret>("rotate_app_secret",{applicationId:application_id}),
+issueAppToken:(client_id:string,client_secret:string,scope?:string,ttl_seconds?:number)=>call<AppToken>("issue_app_token",{clientId:client_id,clientSecret:client_secret,scope:scope??null,ttlSeconds:ttl_seconds??null}),
+verifyAppToken:(token:string)=>call<AppToken|null>("verify_app_token",{token}),
+revokeAppToken:(id:string)=>call<void>("revoke_app_token",{id}),
+appTokens:(application_id:string)=>call<AppToken[]>("list_app_tokens",{applicationId:application_id}),
+marketplaceApps:()=>call<MarketplaceApp[]>("list_marketplace_apps"), saveMarketplaceApp:(value:MarketplaceApp)=>call<MarketplaceApp>("save_marketplace_app",{value}),
+installMarketplaceApp:(value:AppInstall)=>call<AppInstall>("install_marketplace_app",{value}), appInstalls:()=>call<AppInstall[]>("list_app_installs"), uninstallApp:(id:string)=>call<void>("uninstall_app",{id}),
  devfiles:(project_id?:string)=>call<Devfile[]>("list_devfiles",{projectId:project_id??null}), saveDevfile:(value:Devfile)=>call<Devfile>("save_devfile",{value}), deleteDevfile:(id:string)=>call<void>("delete_devfile",{id}), openInIde:(repository:string,ide:string)=>call<IdeLaunch>("open_in_ide",{repository,ide}),
  applications:()=>call<Application[]>("list_applications"), saveApplication:(value:Application)=>call<Application>("save_application",{value}), deleteApplication:(id:string)=>call<void>("delete_application",{id}),
  webhooks:(application_id:string)=>call<WebhookSubscription[]>("list_webhooks",{applicationId:application_id}), saveWebhook:(value:WebhookSubscription)=>call<WebhookSubscription>("save_webhook",{value}), deleteWebhook:(id:string)=>call<void>("delete_webhook",{id}), deliverWebhook:(webhook_id:string,payload_json:string)=>call<WebhookDelivery>("deliver_webhook",{webhookId:webhook_id,payloadJson:payload_json}), retryWebhookDelivery:(id:string)=>call<WebhookDelivery>("retry_webhook_delivery",{id}), webhookDeliveries:(webhook_id:string)=>call<WebhookDelivery[]>("list_webhook_deliveries",{webhookId:webhook_id}),

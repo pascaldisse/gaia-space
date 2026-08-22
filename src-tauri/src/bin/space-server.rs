@@ -956,6 +956,16 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_sprints"
         | "list_subscription_settings"
         | "list_subscription_scopes"
+        | "list_app_tokens"
+        | "list_marketplace_apps"
+        | "list_app_installs"
+        | "rotate_app_secret"
+        | "issue_app_token"
+        | "verify_app_token"
+        | "revoke_app_token"
+        | "save_marketplace_app"
+        | "install_marketplace_app"
+        | "uninstall_app"
         | "list_swimlanes" => CommandPolicy::Session,
         "list_team_memberships"
         | "list_teams"
@@ -2240,6 +2250,16 @@ async fn cmd(
     "list_roles" => platform::list_roles(),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
     "list_sprints" => issues::list_sprints(board_id: Option<String>),
+    "list_app_installs" => applications::list_app_installs(),
+    "list_app_tokens" => applications::list_app_tokens(application_id: String),
+    "list_marketplace_apps" => applications::list_marketplace_apps(),
+    "rotate_app_secret" => applications::rotate_app_secret(application_id: String),
+    "issue_app_token" => applications::issue_app_token(client_id: String, client_secret: String, scope: Option<String>, ttl_seconds: Option<i64>),
+    "verify_app_token" => applications::verify_app_token(token: String),
+    "revoke_app_token" => applications::revoke_app_token(id: String),
+    "save_marketplace_app" => applications::save_marketplace_app(value: applications::MarketplaceApp),
+    "install_marketplace_app" => applications::install_marketplace_app(value: applications::AppInstall),
+    "uninstall_app" => applications::uninstall_app(id: String),
     "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
     "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
