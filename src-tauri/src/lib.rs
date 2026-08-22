@@ -310,6 +310,8 @@ pub fn run() {
             pipelines::update_package_repository,
             pipelines::delete_package_repository,
             pipelines::list_package_versions,
+            pipelines::add_package_vulnerability,
+            pipelines::dependency_overview,
             pipelines::publish_package_version,
             pipelines::download_package_payload,
             pipelines::list_package_repository_acl,

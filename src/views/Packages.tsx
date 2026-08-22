@@ -87,6 +87,8 @@ export default function Packages() {
   const [pubMetadata, setPubMetadata] = createSignal("{}");
   const [pubFilename, setPubFilename] = createSignal("");
   const [pubContent, setPubContent] = createSignal("");
+const [pubImmutable, setPubImmutable] = createSignal(false);
+const [overview, setOverview] = createSignal<{ cve_id: string; severity: string; affected_range: string }[] | null>(null);
 
   async function publish(e: SubmitEvent) {
     e.preventDefault();
@@ -104,12 +106,14 @@ export default function Packages() {
         metadataJson: pubMetadata().trim() || "{}",
         payloadFilename: pubFilename().trim() || null,
         payloadContent: pubFilename().trim() ? pubContent() : null,
+immutable: pubImmutable(),
       });
       setPubName("");
       setPubVersion("");
       setPubMetadata("{}");
       setPubFilename("");
       setPubContent("");
+setPubImmutable(false);
       refetchVersions();
     } catch (err) {
       setError(String(err));
@@ -120,7 +124,8 @@ export default function Packages() {
     if (!repo) return;
     try { const removed = await pipelinesApi.applyPackageRetention(repo.id); setError(removed ? `Retention removed ${removed} version(s)` : "Retention found no removable versions"); refetchVersions(); } catch (err) { setError(String(err)); }
   }
-  async function togglePinned(v: PackageVersion) {
+  async function showOverview(v: PackageVersion) { try { setOverview((await pipelinesApi.dependencyOverview(v.id)).vulnerabilities); } catch (err) { setError(String(err)); } }
+async function togglePinned(v: PackageVersion) {
     try { await pipelinesApi.setPackageVersionPinned(v.id, !v.pinned); refetchVersions(); } catch (err) { setError(String(err)); }
   }
   async function deleteVersion(id: string) {
@@ -199,7 +204,8 @@ export default function Packages() {
                     <input placeholder="version" value={pubVersion()} onInput={(e) => setPubVersion(e.currentTarget.value)} />
                     <input placeholder="payload filename (optional)" value={pubFilename()} onInput={(e) => setPubFilename(e.currentTarget.value)} />
                   </div>
-                  <textarea class="meta-input" placeholder="metadata JSON — use formatMetadata for typed registry fields" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
+                  <label><input type="checkbox" checked={pubImmutable()} onChange={(e) => setPubImmutable(e.currentTarget.checked)} /> Immutable version/tag</label>
+<textarea class="meta-input" placeholder="metadata JSON — use formatMetadata for typed registry fields" rows="3" value={pubMetadata()} onInput={(e) => setPubMetadata(e.currentTarget.value)} />
                   <Show when={pubFilename().trim()}>
                     <textarea class="payload-input" placeholder="payload content (stored as text under app-data/packages/…)" rows="3" value={pubContent()} onInput={(e) => setPubContent(e.currentTarget.value)} />
                   </Show>
@@ -220,10 +226,11 @@ export default function Packages() {
                         {(v) => (
                           <tr>
                             <td>{v.package_name}</td>
-                            <td><code>{v.version}</code>{v.pinned && " 📌"}</td>
+                            <td><code>{v.version}</code>{v.pinned && " 📌"}{v.immutable && " 🔒"}</td>
                             <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
                             <td class="row-actions">
                               <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
+<button class="ghost small" onClick={() => showOverview(v)}>CVEs</button>
                               <button class="ghost small" onClick={() => togglePinned(v)}>{v.pinned ? "Unpin" : "Pin"}</button>
                               <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
                             </td>
@@ -233,7 +240,8 @@ export default function Packages() {
                     </tbody>
                   </table>
                 </Show>
-                <Show when={viewingMeta()}>
+                <Show when={overview()}><div class="metadata-view"><header><strong>Dependency vulnerability overview</strong><button class="ghost small" onClick={() => setOverview(null)}>×</button></header><Show when={overview()!.length} fallback={<p class="hint pad">No local CVEs recorded (no-op scanner).</p>}><ul><For each={overview()!}>{(v) => <li><strong>{v.cve_id}</strong> · {v.severity} · {v.affected_range}</li>}</For></ul></Show></div></Show>
+<Show when={viewingMeta()}>
                   {(v) => (
                     <div class="metadata-view">
                       <header>

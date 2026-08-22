@@ -81,7 +81,9 @@ export function allowedDeploymentTransitions(status: string): string[] {
 // ---------- package repositories + versions ----------
 export type PackageRepository = { id: string; project_id: string | null; name: string; format: string; mode: string; description: string | null; archived: boolean; retention_days: number | null; retention_version_count: number | null; retain_downloaded: boolean; access_level: "PRIVATE" | "PROJECT" | "PUBLIC" };
 export type PackageRepositoryAcl = { repository_id: string; profile_id: string; role: "VIEWER" | "WRITER" | "MANAGER" };
-export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; format_metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean };
+export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; format_metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean; immutable: boolean };
+export type PackageVulnerability = { id: string; package_version_id: string; cve_id: string; severity: string; affected_range: string; title: string | null; description: string | null };
+export type DependencyOverview = { version: PackageVersion; vulnerabilities: PackageVulnerability[] };
 
 export const pipelinesApi = {
   // scripts
@@ -124,6 +126,8 @@ export const pipelinesApi = {
   applyPackageRetention: (repositoryId: string) => invoke<number>("apply_package_retention", { repositoryId }),
 
   // package versions
+  addPackageVulnerability: (vulnerability: PackageVulnerability) => invoke<void>("add_package_vulnerability", { vulnerability }),
+  dependencyOverview: (versionId: string) => invoke<DependencyOverview>("dependency_overview", { versionId }),
   listPackageVersions: (repositoryId: string, query?: string) => invoke<PackageVersion[]>("list_package_versions", { repositoryId, query: query ?? null }),
   publishPackageVersion: (args: {
     repositoryId: string;
@@ -132,6 +136,7 @@ export const pipelinesApi = {
     metadataJson?: string | null;
     payloadFilename?: string | null;
     payloadContent?: string | null;
+    immutable?: boolean;
   }) =>
     invoke<PackageVersion>("publish_package_version", {
       repositoryId: args.repositoryId,
@@ -140,6 +145,7 @@ export const pipelinesApi = {
       metadataJson: args.metadataJson ?? null,
       payloadFilename: args.payloadFilename ?? null,
       payloadContent: args.payloadContent ?? null,
+      immutable: args.immutable ?? null,
     }),
   downloadPackagePayload: (repositoryId: string, packageName: string, version: string, filename: string) =>
 invoke<number[]>("download_package_payload", { repositoryId, packageName, version, filename }),

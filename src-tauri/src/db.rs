@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 30;
+pub const SCHEMA_VERSION: i64 = 31;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -213,6 +213,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
     // V30: normalized, format-specific package metadata alongside legacy generic JSON.
     if version < 30 { tx.execute_batch(SCHEMA_V30)?; }
+    if version < 31 { tx.execute_batch(SCHEMA_V31)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -354,6 +355,17 @@ CREATE TABLE IF NOT EXISTS user_totp (user_id TEXT PRIMARY KEY REFERENCES users(
 "#;
 /// V30 owns typed registry metadata. The existing `metadata_json` remains a lossless
 /// generic envelope for compatibility; this column is the validated, per-format projection.
+/// V31: package-version immutability and local vulnerability ledger.
+pub(crate) const SCHEMA_V31: &str = r#"
+ALTER TABLE package_versions ADD COLUMN immutable INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS package_vulnerabilities (
+ id TEXT PRIMARY KEY, package_version_id TEXT NOT NULL REFERENCES package_versions(id) ON DELETE CASCADE,
+ cve_id TEXT NOT NULL, severity TEXT NOT NULL, affected_range TEXT NOT NULL, title TEXT, description TEXT,
+ UNIQUE(package_version_id, cve_id, affected_range)
+);
+CREATE INDEX IF NOT EXISTS package_vulnerabilities_version ON package_vulnerabilities(package_version_id);
+"#;
+
 pub(crate) const SCHEMA_V30: &str = r#"
 ALTER TABLE package_versions ADD COLUMN format_metadata_json TEXT;
 "#;
@@ -696,7 +708,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 30);
+        assert_eq!(SCHEMA_VERSION, 31);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
