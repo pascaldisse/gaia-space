@@ -413,7 +413,20 @@ pub fn save_document(
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    get_document(id)?.ok_or_else(|| "document vanished after save".to_string())
+    let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
+    document_event("DocumentWebhookEvent", &doc);
+    Ok(doc)
+}
+
+/// Webhook fan-out envelope: `{"event": …, "document": …}`; subscription filters address
+/// it by dot-path, e.g. `"document.title"`. Second domain in the cross-domain taxonomy
+/// (issues being the first). Best effort after commit — a subscriber problem must never
+/// undo a user's document edit.
+fn document_event(event_type: &str, doc: &Document) {
+    let payload = serde_json::json!({ "event": event_type, "document": doc });
+    if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
+        eprintln!("webhook fan-out for {event_type} failed: {e}");
+    }
 }
 
 fn row_to_doc_version(r: &rusqlite::Row) -> rusqlite::Result<DocVersion> {

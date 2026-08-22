@@ -1560,6 +1560,78 @@ mod delivery_tests {
         assert_eq!(payload["issue"]["priority"], "HIGH");
     }
 
+    /// The taxonomy is cross-domain: a document write fans out on its own event name
+    /// and must not land in an issue subscription's queue.
+    #[test]
+    fn a_document_write_enqueues_only_its_own_domain_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("doc-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        save_application(Application {
+            id: "app-doc".into(),
+            name: "Doc app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some("https://example.test/hook".into()),
+            client_id: "doc-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        let hook = |id: &str, event: &str, filters: &str| WebhookSubscription {
+            id: id.into(),
+            application_id: "app-doc".into(),
+            event_type: event.into(),
+            filters_json: Some(filters.into()),
+            endpoint_uri: "https://example.test/hook".into(),
+            enabled: true,
+            secret: None,
+            max_attempts: 5,
+        };
+        save_webhook(hook(
+            "hook-doc",
+            "DocumentWebhookEvent",
+            r#"{"document.doc_type":"text"}"#,
+        ))
+        .expect("doc hook");
+        save_webhook(hook("hook-issue", "issue.created", "{}")).expect("issue hook");
+
+        let c = db::conn().expect("db");
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version) VALUES('doc-1','my-docs','p1','text','Draft','body',1)", []).expect("doc row");
+        drop(c);
+        crate::documents::save_document(
+            "doc-1".into(),
+            "Draft v2".into(),
+            Some("body v2".into()),
+            None,
+        )
+        .expect("save");
+
+        let c = db::conn().expect("db");
+        let targets: Vec<String> = c
+            .prepare("SELECT webhook_id FROM webhook_deliveries ORDER BY webhook_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(targets, vec!["hook-doc".to_string()]);
+        let payload: String = c
+            .query_row(
+                "SELECT payload_json FROM webhook_deliveries WHERE webhook_id='hook-doc'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("delivery row");
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(payload["event"], "DocumentWebhookEvent");
+        assert_eq!(payload["document"]["title"], "Draft v2");
+    }
+
     /// Validation runs before any DB access, so these need no database.
     #[test]
     fn undecidable_filters_are_refused_on_save() {

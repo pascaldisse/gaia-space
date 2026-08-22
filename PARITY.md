@@ -18,7 +18,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☀ — merged
 - V41 → feat/w3-secrot (webhook secret rotation / key-ring) ☘
 
-TOTALS (8/8 audited, 356 rows): done 42 · partial 152 · stub 21 · missing 141. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 42 · partial 154 · stub 19 · missing 141. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -51,7 +51,7 @@ Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29
 Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
-42 rows — done 0 · partial 10 · stub 17 · missing 15.
+42 rows — done 0 · partial 12 · stub 15 · missing 15.
 Progress (feat/w2-feeds-oauth @64ec368): app OAuth client_credentials grant (SCHEMA_V31 `app_secrets`/`app_tokens`, argon2-hashed secret+token, TTL, rotation revokes outstanding tokens, verify/revoke/list) + marketplace listing metadata and install records (`marketplace_apps`, `app_installs` with MARKETPLACE/LINK/MANUAL/JENKINS/TEAMCITY kinds), wired to Applications view ⇒ “App OAuth flows/credentials” stub→partial, “Marketplace app metadata” + “AppInstallInfo install flows” missing→partial. Tests: `applications::oauth_tests::*` (4) + HTTP regression `space-server::tests::app_credentials_are_admin_only`. Web policy: credential commands (rotate/issue/verify/revoke/list + marketplace writes) are `CommandPolicy::AppAdmin` — admin-only, since `applications` has no owner column (☾Kali finding). Webhook delivery/retry=partial: receiver replay guide `docs/webhook-receiver-guide.md:25-32`; durable delivery-ID header `src-tauri/src/applications.rs:352`; retry assertion `src-tauri/src/applications.rs:1044-1065`. UNVERIFIED: no external HTTP API surface consumes the bearer token yet; PKCE/code flow still absent.
 Worst gaps: devfile/deep-links unwired · automatic domain-event webhook/chatbot/extension dispatch incomplete · no external HTTP app API · no slash-command/app-rights integration.
 
