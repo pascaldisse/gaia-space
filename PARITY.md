@@ -4,47 +4,44 @@ Sources: docs/space-knowledge-base/01→08 (KB) + legacy/flutter/ (legacy). Stat
 
 Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 99 pass/0 fail · vite build ✓.
 
+LEDGER (衝突禁 · same-domain double-start forbidden): ☀build-crown → 07→01→02→04→06→08 · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (worktree ../gaia-space-auth, branch feat/parity-05-auth).
+
+TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
+
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
-## 01 Git & Code Review (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB01 | UNVERIFIED | |
+## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md @ 88a03d7)
+52 rows — done 2 · partial 20 · stub 1 · missing 29.
+Worst gaps: Safe Merge (preview only, no CI/final merge) · protected-branch permissions · CODEOWNERS · stacked reviews · quality gates CI/external checks.
 
-## 02 Planning / Issues / Boards (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB02 | UNVERIFIED | |
+## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
+33 rows — done 6 · partial 16 · stub 1 · missing 10.
+Worst gaps: custom-field types incomplete · swimlanes backend-only · board card config · matrix reports · external tracker integration.
 
-## 03 Packages & CI/CD & Deployments (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB03 | UNVERIFIED | |
+## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
+49 rows — done 2 · partial 14 · stub 1 · missing 32.
+Worst gaps: per-format registry protocols · retention/immutability/CVE/ACLs · workers/artifacts/test-reporting · non-manual triggers+DSL · deployment integrations/webhooks.
 
-## 04 Chat / Documents / Meetings / Calendar (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB04 | UNVERIFIED | |
+## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
+61 rows — done 8 · partial 30 · missing 21.
+Worst gaps: chat attachments/mentions/scheduled/pins/polls · doc sharing+KB permissions/search · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
 
-## 05 Platform / Auth / Permissions (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB05 | UNVERIFIED | |
+## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
+32 rows — done 3 · partial 12 · missing 17.
+Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
 
-## 06 Personal / Org (todo, absences, profile) (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB06 | UNVERIFIED | |
+## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
+54 rows — done 2 · partial 20 · stub 3 · missing 29.
+Worst gaps: blogs absent · locations/org-directory stub · full-text search absent (Goto=substring) · dashboard personalization · subscription/feeds system.
 
-## 07 Dev Env / Apps / HTTP API (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB07 | UNVERIFIED | |
+## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
+42 rows — done 0 · partial 6 · stub 19 · missing 17.
+Worst gaps: devfile/deep-links unwired · apps/webhooks/chatbots/extensions backend unreachable from UI · no app OAuth/HTTP-API/marketplace · no webhook delivery/retry · no slash-command/app-rights integration.
 
-## 08 Video Calls / Meet (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB08 | UNVERIFIED | |
+## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)
+35 rows — done 10 · partial 12 · missing 13.
+Worst gaps: recording/egress · lobby/admission · remote audio playback · persistent video_provider · call lifecycle model.
+Note: lane reported 1 dashboard test fail; independent re-run (crown) = 99 pass/0 fail — not reproduced.
 
 ## Legacy-Flutter features (cross-cutting; owned by lane 01 unless noted)
 | feature | legacy path | status | evidence |

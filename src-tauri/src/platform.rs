@@ -73,17 +73,17 @@ pub fn list_profiles() -> Result<Vec<Profile>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_profile( id: String) -> Result<Option<Profile>> {
+pub fn get_profile(id: String) -> Result<Option<Profile>> {
     Ok(list_profiles()?.into_iter().find(|x| x.id == id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_profile( profile: Profile) -> Result<()> {
+pub fn create_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_profile( profile: Profile) -> Result<()> {
+pub fn update_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE profiles SET username=?2,display_name=?3,email=?4,archived=?5 WHERE id=?1",
@@ -167,11 +167,11 @@ pub fn list_teams() -> Result<Vec<Team>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_team( id: String) -> Result<Option<Team>> {
+pub fn get_team(id: String) -> Result<Option<Team>> {
     Ok(list_teams()?.into_iter().find(|x| x.id == id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_team( input: TeamInput) -> Result<Team> {
+pub fn create_team(input: TeamInput) -> Result<Team> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("team"));
     err(c.execute(
@@ -181,7 +181,7 @@ pub fn create_team( input: TeamInput) -> Result<Team> {
     get_team(id)?.ok_or_else(|| "Created team was not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_team( team: Team) -> Result<Team> {
+pub fn update_team(team: Team) -> Result<Team> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE teams SET name=?2,description=?3,parent_id=?4,archived=?5 WHERE id=?1",
@@ -196,7 +196,7 @@ pub fn update_team( team: Team) -> Result<Team> {
     get_team(team.id)?.ok_or_else(|| "Team not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn archive_team( id: String, archived: bool) -> Result<()> {
+pub fn archive_team(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE teams SET archived=?2 WHERE id=?1",
@@ -219,7 +219,8 @@ fn read_membership(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamMembership> {
         archived: r.get(9)?,
     })
 }
-const MEMBERSHIP_COLUMNS: &str = "id,profile_id,team_id,role_id,lead,manager_id,since_date,till_date,requires_approval,archived";
+const MEMBERSHIP_COLUMNS: &str =
+    "id,profile_id,team_id,role_id,lead,manager_id,since_date,till_date,requires_approval,archived";
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_team_memberships(
     team_id: Option<String>,
@@ -234,7 +235,7 @@ pub fn list_team_memberships(
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn add_team_membership( input: TeamMembershipInput) -> Result<TeamMembership> {
+pub fn add_team_membership(input: TeamMembershipInput) -> Result<TeamMembership> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("membership"));
     err(c.execute(
@@ -245,7 +246,7 @@ pub fn add_team_membership( input: TeamMembershipInput) -> Result<TeamMembership
     err(c.query_row(&sql, [&id], read_membership))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_team_membership( membership: TeamMembership) -> Result<()> {
+pub fn update_team_membership(membership: TeamMembership) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE team_memberships SET role_id=?2,lead=?3,manager_id=?4,since_date=?5,till_date=?6,requires_approval=?7,archived=?8 WHERE id=?1",
@@ -254,7 +255,7 @@ pub fn update_team_membership( membership: TeamMembership) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn remove_team_membership( id: String) -> Result<()> {
+pub fn remove_team_membership(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM team_memberships WHERE id=?1", [id]))?;
     Ok(())
@@ -268,54 +269,342 @@ pub fn remove_team_membership( id: String) -> Result<()> {
 /// of Space's ~150 concrete `Right` classes, one row per RightType (scope).
 /// Codes are namespaced `<RightType>.<Name>` so they stay unique across types.
 const RIGHTS_CATALOG: &[(&str, &str, &str, &str, &str)] = &[
-    ("Global.Superadmin", "Superadmin", "Full organization administration.", "Global", "Permissions"),
-    ("Global.CreateProjects", "Create projects", "Create new projects in the organization.", "Global", "Project"),
-    ("Global.AddNewProfile", "Add member profile", "Add a new member account.", "Global", "Members"),
-    ("Global.AddNewTeam", "Add team", "Create a new team in the org directory.", "Global", "Teams"),
-    ("Global.EditRoles", "Edit roles", "Create/edit custom roles and their rights.", "Global", "Permissions"),
-    ("Global.ViewRoles", "View roles", "View the roles catalog.", "Global", "Permissions"),
-    ("Global.ViewTeams", "View teams", "View the team directory.", "Global", "Teams"),
-    ("Global.EditOrganizationInfo", "Edit organization info", "Edit org name/logo/settings.", "Global", "Organization"),
-    ("Global.ViewOrganizationInfo", "View organization info", "View org name/logo/settings.", "Global", "Organization"),
-    ("Global.ManageAuthModule", "Manage auth modules", "Configure login modules.", "Global", "AuthenticationModules"),
-    ("Global.EditCustomFields", "Edit global custom fields", "Manage cross-entity custom field definitions.", "Global", "GlobalCustomFields"),
-    ("Global.OrgMember", "Organization member", "Baseline membership right held by every account.", "Global", "Members"),
-    ("Project.ViewProject", "View project", "View a project and its contents.", "Project", "Project"),
-    ("Project.AdminProject", "Administer project", "Manage project settings and membership.", "Project", "Project"),
-    ("Project.VcsRead", "Read repository", "Read a project's Git repositories.", "Project", "VcsRepositories"),
-    ("Project.VcsWrite", "Write repository", "Push to a project's Git repositories.", "Project", "VcsRepositories"),
-    ("Project.VcsAdmin", "Administer repository", "Manage repository settings/branch protection.", "Project", "VcsRepositories"),
-    ("Project.ViewCodeReview", "View code review", "View merge requests/code reviews.", "Project", "CodeReview"),
-    ("Project.CreateCodeReview", "Create code review", "Open merge requests/code reviews.", "Project", "CodeReview"),
-    ("Project.EditCodeReview", "Edit code review", "Edit/merge code reviews.", "Project", "CodeReview"),
-    ("Project.ViewSecretKeys", "View secrets", "View project secret names.", "Project", "ProjectSecrets"),
-    ("Project.CreateSecrets", "Create secrets", "Create project secrets.", "Project", "ProjectSecrets"),
-    ("Project.ViewParameters", "View parameters", "View automation parameters.", "Project", "ProjectParameters"),
-    ("Project.ModifyParameters", "Modify parameters", "Edit automation parameters.", "Project", "ProjectParameters"),
-    ("Team.ViewTeamMembers", "View team members", "View a team's member list.", "Team", "TeamMembers"),
-    ("Team.ManageTeamMembers", "Manage team members", "Add/remove team members.", "Team", "TeamMembers"),
-    ("Team.EditTeam", "Edit team", "Edit team name/description/parent.", "Team", "Teams"),
-    ("Team.DeleteTeam", "Delete team", "Archive/delete a team.", "Team", "Teams"),
-    ("Profile.ViewProfile", "View profile", "View a member's full profile.", "Profile", "Members"),
-    ("Profile.ViewProfileBasic", "View basic profile", "View a member's basic info.", "Profile", "Members"),
-    ("Profile.EditProfile", "Edit profile", "Edit a member's profile.", "Profile", "Members"),
-    ("Profile.DeleteProfile", "Delete profile", "Remove a member profile.", "Profile", "Members"),
-    ("Profile.ViewAbsences", "View absences", "View a member's absences.", "Profile", "MemberAbsences"),
-    ("Profile.EditAbsences", "Edit absences", "Edit a member's absences.", "Profile", "MemberAbsences"),
-    ("Profile.ApproveAbsences", "Approve absences", "Approve a member's absence requests.", "Profile", "MemberAbsences"),
-    ("Profile.CreatePermanentTokens", "Create permanent tokens", "Create personal permanent tokens.", "Profile", "MemberPermanentTokens"),
-    ("Profile.SetUpTwoFactorAuthentication", "Set up 2FA", "Enable two-factor authentication.", "Profile", "TwoFactorAuthentication"),
-    ("Channel.ViewChannel", "View channel", "View a chat channel and its messages.", "Channel", "Channels"),
-    ("Channel.PostMessages", "Post messages", "Send messages in a channel.", "Channel", "Chat"),
-    ("Channel.ManageChannel", "Manage channel", "Edit channel settings/membership.", "Channel", "Channels"),
-    ("Channel.DeleteChannel", "Delete channel", "Archive/delete a channel.", "Channel", "Channels"),
-    ("Document.ViewDocuments", "View documents", "View documents in a container.", "Document", "Documents"),
-    ("Document.CreateDocuments", "Create documents", "Create new documents.", "Document", "Documents"),
-    ("Document.EditDocuments", "Edit documents", "Edit document content.", "Document", "Documents"),
-    ("Document.DeleteDocumentsForever", "Delete documents forever", "Permanently delete documents.", "Document", "Documents"),
-    ("Document.ManageDocuments", "Manage documents", "Move/archive/share documents.", "Document", "Documents"),
-    ("DocumentFolder.ViewFoldersMetadata", "View folder metadata", "View folder names/hierarchy.", "DocumentFolder", "Documents"),
-    ("DocumentFolder.ManageDocumentFolders", "Manage folders", "Create/rename/move folders.", "DocumentFolder", "Documents"),
+    (
+        "Global.Superadmin",
+        "Superadmin",
+        "Full organization administration.",
+        "Global",
+        "Permissions",
+    ),
+    (
+        "Global.CreateProjects",
+        "Create projects",
+        "Create new projects in the organization.",
+        "Global",
+        "Project",
+    ),
+    (
+        "Global.AddNewProfile",
+        "Add member profile",
+        "Add a new member account.",
+        "Global",
+        "Members",
+    ),
+    (
+        "Global.AddNewTeam",
+        "Add team",
+        "Create a new team in the org directory.",
+        "Global",
+        "Teams",
+    ),
+    (
+        "Global.EditRoles",
+        "Edit roles",
+        "Create/edit custom roles and their rights.",
+        "Global",
+        "Permissions",
+    ),
+    (
+        "Global.ViewRoles",
+        "View roles",
+        "View the roles catalog.",
+        "Global",
+        "Permissions",
+    ),
+    (
+        "Global.ViewTeams",
+        "View teams",
+        "View the team directory.",
+        "Global",
+        "Teams",
+    ),
+    (
+        "Global.EditOrganizationInfo",
+        "Edit organization info",
+        "Edit org name/logo/settings.",
+        "Global",
+        "Organization",
+    ),
+    (
+        "Global.ViewOrganizationInfo",
+        "View organization info",
+        "View org name/logo/settings.",
+        "Global",
+        "Organization",
+    ),
+    (
+        "Global.ManageAuthModule",
+        "Manage auth modules",
+        "Configure login modules.",
+        "Global",
+        "AuthenticationModules",
+    ),
+    (
+        "Global.EditCustomFields",
+        "Edit global custom fields",
+        "Manage cross-entity custom field definitions.",
+        "Global",
+        "GlobalCustomFields",
+    ),
+    (
+        "Global.OrgMember",
+        "Organization member",
+        "Baseline membership right held by every account.",
+        "Global",
+        "Members",
+    ),
+    (
+        "Project.ViewProject",
+        "View project",
+        "View a project and its contents.",
+        "Project",
+        "Project",
+    ),
+    (
+        "Project.AdminProject",
+        "Administer project",
+        "Manage project settings and membership.",
+        "Project",
+        "Project",
+    ),
+    (
+        "Project.VcsRead",
+        "Read repository",
+        "Read a project's Git repositories.",
+        "Project",
+        "VcsRepositories",
+    ),
+    (
+        "Project.VcsWrite",
+        "Write repository",
+        "Push to a project's Git repositories.",
+        "Project",
+        "VcsRepositories",
+    ),
+    (
+        "Project.VcsAdmin",
+        "Administer repository",
+        "Manage repository settings/branch protection.",
+        "Project",
+        "VcsRepositories",
+    ),
+    (
+        "Project.ViewCodeReview",
+        "View code review",
+        "View merge requests/code reviews.",
+        "Project",
+        "CodeReview",
+    ),
+    (
+        "Project.CreateCodeReview",
+        "Create code review",
+        "Open merge requests/code reviews.",
+        "Project",
+        "CodeReview",
+    ),
+    (
+        "Project.EditCodeReview",
+        "Edit code review",
+        "Edit/merge code reviews.",
+        "Project",
+        "CodeReview",
+    ),
+    (
+        "Project.ViewSecretKeys",
+        "View secrets",
+        "View project secret names.",
+        "Project",
+        "ProjectSecrets",
+    ),
+    (
+        "Project.CreateSecrets",
+        "Create secrets",
+        "Create project secrets.",
+        "Project",
+        "ProjectSecrets",
+    ),
+    (
+        "Project.ViewParameters",
+        "View parameters",
+        "View automation parameters.",
+        "Project",
+        "ProjectParameters",
+    ),
+    (
+        "Project.ModifyParameters",
+        "Modify parameters",
+        "Edit automation parameters.",
+        "Project",
+        "ProjectParameters",
+    ),
+    (
+        "Team.ViewTeamMembers",
+        "View team members",
+        "View a team's member list.",
+        "Team",
+        "TeamMembers",
+    ),
+    (
+        "Team.ManageTeamMembers",
+        "Manage team members",
+        "Add/remove team members.",
+        "Team",
+        "TeamMembers",
+    ),
+    (
+        "Team.EditTeam",
+        "Edit team",
+        "Edit team name/description/parent.",
+        "Team",
+        "Teams",
+    ),
+    (
+        "Team.DeleteTeam",
+        "Delete team",
+        "Archive/delete a team.",
+        "Team",
+        "Teams",
+    ),
+    (
+        "Profile.ViewProfile",
+        "View profile",
+        "View a member's full profile.",
+        "Profile",
+        "Members",
+    ),
+    (
+        "Profile.ViewProfileBasic",
+        "View basic profile",
+        "View a member's basic info.",
+        "Profile",
+        "Members",
+    ),
+    (
+        "Profile.EditProfile",
+        "Edit profile",
+        "Edit a member's profile.",
+        "Profile",
+        "Members",
+    ),
+    (
+        "Profile.DeleteProfile",
+        "Delete profile",
+        "Remove a member profile.",
+        "Profile",
+        "Members",
+    ),
+    (
+        "Profile.ViewAbsences",
+        "View absences",
+        "View a member's absences.",
+        "Profile",
+        "MemberAbsences",
+    ),
+    (
+        "Profile.EditAbsences",
+        "Edit absences",
+        "Edit a member's absences.",
+        "Profile",
+        "MemberAbsences",
+    ),
+    (
+        "Profile.ApproveAbsences",
+        "Approve absences",
+        "Approve a member's absence requests.",
+        "Profile",
+        "MemberAbsences",
+    ),
+    (
+        "Profile.CreatePermanentTokens",
+        "Create permanent tokens",
+        "Create personal permanent tokens.",
+        "Profile",
+        "MemberPermanentTokens",
+    ),
+    (
+        "Profile.SetUpTwoFactorAuthentication",
+        "Set up 2FA",
+        "Enable two-factor authentication.",
+        "Profile",
+        "TwoFactorAuthentication",
+    ),
+    (
+        "Channel.ViewChannel",
+        "View channel",
+        "View a chat channel and its messages.",
+        "Channel",
+        "Channels",
+    ),
+    (
+        "Channel.PostMessages",
+        "Post messages",
+        "Send messages in a channel.",
+        "Channel",
+        "Chat",
+    ),
+    (
+        "Channel.ManageChannel",
+        "Manage channel",
+        "Edit channel settings/membership.",
+        "Channel",
+        "Channels",
+    ),
+    (
+        "Channel.DeleteChannel",
+        "Delete channel",
+        "Archive/delete a channel.",
+        "Channel",
+        "Channels",
+    ),
+    (
+        "Document.ViewDocuments",
+        "View documents",
+        "View documents in a container.",
+        "Document",
+        "Documents",
+    ),
+    (
+        "Document.CreateDocuments",
+        "Create documents",
+        "Create new documents.",
+        "Document",
+        "Documents",
+    ),
+    (
+        "Document.EditDocuments",
+        "Edit documents",
+        "Edit document content.",
+        "Document",
+        "Documents",
+    ),
+    (
+        "Document.DeleteDocumentsForever",
+        "Delete documents forever",
+        "Permanently delete documents.",
+        "Document",
+        "Documents",
+    ),
+    (
+        "Document.ManageDocuments",
+        "Manage documents",
+        "Move/archive/share documents.",
+        "Document",
+        "Documents",
+    ),
+    (
+        "DocumentFolder.ViewFoldersMetadata",
+        "View folder metadata",
+        "View folder names/hierarchy.",
+        "DocumentFolder",
+        "Documents",
+    ),
+    (
+        "DocumentFolder.ManageDocumentFolders",
+        "Manage folders",
+        "Create/rename/move folders.",
+        "DocumentFolder",
+        "Documents",
+    ),
 ];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -407,11 +696,11 @@ pub fn list_roles() -> Result<Vec<Role>> {
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_role( id: String) -> Result<Option<Role>> {
+pub fn get_role(id: String) -> Result<Option<Role>> {
     Ok(list_roles()?.into_iter().find(|x| x.id == id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_role( input: RoleInput) -> Result<Role> {
+pub fn create_role(input: RoleInput) -> Result<Role> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("role"));
     err(c.execute(
@@ -427,7 +716,7 @@ pub fn create_role( input: RoleInput) -> Result<Role> {
     get_role(id)?.ok_or_else(|| "Created role was not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_role( role: Role) -> Result<Role> {
+pub fn update_role(role: Role) -> Result<Role> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE roles SET name=?2,description=?3,parent_id=?4,role_type=?5,archived=?6 WHERE id=?1",
@@ -443,7 +732,7 @@ pub fn update_role( role: Role) -> Result<Role> {
     get_role(role.id)?.ok_or_else(|| "Role not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn archive_role( id: String, archived: bool) -> Result<()> {
+pub fn archive_role(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE roles SET archived=?2 WHERE id=?1",
@@ -452,7 +741,7 @@ pub fn archive_role( id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_role_rights( role_id: String) -> Result<Vec<String>> {
+pub fn list_role_rights(role_id: String) -> Result<Vec<String>> {
     let c = db::conn()?;
     let mut s = err(c.prepare(
         "SELECT r.code FROM role_rights rr JOIN rights r ON r.id=rr.right_id WHERE rr.role_id=?1 ORDER BY r.code",
@@ -465,7 +754,7 @@ pub fn list_role_rights( role_id: String) -> Result<Vec<String>> {
 /// Replaces the full set of rights a role grants with `right_codes` (idempotent
 /// full-replace; unknown codes fail the whole call rather than silently no-op).
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn set_role_rights( role_id: String, right_codes: Vec<String>) -> Result<()> {
+pub fn set_role_rights(role_id: String, right_codes: Vec<String>) -> Result<()> {
     let mut c = db::conn()?;
     let tx = err(c.transaction())?;
     err(tx.execute("DELETE FROM role_rights WHERE role_id=?1", [&role_id]))?;
@@ -534,7 +823,7 @@ pub fn list_role_assignments(
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_role_assignment( input: RoleAssignmentInput) -> Result<RoleAssignment> {
+pub fn create_role_assignment(input: RoleAssignmentInput) -> Result<RoleAssignment> {
     if input.profile_id.is_none() == input.team_id.is_none() {
         return Err("Assign the role to exactly one of profile_id or team_id".into());
     }
@@ -548,7 +837,7 @@ pub fn create_role_assignment( input: RoleAssignmentInput) -> Result<RoleAssignm
     err(c.query_row(&sql, [&id], read_assignment))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_role_assignment( id: String) -> Result<()> {
+pub fn delete_role_assignment(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM role_assignments WHERE id=?1", [id]))?;
     Ok(())
@@ -611,7 +900,13 @@ pub fn check_right(
     scope_id: Option<String>,
 ) -> Result<bool> {
     let c = db::conn()?;
-    check_right_on(&c, &profile_id, &right_code, &scope_type, scope_id.as_deref())
+    check_right_on(
+        &c,
+        &profile_id,
+        &right_code,
+        &scope_type,
+        scope_id.as_deref(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -652,11 +947,11 @@ pub fn list_projects() -> Result<Vec<Project>> {
     rows
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_project( id: String) -> Result<Option<Project>> {
+pub fn get_project(id: String) -> Result<Option<Project>> {
     Ok(list_projects()?.into_iter().find(|x| x.id == id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_project( project: Project) -> Result<()> {
+pub fn create_project(project: Project) -> Result<()> {
     let c = db::conn()?;
     create_project_on(&c, project)
 }
@@ -666,15 +961,22 @@ pub fn create_project( project: Project) -> Result<()> {
 /// not a row we silently accept (a NULL owner locks the project out of every
 /// owner-or-admin gate forever).
 pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
-    let owner = project.created_by.as_deref().map(str::trim).filter(|o| !o.is_empty())
+    let owner = project
+        .created_by
+        .as_deref()
+        .map(str::trim)
+        .filter(|o| !o.is_empty())
         .ok_or("A project owner is required")?
         .to_string();
-    let project = Project { created_by: Some(owner), ..project };
+    let project = Project {
+        created_by: Some(owner),
+        ..project
+    };
     c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty())]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_project( project: Project) -> Result<()> {
+pub fn update_project(project: Project) -> Result<()> {
     let c = db::conn()?;
     c.execute(
         "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7 WHERE id=?1",
@@ -698,7 +1000,11 @@ pub fn update_project( project: Project) -> Result<()> {
 /// command gate; this function refuses anything that is not a valid `YYYY-MM-DD` date
 /// or an explicit clear, and never invents a project row.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>) -> Result<Project> {
+pub fn set_project_deadline(
+    project_id: String,
+    deadline: Option<String>,
+    actor_profile_id: Option<String>,
+) -> Result<Project> {
     let c = db::conn()?;
     // Desktop passes its local identity; web passes none because the HTTP
     // command gate already authorized the session before dispatch.
@@ -729,11 +1035,19 @@ fn account_is_live(c: &Connection, profile_id: &str) -> Result<bool> {
 /// on every transport; a deactivated account confers nothing. Every gate — the HTTP
 /// command gate and the desktop authorizers alike — asks this function.
 pub fn is_admin_on(c: &Connection, profile_id: &str) -> Result<bool> {
-    if profile_id.trim().is_empty() { return Ok(false); }
+    if profile_id.trim().is_empty() {
+        return Ok(false);
+    }
     let by_account: bool = c
-        .query_row("SELECT EXISTS(SELECT 1 FROM users WHERE profile_id=?1 AND role='admin' AND active=1)", [profile_id], |r| r.get(0))
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE profile_id=?1 AND role='admin' AND active=1)",
+            [profile_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
-    if by_account { return Ok(true); }
+    if by_account {
+        return Ok(true);
+    }
     check_right_on(c, profile_id, "Global.Superadmin", "global", None)
 }
 
@@ -743,19 +1057,39 @@ pub fn is_admin(profile_id: String) -> Result<bool> {
     is_admin_on(&c, &profile_id)
 }
 
-pub fn authorize_project_deadline_on(c: &Connection, actor_profile_id: &str, project_id: &str) -> Result<()> {
-    if actor_profile_id.trim().is_empty() { return Err("A profile is required".into()); }
+pub fn authorize_project_deadline_on(
+    c: &Connection,
+    actor_profile_id: &str,
+    project_id: &str,
+) -> Result<()> {
+    if actor_profile_id.trim().is_empty() {
+        return Err("A profile is required".into());
+    }
     let owner: Option<Option<String>> = c
-        .query_row("SELECT created_by FROM projects WHERE id=?1", [project_id], |r| r.get(0))
+        .query_row(
+            "SELECT created_by FROM projects WHERE id=?1",
+            [project_id],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
     let owner = owner.ok_or_else(|| "project access denied".to_string())?;
-    if owner.as_deref() == Some(actor_profile_id) { return Ok(()); }
-    if is_admin_on(c, actor_profile_id)? { return Ok(()); }
+    if owner.as_deref() == Some(actor_profile_id) {
+        return Ok(());
+    }
+    if is_admin_on(c, actor_profile_id)? {
+        return Ok(());
+    }
     Err("only the project owner or an admin can set this deadline".into())
 }
-pub fn set_project_deadline_on(c: &Connection, project_id: &str, deadline: Option<&str>) -> Result<Project> {
-    if project_id.trim().is_empty() { return Err("A project is required".into()); }
+pub fn set_project_deadline_on(
+    c: &Connection,
+    project_id: &str,
+    deadline: Option<&str>,
+) -> Result<Project> {
+    if project_id.trim().is_empty() {
+        return Err("A project is required".into());
+    }
     let normalized = match deadline.map(str::trim).filter(|date| !date.is_empty()) {
         Some(date) => Some(crate::personal::parse_day_key(date)?),
         None => None,
@@ -770,7 +1104,11 @@ pub fn set_project_deadline_on(c: &Connection, project_id: &str, deadline: Optio
         .map_err(|e| e.to_string())?;
     if changed == 0 {
         let existing: Option<Option<String>> = c
-            .query_row("SELECT deadline FROM projects WHERE id=?1", [project_id], |r| r.get(0))
+            .query_row(
+                "SELECT deadline FROM projects WHERE id=?1",
+                [project_id],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|e| e.to_string())?;
         return match existing {
@@ -799,7 +1137,12 @@ pub fn update_project_deadline(
     if let Some(actor) = actor_profile_id.as_deref() {
         authorize_project_deadline_on(&c, actor, &project_id)?;
     }
-    update_project_deadline_on(&c, &project_id, expected_deadline.as_deref(), deadline.as_deref())
+    update_project_deadline_on(
+        &c,
+        &project_id,
+        expected_deadline.as_deref(),
+        deadline.as_deref(),
+    )
 }
 
 pub fn update_project_deadline_on(
@@ -808,7 +1151,9 @@ pub fn update_project_deadline_on(
     expected_deadline: Option<&str>,
     deadline: Option<&str>,
 ) -> Result<Project> {
-    if project_id.trim().is_empty() { return Err("A project is required".into()); }
+    if project_id.trim().is_empty() {
+        return Err("A project is required".into());
+    }
     let normalize = |value: Option<&str>| -> Result<Option<String>> {
         match value.map(str::trim).filter(|date| !date.is_empty()) {
             Some(date) => Ok(Some(crate::personal::parse_day_key(date)?)),
@@ -831,7 +1176,9 @@ pub fn update_project_deadline_on(
         // unknown ids with the same 403 every non-owner gets.
         return match project_on(c, project_id)? {
             None => Err("project access denied".into()),
-            Some(_) => Err("That deadline changed since you loaded it; reload and try again".into()),
+            Some(_) => {
+                Err("That deadline changed since you loaded it; reload and try again".into())
+            }
         };
     }
     project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
@@ -841,7 +1188,17 @@ pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
         "SELECT id,name,key,description,created_by,archived,deadline FROM projects WHERE id=?1",
         [project_id],
-        |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, key: r.get(2)?, description: r.get(3)?, created_by: r.get(4)?, archived: r.get(5)?, deadline: r.get(6)? }),
+        |r| {
+            Ok(Project {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                key: r.get(2)?,
+                description: r.get(3)?,
+                created_by: r.get(4)?,
+                archived: r.get(5)?,
+                deadline: r.get(6)?,
+            })
+        },
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -924,7 +1281,11 @@ fn validate_cf_shape(cf_type: &str, constraints_json: Option<&str>) -> Result<()
 /// (min/max length or numeric range, ISO date parse, enum option membership,
 /// boolean type). `profile` referential existence is checked by the caller
 /// (needs a live connection to `profiles`).
-fn validate_cf_value(cf_type: &str, constraints_json: Option<&str>, value_json: &str) -> Result<serde_json::Value> {
+fn validate_cf_value(
+    cf_type: &str,
+    constraints_json: Option<&str>,
+    value_json: &str,
+) -> Result<serde_json::Value> {
     let value: serde_json::Value =
         serde_json::from_str(value_json).map_err(|e| format!("Invalid JSON value: {e}"))?;
     let constraints: serde_json::Value = match constraints_json {
@@ -994,7 +1355,7 @@ fn validate_cf_value(cf_type: &str, constraints_json: Option<&str>, value_json: 
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_cf_definitions( entity_type: Option<String>) -> Result<Vec<CfDefinition>> {
+pub fn list_cf_definitions(entity_type: Option<String>) -> Result<Vec<CfDefinition>> {
     let c = db::conn()?;
     let sql = format!("SELECT {CF_DEF_COLUMNS} FROM cf_definitions WHERE archived=0 AND (?1 IS NULL OR entity_type=?1) ORDER BY entity_type,ordering");
     let mut s = err(c.prepare(&sql))?;
@@ -1004,7 +1365,7 @@ pub fn list_cf_definitions( entity_type: Option<String>) -> Result<Vec<CfDefinit
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_cf_definition( input: CfDefinitionInput) -> Result<CfDefinition> {
+pub fn create_cf_definition(input: CfDefinitionInput) -> Result<CfDefinition> {
     validate_cf_shape(&input.cf_type, input.constraints_json.as_deref())?;
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("cfdef"));
@@ -1024,7 +1385,7 @@ pub fn create_cf_definition( input: CfDefinitionInput) -> Result<CfDefinition> {
     err(c.query_row(&sql, [&id], read_cf_definition))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_cf_definition( definition: CfDefinition) -> Result<CfDefinition> {
+pub fn update_cf_definition(definition: CfDefinition) -> Result<CfDefinition> {
     validate_cf_shape(&definition.cf_type, definition.constraints_json.as_deref())?;
     let c = db::conn()?;
     err(c.execute(
@@ -1035,7 +1396,7 @@ pub fn update_cf_definition( definition: CfDefinition) -> Result<CfDefinition> {
     err(c.query_row(&sql, [&definition.id], read_cf_definition))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn archive_cf_definition( id: String, archived: bool) -> Result<()> {
+pub fn archive_cf_definition(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
         "UPDATE cf_definitions SET archived=?2 WHERE id=?1",
@@ -1044,7 +1405,12 @@ pub fn archive_cf_definition( id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 
-fn cf_set_value_on(c: &Connection, definition_id: &str, entity_id: &str, value_json: &str) -> Result<()> {
+fn cf_set_value_on(
+    c: &Connection,
+    definition_id: &str,
+    entity_id: &str,
+    value_json: &str,
+) -> Result<()> {
     let (cf_type, constraints_json): (String, Option<String>) = err(c
         .query_row(
             "SELECT cf_type,constraints_json FROM cf_definitions WHERE id=?1",
@@ -1073,16 +1439,12 @@ fn cf_set_value_on(c: &Connection, definition_id: &str, entity_id: &str, value_j
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn cf_set_value(
-    definition_id: String,
-    entity_id: String,
-    value_json: String,
-) -> Result<()> {
+pub fn cf_set_value(definition_id: String, entity_id: String, value_json: String) -> Result<()> {
     let c = db::conn()?;
     cf_set_value_on(&c, &definition_id, &entity_id, &value_json)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn cf_get_values( entity_type: String, entity_id: String) -> Result<Vec<CfValueEntry>> {
+pub fn cf_get_values(entity_type: String, entity_id: String) -> Result<Vec<CfValueEntry>> {
     let c = db::conn()?;
     let sql = format!(
         "SELECT {cols}, v.value_json FROM cf_definitions d LEFT JOIN cf_values v ON v.definition_id=d.id AND v.entity_id=?2 WHERE d.entity_type=?1 AND d.archived=0 ORDER BY d.ordering",
@@ -1114,11 +1476,8 @@ mod tests {
         c
     }
     fn insert_role_right(c: &Connection, role_id: &str, right_code: &str, right_type: &str) {
-        c.execute(
-            "INSERT INTO roles(id,name) VALUES(?1,?1)",
-            [role_id],
-        )
-        .ok();
+        c.execute("INSERT INTO roles(id,name) VALUES(?1,?1)", [role_id])
+            .ok();
         let right_id = format!("{right_code}-id");
         c.execute(
             "INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES(?1,?2,?2,?3)",
@@ -1135,9 +1494,18 @@ mod tests {
     #[test]
     fn check_right_resolves_team_inherited_assignment() {
         let c = conn();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p1','p1','P1',0)", []).unwrap();
-        c.execute("INSERT INTO teams(id,name) VALUES('t1','Team1')", []).unwrap();
-        c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('m1','p1','t1')", []).unwrap();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p1','p1','P1',0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('t1','Team1')", [])
+            .unwrap();
+        c.execute(
+            "INSERT INTO team_memberships(id,profile_id,team_id) VALUES('m1','p1','t1')",
+            [],
+        )
+        .unwrap();
         insert_role_right(&c, "r1", "Project.ViewProject", "Project");
         c.execute(
             "INSERT INTO role_assignments(id,role_id,team_id,scope_type,scope_id) VALUES('a1','r1','t1','project','proj1')",
@@ -1146,15 +1514,28 @@ mod tests {
         .unwrap();
         assert!(check_right_on(&c, "p1", "Project.ViewProject", "project", Some("proj1")).unwrap());
         // different project scope_id: must not match (no cross-scope leakage).
-        assert!(!check_right_on(&c, "p1", "Project.ViewProject", "project", Some("proj2")).unwrap());
+        assert!(
+            !check_right_on(&c, "p1", "Project.ViewProject", "project", Some("proj2")).unwrap()
+        );
         // profile with no membership at all: no right.
-        assert!(!check_right_on(&c, "nobody", "Project.ViewProject", "project", Some("proj1")).unwrap());
+        assert!(!check_right_on(
+            &c,
+            "nobody",
+            "Project.ViewProject",
+            "project",
+            Some("proj1")
+        )
+        .unwrap());
     }
 
     #[test]
     fn check_right_scope_isolation_project_vs_global() {
         let c = conn();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p2','p2','P2',0)", []).unwrap();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p2','p2','P2',0)",
+            [],
+        )
+        .unwrap();
         insert_role_right(&c, "r2", "Global.EditRoles", "Global");
         c.execute(
             "INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('a2','r2','p2','project','proj1')",
@@ -1173,7 +1554,9 @@ mod tests {
         )
         .unwrap();
         // A global grant DOES imply any narrower scope.
-        assert!(check_right_on(&c, "p2", "Global.EditRoles", "project", Some("any-project")).unwrap());
+        assert!(
+            check_right_on(&c, "p2", "Global.EditRoles", "project", Some("any-project")).unwrap()
+        );
         assert!(check_right_on(&c, "p2", "Global.EditRoles", "team", Some("any-team")).unwrap());
     }
 
@@ -1213,7 +1596,8 @@ mod tests {
     #[test]
     fn role_assignment_requires_exactly_one_target() {
         let c = conn();
-        c.execute("INSERT INTO roles(id,name) VALUES('r4','R4')", []).unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('r4','R4')", [])
+            .unwrap();
         let both = RoleAssignmentInput {
             id: None,
             role_id: "r4".into(),
@@ -1238,14 +1622,16 @@ mod tests {
     #[test]
     fn set_role_rights_full_replace() {
         let c = conn();
-        c.execute("INSERT INTO roles(id,name) VALUES('r5','R5')", []).unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('r5','R5')", [])
+            .unwrap();
         seed_rights_on(&c).unwrap();
         let mut tx_conn = c;
         // emulate set_role_rights body against a plain Connection (no AppHandle in unit tests)
         let codes = vec!["Global.Superadmin".to_string()];
         {
             let tx = tx_conn.transaction().unwrap();
-            tx.execute("DELETE FROM role_rights WHERE role_id=?1", ["r5"]).unwrap();
+            tx.execute("DELETE FROM role_rights WHERE role_id=?1", ["r5"])
+                .unwrap();
             for code in &codes {
                 let right_id: String = tx
                     .query_row("SELECT id FROM rights WHERE code=?1", [code], |r| r.get(0))
@@ -1273,18 +1659,32 @@ mod tests {
         let c = conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
         let project = |owner: Option<&str>| Project {
-            id: "pr".into(), name: "Project".into(), key: "PR".into(), description: None,
-            created_by: owner.map(str::to_owned), archived: false, deadline: None,
+            id: "pr".into(),
+            name: "Project".into(),
+            key: "PR".into(),
+            description: None,
+            created_by: owner.map(str::to_owned),
+            archived: false,
+            deadline: None,
         };
         // Desktop used to send no owner at all: the row landed with NULL `created_by`
         // and no owner-or-admin gate could ever pass for it again.
         let refused = create_project_on(&c, project(None)).unwrap_err();
         assert!(refused.contains("owner is required"), "{refused}");
-        assert!(create_project_on(&c, project(Some("   "))).is_err(), "blank owner is no owner");
-        let rows: i64 = c.query_row("SELECT count(*) FROM projects", [], |r| r.get(0)).unwrap();
+        assert!(
+            create_project_on(&c, project(Some("   "))).is_err(),
+            "blank owner is no owner"
+        );
+        let rows: i64 = c
+            .query_row("SELECT count(*) FROM projects", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(rows, 0, "a refused create writes nothing");
         create_project_on(&c, project(Some("p"))).unwrap();
-        let stored: Option<String> = c.query_row("SELECT created_by FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        let stored: Option<String> = c
+            .query_row("SELECT created_by FROM projects WHERE id='pr'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(stored.as_deref(), Some("p"));
     }
 
@@ -1296,7 +1696,11 @@ mod tests {
     fn admin_means_the_same_thing_on_both_transports() {
         let c = conn();
         for id in ["webadmin", "deskboss", "plain", "retired"] {
-            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)",
+                [id],
+            )
+            .unwrap();
         }
         // A web admin: an account row with role='admin' and no rights grant at all.
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-web','webadmin','x','Web','webadmin','admin',1,1)", []).unwrap();
@@ -1307,18 +1711,36 @@ mod tests {
         // A deactivated admin account confers nothing.
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-old','retired','x','Old','retired','admin',0,1)", []).unwrap();
 
-        assert!(is_admin_on(&c, "webadmin").unwrap(), "an account-level admin is an admin everywhere");
-        assert!(is_admin_on(&c, "deskboss").unwrap(), "a Global.Superadmin is an admin everywhere");
-        assert!(!is_admin_on(&c, "plain").unwrap(), "an ordinary profile is never an admin");
-        assert!(!is_admin_on(&c, "retired").unwrap(), "a deactivated admin account confers nothing");
-        assert!(!is_admin_on(&c, "").unwrap(), "a blank identity is never an admin");
+        assert!(
+            is_admin_on(&c, "webadmin").unwrap(),
+            "an account-level admin is an admin everywhere"
+        );
+        assert!(
+            is_admin_on(&c, "deskboss").unwrap(),
+            "a Global.Superadmin is an admin everywhere"
+        );
+        assert!(
+            !is_admin_on(&c, "plain").unwrap(),
+            "an ordinary profile is never an admin"
+        );
+        assert!(
+            !is_admin_on(&c, "retired").unwrap(),
+            "a deactivated admin account confers nothing"
+        );
+        assert!(
+            !is_admin_on(&c, "").unwrap(),
+            "a blank identity is never an admin"
+        );
 
         // ...and the desktop deadline gate accepts the web-minted admin, which is
         // exactly the mapping that did not exist before.
         c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','plain',0,1)", []).unwrap();
         authorize_project_deadline_on(&c, "webadmin", "pr").unwrap();
         authorize_project_deadline_on(&c, "deskboss", "pr").unwrap();
-        assert!(authorize_project_deadline_on(&c, "retired", "pr").is_err(), "a deactivated admin is refused");
+        assert!(
+            authorize_project_deadline_on(&c, "retired", "pr").is_err(),
+            "a deactivated admin is refused"
+        );
     }
 
     /// The hole this closes: `is_admin_on` refused a deactivated *account* admin,
@@ -1328,7 +1750,11 @@ mod tests {
     fn a_deactivated_account_holds_no_right_and_no_admin() {
         let c = conn();
         for id in ["frozen", "live", "desktoponly"] {
-            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)",
+                [id],
+            )
+            .unwrap();
         }
         insert_role_right(&c, "admin-role", "Global.Superadmin", "global");
         for (n, profile) in ["frozen", "live", "desktoponly"].iter().enumerate() {
@@ -1337,9 +1763,18 @@ mod tests {
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-frozen','frozen','x','Frozen','frozen','member',0,1)", []).unwrap();
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u-live','live','x','Live','live','member',1,1)", []).unwrap();
 
-        assert!(!check_right_on(&c, "frozen", "Global.Superadmin", "global", None).unwrap(), "a deactivated account holds no right");
-        assert!(!is_admin_on(&c, "frozen").unwrap(), "and therefore is not an admin by the rights path either");
-        assert!(check_right_on(&c, "live", "Global.Superadmin", "global", None).unwrap(), "an active account still holds its rights");
+        assert!(
+            !check_right_on(&c, "frozen", "Global.Superadmin", "global", None).unwrap(),
+            "a deactivated account holds no right"
+        );
+        assert!(
+            !is_admin_on(&c, "frozen").unwrap(),
+            "and therefore is not an admin by the rights path either"
+        );
+        assert!(
+            check_right_on(&c, "live", "Global.Superadmin", "global", None).unwrap(),
+            "an active account still holds its rights"
+        );
         assert!(is_admin_on(&c, "live").unwrap());
         assert!(
             check_right_on(&c, "desktoponly", "Global.Superadmin", "global", None).unwrap(),
@@ -1351,7 +1786,11 @@ mod tests {
     fn desktop_deadline_write_is_owner_or_superadmin_only() {
         let c = conn();
         for id in ["owner", "stranger", "boss"] {
-            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)", [id]).unwrap();
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,1)",
+                [id],
+            )
+            .unwrap();
         }
         c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','owner',0,1)", []).unwrap();
         insert_role_right(&c, "admin-role", "Global.Superadmin", "global");
@@ -1361,7 +1800,10 @@ mod tests {
         authorize_project_deadline_on(&c, "owner", "pr").unwrap();
         authorize_project_deadline_on(&c, "boss", "pr").unwrap();
         let refused = authorize_project_deadline_on(&c, "stranger", "pr").unwrap_err();
-        assert!(refused.contains("only the project owner or an admin"), "{refused}");
+        assert!(
+            refused.contains("only the project owner or an admin"),
+            "{refused}"
+        );
         // No identity, and unknown projects, are refused too (never leak existence).
         assert!(authorize_project_deadline_on(&c, "", "pr").is_err());
         assert!(authorize_project_deadline_on(&c, "owner", "ghost").is_err());
@@ -1371,7 +1813,11 @@ mod tests {
         authorize_project_deadline_on(&c, "boss", "pr").unwrap();
         let occupied = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap_err();
         assert!(occupied.contains("already has a deadline"), "{occupied}");
-        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        let held: Option<String> = c
+            .query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(held.as_deref(), Some("2030-03-10"));
     }
 
@@ -1388,21 +1834,46 @@ mod tests {
         // First-write law: an occupied deadline column is never overwritten.
         let refused = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap_err();
         assert!(refused.contains("already has a deadline"), "{refused}");
-        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
-        assert_eq!(held.as_deref(), Some("2030-03-10"), "the stored deadline stands");
+        let held: Option<String> = c
+            .query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            held.as_deref(),
+            Some("2030-03-10"),
+            "the stored deadline stands"
+        );
         // Only after an explicit clear does a new first write land.
-        assert_eq!(set_project_deadline_on(&c, "pr", None).unwrap().deadline, None);
+        assert_eq!(
+            set_project_deadline_on(&c, "pr", None).unwrap().deadline,
+            None
+        );
         let project = set_project_deadline_on(&c, "pr", Some("2030-04-01")).unwrap();
         assert_eq!(project.deadline.as_deref(), Some("2030-04-01"));
         assert_eq!(project.name, "Project");
         // Clearing is explicit; blank normalizes to NULL.
-        assert_eq!(set_project_deadline_on(&c, "pr", Some("  ")).unwrap().deadline, None);
-        assert_eq!(set_project_deadline_on(&c, "pr", None).unwrap().deadline, None);
+        assert_eq!(
+            set_project_deadline_on(&c, "pr", Some("  "))
+                .unwrap()
+                .deadline,
+            None
+        );
+        assert_eq!(
+            set_project_deadline_on(&c, "pr", None).unwrap().deadline,
+            None
+        );
         // Malformed dates and unknown projects fail loudly, leaving state untouched.
         assert!(set_project_deadline_on(&c, "pr", Some("10/03/2030")).is_err());
         assert!(set_project_deadline_on(&c, "pr", Some("2030-13-40")).is_err());
         assert!(set_project_deadline_on(&c, "ghost", Some("2030-03-10")).is_err());
-        let stored: (String, Option<String>) = c.query_row("SELECT name,deadline FROM projects WHERE id='pr'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let stored: (String, Option<String>) = c
+            .query_row(
+                "SELECT name,deadline FROM projects WHERE id='pr'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(stored, ("Project".to_string(), None));
     }
 
@@ -1417,21 +1888,50 @@ mod tests {
         set_project_deadline_on(&c, "pr", Some("2030-03-10")).unwrap();
 
         // Edit against the value on screen: lands, and only the deadline column moves.
-        let edited = update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2030-04-01")).unwrap();
+        let edited =
+            update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2030-04-01")).unwrap();
         assert_eq!(edited.deadline.as_deref(), Some("2030-04-01"));
-        assert_eq!((edited.name.as_str(), edited.description.as_deref(), edited.created_by.as_deref()), ("Project", Some("Original"), Some("p")));
+        assert_eq!(
+            (
+                edited.name.as_str(),
+                edited.description.as_deref(),
+                edited.created_by.as_deref()
+            ),
+            ("Project", Some("Original"), Some("p"))
+        );
 
         // Stale expectation: refused, and the stored date is untouched.
-        let stale = update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2031-01-01")).unwrap_err();
+        let stale = update_project_deadline_on(&c, "pr", Some("2030-03-10"), Some("2031-01-01"))
+            .unwrap_err();
         assert!(stale.contains("changed since you loaded it"), "{stale}");
-        let held: Option<String> = c.query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| r.get(0)).unwrap();
+        let held: Option<String> = c
+            .query_row("SELECT deadline FROM projects WHERE id='pr'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(held.as_deref(), Some("2030-04-01"));
 
         // Clearing is an edit too, and the cleared column can then be filled again.
-        assert_eq!(update_project_deadline_on(&c, "pr", Some("2030-04-01"), None).unwrap().deadline, None);
-        assert_eq!(update_project_deadline_on(&c, "pr", None, Some("2030-05-05")).unwrap().deadline.as_deref(), Some("2030-05-05"));
+        assert_eq!(
+            update_project_deadline_on(&c, "pr", Some("2030-04-01"), None)
+                .unwrap()
+                .deadline,
+            None
+        );
+        assert_eq!(
+            update_project_deadline_on(&c, "pr", None, Some("2030-05-05"))
+                .unwrap()
+                .deadline
+                .as_deref(),
+            Some("2030-05-05")
+        );
         // Blank means clear, on both sides of the comparison.
-        assert_eq!(update_project_deadline_on(&c, "pr", Some("2030-05-05"), Some("   ")).unwrap().deadline, None);
+        assert_eq!(
+            update_project_deadline_on(&c, "pr", Some("2030-05-05"), Some("   "))
+                .unwrap()
+                .deadline,
+            None
+        );
 
         // Malformed input never reaches the row; an unknown project is refused in the
         // same words a non-owner gets, disclosing nothing about existence.
@@ -1439,7 +1939,13 @@ mod tests {
         assert!(update_project_deadline_on(&c, "pr", None, Some("2030-13-40")).is_err());
         let ghost = update_project_deadline_on(&c, "ghost", None, Some("2030-03-10")).unwrap_err();
         assert_eq!(ghost, "project access denied");
-        let stored: (String, Option<String>) = c.query_row("SELECT name,deadline FROM projects WHERE id='pr'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let stored: (String, Option<String>) = c
+            .query_row(
+                "SELECT name,deadline FROM projects WHERE id='pr'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(stored, ("Project".to_string(), None));
     }
 }

@@ -1,54 +1,152 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
-import { platformApi, type CfValueEntry } from "../api/platform";
+import { ProfilePicker, ProjectPicker } from "../components/Pickers";
+import IssueDetail from "./IssueDetail";
+import { humanError, projectId as sessionProject, setProjectId } from "../session";
+import { linkEntity, linkProps, route, useDeepLink } from "../router";
 import "./Issues.css";
-import { Resizer, paneWidth } from "../components/Resizer";
-import { ProjectPicker, ProfilePicker } from "../components/Pickers";
-import { projectId as sessionProject, setProjectId, humanError } from "../session";
-import { useDeepLink, linkEntity, linkProps, route } from "../router";
 
-const blank = () => ({ project_id:"", title:"", description:"", status_id:"", assignee_id:"", due_date:"" });
+const blank = () => ({ title: "", description: "", status_id: "", assignee_id: "", due_date: "" });
+
+/** Workspace issue tracker: filters query the persisted planning domain; the
+ * detail panel owns issue fields, tags, checklists, time entries, and children. */
 export default function Issues() {
-  const projectId=sessionProject; const [query,setQuery]=createSignal(""); const [statusFilter,setStatusFilter]=createSignal(""); const [selected,setSelected]=createSignal<Issue>(); const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal(""); const [tagName,setTagName]=createSignal(""); const [checklistTitle,setChecklistTitle]=createSignal(""); const [minutes,setMinutes]=createSignal(""); const [sideW,setSideW]=paneWidth("issues.side.width",255); const [listW,setListW]=paneWidth("issues.list.width",420);
-  const [issues,{refetch:reloadIssues}]=createResource(()=>[projectId(),query(),statusFilter()] as const,([project_id,text,status_id])=>planningApi.issues({project_id:project_id||undefined,text:text||undefined,status_id:status_id||undefined}));
-  const [statuses,{refetch:reloadStatuses}]=createResource(projectId, id=>id?planningApi.statuses(id):Promise.resolve([]));
-  const [detail,{refetch:reloadDetail}]=createResource(()=>selected()?.id, id=>id?planningApi.issue(id):Promise.resolve(null));
-  let deepSeq=0; // bumped on every open/clear/direct-select so a slow deep-link fetch that resolves later is discarded
-  const issueRoute=(issue:Issue)=>({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id||sessionProject()||undefined});
-  // A project-scoped issue URL must also move the session into that project, otherwise the
-  // deep link renders an issue that the surrounding list/filters do not contain.
-  const syncProject=(projectId?:string)=>{ if(projectId&&projectId!==sessionProject()) setProjectId(projectId); };
-  useDeepLink("issue",async id=>{syncProject(route().projectId);if(selected()?.id===id)return;const found=issues()?.find(i=>i.id===id);if(found){setSelected(found);syncProject(found.project_id);if(!route().projectId&&found.project_id)linkEntity("issue",found.id,{projectId:found.project_id},true);return}const seq=++deepSeq;try{const d=await planningApi.issue(id);if(seq!==deepSeq||route().entityId!==id)return;if(d){setSelected(d.issue);syncProject(d.issue.project_id);if(!route().projectId&&d.issue.project_id)linkEntity("issue",d.issue.id,{projectId:d.issue.project_id},true)}}catch(e){if(seq===deepSeq&&route().entityId===id)setError(humanError(e))}},()=>{deepSeq++;if(selected())setSelected(undefined)});
-  // The picker DISPLAYS the session project when the form field is still empty,
-  // so the submit must resolve it the same way — otherwise a visibly selected
-  // project reads as "missing" and the user is told to fill in a filled field.
-  const formProject=()=>form().project_id||sessionProject();
-  const saveIssue=async(e:SubmitEvent)=>{e.preventDefault();try { const f=form(); const project_id=formProject(); if(!project_id||!f.title.trim()) throw new Error("Pick a project and enter a title."); const item=await planningApi.createIssue({project_id,title:f.title.trim(),description:f.description||null,status_id:f.status_id||null,assignee_id:f.assignee_id||null,created_by:null,due_date:f.due_date||null,priority:null,archived:false}); setSelected(item);setForm(blank());reloadIssues(); }catch(e){setError(humanError(e))}};
-  const edit=async(e:SubmitEvent)=>{e.preventDefault();const i=selected();if(!i)return;try{await planningApi.updateIssue(i);reloadIssues();reloadDetail()}catch(e){setError(humanError(e))}};
-  const saveStatus=async()=>{const name=prompt("Status name");if(!name||!projectId())return;try{await planningApi.createStatus({project_id:projectId(),name,color:"var(--accent)",resolved:false});reloadStatuses()}catch(e){setError(humanError(e))}};
-  const addTag=async()=>{const i=selected();if(!i||!tagName().trim())return;try{const tag=await planningApi.saveTag({project_id:i.project_id,parent_id:null,name:tagName().trim(),archived:false});await planningApi.setTags(i.id,[...(detail()?.tags.map(t=>t.id)??[]),tag.id]);setTagName("");reloadDetail();reloadIssues()}catch(e){setError(humanError(e))}};
-  const addChecklist=async()=>{const i=selected();if(!i||!checklistTitle().trim())return;try{await planningApi.saveChecklist({issue_id:i.id,title:checklistTitle().trim()});setChecklistTitle("");reloadDetail()}catch(e){setError(humanError(e))}};
-  const logTime=async()=>{const i=selected();const duration_minutes=Number(minutes());if(!i||!Number.isInteger(duration_minutes)||duration_minutes<1)return;const profile_id=i.assignee_id||i.created_by;if(!profile_id){setError("Assign an issue owner before logging time.");return}try{await planningApi.saveTime({issue_id:i.id,profile_id,entry_date:new Date().toISOString().slice(0,10),duration_minutes,description:null});setMinutes("");reloadDetail()}catch(e){setError(humanError(e))}};
-  return <section class="planning-view"><header class="planning-head"><div><h1>Issues</h1><p>Track project work, status, tags, checklists, time, and sub-items.</p></div><ProjectPicker/></header><Show when={error()}><p class="planning-error">{error()}</p></Show><div class="issue-layout" style={{"--col-side":sideW()+"px","--col-list":listW()+"px"}}><aside class="issue-sidebar"><form class="new-issue" onSubmit={saveIssue}><h2>New issue</h2><ProjectPicker label="Project" value={form().project_id||sessionProject()} onChange={id=>setForm({...form(),project_id:id})}/><input placeholder="Title" value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/><textarea placeholder="Description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><select value={form().status_id} onChange={e=>setForm({...form(),status_id:e.currentTarget.value})}><option value="">No status</option><For each={statuses()}>{s=><option value={s.id}>{s.name}</option>}</For></select><ProfilePicker label="Assignee" value={form().assignee_id} onChange={id=>setForm({...form(),assignee_id:id})} allowAll/><input type="date" value={form().due_date} onInput={e=>setForm({...form(),due_date:e.currentTarget.value})}/><button class="primary">Create issue</button></form><section class="status-editor"><div class="section-title"><h2>Statuses</h2><button onClick={saveStatus}>+</button></div><For each={statuses()}>{(s:Status)=><div class="status-row"><input type="color" value={s.color} onInput={async e=>{await planningApi.updateStatus({...s,color:e.currentTarget.value});reloadStatuses()}}/><input value={s.name} onChange={async e=>{await planningApi.updateStatus({...s,name:e.currentTarget.value});reloadStatuses()}}/><label><input type="checkbox" checked={s.resolved} onChange={async e=>{await planningApi.updateStatus({...s,resolved:e.currentTarget.checked});reloadStatuses()}}/> done</label><button class="ghost" onClick={async()=>{try{await planningApi.deleteStatus(s.id);reloadStatuses()}catch(e){setError(humanError(e))}}}>×</button></div>}</For><Show when={!projectId()}><p class="hint">Enter a project ID to edit its statuses.</p></Show></section></aside><Resizer width={sideW} setWidth={setSideW} min={190} max={460}/><main class="issue-list-pane"><div class="filter-row"><input placeholder="Search title or description" value={query()} onInput={e=>setQuery(e.currentTarget.value)}/><select value={statusFilter()} onChange={e=>setStatusFilter(e.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{s=><option value={s.id}>{s.name}</option>}</For></select></div><Show when={issues.loading}><p class="hint">Loading issues…</p></Show><ul class="issue-list"><For each={issues()}>{issue=><li classList={{active:selected()?.id===issue.id}}><a class="row-link" {...linkProps(issueRoute(issue))} onClick={event=>{deepSeq++;linkProps(issueRoute(issue)).onClick(event)}}><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><span class="status-dot" style={{background:statuses()?.find(s=>s.id===issue.status_id)?.color}}/><Show when={issue.due_date}><time>{issue.due_date}</time></Show></a></li>}</For></ul></main><Resizer width={listW} setWidth={setListW} min={260} max={860}/><aside class="issue-detail"><Show when={selected()} fallback={<p class="hint pad">Select an issue to view details.</p>}>{issue=><><form onSubmit={edit}><div class="section-title"><span>#{issue().number}</span><button type="button" class="ghost" onClick={async()=>{await planningApi.archiveIssue(issue().id,!issue().archived);reloadIssues();reloadDetail()}}>{issue().archived?"Restore":"Archive"}</button></div><input class="issue-title-input" value={issue().title} onInput={e=>setSelected({...issue(),title:e.currentTarget.value})}/><textarea value={issue().description??""} onInput={e=>setSelected({...issue(),description:e.currentTarget.value||null})}/><label>Status<select value={issue().status_id??""} onChange={e=>setSelected({...issue(),status_id:e.currentTarget.value||null})}><option value="">No status</option><For each={statuses()}>{s=><option value={s.id}>{s.name}</option>}</For></select></label><ProfilePicker label="Assignee" value={issue().assignee_id??""} onChange={id=>setSelected({...issue(),assignee_id:id||null})} allowAll/><label>Due date<input type="date" value={issue().due_date??""} onInput={e=>setSelected({...issue(),due_date:e.currentTarget.value||null})}/></label><button class="primary">Save</button></form><section><h3>Tags</h3><div class="chips"><For each={detail()?.tags}>{tag=><span>{tag.name}</span>}</For></div><div class="inline-form"><input placeholder="New tag" value={tagName()} onInput={e=>setTagName(e.currentTarget.value)}/><button onClick={addTag}>Add</button></div></section><section><h3>Custom fields</h3><IssueCustomFields issueId={issue().id}/></section><section><h3>Checklists</h3><For each={detail()?.checklists}>{list=><ChecklistList id={list.id} title={list.title}/>}</For><div class="inline-form"><input placeholder="Checklist title" value={checklistTitle()} onInput={e=>setChecklistTitle(e.currentTarget.value)}/><button onClick={addChecklist}>Add</button></div></section><section><h3>Time tracking <small>{detail()?.time_total_minutes??0} min</small></h3><div class="inline-form"><input type="number" min="1" placeholder="Minutes" value={minutes()} onInput={e=>setMinutes(e.currentTarget.value)}/><button onClick={logTime}>Log</button></div></section><section><h3>Sub-items</h3><For each={detail()?.children}>{child=><p>#{child.number} {child.title}</p>}</For></section></>}</Show></aside></div></section>;
+  const projectId = sessionProject;
+  const [query, setQuery] = createSignal("");
+  const [statusFilter, setStatusFilter] = createSignal("");
+  const [tagFilter, setTagFilter] = createSignal("");
+  const [assigneeFilter, setAssigneeFilter] = createSignal("");
+  const [selected, setSelected] = createSignal<Issue>();
+  const [form, setForm] = createSignal(blank());
+  const [error, setError] = createSignal("");
+  const [issues, { refetch: reloadIssues }] = createResource(
+    () => [projectId(), query(), statusFilter(), tagFilter(), assigneeFilter()] as const,
+    ([project_id, text, status_id, tag_id, assignee_id]) => planningApi.issues({
+      project_id: project_id || undefined,
+      text: text || undefined,
+      status_id: status_id || undefined,
+      tag_id: tag_id || undefined,
+      assignee_id: assignee_id || undefined,
+    }),
+  );
+  const [statuses, { refetch: reloadStatuses }] = createResource(projectId, id => id ? planningApi.statuses(id) : Promise.resolve([]));
+  const [tags, { refetch: reloadTags }] = createResource(projectId, id => id ? planningApi.tags(id) : Promise.resolve([]));
+  let deepLinkSequence = 0;
+  const issueRoute = (issue: Issue) => ({ view: "Issues", entityType: "issue", entityId: issue.id, projectId: issue.project_id || projectId() || undefined });
+  const select = (issue: Issue) => {
+    deepLinkSequence++;
+    setSelected(issue);
+    if (issue.project_id !== projectId()) setProjectId(issue.project_id);
+  };
+  const openInUrl = (issue: Issue) => {
+    select(issue);
+    linkEntity("issue", issue.id, { projectId: issue.project_id }, true);
+  };
+  const followIssue = (event: MouseEvent, issue: Issue) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    openInUrl(issue);
+  };
+  useDeepLink("issue", async id => {
+    const fromList = issues()?.find(issue => issue.id === id);
+    if (fromList) { select(fromList); return; }
+    const sequence = ++deepLinkSequence;
+    try {
+      const detail = await planningApi.issue(id);
+      if (sequence !== deepLinkSequence || route().entityId !== id || !detail) return;
+      setSelected(detail.issue);
+      if (detail.issue.project_id !== projectId()) setProjectId(detail.issue.project_id);
+      if (!route().projectId) linkEntity("issue", detail.issue.id, { projectId: detail.issue.project_id }, true);
+    } catch (reason) {
+      if (sequence === deepLinkSequence) setError(humanError(reason));
+    }
+  }, () => { deepLinkSequence++; setSelected(undefined); });
+
+  const createIssue = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const values = form();
+    if (!projectId() || !values.title.trim()) { setError("Pick a project and enter an issue title."); return; }
+    try {
+      const issue = await planningApi.createIssue({
+        project_id: projectId(), title: values.title.trim(), description: values.description.trim() || null,
+        status_id: values.status_id || null, assignee_id: values.assignee_id || null, created_by: null,
+        due_date: values.due_date || null, priority: null, archived: false,
+      });
+      setForm(blank());
+      await reloadIssues();
+      openInUrl(issue);
+    } catch (reason) { setError(humanError(reason)); }
+  };
+  const createStatus = async () => {
+    const name = prompt("Status name")?.trim();
+    if (!name || !projectId()) return;
+    try {
+      await planningApi.createStatus({ project_id: projectId(), name, color: "#6d7c99", resolved: false });
+      await reloadStatuses();
+    } catch (reason) { setError(humanError(reason)); }
+  };
+  const saveStatus = async (status: Status, change: Partial<Status>) => {
+    try { await planningApi.updateStatus({ ...status, ...change }); await reloadStatuses(); }
+    catch (reason) { setError(humanError(reason)); }
+  };
+
+  return <section class="planning-view">
+    <header class="planning-head">
+      <div><h1>Issues</h1><p>Track work independently from the boards that visualize it.</p></div>
+      <div class="planning-actions">
+        <ProjectPicker />
+        <a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+      </div>
+    </header>
+    <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
+    <div class="issue-layout">
+      <aside class="issue-sidebar">
+        <form class="new-issue" onSubmit={createIssue}>
+          <h2>New issue</h2>
+          <input aria-label="Issue title" placeholder="Title" value={form().title} onInput={event => setForm({ ...form(), title: event.currentTarget.value })} />
+          <textarea aria-label="Issue description" placeholder="Description" value={form().description} onInput={event => setForm({ ...form(), description: event.currentTarget.value })} />
+          <select aria-label="Issue status" value={form().status_id} onChange={event => setForm({ ...form(), status_id: event.currentTarget.value })}>
+            <option value="">No status</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For>
+          </select>
+          <ProfilePicker label="Assignee" value={form().assignee_id} onChange={id => setForm({ ...form(), assignee_id: id })} allowAll />
+          <input aria-label="Due date" type="date" value={form().due_date} onInput={event => setForm({ ...form(), due_date: event.currentTarget.value })} />
+          <button class="primary" disabled={!projectId() || !form().title.trim()}>Create issue</button>
+        </form>
+        <section class="status-editor">
+          <div class="section-title"><h2>Statuses</h2><button type="button" aria-label="Create status" onClick={() => void createStatus()}>+</button></div>
+          <For each={statuses()}>{status => <div class="status-row">
+            <input aria-label={`${status.name} color`} type="color" value={status.color} onChange={event => void saveStatus(status, { color: event.currentTarget.value })} />
+            <input aria-label={`${status.name} name`} value={status.name} onBlur={event => void saveStatus(status, { name: event.currentTarget.value.trim() || status.name })} />
+            <label><input type="checkbox" checked={status.resolved} onChange={event => void saveStatus(status, { resolved: event.currentTarget.checked })} /> done</label>
+            <button class="ghost" type="button" aria-label={`Delete ${status.name}`} onClick={async () => {
+              try { await planningApi.deleteStatus(status.id); await reloadStatuses(); }
+              catch (reason) { setError(humanError(reason)); }
+            }}>×</button>
+          </div>}</For>
+        </section>
+      </aside>
+      <main class="issue-list-pane">
+        <div class="filter-row" aria-label="Issue filters">
+          <input aria-label="Search issues" placeholder="Search title or description" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
+          <select aria-label="Filter by status" value={statusFilter()} onChange={event => setStatusFilter(event.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
+          <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+          <ProfilePicker label="Assignee" value={assigneeFilter()} onChange={setAssigneeFilter} allowAll />
+        </div>
+        <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
+        <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
+        <ul class="issue-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
+          <a class="issue-row" {...linkProps(issueRoute(issue))} onClick={event => followIssue(event, issue)}>
+            <span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong>
+            <Show when={issue.status_id}>{id => <span class="status-name">{statuses()?.find(status => status.id === id())?.name ?? "Status"}</span>}</Show>
+            <Show when={issue.due_date}>{date => <time>{date()}</time>}</Show>
+          </a>
+        </li>}</For></ul>
+      </main>
+      <aside class="issue-detail">
+        <Show when={selected()} fallback={<p class="hint pad">Select an issue to manage its tags, checklist, time, and sub-items.</p>}>
+          {issue => <IssueDetail issueId={issue().id} statuses={statuses()} onChanged={() => { void reloadIssues(); void reloadTags(); }} />}
+        </Show>
+      </aside>
+    </div>
+  </section>;
 }
-function IssueCustomFields(props:{issueId:string}) {
-  const [defs,{refetch}]=createResource(()=>props.issueId, id=>platformApi.cfGetValues("issue", id));
-  const [cfError,setCfError]=createSignal("");
-  const parseValue=(json:string|null|undefined)=>{ if(!json) return null; try { return JSON.parse(json); } catch { return null; } };
-  const setValue=async(def:CfValueEntry, raw:string)=>{ try { await platformApi.cfSetValue(def.id, props.issueId, raw); refetch(); } catch(e){ setCfError(String(e)); } };
-  return <div class="cf-panel">
-    <Show when={cfError()}><p class="planning-error">{cfError()}</p></Show>
-    <For each={defs()}>{def=>{
-      const current=parseValue(def.value_json??def.default_json);
-      return <label class="cf-field"><span>{def.name}</span>
-        <Show when={def.cf_type==="bool"}><input type="checkbox" checked={current===true} onChange={e=>setValue(def, JSON.stringify(e.currentTarget.checked))}/></Show>
-        <Show when={def.cf_type==="int"}><input type="number" value={current??""} onChange={e=>setValue(def, JSON.stringify(Number(e.currentTarget.value)))}/></Show>
-        <Show when={def.cf_type==="date"}><input type="date" value={current??""} onChange={e=>setValue(def, JSON.stringify(e.currentTarget.value))}/></Show>
-        <Show when={def.cf_type==="enum"}><select onChange={e=>setValue(def, JSON.stringify(e.currentTarget.value))}><option value="" selected={current==null}>—</option><For each={(()=>{try{return JSON.parse(def.constraints_json??"{}").options??[]}catch{return []}})()}>{(opt:string)=><option value={opt} selected={current===opt}>{opt}</option>}</For></select></Show>
-        <Show when={def.cf_type==="profile"||def.cf_type==="text"}><input value={current??""} onChange={e=>setValue(def, JSON.stringify(e.currentTarget.value))}/></Show>
-      </label>;
-    }}</For>
-    <Show when={defs()?.length===0}><p class="hint">No custom fields defined for issues yet — add them in Admin.</p></Show>
-  </div>;
-}
-function ChecklistList(props:{id:string;title:string}) { const [items,{refetch}]=createResource(()=>planningApi.items(props.id)); const [text,setText]=createSignal(""); const add=async()=>{if(!text().trim())return;await planningApi.saveItem({checklist_id:props.id,parent_id:null,item_text:text().trim(),item_done:false});setText("");refetch()};return <div class="checklist"><strong>{props.title}</strong><For each={items()}>{item=><label><input type="checkbox" checked={item.item_done} onChange={async e=>{await planningApi.toggleItem(item.id,e.currentTarget.checked);refetch()}}/>{item.item_text}</label>}</For><div class="inline-form"><input placeholder="Item" value={text()} onInput={e=>setText(e.currentTarget.value)}/><button onClick={add}>+</button></div></div> }

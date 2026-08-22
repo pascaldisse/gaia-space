@@ -122,20 +122,43 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
 }
 fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
     let content_type: String = c
-        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .query_row(
+            "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
+            [channel_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
-    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
+    if matches!(content_type.as_str(), "public" | "entity-bound") {
+        return Ok(true);
+    }
     let count: i64 = c
-        .query_row("SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND profile_id=?2", rusqlite::params![channel_id, profile_id], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND profile_id=?2",
+            rusqlite::params![channel_id, profile_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
     Ok(count > 0)
 }
-fn channel_allows_actor(c: &Connection, channel_id: &str, profile_id: Option<&str>) -> Result<bool> {
+fn channel_allows_actor(
+    c: &Connection,
+    channel_id: &str,
+    profile_id: Option<&str>,
+) -> Result<bool> {
     let content_type: String = c
-        .query_row("SELECT content_type FROM channels WHERE id=?1 AND archived=0", [channel_id], |r| r.get(0))
+        .query_row(
+            "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
+            [channel_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
-    if matches!(content_type.as_str(), "public" | "entity-bound") { return Ok(true); }
-    match profile_id { Some(profile_id) => channel_allows_profile(c, channel_id, profile_id), None => Ok(false) }
+    if matches!(content_type.as_str(), "public" | "entity-bound") {
+        return Ok(true);
+    }
+    match profile_id {
+        Some(profile_id) => channel_allows_profile(c, channel_id, profile_id),
+        None => Ok(false),
+    }
 }
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
     let channels = list_channels_impl(c)?;
@@ -143,7 +166,9 @@ fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<
         .into_iter()
         .filter(|ch| !ch.archived)
         .map(|ch| {
-            if !channel_allows_profile(c, &ch.id, profile_id)? { return Ok(None); }
+            if !channel_allows_profile(c, &ch.id, profile_id)? {
+                return Ok(None);
+            }
             let member_count = member_count_impl(c, &ch.id)?;
             let unread_count = unread_count_impl(c, &ch.id, profile_id)?;
             let last_message_at = last_message_at_impl(c, &ch.id)?;
@@ -285,7 +310,9 @@ fn list_messages_impl(
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
     let allowed = channel_allows_actor(c, channel_id, acting_profile_id)?;
-    if !allowed { return Err("channel access denied".to_string()); }
+    if !allowed {
+        return Err("channel access denied".to_string());
+    }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -307,10 +334,16 @@ fn list_thread_replies_impl(
     acting_profile_id: Option<&str>,
 ) -> Result<Vec<MessageView>> {
     let channel_id: String = c
-        .query_row("SELECT channel_id FROM messages WHERE id=?1", [thread_of], |r| r.get(0))
+        .query_row(
+            "SELECT channel_id FROM messages WHERE id=?1",
+            [thread_of],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
     let allowed = channel_allows_actor(c, &channel_id, acting_profile_id)?;
-    if !allowed { return Err("channel access denied".to_string()); }
+    if !allowed {
+        return Err("channel access denied".to_string());
+    }
     let mut s = c
         .prepare(
             "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
@@ -327,11 +360,15 @@ fn list_thread_replies_impl(
         .collect()
 }
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
-    let allowed = message.author_id.as_deref()
+    let allowed = message
+        .author_id
+        .as_deref()
         .map(|profile_id| channel_allows_profile(c, &message.channel_id, profile_id))
         .transpose()?
         .unwrap_or(false);
-    if !allowed { return Err("channel access denied".to_string()); }
+    if !allowed {
+        return Err("channel access denied".to_string());
+    }
     c.execute(
         "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
@@ -424,34 +461,31 @@ pub fn list_channels() -> Result<Vec<Channel>> {
     list_channels_impl(&db::conn()?)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_channel( id: String) -> Result<Option<Channel>> {
+pub fn get_channel(id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_channels_with_meta( profile_id: String) -> Result<Vec<ChannelSummary>> {
+pub fn list_channels_with_meta(profile_id: String) -> Result<Vec<ChannelSummary>> {
     list_channels_with_meta_impl(&db::conn()?, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_channel(
-    channel: Channel,
-    member_ids: Vec<String>,
-) -> Result<Channel> {
+pub fn create_channel(channel: Channel, member_ids: Vec<String>) -> Result<Channel> {
     let c = db::conn()?;
     create_channel_impl(&c, &channel, &member_ids)?;
     Ok(channel)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_channel( channel: Channel) -> Result<()> {
+pub fn update_channel(channel: Channel) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn join_channel( channel_id: String, profile_id: String) -> Result<()> {
+pub fn join_channel(channel_id: String, profile_id: String) -> Result<()> {
     add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, false)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn leave_channel( channel_id: String, profile_id: String) -> Result<()> {
+pub fn leave_channel(channel_id: String, profile_id: String) -> Result<()> {
     remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -460,19 +494,14 @@ pub fn add_channel_member(
     profile_id: String,
     administrator: bool,
 ) -> Result<()> {
-    add_channel_member_impl(
-        &db::conn()?,
-        &channel_id,
-        &profile_id,
-        administrator,
-    )
+    add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, administrator)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn remove_channel_member( channel_id: String, profile_id: String) -> Result<()> {
+pub fn remove_channel_member(channel_id: String, profile_id: String) -> Result<()> {
     remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_channel_members( channel_id: String) -> Result<Vec<ChannelMember>> {
+pub fn list_channel_members(channel_id: String) -> Result<Vec<ChannelMember>> {
     list_channel_members_impl(&db::conn()?, &channel_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -484,52 +513,38 @@ pub fn create_entity_channel(
     create_entity_channel_impl(&db::conn()?, &entity_type, &entity_id, name)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_channel_by_entity(
-    entity_type: String,
-    entity_id: String,
-) -> Result<Option<Channel>> {
-    get_channel_impl(
-        &db::conn()?,
-        &entity_channel_id(&entity_type, &entity_id),
-    )
+pub fn get_channel_by_entity(entity_type: String, entity_id: String) -> Result<Option<Channel>> {
+    get_channel_impl(&db::conn()?, &entity_channel_id(&entity_type, &entity_id))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_messages(
     channel_id: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
-    list_messages_impl(
-        &db::conn()?,
-        &channel_id,
-        acting_profile_id.as_deref(),
-    )
+    list_messages_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
     thread_of: String,
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
-    list_thread_replies_impl(
-        &db::conn()?,
-        &thread_of,
-        acting_profile_id.as_deref(),
-    )
+    list_thread_replies_impl(&db::conn()?, &thread_of, acting_profile_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_message( message: Message) -> Result<MessageView> {
+pub fn create_message(message: Message) -> Result<MessageView> {
     let c = db::conn()?;
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_message( id: String, text: String) -> Result<MessageView> {
+pub fn update_message(id: String, text: String) -> Result<MessageView> {
     let c = db::conn()?;
     update_message_impl(&c, &id, &text)?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_message( id: String) -> Result<()> {
+pub fn delete_message(id: String) -> Result<()> {
     delete_message_impl(&db::conn()?, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -720,21 +735,47 @@ mod tests {
         create_channel_impl(
             &c,
             &Channel {
-                id: "dm-private".into(), content_type: "dm".into(), name: Some("Direct".into()),
-                description: None, project_id: None, archived: false,
+                id: "dm-private".into(),
+                content_type: "dm".into(),
+                name: Some("Direct".into()),
+                description: None,
+                project_id: None,
+                archived: false,
             },
             &["default-org".into(), "other".into()],
-        ).unwrap();
-        assert!(list_channels_with_meta_impl(&c, "default-org").unwrap().iter().any(|x| x.channel.id == "dm-private"));
-        assert!(list_channels_with_meta_impl(&c, "other").unwrap().iter().any(|x| x.channel.id == "dm-private"));
-        assert!(!list_channels_with_meta_impl(&c, "stranger").unwrap().iter().any(|x| x.channel.id == "dm-private"));
+        )
+        .unwrap();
+        assert!(list_channels_with_meta_impl(&c, "default-org")
+            .unwrap()
+            .iter()
+            .any(|x| x.channel.id == "dm-private"));
+        assert!(list_channels_with_meta_impl(&c, "other")
+            .unwrap()
+            .iter()
+            .any(|x| x.channel.id == "dm-private"));
+        assert!(!list_channels_with_meta_impl(&c, "stranger")
+            .unwrap()
+            .iter()
+            .any(|x| x.channel.id == "dm-private"));
         assert!(list_messages_impl(&c, "dm-private", Some("stranger")).is_err());
-        assert!(create_message_impl(&c, &Message {
-            id: "intrusion".into(), channel_id: "dm-private".into(), author_id: Some("stranger".into()),
-            text: "nope".into(), created_at: 1, edited_at: None, thread_of: None, archived: false,
-        }).is_err());
+        assert!(create_message_impl(
+            &c,
+            &Message {
+                id: "intrusion".into(),
+                channel_id: "dm-private".into(),
+                author_id: Some("stranger".into()),
+                text: "nope".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+            }
+        )
+        .is_err());
         let members = list_channel_members_impl(&c, "dm-private").unwrap();
-        assert!(members.iter().any(|m| m.profile_id == "default-org" && m.administrator));
+        assert!(members
+            .iter()
+            .any(|m| m.profile_id == "default-org" && m.administrator));
         drop(c);
         drop(path);
     }

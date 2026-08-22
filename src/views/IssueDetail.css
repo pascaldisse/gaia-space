@@ -13,6 +13,14 @@
 .idp-section h3 small { color: var(--text-muted); letter-spacing: 0; text-transform: none; font-weight: 500; }
 .idp-child { margin: 0; font-size: 13px; color: var(--text-muted); }
 .idp-owner { margin: 0; font-size: 11.5px; color: var(--text-faint); }
+.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-picker button { border: 1px solid var(--surface-border); background: var(--surface-hover); color: var(--text-muted); border-radius: 12px; padding: 3px 9px; font-size: 12px; }
+.tag-picker button.selected { border-color: var(--accent); color: var(--text-strong); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+.time-form { display: grid; grid-template-columns: 130px 90px minmax(120px, 1fr) auto; gap: 6px; }
+.time-entries { display: grid; gap: 4px; list-style: none; padding: 0; margin: 0; }
+.time-entries li { display: grid; grid-template-columns: 88px 54px minmax(0, 1fr) auto; align-items: baseline; gap: 7px; padding: 5px 0; border-top: 1px solid var(--surface-border); font-size: 12px; }
+.time-entries span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+@media (max-width: 600px) { .time-form { grid-template-columns: 1fr 1fr; } .time-form input[aria-label="Work description"] { grid-column: 1 / -1; } .time-entries li { grid-template-columns: 76px 50px 1fr; } .time-entries li small { grid-column: 3; } }
 
 .checklist { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--surface-border); border-radius: 10px; background: var(--surface-2, rgba(255,255,255,.02)); }
 .checklist-head { display: flex; align-items: baseline; gap: 8px; }
