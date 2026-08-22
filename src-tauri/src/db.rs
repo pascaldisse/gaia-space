@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -169,6 +169,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 14 {
         tx.execute_batch(SCHEMA_V14)?;
     }
+    if version < 15 {
+        tx.execute_batch(SCHEMA_V15)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -270,6 +273,11 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+pub(crate) const SCHEMA_V15: &str = r#"
+CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE, payload_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), attempts INTEGER NOT NULL DEFAULT 0, response_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), delivered_at INTEGER, next_attempt_at INTEGER);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_created ON webhook_deliveries(webhook_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(status, next_attempt_at);
 "#;
 pub(crate) const SCHEMA_V14: &str = r#"
 CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
@@ -509,13 +517,22 @@ mod tests {
         seed(&conn).expect("seed");
         conn.pragma_update(None, "user_version", 13).unwrap();
         migrate(&conn).expect("v14");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 14);
         conn.execute("INSERT INTO devfiles(id,project_id,path,name,content,generated) VALUES('d','demo-project','.space/dev.devfile.yaml','Dev','schemaVersion: 2.2.0',0)", []).unwrap();
         conn.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('a','App','Application','client')", []).unwrap();
         conn.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('w','a','IssueWebhookEvent','https://example.test/hook')", []).unwrap();
-        conn.execute("DELETE FROM applications WHERE id='a'", []).unwrap();
-        let orphaned: i64 = conn.query_row("SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM applications WHERE id='a'", [])
+            .unwrap();
+        let orphaned: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(orphaned, 0, "extension rows cascade with their application");
     }
 
@@ -531,10 +548,19 @@ mod tests {
         // Simulate a database stamped at V10 and migrate forward again.
         conn.pragma_update(None, "user_version", 10).unwrap();
         migrate(&conn).expect("v11");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "schema version is monotonic and lands on head"
+        );
         assert_eq!(SCHEMA_VERSION, 14);
-        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        let notes: Option<String> = conn
+            .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn
             .query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| {
