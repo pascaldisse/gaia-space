@@ -1330,6 +1330,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // dispatch spends that key against an arbitrary URL: same admin gate.
         | "app_signing_key"
         | "rotate_app_signing_key"
+| "add_app_ssh_key" | "list_app_ssh_keys" | "delete_app_ssh_key"
+| "add_app_gpg_key" | "list_app_gpg_keys" | "delete_app_gpg_key" | "revoke_app_gpg_key"
         | "dispatch_application_payload"
         | "parse_application_payload"
         | "application_payload_classes"
@@ -2848,6 +2850,13 @@ async fn cmd(
     "list_webhook_secrets" => applications::list_webhook_secrets(webhook_id: String),
     "app_signing_key" => payload_dispatch::app_signing_key(application_id: String),
     "rotate_app_signing_key" => payload_dispatch::rotate_app_signing_key(application_id: String),
+    "add_app_ssh_key" => applications::add_app_ssh_key(application_id: String, public_key: String, comment: Option<String>),
+    "list_app_ssh_keys" => applications::list_app_ssh_keys(application_id: String),
+    "delete_app_ssh_key" => applications::delete_app_ssh_key(application_id: String, fingerprint: String),
+    "add_app_gpg_key" => applications::add_app_gpg_key(application_id: String, public_key: String),
+    "list_app_gpg_keys" => applications::list_app_gpg_keys(application_id: String),
+    "delete_app_gpg_key" => applications::delete_app_gpg_key(application_id: String, fingerprint: String),
+    "revoke_app_gpg_key" => applications::revoke_app_gpg_key(application_id: String, fingerprint: String),
     "parse_application_payload" => payload_dispatch::parse_application_payload(payload_json: String),
     "application_payload_classes" => payload_dispatch::application_payload_classes(),
     "dispatch_application_payload" => payload_dispatch::dispatch_application_payload(application_id: String, payload_json: String),

@@ -2815,3 +2815,130 @@ pub fn verify_app_payload_signature(
 pub(crate) fn dispatch_body(payload: &ApplicationPayload) -> Result<String> {
     serde_json::to_string(payload).map_err(|e| e.to_string())
 }
+
+/// Public application SSH key; private material is rejected and never persisted.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct AppSshKey {
+    pub application_id: String,
+    pub fingerprint: String,
+    pub public_key: String,
+    pub comment: String,
+    pub created_at: i64,
+}
+/// Public OpenPGP key, with a durable revocation marker rather than destructive removal.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct AppGpgKey {
+    pub application_id: String,
+    pub fingerprint: String,
+    pub public_key: String,
+    pub revoked_at: Option<i64>,
+    pub created_at: i64,
+}
+fn fingerprint(public_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(public_key.as_bytes()))[..32].to_string()
+}
+fn public_ssh_key(value: &str) -> Result<()> {
+    if value.trim_start().starts_with("ssh-") {
+        Ok(())
+    } else {
+        Err("SSH key must be an OpenSSH public key".into())
+    }
+}
+fn public_gpg_key(value: &str) -> Result<()> {
+    if value.contains("BEGIN PGP PUBLIC KEY BLOCK") {
+        Ok(())
+    } else {
+        Err("GPG key must be an armored public key".into())
+    }
+}
+fn read_ssh_key(r: &rusqlite::Row<'_>) -> rusqlite::Result<AppSshKey> {
+    Ok(AppSshKey {
+        application_id: r.get(0)?,
+        fingerprint: r.get(1)?,
+        public_key: r.get(2)?,
+        comment: r.get(3)?,
+        created_at: r.get(4)?,
+    })
+}
+fn read_gpg_key(r: &rusqlite::Row<'_>) -> rusqlite::Result<AppGpgKey> {
+    Ok(AppGpgKey {
+        application_id: r.get(0)?,
+        fingerprint: r.get(1)?,
+        public_key: r.get(2)?,
+        revoked_at: r.get(3)?,
+        created_at: r.get(4)?,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_app_ssh_key(
+    application_id: String,
+    public_key: String,
+    comment: Option<String>,
+) -> Result<AppSshKey> {
+    public_ssh_key(&public_key)?;
+    let c = db::conn()?;
+    app_exists_on(&c, &application_id)?;
+    let fp = fingerprint(&public_key);
+    c.execute("INSERT INTO app_ssh_keys(application_id,fingerprint,public_key,comment) VALUES(?1,?2,?3,?4) ON CONFLICT(application_id,fingerprint) DO UPDATE SET public_key=excluded.public_key,comment=excluded.comment",params![application_id,fp,public_key,comment.unwrap_or_default()]).map_err(|e|e.to_string())?;
+    c.query_row("SELECT application_id,fingerprint,public_key,comment,created_at FROM app_ssh_keys WHERE application_id=?1 AND fingerprint=?2",params![application_id,fp],read_ssh_key).map_err(|e|e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_app_ssh_keys(application_id: String) -> Result<Vec<AppSshKey>> {
+    let c = db::conn()?;
+    app_exists_on(&c, &application_id)?;
+    let mut q=c.prepare("SELECT application_id,fingerprint,public_key,comment,created_at FROM app_ssh_keys WHERE application_id=?1 ORDER BY created_at").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map([application_id], read_ssh_key)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_app_ssh_key(application_id: String, fingerprint: String) -> Result<()> {
+    db::conn()?
+        .execute(
+            "DELETE FROM app_ssh_keys WHERE application_id=?1 AND fingerprint=?2",
+            params![application_id, fingerprint],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_app_gpg_key(application_id: String, public_key: String) -> Result<AppGpgKey> {
+    public_gpg_key(&public_key)?;
+    let c = db::conn()?;
+    app_exists_on(&c, &application_id)?;
+    let fp = fingerprint(&public_key);
+    c.execute("INSERT INTO app_gpg_keys(application_id,fingerprint,public_key) VALUES(?1,?2,?3) ON CONFLICT(application_id,fingerprint) DO UPDATE SET public_key=excluded.public_key",params![application_id,fp,public_key]).map_err(|e|e.to_string())?;
+    c.query_row("SELECT application_id,fingerprint,public_key,revoked_at,created_at FROM app_gpg_keys WHERE application_id=?1 AND fingerprint=?2",params![application_id,fp],read_gpg_key).map_err(|e|e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_app_gpg_keys(application_id: String) -> Result<Vec<AppGpgKey>> {
+    let c = db::conn()?;
+    app_exists_on(&c, &application_id)?;
+    let mut q=c.prepare("SELECT application_id,fingerprint,public_key,revoked_at,created_at FROM app_gpg_keys WHERE application_id=?1 ORDER BY created_at").map_err(|e|e.to_string())?;
+    let rows = q
+        .query_map([application_id], read_gpg_key)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_app_gpg_key(application_id: String, fingerprint: String) -> Result<()> {
+    db::conn()?
+        .execute(
+            "DELETE FROM app_gpg_keys WHERE application_id=?1 AND fingerprint=?2",
+            params![application_id, fingerprint],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn revoke_app_gpg_key(application_id: String, fingerprint: String) -> Result<AppGpgKey> {
+    let c = db::conn()?;
+    if c.execute("UPDATE app_gpg_keys SET revoked_at=COALESCE(revoked_at,unixepoch()) WHERE application_id=?1 AND fingerprint=?2",params![application_id,fingerprint]).map_err(|e|e.to_string())? == 0 { return Err("GPG key not found".into()) };
+    c.query_row("SELECT application_id,fingerprint,public_key,revoked_at,created_at FROM app_gpg_keys WHERE application_id=?1 AND fingerprint=?2",params![application_id,fingerprint],read_gpg_key).map_err(|e|e.to_string())
+}

@@ -11,6 +11,8 @@ export type WebhookSecretMeta={id:string;webhook_id:string;state:"ACTIVE"|"RETIR
 export type RotatedWebhookSecret={webhook_id:string;secret:string;previous_expires_at:number|null;overlap_seconds:number};
 export type ChatbotRegistration={id:string;application_id:string;display_name:string;description:string|null;commands_json:string;enabled:boolean};
 export type UiExtension={id:string;application_id:string;extension_type:string;display_name:string;unique_code:string;iframe_url:string|null;enabled:boolean};
+export type AppSshKey={application_id:string;fingerprint:string;public_key:string;comment:string;created_at:number};
+export type AppGpgKey={application_id:string;fingerprint:string;public_key:string;revoked_at:number|null;created_at:number};
 export type AppSecret={application_id:string;client_id:string;client_secret:string};
 export type AppToken={id:string;application_id:string;scope:string;expires_at:number|null;access_token:string|null};
 /** Closed typed payload family delivered to an application's own endpoint (`className` tag). */
@@ -33,6 +35,8 @@ export type AppInstall={id:string;marketplace_app_id:string|null;application_id:
 export const appHttpApi={me:"/api/app/me",projects:"/api/app/projects"} as const;
 export const applicationsApi={
 rotateAppSecret:(application_id:string)=>call<AppSecret>("rotate_app_secret",{applicationId:application_id}),
+addSshKey:(application_id:string,public_key:string,comment?:string)=>call<AppSshKey>("add_app_ssh_key",{applicationId:application_id,publicKey:public_key,comment:comment??null}), sshKeys:(application_id:string)=>call<AppSshKey[]>("list_app_ssh_keys",{applicationId:application_id}), deleteSshKey:(application_id:string,fingerprint:string)=>call<void>("delete_app_ssh_key",{applicationId:application_id,fingerprint}),
+addGpgKey:(application_id:string,public_key:string)=>call<AppGpgKey>("add_app_gpg_key",{applicationId:application_id,publicKey:public_key}), gpgKeys:(application_id:string)=>call<AppGpgKey[]>("list_app_gpg_keys",{applicationId:application_id}), deleteGpgKey:(application_id:string,fingerprint:string)=>call<void>("delete_app_gpg_key",{applicationId:application_id,fingerprint}), revokeGpgKey:(application_id:string,fingerprint:string)=>call<AppGpgKey>("revoke_app_gpg_key",{applicationId:application_id,fingerprint}),
 issueAppToken:(client_id:string,client_secret:string,scope?:string,ttl_seconds?:number)=>call<AppToken>("issue_app_token",{clientId:client_id,clientSecret:client_secret,scope:scope??null,ttlSeconds:ttl_seconds??null}),
 verifyAppToken:(token:string)=>call<AppToken|null>("verify_app_token",{token}),
 revokeAppToken:(id:string)=>call<void>("revoke_app_token",{id}),

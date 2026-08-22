@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 53;
+pub const SCHEMA_VERSION: i64 = 54;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -440,6 +440,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             add_column_if_missing(&tx, "absences", "availability", "TEXT NOT NULL DEFAULT 'away'")?;
         }
     }
+    if version < 54 {
+        tx.execute_batch(SCHEMA_V54)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -770,6 +773,10 @@ pub(crate) const SCHEMA_V51: &str = r#"
 CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id);
 "#;
 
+pub(crate) const SCHEMA_V54: &str = r#"
+CREATE TABLE IF NOT EXISTS app_ssh_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
+CREATE TABLE IF NOT EXISTS app_gpg_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
+"#;
 pub(crate) const SCHEMA_V52: &str = r#"
 CREATE TABLE IF NOT EXISTS app_signing_keys (application_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, private_key TEXT NOT NULL, public_key TEXT NOT NULL, previous_key_id TEXT, previous_public_key TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 "#;
@@ -1132,7 +1139,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 53);
+        assert_eq!(SCHEMA_VERSION, 54);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
