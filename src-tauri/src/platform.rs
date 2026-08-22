@@ -581,6 +581,17 @@ pub fn require_right_on(
     if is_admin_on(c, profile_id)?
         || check_right_on(c, profile_id, right.code(), scope_type, scope_id)?
     {
+        return Ok(());
+    }
+    // A right nobody has configured in the role matrix is not yet enforced:
+    // the catalog is opt-in tightening, not a default lockout. The moment an
+    // admin grants the right to any role, it becomes a real gate everywhere.
+    let configured: i64 = err(c.query_row(
+        "SELECT count(*) FROM role_rights rr JOIN rights r ON r.id = rr.right_id WHERE r.code = ?1",
+        params![right.code()],
+        |r| r.get(0),
+    ))?;
+    if configured == 0 {
         Ok(())
     } else {
         Err(format!("missing right {}", right.code()))
