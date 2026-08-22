@@ -9,7 +9,14 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WORK_DIR=${WORK_DIR:-"$REPO_ROOT/.work/registry"}
 SERVER_BIN=${SERVER_BIN:-"$REPO_ROOT/src-tauri/target/debug/space-server"}
 ADMIN_PASSWORD=${ADMIN_PASSWORD:-registry-check-pw}
-MAVEN_HOME=${MAVEN_HOME:-"$WORK_DIR/apache-maven"}
+# Tool cache lives beside (not inside) the wiped work dir so a rerun does not re-download.
+TOOL_DIR=${TOOL_DIR:-"$REPO_ROOT/.work/tools"}
+MAVEN_VERSION=${MAVEN_VERSION:-3.9.9}
+MAVEN_HOME=${MAVEN_HOME:-"$TOOL_DIR/apache-maven-$MAVEN_VERSION"}
+# JAVA_HOME is only defaulted when the caller has none and a Homebrew JDK is present.
+if [ -z "${JAVA_HOME:-}" ] && [ -x /opt/homebrew/opt/openjdk/bin/java ]; then
+  export JAVA_HOME=/opt/homebrew/opt/openjdk
+fi
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
@@ -80,7 +87,7 @@ echo "bun add OK: $(cat "$CONSUMER/node_modules/@space/registry-demo/index.js")"
 
 # ---------- maven: real `mvn deploy` + `mvn dependency:get` when a JDK-driven mvn exists ----------
 if [ -x "$MAVEN_HOME/bin/mvn" ] || command -v mvn >/dev/null 2>&1; then
-  MVN=$(command -v mvn || echo "$MAVEN_HOME/bin/mvn")
+  MVN=$([ -x "$MAVEN_HOME/bin/mvn" ] && echo "$MAVEN_HOME/bin/mvn" || command -v mvn)
   MVN_PROJECT="$WORK_DIR/mvn-project"
   mkdir -p "$MVN_PROJECT/src/main/java/demo"
   cat >"$MVN_PROJECT/src/main/java/demo/Demo.java" <<'JAVA'

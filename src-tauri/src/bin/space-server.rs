@@ -204,6 +204,21 @@ fn registry_user(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)>
     }
     user_by_password(username, password)
 }
+/// Maven (and curl) only send credentials after a challenge, so registry 401s must carry
+/// `WWW-Authenticate`. Wraps `registry_user` into a ready-to-return response on failure.
+fn registry_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> {
+    registry_user(headers).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                header::WWW_AUTHENTICATE,
+                "Basic realm=\"gaia-space registry\"",
+            )],
+            Json(json!({"ok":false,"error":"unauthorized"})),
+        )
+            .into_response()
+    })
+}
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
@@ -2117,8 +2132,8 @@ async fn registry_npm_put(
     Path((repository_id, path)): Path<(String, String)>,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(error) = registry_user(&headers) {
-        return error.into_response();
+    if let Err(response) = registry_auth(&headers) {
+        return response;
     }
     let package_name = path.trim_matches('/').to_string();
     let document: Value = match serde_json::from_slice(&body) {
@@ -2146,8 +2161,8 @@ async fn registry_npm_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(error) = registry_user(&headers) {
-        return error.into_response();
+    if let Err(response) = registry_auth(&headers) {
+        return response;
     }
     let path = path.trim_matches('/').to_string();
     if let Some((package_name, filename)) = path.split_once("/-/") {
@@ -2193,8 +2208,8 @@ async fn registry_maven_put(
     Path((repository_id, path)): Path<(String, String)>,
     payload: Bytes,
 ) -> axum::response::Response {
-    if let Err(error) = registry_user(&headers) {
-        return error.into_response();
+    if let Err(response) = registry_auth(&headers) {
+        return response;
     }
     let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
         Ok(value) => value,
@@ -2229,8 +2244,8 @@ async fn registry_maven_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
 ) -> axum::response::Response {
-    if let Err(error) = registry_user(&headers) {
-        return error.into_response();
+    if let Err(response) = registry_auth(&headers) {
+        return response;
     }
     let (package_name, version, filename) = match pipelines::maven_coordinates(&path) {
         Ok(value) => value,
