@@ -10,9 +10,10 @@ TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
-## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md @ 88a03d7)
-52 rows — done 2 · partial 20 · stub 1 · missing 29.
-Worst gaps: Safe Merge (preview only, no CI/final merge) · protected-branch permissions · CODEOWNERS · stacked reviews · quality gates CI/external checks.
+## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md; Varuna-III stage 3)
+52 rows — done 2 · partial 21 · stub 1 · missing 28.
+Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21; `review::tests::codeowners_last_match_wins_and_requires_the_matching_reviewer`).
+Worst gaps: stacked reviews · quality gates external checks; CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
 33 rows — done 6 · partial 16 · stub 1 · missing 10.

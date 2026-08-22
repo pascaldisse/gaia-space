@@ -74,6 +74,8 @@ export type QualityGateEvaluation = {
   approvals: number;
   min_approvals: number;
   matched_rules: number;
+  codeowner_paths: string[];
+  codeowner_approvers: string[];
 };
 
 export type NewMergeRequest = {

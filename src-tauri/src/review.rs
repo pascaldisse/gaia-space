@@ -105,6 +105,9 @@ pub struct QualityGateEvaluation {
     pub approvals: i64,
     pub min_approvals: i64,
     pub matched_rules: i64,
+    /// Source-branch CODEOWNERS paths that have a rule, plus locally resolved owners.
+    pub codeowner_paths: Vec<String>,
+    pub codeowner_approvers: Vec<String>,
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -591,6 +594,179 @@ fn branch_matches(pattern: &str, branch: &str) -> bool {
         None => pattern == branch,
     }
 }
+#[derive(Debug)]
+struct CodeOwnerMatch {
+    path: String,
+    owner_ids: Vec<String>,
+}
+
+/// Split owners while retaining quoted role names, e.g. "Project Admin".
+fn codeowner_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for ch in input.chars() {
+        match ch {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// `*` stays in one path component; `**` can span components.
+fn codeowner_glob(pattern: &[u8], path: &[u8]) -> bool {
+    match pattern {
+        [] => path.is_empty(),
+        [b'*', b'*', rest @ ..] => {
+            codeowner_glob(rest, path) || (!path.is_empty() && codeowner_glob(pattern, &path[1..]))
+        }
+        [b'*', rest @ ..] => {
+            codeowner_glob(rest, path)
+                || (!path.is_empty() && path[0] != b'/' && codeowner_glob(pattern, &path[1..]))
+        }
+        [b'?', rest @ ..] => {
+            !path.is_empty() && path[0] != b'/' && codeowner_glob(rest, &path[1..])
+        }
+        [first, rest @ ..] => {
+            !path.is_empty() && *first == path[0] && codeowner_glob(rest, &path[1..])
+        }
+    }
+}
+
+fn codeowner_pattern_matches(raw: &str, path: &str) -> bool {
+    let mut pattern = raw.trim_start_matches('/').to_owned();
+    if pattern.ends_with('/') {
+        pattern.push_str("**");
+    }
+    if !pattern.contains('/') {
+        return codeowner_glob(
+            pattern.as_bytes(),
+            path.rsplit('/').next().unwrap_or(path).as_bytes(),
+        );
+    }
+    codeowner_glob(pattern.as_bytes(), path.as_bytes())
+}
+
+fn codeowner_profile_ids(
+    conn: &Connection,
+    project_id: &str,
+    owners: &[String],
+) -> Result<Vec<String>> {
+    let mut ids = std::collections::BTreeSet::new();
+    for owner in owners {
+        let owner = owner.trim_start_matches('@');
+        let mut profiles = conn
+            .prepare(
+                "SELECT id FROM profiles WHERE lower(username)=lower(?1) OR lower(email)=lower(?1)",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = profiles
+            .query_map(rusqlite::params![owner], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
+        let mut role_members = conn.prepare(
+            "SELECT DISTINCT a.profile_id FROM roles r JOIN role_assignments a ON a.role_id=r.id \
+             WHERE r.name=?1 AND a.profile_id IS NOT NULL AND (a.scope_type='global' OR (a.scope_type='project' AND a.scope_id=?2))",
+        ).map_err(|e| e.to_string())?;
+        let rows = role_members
+            .query_map(rusqlite::params![owner, project_id], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(ids.into_iter().collect())
+}
+
+/// Read root CODEOWNERS (or `.space/CODEOWNERS`) from the MR source commit and apply
+/// last-match-wins ownership to changed paths. It is never cached, so new source pushes
+/// are evaluated against their own ownership file.
+fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOwnerMatch>> {
+    let (project_id, repo_path, source_branch, target_branch): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT project_id,repo_path,source_branch,target_branch FROM reviews WHERE id=?1",
+            rusqlite::params![review_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (repo_path, source_branch, target_branch) = match (repo_path, source_branch, target_branch)
+    {
+        (Some(repo), Some(source), Some(target)) => (repo, source, target),
+        _ => return Ok(Vec::new()),
+    };
+    let repo = open(&repo_path)?;
+    let source = branch_commit(&repo, &source_branch)?;
+    let target = branch_commit(&repo, &target_branch)?;
+    let base = repo
+        .merge_base(target.id(), source.id())
+        .map_err(|e| e.to_string())?;
+    let base_tree = repo
+        .find_commit(base)
+        .map_err(|e| e.to_string())?
+        .tree()
+        .map_err(|e| e.to_string())?;
+    let source_tree = source.tree().map_err(|e| e.to_string())?;
+    let entry = source_tree
+        .get_path(std::path::Path::new("CODEOWNERS"))
+        .or_else(|_| source_tree.get_path(std::path::Path::new(".space/CODEOWNERS")));
+    let Ok(entry) = entry else {
+        return Ok(Vec::new());
+    };
+    let blob = repo.find_blob(entry.id()).map_err(|e| e.to_string())?;
+    let text =
+        std::str::from_utf8(blob.content()).map_err(|_| "CODEOWNERS must be UTF-8".to_string())?;
+    let rules: Vec<(String, Vec<String>)> = text
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let tokens = codeowner_tokens(line);
+            (tokens.len() >= 2).then(|| (tokens[0].clone(), tokens[1..].to_vec()))
+        })
+        .collect();
+    let diff = repo
+        .diff_tree_to_tree(Some(&base_tree), Some(&source_tree), None)
+        .map_err(|e| e.to_string())?;
+    let mut matches = Vec::new();
+    for delta in diff.deltas() {
+        let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+            continue;
+        };
+        let path = path.to_string_lossy().to_string();
+        if let Some((_, owners)) = rules
+            .iter()
+            .rev()
+            .find(|(pattern, _)| codeowner_pattern_matches(pattern, &path))
+        {
+            matches.push(CodeOwnerMatch {
+                path,
+                owner_ids: codeowner_profile_ids(conn, &project_id, owners)?,
+            });
+        }
+    }
+    Ok(matches)
+}
+
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
     let (project_id, target_branch): (String, Option<String>) = conn
         .query_row(
@@ -630,6 +806,8 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
             approvals: 0,
             min_approvals: 0,
             matched_rules: 0,
+            codeowner_paths: Vec::new(),
+            codeowner_approvers: Vec::new(),
         });
     }
 
@@ -679,10 +857,35 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
             missing_reviewers.join(", ")
         ));
     }
-    // Simplified: no CODEOWNERS file parsing (KB §4 gap). codeowners_required is treated as
-    // "at least one reviewer approval" until real CODEOWNERS-file matching is implemented.
-    if codeowners_required && approvals < 1 {
-        reasons.push("requires at least one reviewer approval (CODEOWNERS gate)".into());
+    let codeowner_matches = if codeowners_required {
+        codeowner_matches_tx(conn, review_id)?
+    } else {
+        Vec::new()
+    };
+    let codeowner_paths: Vec<String> = codeowner_matches.iter().map(|m| m.path.clone()).collect();
+    let mut codeowner_approvers = std::collections::BTreeSet::new();
+    for owner_match in &codeowner_matches {
+        codeowner_approvers.extend(owner_match.owner_ids.iter().cloned());
+        if owner_match.owner_ids.is_empty() {
+            reasons.push(format!(
+                "CODEOWNERS for '{}' has no locally resolvable owner",
+                owner_match.path
+            ));
+        } else if !owner_match
+            .owner_ids
+            .iter()
+            .any(|id| accepted_ids.contains(id))
+        {
+            reasons.push(format!(
+                "missing CODEOWNERS approval for '{}'",
+                owner_match.path
+            ));
+        }
+    }
+    if codeowners_required && codeowner_matches.is_empty() {
+        reasons.push(
+            "CODEOWNERS gate requires a source-branch CODEOWNERS rule for changed files".into(),
+        );
     }
 
     Ok(QualityGateEvaluation {
@@ -691,6 +894,8 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         approvals,
         min_approvals,
         matched_rules: matched.len() as i64,
+        codeowner_paths,
+        codeowner_approvers: codeowner_approvers.into_iter().collect(),
     })
 }
 /// Live gate evaluation banner: satisfied/blocking reasons for a review's target branch.
@@ -1133,6 +1338,42 @@ mod tests {
         assert_eq!(eval.approvals, 1);
 
         drop(db_path);
+    }
+
+    #[test]
+    fn codeowners_last_match_wins_and_requires_the_matching_reviewer() {
+        assert!(codeowner_pattern_matches("/src/**", "src/lib.rs"));
+        assert!(!codeowner_pattern_matches("*.ts", "src/lib.rs"));
+        let (dir, repo) = clean_repo("codeowners");
+        let feature = branch_commit(&repo, "feature").unwrap().id();
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(feature),
+            "CODEOWNERS",
+            "* @reviewer1\nextra.txt @owner2\n",
+        );
+        let path = dir.to_string_lossy().to_string();
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-1','reviewer1','Reviewer One',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-2','owner2','Reviewer Two',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('r-owner','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
+        conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,codeowners_required) VALUES('owners','demo-project','main',1)", []).unwrap();
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-1','Reviewer','accepted',0)", []).unwrap();
+        let blocked = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
+        assert!(!blocked.satisfied);
+        assert!(blocked.reasons.iter().any(|r| r.contains("extra.txt")));
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-2','Reviewer','accepted',0)", []).unwrap();
+        let passed = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
+        assert!(passed.satisfied, "{:?}", passed.reasons);
+        assert!(passed
+            .codeowner_paths
+            .iter()
+            .any(|path| path == "extra.txt"));
+        assert_eq!(passed.codeowner_approvers, vec!["reviewer-1", "reviewer-2"]);
+        drop(db_path);
+        sweep(&dir);
     }
 
     #[test]
