@@ -112,6 +112,15 @@ pub struct WebhookSubscription {
     pub filters_json: Option<String>,
     pub endpoint_uri: String,
     pub enabled: bool,
+    /// Shared secret for the HMAC-SHA256 request signature. `None` = unsigned endpoint.
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Attempts after which a delivery is dead-lettered (`next_attempt_at` cleared).
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: i64,
+}
+fn default_max_attempts() -> i64 {
+    5
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WebhookDelivery {
@@ -229,12 +238,34 @@ fn webhook(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookSubscription> {
         filters_json: r.get(3)?,
         endpoint_uri: r.get(4)?,
         enabled: r.get(5)?,
+        secret: r.get(6)?,
+        max_attempts: r.get(7)?,
     })
+}
+/// HMAC-SHA256 over `{timestamp}.{payload}` — the timestamp is inside the MAC so a
+/// captured body cannot be replayed under a fresh header.
+pub(crate) fn webhook_signature(secret: &str, timestamp: i64, payload: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let key = secret.as_bytes();
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.map(|v| v ^ 0x36));
+    inner.update(format!("{timestamp}.{payload}").as_bytes());
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(k.map(|v| v ^ 0x5c));
+    outer.update(inner);
+    format!("sha256={:x}", outer.finalize())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_webhooks(application_id: String) -> Result<Vec<WebhookSubscription>> {
     let c = db::conn()?;
-    let mut q=c.prepare("SELECT id,application_id,event_type,filters_json,endpoint_uri,enabled FROM webhook_subscriptions WHERE application_id=?1 ORDER BY event_type").map_err(|e|e.to_string())?;
+    let mut q=c.prepare("SELECT id,application_id,event_type,filters_json,endpoint_uri,enabled,secret,max_attempts FROM webhook_subscriptions WHERE application_id=?1 ORDER BY event_type").map_err(|e|e.to_string())?;
     let rows = q
         .query_map([application_id], webhook)
         .map_err(|e| e.to_string())?
@@ -253,9 +284,12 @@ pub fn save_webhook(value: WebhookSubscription) -> Result<WebhookSubscription> {
         serde_json::from_str::<serde_json::Value>(filters)
             .map_err(|_| "webhook filters must be JSON".to_string())?;
     }
+    if value.max_attempts < 1 {
+        return Err("webhook max attempts must be at least 1".into());
+    }
     app_exists(&value.application_id)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,filters_json,endpoint_uri,enabled) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET event_type=excluded.event_type,filters_json=excluded.filters_json,endpoint_uri=excluded.endpoint_uri,enabled=excluded.enabled",params![value.id,value.application_id,value.event_type,value.filters_json,value.endpoint_uri,value.enabled]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,filters_json,endpoint_uri,enabled,secret,max_attempts) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET event_type=excluded.event_type,filters_json=excluded.filters_json,endpoint_uri=excluded.endpoint_uri,enabled=excluded.enabled,secret=excluded.secret,max_attempts=excluded.max_attempts",params![value.id,value.application_id,value.event_type,value.filters_json,value.endpoint_uri,value.enabled,value.secret,value.max_attempts]).map_err(|e|e.to_string())?;
     Ok(value)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -282,19 +316,31 @@ fn read_delivery(r: &rusqlite::Row<'_>) -> rusqlite::Result<WebhookDelivery> {
 fn delivery_backoff(attempts: i64) -> i64 {
     30 * (1_i64 << attempts.clamp(0, 5))
 }
+/// `None` = dead letter: the budget is spent, so no future time is written and the
+/// queue sweeper can never pick the row up again.
+fn retry_schedule(attempts_done: i64, max_attempts: i64) -> Option<i64> {
+    if attempts_done >= max_attempts {
+        None
+    } else {
+        Some(delivery_backoff(attempts_done))
+    }
+}
 fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
     let c = db::conn()?;
-    let (webhook_id, endpoint_uri, enabled, payload): (String,String,bool,String) = c.query_row("SELECT d.webhook_id,w.endpoint_uri,w.enabled,d.payload_json FROM webhook_deliveries d JOIN webhook_subscriptions w ON w.id=d.webhook_id WHERE d.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|_|"webhook delivery not found".to_string())?;
+    let (webhook_id, endpoint_uri, enabled, payload, secret, max_attempts, attempt): (String,String,bool,String,Option<String>,i64,i64) = c.query_row("SELECT d.webhook_id,w.endpoint_uri,w.enabled,d.payload_json,w.secret,w.max_attempts,d.attempts FROM webhook_deliveries d JOIN webhook_subscriptions w ON w.id=d.webhook_id WHERE d.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).map_err(|_|"webhook delivery not found".to_string())?;
     if !enabled {
         return Err("webhook is disabled".into());
     }
-    let attempt: i64 = c
-        .query_row(
-            "SELECT attempts FROM webhook_deliveries WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    if attempt >= max_attempts {
+        return Err("webhook delivery exhausted its attempts".into());
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as i64;
+    let signature = secret
+        .as_deref()
+        .map(|s| webhook_signature(s, timestamp, &payload));
     let result = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -303,6 +349,11 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
         .post(&endpoint_uri)
         .header("content-type", "application/json")
         .header("x-gaia-space-webhook", &webhook_id)
+        .header("x-gaia-space-timestamp", timestamp.to_string())
+        .header(
+            "x-gaia-space-signature",
+            signature.clone().unwrap_or_default(),
+        )
         .body(payload)
         .send();
     match result {
@@ -310,12 +361,12 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
             c.execute("UPDATE webhook_deliveries SET status='SUCCEEDED',attempts=?2,response_status=?3,last_error=NULL,delivered_at=unixepoch(),next_attempt_at=NULL WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16())]).map_err(|e|e.to_string())?;
         }
         Ok(response) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=?3,last_error=?4,next_attempt_at=unixepoch()+?5 WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16()),format!("HTTP {}",response.status()),next]).map_err(|e|e.to_string())?;
+            let next = retry_schedule(attempt + 1, max_attempts);
+            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=?3,last_error=?4,next_attempt_at=CASE WHEN ?5 IS NULL THEN NULL ELSE unixepoch()+?5 END WHERE id=?1",params![id,attempt+1,i64::from(response.status().as_u16()),format!("HTTP {}",response.status()),next]).map_err(|e|e.to_string())?;
         }
         Err(error) => {
-            let next = delivery_backoff(attempt + 1);
-            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=NULL,last_error=?3,next_attempt_at=unixepoch()+?4 WHERE id=?1",params![id,attempt+1,error.to_string(),next]).map_err(|e|e.to_string())?;
+            let next = retry_schedule(attempt + 1, max_attempts);
+            c.execute("UPDATE webhook_deliveries SET status='FAILED',attempts=?2,response_status=NULL,last_error=?3,next_attempt_at=CASE WHEN ?4 IS NULL THEN NULL ELSE unixepoch()+?4 END WHERE id=?1",params![id,attempt+1,error.to_string(),next]).map_err(|e|e.to_string())?;
         }
     }
     c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[id],read_delivery).map_err(|e|e.to_string())
@@ -339,6 +390,34 @@ pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<Webho
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn retry_webhook_delivery(id: String) -> Result<WebhookDelivery> {
     deliver_delivery(&id)
+}
+/// Deliveries that are due now: FAILED, still inside their attempt budget
+/// (`next_attempt_at` non-NULL = not dead-lettered), and past their backoff.
+pub fn due_webhook_deliveries(limit: i64) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id FROM webhook_deliveries WHERE status='FAILED' AND next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch() ORDER BY next_attempt_at LIMIT ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([limit], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+/// One sweep of the retry queue. Returns the deliveries it touched; a delivery whose
+/// redelivery errors out is reported, not propagated — one bad endpoint must not stop
+/// the sweep.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn process_webhook_queue(limit: i64) -> Result<Vec<WebhookDelivery>> {
+    let limit = limit.clamp(1, 100);
+    let mut out = Vec::new();
+    for id in due_webhook_deliveries(limit)? {
+        if let Ok(delivery) = deliver_delivery(&id) {
+            out.push(delivery);
+        }
+    }
+    Ok(out)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_webhook_deliveries(webhook_id: String) -> Result<Vec<WebhookDelivery>> {
@@ -485,9 +564,16 @@ pub struct AppInstall {
     pub installed_at: i64,
 }
 const INSTALL_KINDS: [&str; 5] = ["MARKETPLACE", "LINK", "MANUAL", "JENKINS", "TEAMCITY"];
-pub(crate) fn rotate_app_secret_on(c: &rusqlite::Connection, application_id: &str) -> Result<AppSecret> {
+pub(crate) fn rotate_app_secret_on(
+    c: &rusqlite::Connection,
+    application_id: &str,
+) -> Result<AppSecret> {
     let client_id: String = c
-        .query_row("SELECT client_id FROM applications WHERE id=?1", [application_id], |r| r.get(0))
+        .query_row(
+            "SELECT client_id FROM applications WHERE id=?1",
+            [application_id],
+            |r| r.get(0),
+        )
         .map_err(|_| "application not found".to_string())?;
     let secret = crate::auth_security::opaque("spcs_");
     let hashed = crate::auth_security::hash(&secret)?;
@@ -500,10 +586,20 @@ pub(crate) fn rotate_app_secret_on(c: &rusqlite::Connection, application_id: &st
     c.execute("UPDATE app_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
     c.execute("UPDATE oauth_access_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
     c.execute("UPDATE oauth_auth_codes SET consumed_at=unixepoch() WHERE application_id=?1 AND consumed_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
-    Ok(AppSecret { application_id: application_id.into(), client_id, client_secret: secret })
+    Ok(AppSecret {
+        application_id: application_id.into(),
+        client_id,
+        client_secret: secret,
+    })
 }
 /// client_credentials grant: verifies the app secret and mints an opaque bearer token.
-pub(crate) fn issue_app_token_on(c: &rusqlite::Connection, client_id: &str, client_secret: &str, scope: Option<String>, ttl_seconds: Option<i64>) -> Result<AppToken> {
+pub(crate) fn issue_app_token_on(
+    c: &rusqlite::Connection,
+    client_id: &str,
+    client_secret: &str,
+    scope: Option<String>,
+    ttl_seconds: Option<i64>,
+) -> Result<AppToken> {
     let row: Option<(String, bool, bool, String)> = c.query_row("SELECT a.id,a.client_credentials_flow_enabled,a.archived,coalesce(s.secret_hash,'') FROM applications a LEFT JOIN app_secrets s ON s.application_id=a.id WHERE a.client_id=?1",[client_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
     let Some((application_id, flow_enabled, archived, secret_hash)) = row else {
         return Err("invalid client credentials".into());
@@ -527,20 +623,50 @@ pub(crate) fn issue_app_token_on(c: &rusqlite::Connection, client_id: &str, clie
     let scope = scope.unwrap_or_default();
     let expires_at = chrono::Utc::now().timestamp() + ttl;
     c.execute("INSERT INTO app_tokens(id,application_id,token_hash,scope,created_at,expires_at) VALUES(?1,?2,?3,?4,unixepoch(),?5)",params![id,application_id,hashed,scope,expires_at]).map_err(|e|e.to_string())?;
-    Ok(AppToken { id, application_id, scope, expires_at: Some(expires_at), access_token: Some(raw) })
+    Ok(AppToken {
+        id,
+        application_id,
+        scope,
+        expires_at: Some(expires_at),
+        access_token: Some(raw),
+    })
 }
 /// Resolves a bearer token to its application; expired/revoked tokens resolve to None.
-pub(crate) fn verify_app_token_on(c: &rusqlite::Connection, token: &str) -> Result<Option<AppToken>> {
+pub(crate) fn verify_app_token_on(
+    c: &rusqlite::Connection,
+    token: &str,
+) -> Result<Option<AppToken>> {
     let mut q=c.prepare("SELECT id,application_id,token_hash,scope,expires_at FROM app_tokens WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<i64>>(4)?))).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     for (id, application_id, token_hash, scope, expires_at) in rows {
         if crate::auth_security::matches(token, &token_hash) {
-            return Ok(Some(AppToken { id, application_id, scope, expires_at, access_token: None }));
+            return Ok(Some(AppToken {
+                id,
+                application_id,
+                scope,
+                expires_at,
+                access_token: None,
+            }));
         }
     }
     Ok(None)
 }
-pub(crate) fn install_marketplace_app_on(c: &rusqlite::Connection, value: AppInstall) -> Result<AppInstall> {
+pub(crate) fn install_marketplace_app_on(
+    c: &rusqlite::Connection,
+    value: AppInstall,
+) -> Result<AppInstall> {
     required("install id", &value.id)?;
     required("application", &value.application_id)?;
     if !INSTALL_KINDS.contains(&value.install_kind.as_str()) {
@@ -550,8 +676,17 @@ pub(crate) fn install_marketplace_app_on(c: &rusqlite::Connection, value: AppIns
         return Err("marketplace installs require a marketplace app".into());
     }
     c.execute("INSERT INTO app_installs(id,marketplace_app_id,application_id,install_kind,installed_by,installed_at) VALUES(?1,?2,?3,?4,?5,unixepoch()) ON CONFLICT(id) DO UPDATE SET install_kind=excluded.install_kind,installed_by=excluded.installed_by",params![value.id,value.marketplace_app_id,value.application_id,value.install_kind,value.installed_by]).map_err(|e|e.to_string())?;
-    let installed_at: i64 = c.query_row("SELECT installed_at FROM app_installs WHERE id=?1", [&value.id], |r| r.get(0)).map_err(|e| e.to_string())?;
-    Ok(AppInstall { installed_at, ..value })
+    let installed_at: i64 = c
+        .query_row(
+            "SELECT installed_at FROM app_installs WHERE id=?1",
+            [&value.id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(AppInstall {
+        installed_at,
+        ..value
+    })
 }
 /// Issues a fresh client secret for an application; the plaintext is returned once.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -559,7 +694,12 @@ pub fn rotate_app_secret(application_id: String) -> Result<AppSecret> {
     rotate_app_secret_on(&db::conn()?, &application_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn issue_app_token(client_id: String, client_secret: String, scope: Option<String>, ttl_seconds: Option<i64>) -> Result<AppToken> {
+pub fn issue_app_token(
+    client_id: String,
+    client_secret: String,
+    scope: Option<String>,
+    ttl_seconds: Option<i64>,
+) -> Result<AppToken> {
     issue_app_token_on(&db::conn()?, &client_id, &client_secret, scope, ttl_seconds)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -569,7 +709,13 @@ pub fn verify_app_token(token: String) -> Result<Option<AppToken>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn revoke_app_token(id: String) -> Result<()> {
     let c = db::conn()?;
-    if c.execute("UPDATE app_tokens SET revoked_at=unixepoch() WHERE id=?1 AND revoked_at IS NULL", [id]).map_err(|e| e.to_string())? == 0 {
+    if c.execute(
+        "UPDATE app_tokens SET revoked_at=unixepoch() WHERE id=?1 AND revoked_at IS NULL",
+        [id],
+    )
+    .map_err(|e| e.to_string())?
+        == 0
+    {
         return Err("token not found".into());
     }
     Ok(())
@@ -578,14 +724,40 @@ pub fn revoke_app_token(id: String) -> Result<()> {
 pub fn list_app_tokens(application_id: String) -> Result<Vec<AppToken>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,application_id,scope,expires_at FROM app_tokens WHERE application_id=?1 AND revoked_at IS NULL ORDER BY created_at DESC").map_err(|e|e.to_string())?;
-    let rows = q.query_map([application_id], |r| Ok(AppToken { id: r.get(0)?, application_id: r.get(1)?, scope: r.get(2)?, expires_at: r.get(3)?, access_token: None })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([application_id], |r| {
+            Ok(AppToken {
+                id: r.get(0)?,
+                application_id: r.get(1)?,
+                scope: r.get(2)?,
+                expires_at: r.get(3)?,
+                access_token: None,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_marketplace_apps() -> Result<Vec<MarketplaceApp>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,name,vendor,description,capabilities_json,compatibility,listing_url FROM marketplace_apps ORDER BY name").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok(MarketplaceApp { id: r.get(0)?, name: r.get(1)?, vendor: r.get(2)?, description: r.get(3)?, capabilities_json: r.get(4)?, compatibility: r.get(5)?, listing_url: r.get(6)? })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok(MarketplaceApp {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                vendor: r.get(2)?,
+                description: r.get(3)?,
+                capabilities_json: r.get(4)?,
+                compatibility: r.get(5)?,
+                listing_url: r.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -593,10 +765,18 @@ pub fn save_marketplace_app(value: MarketplaceApp) -> Result<MarketplaceApp> {
     required("marketplace app id", &value.id)?;
     required("name", &value.name)?;
     required("vendor", &value.vendor)?;
-    if serde_json::from_str::<serde_json::Value>(&value.capabilities_json).ok().filter(|v| v.is_array()).is_none() {
+    if serde_json::from_str::<serde_json::Value>(&value.capabilities_json)
+        .ok()
+        .filter(|v| v.is_array())
+        .is_none()
+    {
         return Err("capabilities must be a JSON array".into());
     }
-    if value.listing_url.as_deref().is_some_and(|url| !valid_http(url)) {
+    if value
+        .listing_url
+        .as_deref()
+        .is_some_and(|url| !valid_http(url))
+    {
         return Err("listing URL must use HTTP(S)".into());
     }
     db::conn()?.execute("INSERT INTO marketplace_apps(id,name,vendor,description,capabilities_json,compatibility,listing_url) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET name=excluded.name,vendor=excluded.vendor,description=excluded.description,capabilities_json=excluded.capabilities_json,compatibility=excluded.compatibility,listing_url=excluded.listing_url",params![value.id,value.name,value.vendor,value.description,value.capabilities_json,value.compatibility,value.listing_url]).map_err(|e|e.to_string())?;
@@ -610,12 +790,29 @@ pub fn install_marketplace_app(value: AppInstall) -> Result<AppInstall> {
 pub fn list_app_installs() -> Result<Vec<AppInstall>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,marketplace_app_id,application_id,install_kind,installed_by,installed_at FROM app_installs ORDER BY installed_at DESC").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok(AppInstall { id: r.get(0)?, marketplace_app_id: r.get(1)?, application_id: r.get(2)?, install_kind: r.get(3)?, installed_by: r.get(4)?, installed_at: r.get(5)? })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok(AppInstall {
+                id: r.get(0)?,
+                marketplace_app_id: r.get(1)?,
+                application_id: r.get(2)?,
+                install_kind: r.get(3)?,
+                installed_by: r.get(4)?,
+                installed_at: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn uninstall_app(id: String) -> Result<()> {
-    if db::conn()?.execute("DELETE FROM app_installs WHERE id=?1", [id]).map_err(|e| e.to_string())? == 0 {
+    if db::conn()?
+        .execute("DELETE FROM app_installs WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?
+        == 0
+    {
         return Err("install not found".into());
     }
     Ok(())
@@ -634,13 +831,28 @@ mod oauth_tests {
     fn client_credentials_issue_and_verify() {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
-        let token = issue_app_token_on(&c, "client-1", &secret.client_secret, Some("read".into()), Some(60)).unwrap();
+        let token = issue_app_token_on(
+            &c,
+            "client-1",
+            &secret.client_secret,
+            Some("read".into()),
+            Some(60),
+        )
+        .unwrap();
         let raw = token.access_token.clone().unwrap();
-        let verified = verify_app_token_on(&c, &raw).unwrap().expect("token verifies");
+        let verified = verify_app_token_on(&c, &raw)
+            .unwrap()
+            .expect("token verifies");
         assert_eq!(verified.application_id, "app");
         assert_eq!(verified.scope, "read");
         // Independent check: the plaintext is not what is stored.
-        let stored: String = c.query_row("SELECT token_hash FROM app_tokens WHERE id=?1", [&token.id], |r| r.get(0)).unwrap();
+        let stored: String = c
+            .query_row(
+                "SELECT token_hash FROM app_tokens WHERE id=?1",
+                [&token.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_ne!(stored, raw);
         assert!(verify_app_token_on(&c, "spat_wrong").unwrap().is_none());
     }
@@ -649,29 +861,77 @@ mod oauth_tests {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
         assert!(issue_app_token_on(&c, "client-1", "spcs_bogus", None, None).is_err());
-        assert!(issue_app_token_on(&c, "client-2", &secret.client_secret, None, None).is_err(), "flow disabled");
+        assert!(
+            issue_app_token_on(&c, "client-2", &secret.client_secret, None, None).is_err(),
+            "flow disabled"
+        );
         let token = issue_app_token_on(&c, "client-1", &secret.client_secret, None, None).unwrap();
         let raw = token.access_token.unwrap();
         rotate_app_secret_on(&c, "app").unwrap();
-        assert!(verify_app_token_on(&c, &raw).unwrap().is_none(), "rotation revokes old tokens");
+        assert!(
+            verify_app_token_on(&c, &raw).unwrap().is_none(),
+            "rotation revokes old tokens"
+        );
     }
     #[test]
     fn expired_token_does_not_verify() {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
-        let token = issue_app_token_on(&c, "client-1", &secret.client_secret, None, Some(60)).unwrap();
+        let token =
+            issue_app_token_on(&c, "client-1", &secret.client_secret, None, Some(60)).unwrap();
         let raw = token.access_token.unwrap();
-        c.execute("UPDATE app_tokens SET expires_at=unixepoch()-1 WHERE id=?1", [&token.id]).unwrap();
+        c.execute(
+            "UPDATE app_tokens SET expires_at=unixepoch()-1 WHERE id=?1",
+            [&token.id],
+        )
+        .unwrap();
         assert!(verify_app_token_on(&c, &raw).unwrap().is_none());
     }
     #[test]
     fn install_kinds_are_validated() {
         let c = conn();
-        c.execute("INSERT INTO marketplace_apps(id,name,vendor) VALUES('m','Market App','Vendor')", []).unwrap();
-        let ok = install_marketplace_app_on(&c, AppInstall { id: "i1".into(), marketplace_app_id: Some("m".into()), application_id: "app".into(), install_kind: "MARKETPLACE".into(), installed_by: None, installed_at: 0 }).unwrap();
+        c.execute(
+            "INSERT INTO marketplace_apps(id,name,vendor) VALUES('m','Market App','Vendor')",
+            [],
+        )
+        .unwrap();
+        let ok = install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i1".into(),
+                marketplace_app_id: Some("m".into()),
+                application_id: "app".into(),
+                install_kind: "MARKETPLACE".into(),
+                installed_by: None,
+                installed_at: 0,
+            },
+        )
+        .unwrap();
         assert!(ok.installed_at > 0);
-        assert!(install_marketplace_app_on(&c, AppInstall { id: "i2".into(), marketplace_app_id: None, application_id: "app".into(), install_kind: "MARKETPLACE".into(), installed_by: None, installed_at: 0 }).is_err());
-        assert!(install_marketplace_app_on(&c, AppInstall { id: "i3".into(), marketplace_app_id: None, application_id: "app".into(), install_kind: "SMOKE".into(), installed_by: None, installed_at: 0 }).is_err());
+        assert!(install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i2".into(),
+                marketplace_app_id: None,
+                application_id: "app".into(),
+                install_kind: "MARKETPLACE".into(),
+                installed_by: None,
+                installed_at: 0
+            }
+        )
+        .is_err());
+        assert!(install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i3".into(),
+                marketplace_app_id: None,
+                application_id: "app".into(),
+                install_kind: "SMOKE".into(),
+                installed_by: None,
+                installed_at: 0
+            }
+        )
+        .is_err());
     }
 }
 #[cfg(test)]
@@ -745,6 +1005,8 @@ mod delivery_tests {
             filters_json: Some("{}".into()),
             endpoint_uri: endpoint,
             enabled: true,
+            secret: Some("shhh".into()),
+            max_attempts: 5,
         })
         .expect("hook");
         let failed = deliver_webhook("hook-delivery".into(), r#"{"issue":"GAIA-7"}"#.into())
@@ -755,6 +1017,91 @@ mod delivery_tests {
         assert_eq!(succeeded.status, "SUCCEEDED");
         assert_eq!(succeeded.attempts, 2);
         server.join().expect("server");
-        assert!(body.lock().unwrap().contains("GAIA-7"));
+        let request = body.lock().unwrap().clone();
+        assert!(request.contains("GAIA-7"));
+        // signature is present and is the HMAC of the timestamp the server saw
+        let timestamp: i64 = header(&request, "x-gaia-space-timestamp")
+            .parse()
+            .expect("ts");
+        assert_eq!(
+            header(&request, "x-gaia-space-signature"),
+            webhook_signature("shhh", timestamp, r#"{"issue":"GAIA-7"}"#)
+        );
+    }
+
+    fn header(request: &str, name: &str) -> String {
+        request
+            .lines()
+            .find_map(|l| {
+                l.to_ascii_lowercase()
+                    .starts_with(name)
+                    .then(|| l.split_once(':').unwrap().1.trim().to_string())
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn attempts_budget_dead_letters_and_the_sweeper_skips_dead_rows() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-deadletter");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        // a port nobody listens on: every attempt is a transport error
+        let endpoint = {
+            let l = TcpListener::bind("127.0.0.1:0").expect("port");
+            let a = l.local_addr().unwrap();
+            drop(l);
+            format!("http://{a}")
+        };
+        save_application(Application {
+            id: "app-dead".into(),
+            name: "Dead app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "dead-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-dead".into(),
+            application_id: "app-dead".into(),
+            event_type: "IssueWebhookEvent".into(),
+            filters_json: None,
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: None,
+            max_attempts: 1,
+        })
+        .expect("hook");
+        let dead = deliver_webhook("hook-dead".into(), "{}".into()).expect("delivery");
+        assert_eq!(dead.status, "FAILED");
+        assert_eq!(dead.attempts, 1);
+        assert!(dead.next_attempt_at.is_none(), "budget spent = dead letter");
+        assert!(due_webhook_deliveries(10).unwrap().is_empty());
+        assert!(process_webhook_queue(10).unwrap().is_empty());
+        assert!(
+            retry_webhook_delivery(dead.id).is_err(),
+            "no retry past budget"
+        );
+    }
+
+    #[test]
+    fn max_attempts_must_be_positive() {
+        assert!(save_webhook(WebhookSubscription {
+            id: "h".into(),
+            application_id: "a".into(),
+            event_type: "E".into(),
+            filters_json: None,
+            endpoint_uri: "https://example.test".into(),
+            enabled: true,
+            secret: None,
+            max_attempts: 0,
+        })
+        .is_err());
     }
 }

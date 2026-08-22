@@ -183,8 +183,7 @@ fn code_client(client_id: &str) -> Result<Client> {
 /// mean one flow could silently keep a retired secret alive. This is a thin,
 /// code-flow-shaped view over that single source.
 pub fn rotate_client_secret(application_id: &str) -> Result<String> {
-    crate::applications::rotate_app_secret_on(&db::conn()?, application_id)
-        .map(|s| s.client_secret)
+    crate::applications::rotate_app_secret_on(&db::conn()?, application_id).map(|s| s.client_secret)
 }
 
 /// RFC 6749 §2.3/§4.1.3: a confidential client MUST authenticate at the token endpoint.
@@ -539,7 +538,8 @@ mod tests {
                     [grant.code.split_once('.').unwrap().0],
                 )
                 .unwrap();
-            let err = exchange_code(&token_request("c6", &grant.code, Some(VERIFIER)), cfg).unwrap_err();
+            let err =
+                exchange_code(&token_request("c6", &grant.code, Some(VERIFIER)), cfg).unwrap_err();
             assert!(err.contains("expired"), "{err}");
         });
     }
@@ -548,7 +548,12 @@ mod tests {
     fn the_code_plaintext_is_never_stored() {
         with_db(|| {
             app("c7", false);
-            let grant = authorize("u1", &request("c7", Some(&s256(VERIFIER))), OAuthConfig::default()).unwrap();
+            let grant = authorize(
+                "u1",
+                &request("c7", Some(&s256(VERIFIER))),
+                OAuthConfig::default(),
+            )
+            .unwrap();
             let secret = grant.code.split_once('.').unwrap().1;
             let hits: i64 = db::conn()
                 .unwrap()
@@ -602,7 +607,10 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(consumed, None, "an unauthenticated caller cannot burn the code");
+            assert_eq!(
+                consumed, None,
+                "an unauthenticated caller cannot burn the code"
+            );
             let token = exchange_code(&with_secret(Some(&client_secret)), cfg).unwrap();
             assert_eq!(token.token_type, "Bearer");
         });
@@ -616,7 +624,10 @@ mod tests {
             let grant = authorize("u1", &request("c9", Some(&s256(VERIFIER))), cfg).unwrap();
             let mut req = token_request("c9", &grant.code, Some(VERIFIER));
             req.client_secret = Some("uninvited".into());
-            assert!(exchange_code(&req, cfg).is_err(), "a public client takes no secret");
+            assert!(
+                exchange_code(&req, cfg).is_err(),
+                "a public client takes no secret"
+            );
             req.client_secret = None;
             let token = exchange_code(&req, cfg).unwrap();
             assert!(access_token_owner(&token.access_token).unwrap().is_some());
@@ -650,15 +661,11 @@ mod tests {
             req.client_secret = Some(secret.clone());
             let code_token = exchange_code(&req, cfg).unwrap().access_token;
             // (b) a client_credentials bearer token
-            let app_token = crate::applications::issue_app_token(
-                "c9".into(),
-                secret.clone(),
-                None,
-                Some(60),
-            )
-            .unwrap()
-            .access_token
-            .unwrap();
+            let app_token =
+                crate::applications::issue_app_token("c9".into(), secret.clone(), None, Some(60))
+                    .unwrap()
+                    .access_token
+                    .unwrap();
             // (c) a code minted under the old secret, not yet exchanged
             let pending = authorize("u1", &request("c9", Some(&s256(VERIFIER))), cfg).unwrap();
             assert!(access_token_owner(&code_token).unwrap().is_some());
@@ -673,7 +680,9 @@ mod tests {
                 "the code-flow token dies with the secret"
             );
             assert!(
-                crate::applications::verify_app_token(app_token).unwrap().is_none(),
+                crate::applications::verify_app_token(app_token)
+                    .unwrap()
+                    .is_none(),
                 "the client_credentials token dies with the secret"
             );
             let mut stale = token_request("c9", &pending.code, Some(VERIFIER));

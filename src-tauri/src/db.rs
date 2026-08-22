@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 38;
+pub const SCHEMA_VERSION: i64 = 39;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -346,6 +346,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V37 databases.
     if version < 38 {
         tx.execute_batch(SCHEMA_V38)?;
+    }
+    // V39: a webhook endpoint cannot trust an unsigned POST, and a failing endpoint
+    // must stop being retried at some point. Both facts are per-subscription state, so
+    // they are columns on `webhook_subscriptions`, added individually because older
+    // databases may already carry a partially-applied batch.
+    if version < 39 {
+        add_column_if_missing(&tx, "webhook_subscriptions", "secret", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "webhook_subscriptions",
+            "max_attempts",
+            "INTEGER NOT NULL DEFAULT 5",
+        )?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()

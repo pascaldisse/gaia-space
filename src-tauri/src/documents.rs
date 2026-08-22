@@ -613,10 +613,18 @@ fn publish_document_tx(
             Some(existing) => existing,
             None => {
                 let title: String = c
-                    .query_row("SELECT title FROM documents WHERE id=?1", [&document_id], |r| r.get(0))
+                    .query_row(
+                        "SELECT title FROM documents WHERE id=?1",
+                        [&document_id],
+                        |r| r.get(0),
+                    )
                     .map_err(|e| e.to_string())?;
                 let base = slugify(&title);
-                if base.is_empty() { "document".to_string() } else { base }
+                if base.is_empty() {
+                    "document".to_string()
+                } else {
+                    base
+                }
             }
         },
     };
@@ -710,8 +718,11 @@ pub fn update_book_access(
     if !is_book {
         return Err("only a top-level knowledge-base folder is a book".into());
     }
-    tx.execute("DELETE FROM document_folder_permissions WHERE folder_id=?1", [&book_id])
-        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM document_folder_permissions WHERE folder_id=?1",
+        [&book_id],
+    )
+    .map_err(|e| e.to_string())?;
     for permission in permissions {
         tx.execute(
             "INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES(?1,?2,?3,?4)",
@@ -763,7 +774,11 @@ pub struct DocumentImportSummary {
 }
 
 fn generated_id(prefix: &str) -> String {
-    format!("{prefix}-{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+    format!(
+        "{prefix}-{:016x}{:016x}",
+        rand::random::<u64>(),
+        rand::random::<u64>()
+    )
 }
 
 /// Minimal HTML flattening: drops script/style bodies and tags, decodes the five
@@ -797,7 +812,11 @@ fn html_to_text(html: &str) -> String {
             while k < chars.len() && !chars[k..].starts_with(&needle[..]) {
                 k += 1;
             }
-            i = if k >= chars.len() { chars.len() } else { k + needle.len() };
+            i = if k >= chars.len() {
+                chars.len()
+            } else {
+                k + needle.len()
+            };
             continue;
         }
         if matches!(
@@ -907,9 +926,11 @@ fn import_document_folder_tx(
             }
             if meta.is_dir() {
                 if depth + 1 > request.max_depth {
-                    summary
-                        .skipped
-                        .push(format!("{}: deeper than max_depth {}", path.display(), request.max_depth));
+                    summary.skipped.push(format!(
+                        "{}: deeper than max_depth {}",
+                        path.display(),
+                        request.max_depth
+                    ));
                     continue;
                 }
                 let folder_id = generated_id("docfolder");
@@ -946,8 +967,15 @@ fn import_document_folder_tx(
                 }
             };
             let is_html = ext == "html" || ext == "htm";
-            let body = if is_html { html_to_text(&raw) } else { raw.clone() };
-            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or(name);
+            let body = if is_html {
+                html_to_text(&raw)
+            } else {
+                raw.clone()
+            };
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or(name);
             let title = imported_title(&raw, &body, &stem);
             let doc_id = generated_id("doc");
             c.execute(
@@ -1057,7 +1085,11 @@ mod tests {
         assert_eq!(first.public_slug.as_deref(), Some("my-first-page"));
         assert!(first.published_at.is_some());
         let second = publish_document_tx(&c, "d2".into(), true, None).expect("publish");
-        assert_eq!(second.public_slug.as_deref(), Some("my-first-page-2"), "slug collision");
+        assert_eq!(
+            second.public_slug.as_deref(),
+            Some("my-first-page-2"),
+            "slug collision"
+        );
 
         let public = get_public_document_tx(&c, "my-first-page".into()).unwrap();
         assert_eq!(public.map(|d| d.id), Some("d1".to_string()));
@@ -1066,11 +1098,16 @@ mod tests {
         let closed = publish_document_tx(&c, "d1".into(), false, None).expect("unpublish");
         assert!(!closed.published);
         assert_eq!(closed.public_slug.as_deref(), Some("my-first-page"));
-        assert!(get_public_document_tx(&c, "my-first-page".into()).unwrap().is_none());
+        assert!(get_public_document_tx(&c, "my-first-page".into())
+            .unwrap()
+            .is_none());
 
         // Archived documents are never public either.
-        c.execute("UPDATE documents SET archived=1 WHERE id='d2'", []).unwrap();
-        assert!(get_public_document_tx(&c, "my-first-page-2".into()).unwrap().is_none());
+        c.execute("UPDATE documents SET archived=1 WHERE id='d2'", [])
+            .unwrap();
+        assert!(get_public_document_tx(&c, "my-first-page-2".into())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1084,7 +1121,10 @@ mod tests {
 
         let readable = |id: &str| -> bool {
             c.query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {})", document_read_scope()),
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {})",
+                    document_read_scope()
+                ),
                 rusqlite::params!["reader", id],
                 |r| r.get(0),
             )
@@ -1129,7 +1169,11 @@ mod tests {
             },
         )
         .expect("import");
-        assert_eq!(summary.documents_created, 3, "skipped: {:?}", summary.skipped);
+        assert_eq!(
+            summary.documents_created, 3,
+            "skipped: {:?}",
+            summary.skipped
+        );
         assert_eq!(summary.folders_created, 2);
 
         let (title, body): (String, String) = c
@@ -1154,7 +1198,11 @@ mod tests {
             .expect("deep doc filed");
         assert_eq!(deep_folder, "child");
         let root_titles: i64 = c
-            .query_row("SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id IS NULL", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(root_titles, 1);
         // Every imported page starts its version history.
@@ -1187,7 +1235,11 @@ mod tests {
         .expect("import");
         assert_eq!(summary.documents_created, 0);
         assert_eq!(summary.skipped.len(), 1);
-        assert!(summary.skipped[0].contains("max_file_bytes"), "{:?}", summary.skipped);
+        assert!(
+            summary.skipped[0].contains("max_file_bytes"),
+            "{:?}",
+            summary.skipped
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
