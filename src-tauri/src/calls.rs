@@ -164,7 +164,7 @@ pub struct CallRecording { pub egress_id: String, pub status: String }
 static RECORDINGS: LazyLock<Mutex<std::collections::BTreeMap<String, String>>> = LazyLock::new(|| Mutex::new(std::collections::BTreeMap::new()));
 
 #[cfg(feature = "desktop")]
-fn recording_authorized(app: &AppHandle, meeting_id: &str, participant_id: &str) -> Result<(LivekitConfig, String)> {
+fn recording_authorized(_app: &AppHandle, meeting_id: &str, participant_id: &str) -> Result<(LivekitConfig, String)> {
     let meeting = meetings::get_meeting_scoped(meeting_id.to_owned(), participant_id.to_owned())?.ok_or("Meeting not found")?;
     if meeting.archived { return Err("Cannot record an archived meeting".into()); }
     if meeting.organizer_id.as_deref() != Some(participant_id) { return Err("Only the meeting organizer can control recording".into()); }
