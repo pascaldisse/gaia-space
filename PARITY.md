@@ -6,10 +6,9 @@ Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
-## 01 Git & Code Review (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB01 | UNVERIFIED | |
+## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md @ 88a03d7)
+52 rows — done 2 · partial 20 · stub 1 · missing 29.
+Worst gaps: Safe Merge (preview only, no CI/final merge) · protected-branch permissions · CODEOWNERS · stacked reviews · quality gates CI/external checks.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
 33 rows — done 6 · partial 16 · stub 1 · missing 10.
