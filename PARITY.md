@@ -39,9 +39,9 @@ Worst gaps: locations/org-directory stub · dashboard personalization · subscri
 42 rows — done 0 · partial 6 · stub 19 · missing 17.
 Worst gaps: devfile/deep-links unwired · apps/webhooks/chatbots/extensions backend unreachable from UI · no app OAuth/HTTP-API/marketplace · no webhook delivery/retry · no slash-command/app-rights integration.
 
-## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md)
-35 rows — done 10 · partial 15 · missing 10.
-Worst gaps: deployed Egress/storage/webhook proof · multi-client lobby admission proof · persistent video_provider · call lifecycle model.
+## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)
+35 rows — done 10 · partial 12 · missing 13.
+Worst gaps: recording/egress · lobby/admission · remote audio playback · persistent video_provider · call lifecycle model.
 Note: lane reported 1 dashboard test fail; independent re-run (crown) = 99 pass/0 fail — not reproduced.
 
 ## Legacy-Flutter features (cross-cutting; owned by lane 01 unless noted)
