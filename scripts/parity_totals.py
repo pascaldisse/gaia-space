@@ -39,6 +39,13 @@ def main() -> int:
     missing = [str(path.relative_to(root)) for path in report_paths if not path.is_file()]
     if missing:
         parser.error("missing canonical report(s): " + ", ".join(missing))
+    stray = sorted(
+        path.name
+        for path in (root / "reports/parity").glob("*.md")
+        if path.name not in REPORTS
+    )
+    if stray:
+        parser.error("non-canonical ledger file(s) in reports/parity: " + ", ".join(stray))
     total: Counter[str] = Counter()
     for path in report_paths:
         count = rows(path)
