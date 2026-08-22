@@ -18,7 +18,7 @@
 .ov-tag.event,.ov-tag.reason{background:var(--surface-hover);color:#c9d6f0;border-color:#3a4f80}
 .ov-tag.body{background:#241d33;color:#c4a9e6;border-color:#402f5c}
 .ov-empty{margin:0;padding:14px;border:1px dashed #3d4a68;border-radius:8px;color:var(--text-faint);font-size:12px}
-.dashboard-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:36px 28px;border:1px dashed var(--surface-border-hover);background:var(--surface);border-radius:12px;max-width:520px;margin:24px auto}.dashboard-muted{color:var(--text-faint)!important}.dashboard-refresh{margin-top:16px}@media(max-width:920px){.dashboard-grid{grid-template-columns:repeat(2,minmax(240px,1fr))}}@media(max-width:760px){.dashboard-view label{width:auto}.dashboard-grid{grid-template-columns:1fr}}
+.dashboard-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:36px 28px;border:1px dashed var(--surface-border-hover);background:var(--surface);border-radius:12px;max-width:520px;margin:24px auto}.dashboard-muted{color:var(--text-faint)!important}.dashboard-error{margin:0 0 16px!important;padding:9px 11px;border:1px solid var(--status-danger-ink);border-radius:8px;background:var(--status-danger-bg);color:var(--status-danger-ink)!important}.dashboard-refresh{margin-top:16px}.ov-open{justify-self:start}@media(max-width:920px){.dashboard-grid{grid-template-columns:repeat(2,minmax(240px,1fr))}}@media(max-width:760px){.dashboard-view label{width:auto}.dashboard-grid{grid-template-columns:1fr}}
 
 /* ── Today & next ── action-centered top area (paloptic surfaces + accents) ── */
 .today-next{margin:0 0 20px;border:1px solid #2b3550;border-radius:12px;background:linear-gradient(150deg,#122240,#0e1a31 60%);box-shadow:0 8px 26px rgba(0,0,0,.28);overflow:hidden}
@@ -44,7 +44,7 @@
 .tn-col ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 
 /* tasks column */
-.tn-tasksec{display:grid;gap:5px;margin-bottom:6px}
+.tn-tasksec{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:9px;margin-bottom:6px}
 .tn-seclabel{font-family:var(--font-head);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);display:flex;align-items:center;gap:6px}
 .tn-seclabel em{font-style:normal;font-size:10px;color:#7fb8b0;background:#1f2740;padding:0 5px;border-radius:8px}
 .tn-seclabel.overdue{color:var(--status-danger-ink)}
@@ -58,8 +58,9 @@
 .tn-task-body small.overdue{color:var(--status-danger-ink)}
 
 /* project risk column */
-.tn-risklist li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;background:#111f3a;cursor:pointer}
-.tn-risklist li:hover{background:#16264a}
+.tn-risklist li{padding:0;list-style:none}
+.tn-risklist li>button{width:100%;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:7px 8px;border:0;border-radius:7px;background:#111f3a;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.tn-risklist li>button:hover{background:#16264a}
 .tn-riskdot{width:9px;height:9px;border-radius:50%;flex:none}
 .tn-riskdot.overdue,.tn-riskbadge.overdue{--r:var(--status-risk-overdue)}
 .tn-riskdot.high,.tn-riskbadge.high{--r:var(--status-risk-high)}
@@ -87,7 +88,7 @@
 @media(max-width:760px){.tn-grid{grid-template-columns:1fr}}
 
 /* ── Calendar overview ── embedded compact month + day agenda on the Overview ── */
-.cal-overview{margin:0 0 20px;border:1px solid #2b3550;border-radius:12px;background:linear-gradient(150deg,#122240,#0e1a31 60%);box-shadow:0 8px 26px rgba(0,0,0,.28);overflow:hidden}
+.calendar-overview{margin:0 0 20px;border:1px solid #2b3550;border-radius:12px;background:linear-gradient(150deg,#122240,#0e1a31 60%);box-shadow:0 8px 26px rgba(0,0,0,.28);overflow:hidden}
 .co-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid #223052}
 .co-title{display:flex;align-items:center;gap:13px}
 .co-icon{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:18px}
