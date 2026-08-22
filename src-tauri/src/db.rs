@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -149,6 +149,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 13 {
         tx.execute_batch(SCHEMA_V13)?;
     }
+    if version < 14 {
+        tx.execute_batch(SCHEMA_V14)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -251,12 +254,24 @@ CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES is
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
 "#;
+pub(crate) const SCHEMA_V14: &str = r#"
+CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
+CREATE INDEX IF NOT EXISTS devfiles_project ON devfiles(project_id);
+CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, application_type TEXT NOT NULL CHECK(application_type IN ('Application','InternalApp','MarketplaceApp','FeaturedIntegration')), endpoint_uri TEXT, client_id TEXT NOT NULL UNIQUE, client_credentials_flow_enabled INTEGER NOT NULL DEFAULT 0, code_flow_enabled INTEGER NOT NULL DEFAULT 0, pkce_required INTEGER NOT NULL DEFAULT 0, connection_status TEXT NOT NULL DEFAULT 'CONNECTING' CHECK(connection_status IN ('CONNECTING','FAILED_TO_CONNECT','RECONNECTING','CONNECTED')), archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, event_type TEXT NOT NULL, filters_json TEXT, endpoint_uri TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS webhook_subscriptions_application ON webhook_subscriptions(application_id);
+CREATE TABLE IF NOT EXISTS chatbot_registrations (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, display_name TEXT NOT NULL, description TEXT, commands_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS chatbot_registrations_application ON chatbot_registrations(application_id);
+CREATE TABLE IF NOT EXISTS ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ui_extensions_application ON ui_extensions(application_id);
+"#;
 pub(crate) const SCHEMA_V13: &str = r#"
 CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS calendar_feeds_profile ON calendar_feeds(profile_id);
 CREATE TABLE IF NOT EXISTS calendar_feed_events (feed_id TEXT NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE, uid TEXT NOT NULL, occurrence_key TEXT NOT NULL, title TEXT NOT NULL, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day_date TEXT, PRIMARY KEY(feed_id, uid, occurrence_key));
 CREATE INDEX IF NOT EXISTS calendar_feed_events_range ON calendar_feed_events(feed_id, starts_at);
 "#;
+
 pub(crate) const SCHEMA_V6: &str = r#"
 CREATE INDEX IF NOT EXISTS todos_project_id ON todos(project_id);
 "#;
