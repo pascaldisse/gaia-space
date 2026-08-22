@@ -206,6 +206,9 @@ fn registry_user(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)>
 }
 /// Maven (and curl) only send credentials after a challenge, so registry 401s must carry
 /// `WWW-Authenticate`. Wraps `registry_user` into a ready-to-return response on failure.
+// The `Err` variant is an `axum::response::Response`, returned directly by every caller
+// via `?` from a handler. Boxing it would only add an indirection before the same unwrap.
+#[allow(clippy::result_large_err)]
 fn registry_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> {
     registry_user(headers).map_err(|_| {
         (
@@ -2788,6 +2791,10 @@ async fn main() {
     .unwrap();
 }
 
+// `test_lock()` deliberately holds a `MutexGuard` for the whole async test body: these
+// tests share one process-global DB and must run serially, so the guard has to outlive
+// every `.await` in the test. This is the intent, not an accident.
+#[allow(clippy::await_holding_lock)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4541,9 +4548,8 @@ mod tests {
         // The already-authorized member write now executes with its stale payload.
         let status = absence_update(&member, &body).status();
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(
+        assert!(
             stored_absence("absence-race").unwrap().2,
-            true,
             "a member write must not revoke an approval"
         );
     }
