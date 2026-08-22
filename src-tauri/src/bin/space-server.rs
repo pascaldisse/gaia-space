@@ -1239,6 +1239,7 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
+fn require_catalog_right(user: &User, right: gaia_space_lib::rights::Right, scope_type: &str, scope_id: Option<&str>) -> Result<(), (StatusCode, Json<Value>)> { let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; platform::require_right_on(&c,&user.profile_id,right,scope_type,scope_id).map_err(|_|err(StatusCode::FORBIDDEN,"right required")) }
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
 fn authorize_command(
@@ -1331,13 +1332,9 @@ fn authorize_command(
                 .and_then(|input| input.get("project_id").or_else(|| input.get("projectId")))
                 .and_then(Value::as_str)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "project_id is required"))?;
-            if project_readable(user, project_id)
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
-            {
-                Ok(())
-            } else {
-                Err(err(StatusCode::FORBIDDEN, "project access denied"))
-            }
+            if !project_readable(user, project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
+            if name == "create_issue" { require_catalog_right(user, gaia_space_lib::rights::Right::CreateIssue, "project", Some(project_id))?; }
+            Ok(())
         }
         // Only the owner or an admin decides who belongs to a project.
         CommandPolicy::ProjectMemberAdmin => {
@@ -1623,9 +1620,7 @@ fn authorize_command(
             _ => unreachable!("identity-write policy must name an identity-write command"),
         }
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
-        CommandPolicy::DocumentCreate => {
-            bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))
-        }
+        CommandPolicy::DocumentCreate => { bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?; require_catalog_right(user, gaia_space_lib::rights::Right::CreateDocument, "global", None) }
         CommandPolicy::DocumentReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -1756,6 +1751,7 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::Session => {
+            if name == "create_message" { let message=body.get("message").ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid message"))?; let channel_id:String=arg(message,"channel_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?; if !chat_channel_access(&user.profile_id,&channel_id){return Err(err(StatusCode::FORBIDDEN,"channel access denied"));} require_catalog_right(user,gaia_space_lib::rights::Right::PostMessage,"channel",Some(&channel_id))?; }
             if matches!(
                 name,
                 "list_messages"
