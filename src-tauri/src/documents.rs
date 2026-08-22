@@ -522,6 +522,250 @@ pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
     rows
 }
 
+// ---------- local-folder / Confluence-export import ----------
+// A Confluence space export and a plain notes directory are the same shape on disk: a
+// tree of directories holding .md/.html files. Import mirrors that tree into
+// document_folders and files each page as an ordinary document, so imported pages get
+// versioning, permissions and search for free.
+
+fn default_import_extensions() -> Vec<String> {
+    vec!["md".into(), "markdown".into(), "html".into(), "htm".into()]
+}
+fn default_max_file_bytes() -> u64 {
+    2 * 1024 * 1024
+}
+fn default_max_depth() -> u32 {
+    16
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DocumentImportRequest {
+    pub source_path: String,
+    pub container_type: String,
+    pub container_id: Option<String>,
+    /// Folder the import tree is grafted under; None imports into the container root.
+    pub parent_folder_id: Option<String>,
+    pub created_by: Option<String>,
+    #[serde(default = "default_import_extensions")]
+    pub extensions: Vec<String>,
+    #[serde(default = "default_max_file_bytes")]
+    pub max_file_bytes: u64,
+    #[serde(default = "default_max_depth")]
+    pub max_depth: u32,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct DocumentImportSummary {
+    pub folders_created: i64,
+    pub documents_created: i64,
+    /// Path + reason for every file the walk refused, so nothing vanishes silently.
+    pub skipped: Vec<String>,
+}
+
+fn generated_id(prefix: &str) -> String {
+    format!("{prefix}-{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+}
+
+/// Minimal HTML flattening: drops script/style bodies and tags, decodes the five
+/// entities a Confluence export actually emits, and collapses runs of blank lines.
+/// It is deliberately not a full parser — the original markup stays recoverable from
+/// the source file, and the body remains searchable text.
+fn html_to_text(html: &str) -> String {
+    let chars: Vec<char> = html.chars().collect();
+    let mut out = String::with_capacity(html.len());
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] != '<' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let closing = chars.get(i + 1) == Some(&'/');
+        let mut j = if closing { i + 2 } else { i + 1 };
+        let mut tag = String::new();
+        while j < chars.len() && chars[j].is_ascii_alphanumeric() {
+            tag.push(chars[j].to_ascii_lowercase());
+            j += 1;
+        }
+        let mut end = j;
+        while end < chars.len() && chars[end] != '>' {
+            end += 1;
+        }
+        if !closing && (tag == "script" || tag == "style") {
+            let needle: Vec<char> = format!("</{tag}>").chars().collect();
+            let mut k = end.saturating_add(1);
+            while k < chars.len() && !chars[k..].starts_with(&needle[..]) {
+                k += 1;
+            }
+            i = if k >= chars.len() { chars.len() } else { k + needle.len() };
+            continue;
+        }
+        if matches!(
+            tag.as_str(),
+            "p" | "br" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+        ) {
+            out.push('\n');
+        }
+        i = end + 1;
+    }
+    let decoded = out
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&");
+    let mut lines: Vec<&str> = Vec::new();
+    for line in decoded.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() && lines.last().map(|l: &&str| l.is_empty()).unwrap_or(true) {
+            continue;
+        }
+        lines.push(trimmed);
+    }
+    while lines.last().map(|l| l.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+/// Title precedence: markdown `# heading` / HTML `<h1>` / HTML `<title>`, else file stem.
+fn imported_title(raw: &str, text: &str, stem: &str) -> String {
+    let lower = raw.to_lowercase();
+    for (open, close) in [("<h1", "</h1>"), ("<title", "</title>")] {
+        if let Some(start) = lower.find(open) {
+            if let Some(gt) = lower[start..].find('>') {
+                let from = start + gt + 1;
+                if let Some(end) = lower[from..].find(close) {
+                    let title = html_to_text(&raw[from..from + end]).trim().to_string();
+                    if !title.is_empty() {
+                        return title;
+                    }
+                }
+            }
+        }
+    }
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix("# ") {
+            if !heading.trim().is_empty() {
+                return heading.trim().to_string();
+            }
+        }
+        if !trimmed.is_empty() {
+            break;
+        }
+    }
+    stem.to_string()
+}
+
+/// Imports a directory tree of markdown/HTML pages, preserving the folder hierarchy.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn import_document_folder(request: DocumentImportRequest) -> Result<DocumentImportSummary> {
+    let c = db::conn()?;
+    import_document_folder_tx(&c, request)
+}
+
+fn import_document_folder_tx(
+    c: &rusqlite::Connection,
+    request: DocumentImportRequest,
+) -> Result<DocumentImportSummary> {
+    let root = std::path::PathBuf::from(&request.source_path);
+    if !root.is_dir() {
+        return Err(format!("'{}' is not a directory", request.source_path));
+    }
+    let extensions: Vec<String> = request
+        .extensions
+        .iter()
+        .map(|e| e.trim_start_matches('.').to_lowercase())
+        .collect();
+    let mut summary = DocumentImportSummary::default();
+    let mut stack = vec![(root.clone(), request.parent_folder_id.clone(), 0u32)];
+    while let Some((dir, parent_id, depth)) = stack.pop() {
+        let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&dir)
+            .map_err(|e| format!("read {}: {e}", dir.display()))?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            let meta = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(e) => {
+                    summary.skipped.push(format!("{}: {e}", path.display()));
+                    continue;
+                }
+            };
+            // Symlinks are never followed: an export can contain a cycle back to its root.
+            if meta.file_type().is_symlink() {
+                summary.skipped.push(format!("{}: symlink", path.display()));
+                continue;
+            }
+            if meta.is_dir() {
+                if depth + 1 > request.max_depth {
+                    summary
+                        .skipped
+                        .push(format!("{}: deeper than max_depth {}", path.display(), request.max_depth));
+                    continue;
+                }
+                let folder_id = generated_id("docfolder");
+                c.execute(
+                    "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,?2,?3,?4,?5,NULL,0)",
+                    rusqlite::params![folder_id, request.container_type, request.container_id, parent_id, name],
+                )
+                .map_err(|e| e.to_string())?;
+                summary.folders_created += 1;
+                stack.push((path, Some(folder_id), depth + 1));
+                continue;
+            }
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if !extensions.iter().any(|e| *e == ext) {
+                continue;
+            }
+            if meta.len() > request.max_file_bytes {
+                summary.skipped.push(format!(
+                    "{}: {} bytes exceeds max_file_bytes {}",
+                    path.display(),
+                    meta.len(),
+                    request.max_file_bytes
+                ));
+                continue;
+            }
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(raw) => raw,
+                Err(e) => {
+                    summary.skipped.push(format!("{}: {e}", path.display()));
+                    continue;
+                }
+            };
+            let is_html = ext == "html" || ext == "htm";
+            let body = if is_html { html_to_text(&raw) } else { raw.clone() };
+            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or(name);
+            let title = imported_title(&raw, &body, &stem);
+            let doc_id = generated_id("doc");
+            c.execute(
+                "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'text',?5,?6,1,0,?7)",
+                rusqlite::params![doc_id, request.container_type, request.container_id, parent_id, title, body, request.created_by],
+            )
+            .map_err(|e| e.to_string())?;
+            c.execute(
+                "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
+                rusqlite::params![format!("{doc_id}-v1"), doc_id, body, request.created_by],
+            )
+            .map_err(|e| e.to_string())?;
+            summary.documents_created += 1;
+        }
+    }
+    Ok(summary)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document_folder(folder: DocumentFolder) -> Result<()> {
     let c = db::conn()?;
@@ -590,6 +834,106 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         db::migrate_path(&path).expect("migration")
+    }
+
+    /// Throwaway import source under src-tauri/target/, never a user directory.
+    fn import_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-imports")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn import_mirrors_the_folder_tree_and_flattens_html() {
+        let c = test_conn();
+        let dir = import_dir("docs-import");
+        std::fs::write(dir.join("root.md"), "# Root Page\n\nbody\n").unwrap();
+        std::fs::write(dir.join("skip.txt"), "not imported").unwrap();
+        std::fs::create_dir_all(dir.join("space/child")).unwrap();
+        std::fs::write(
+            dir.join("space/page.html"),
+            "<html><head><title>Ignored</title></head><body><h1>HTML Page</h1><p>a &amp; b</p><script>var x=1;</script></body></html>",
+        )
+        .unwrap();
+        std::fs::write(dir.join("space/child/deep.md"), "deep body\n").unwrap();
+
+        let summary = import_document_folder_tx(
+            &c,
+            DocumentImportRequest {
+                source_path: dir.to_string_lossy().to_string(),
+                container_type: "project".into(),
+                container_id: Some("demo-project".into()),
+                parent_folder_id: None,
+                created_by: None,
+                extensions: default_import_extensions(),
+                max_file_bytes: default_max_file_bytes(),
+                max_depth: default_max_depth(),
+            },
+        )
+        .expect("import");
+        assert_eq!(summary.documents_created, 3, "skipped: {:?}", summary.skipped);
+        assert_eq!(summary.folders_created, 2);
+
+        let (title, body): (String, String) = c
+            .query_row(
+                "SELECT title,body FROM documents WHERE title='HTML Page'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("html page imported");
+        assert_eq!(title, "HTML Page");
+        assert!(body.contains("a & b"), "body: {body:?}");
+        assert!(!body.contains("var x=1"), "script body leaked: {body:?}");
+        assert!(!body.contains('<'), "tags leaked: {body:?}");
+
+        // Markdown heading wins over the file stem; the tree is mirrored, not flattened.
+        let deep_folder: String = c
+            .query_row(
+                "SELECT f.name FROM documents d JOIN document_folders f ON f.id=d.folder_id WHERE d.title='deep'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("deep doc filed");
+        assert_eq!(deep_folder, "child");
+        let root_titles: i64 = c
+            .query_row("SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id IS NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(root_titles, 1);
+        // Every imported page starts its version history.
+        let versions: i64 = c
+            .query_row("SELECT COUNT(*) FROM doc_versions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(versions, 3);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_reports_oversize_files_instead_of_dropping_them() {
+        let c = test_conn();
+        let dir = import_dir("docs-import-limit");
+        std::fs::write(dir.join("big.md"), "x".repeat(200)).unwrap();
+        let summary = import_document_folder_tx(
+            &c,
+            DocumentImportRequest {
+                source_path: dir.to_string_lossy().to_string(),
+                container_type: "my-docs".into(),
+                container_id: Some("default-org".into()),
+                parent_folder_id: None,
+                created_by: None,
+                extensions: default_import_extensions(),
+                max_file_bytes: 100,
+                max_depth: default_max_depth(),
+            },
+        )
+        .expect("import");
+        assert_eq!(summary.documents_created, 0);
+        assert_eq!(summary.skipped.len(), 1);
+        assert!(summary.skipped[0].contains("max_file_bytes"), "{:?}", summary.skipped);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn insert_doc(

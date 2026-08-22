@@ -264,6 +264,7 @@ pub fn run() {
             documents::restore_doc_version,
             documents::list_document_access,
             documents::update_document_access,
+            documents::import_document_folder,
             documents::list_document_folders,
             documents::create_document_folder,
             documents::update_document_folder,

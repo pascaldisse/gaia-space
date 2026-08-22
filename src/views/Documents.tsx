@@ -11,6 +11,7 @@ import {
   type Document,
   type DocumentAccessRecipient,
   type DocumentFolder,
+  type DocumentImportSummary,
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 
@@ -111,6 +112,35 @@ export default function Documents() {
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setExpanded(next);
+  }
+
+  // ---- import (Confluence export / local notes folder) ----
+  // Both are the same shape on disk; the Rust side mirrors the directory tree into folders.
+  const [importPath, setImportPath] = createSignal("");
+  const [importing, setImporting] = createSignal(false);
+  const [importSummary, setImportSummary] = createSignal<DocumentImportSummary | null>(null);
+  async function runImport() {
+    const path = importPath().trim();
+    const cid = containerId();
+    if (!path || !cid) return;
+    setImporting(true);
+    setImportSummary(null);
+    try {
+      const summary = await documentsApi.importFolder({
+        source_path: path,
+        container_type: activeContainer(),
+        container_id: cid,
+        parent_folder_id: selectedFolderId() ?? rootParentId(),
+        created_by: localProfileId(),
+      });
+      setImportSummary(summary);
+      setImportPath("");
+      await Promise.all([refetchFolders(), refetchDocuments()]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setImporting(false);
+    }
   }
 
   // ---- folder CRUD ----
@@ -540,6 +570,26 @@ export default function Documents() {
           <button class="ghost small" onClick={createBook} disabled={!newBookName().trim()}>
             + Book
           </button>
+        </Show>
+
+        <label class="import-folder">
+          Import folder
+          <input
+            placeholder="path to a markdown / Confluence-export folder"
+            value={importPath()}
+            onInput={(e) => setImportPath(e.currentTarget.value)}
+          />
+        </label>
+        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId()}>
+          {importing() ? "Importing…" : "Import"}
+        </button>
+        <Show when={importSummary()}>
+          {(summary) => (
+            <span class="hint import-summary">
+              {summary().documents_created} page(s), {summary().folders_created} folder(s)
+              {summary().skipped.length ? ` · skipped ${summary().skipped.length}: ${summary().skipped.join("; ")}` : ""}
+            </span>
+          )}
         </Show>
 
         <label class="show-archived">
