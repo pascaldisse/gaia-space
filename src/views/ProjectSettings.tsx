@@ -1,182 +1,167 @@
-import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { platformApi, type CfDefinition, type CfType, type Profile, type RoleAssignment } from "../api/platform";
+import { createEffect, createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
+import { platformApi, type CfDefinition, type CfType, type RoleAssignment } from "../api/platform";
 import { personalApi } from "../api/personal";
-import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
+import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { navigate, route } from "../router";
 import "./ProjectSettings.css";
 
-const CF_TYPES: CfType[] = ["text", "int", "date", "enum", "profile", "bool"];
-type CfForm = { name: string; cf_type: CfType; constraints: string };
-const blankCf = (): CfForm => ({ name: "", cf_type: "text", constraints: "" });
-const nameOf = (people: Profile[] | undefined, id: string) =>
-  people?.find((person) => person.id === id)?.display_name || people?.find((person) => person.id === id)?.username || id;
-const parseJson = (value: string | null): unknown => { try { return value ? JSON.parse(value) : undefined; } catch { return undefined; } };
+const CF_TYPES: { value: CfType; label: string; hint: string }[] = [
+  { value: "text", label: "Text", hint: "Short text" },
+  { value: "int", label: "Number", hint: "Whole number" },
+  { value: "date", label: "Date", hint: "Calendar date" },
+  { value: "enum", label: "List", hint: "One choice from a list" },
+  { value: "profile", label: "Organization member", hint: "A member reference" },
+  { value: "bool", label: "Checkbox", hint: "Yes or no" },
+];
 
-function ProjectMembers(props: { projectId: string; allowed: boolean }) {
+const nameOf = (id: string) => {
+  const profile = profiles()?.find(item => item.id === id);
+  return profile?.display_name || profile?.username || id;
+};
+
+function ProjectMembers(props: { projectId: string; owner: string | null; canManage: boolean }) {
   const [error, setError] = createSignal("");
   const [memberId, setMemberId] = createSignal("");
-  const [roleId, setRoleId] = createSignal("");
-  const [members, { mutate: setMembers, refetch: reloadMembers }] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
+  const [busy, setBusy] = createSignal("");
+  const [members, { mutate: setMembers, refetch: reloadMembers }] = createResource(
+    () => props.projectId,
+    id => id ? personalApi.projectMemberIds(id) : Promise.resolve([] as string[]),
+  );
   const [roles] = createResource(platformApi.roles);
   const [assignments, { refetch: reloadAssignments }] = createResource(() => true, () => platformApi.assignments());
-  const projectAssignments = () => (assignments() ?? []).filter(assignment =>
-    assignment.scope_type === "project" && assignment.scope_id === props.projectId && !!assignment.profile_id,
+  if (!profiles()) void reloadProfiles().catch(() => undefined);
+
+  const available = () => (profiles() ?? []).filter(profile => !profile.archived && !(members() ?? []).includes(profile.id));
+  const assignmentFor = (member: string) => (assignments() ?? []).find(assignment =>
+    assignment.profile_id === member && assignment.scope_type === "project" && assignment.scope_id === props.projectId,
   );
-  const memberRoles = (member: string) => projectAssignments().filter(assignment => assignment.profile_id === member);
-  const candidates = () => (profiles() ?? []).filter(person => !person.archived && !(members() ?? []).includes(person.id));
+  const assignableRoles = () => (roles() ?? []).filter(role => !role.archived);
+  const roleName = (assignment?: RoleAssignment) => assignment ? roles()?.find(role => role.id === assignment.role_id)?.name ?? assignment.role_id : "Member";
+
   const add = async () => {
     if (!memberId()) return;
-    try {
-      const next = await personalApi.addProjectMember(props.projectId, memberId());
-      setMembers(next); setError("");
-      if (roleId()) await platformApi.createAssignment({ role_id: roleId(), profile_id: memberId(), team_id: null, scope_type: "project", scope_id: props.projectId });
-      setMemberId(""); setRoleId(""); await reloadAssignments();
-    } catch (reason) { setError(humanError(reason)); void reloadMembers(); void reloadAssignments(); }
+    setError(""); setBusy(memberId());
+    try { setMembers(await personalApi.addProjectMember(props.projectId, memberId())); setMemberId(""); }
+    catch (reason) { setError(humanError(reason)); void reloadMembers(); }
+    finally { setBusy(""); }
   };
   const remove = async (member: string) => {
-    try { setMembers(await personalApi.removeProjectMember(props.projectId, member)); setError(""); }
+    setError(""); setBusy(member);
+    try { setMembers(await personalApi.removeProjectMember(props.projectId, member)); await reloadAssignments(); }
     catch (reason) { setError(humanError(reason)); void reloadMembers(); }
+    finally { setBusy(""); }
   };
-  const grant = async (member: string, nextRole: string) => {
-    if (!nextRole) return;
+  const setRole = async (member: string, roleId: string) => {
+    const previous = assignmentFor(member);
+    if ((previous?.role_id ?? "") === roleId) return;
+    setError(""); setBusy(member);
     try {
-      await platformApi.createAssignment({ role_id: nextRole, profile_id: member, team_id: null, scope_type: "project", scope_id: props.projectId });
-      setError(""); await reloadAssignments();
-    } catch (reason) { setError(humanError(reason)); }
+      if (previous) await platformApi.deleteAssignment(previous.id);
+      if (roleId) await platformApi.createAssignment({ role_id: roleId, profile_id: member, scope_type: "project", scope_id: props.projectId });
+      await reloadAssignments();
+    } catch (reason) { setError(humanError(reason)); await reloadAssignments(); }
+    finally { setBusy(""); }
   };
-  const revoke = async (assignment: RoleAssignment) => {
-    try { await platformApi.deleteAssignment(assignment.id); setError(""); await reloadAssignments(); }
-    catch (reason) { setError(humanError(reason)); }
-  };
-  if (!profiles()) void reloadProfiles().catch(() => undefined);
+
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Members and project roles</h2></div>
-    <p class="ps-hint">Project members can be assigned work. Roles are scoped to this project; they do not change someone’s organization-wide access.</p>
+    <div class="ps-panel-head"><h2>Members and roles</h2></div>
+    <p class="ps-hint">Project members can access this project and be assigned to its work. A project role grants the rights configured for that role in this project only.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
-    <Show when={members.loading}><p class="ps-hint">Loading project members…</p></Show>
     <ul class="ps-members">
-      <For each={members()}>{member => <li>
-        <div><strong>{nameOf(profiles(), member)}</strong><code>{member}</code></div>
-        <div class="ps-member-roles">
-          <For each={memberRoles(member)}>{assignment => <span class="ps-role-chip">{roles()?.find(role => role.id === assignment.role_id)?.name ?? assignment.role_id}
-            <Show when={props.allowed}><button type="button" aria-label={`Remove project role from ${nameOf(profiles(), member)}`} onClick={() => void revoke(assignment)}>×</button></Show>
-          </span>}</For>
-          <Show when={props.allowed}><select aria-label={`Add role for ${nameOf(profiles(), member)}`} value="" onChange={event => { const value = event.currentTarget.value; event.currentTarget.value = ""; void grant(member, value); }}>
-            <option value="">Add role…</option><For each={roles()?.filter(role => !role.archived)}>{role => <option value={role.id}>{role.name}</option>}</For>
-          </select></Show>
-        </div>
-        <Show when={props.allowed}><button type="button" class="ghost" onClick={() => void remove(member)}>Remove</button></Show>
-      </li>}</For>
+      <For each={members()}>{member => {
+        const assignment = () => assignmentFor(member);
+        return <li class="ps-member-row">
+          <div class="ps-member"><span class="ps-avatar" aria-hidden="true">{nameOf(member).slice(0, 1).toUpperCase()}</span><div><strong>{nameOf(member)}</strong><small>{member === props.owner ? "Project owner" : roleName(assignment())}</small></div></div>
+          <Show when={props.canManage} fallback={<span class="ps-role-readonly">{roleName(assignment())}</span>}>
+            <div class="ps-member-actions">
+              <label class="sr-only" for={`project-role-${member}`}>Role for {nameOf(member)}</label>
+              <select id={`project-role-${member}`} disabled={busy() === member} value={assignment()?.role_id ?? ""} onChange={event => void setRole(member, event.currentTarget.value)}>
+                <option value="">Member (no extra role)</option>
+                <For each={assignableRoles()}>{role => <option value={role.id}>{role.name}</option>}</For>
+              </select>
+              <Show when={member !== props.owner}><button type="button" class="ghost" disabled={busy() === member} onClick={() => void remove(member)}>Remove</button></Show>
+            </div>
+          </Show>
+        </li>;
+      }}</For>
     </ul>
-    <Show when={!members.loading && !(members()?.length)}><p class="ps-hint">No members yet. Add people before assigning project work.</p></Show>
-    <Show when={props.allowed}><div class="ps-add-member">
-      <select aria-label="Project member" value={memberId()} onChange={event => setMemberId(event.currentTarget.value)}>
-        <option value="">Add a person…</option><For each={candidates()}>{person => <option value={person.id}>{person.display_name || person.username}</option>}</For>
-      </select>
-      <select aria-label="Initial project role" value={roleId()} onChange={event => setRoleId(event.currentTarget.value)}>
-        <option value="">No project role</option><For each={roles()?.filter(role => !role.archived)}>{role => <option value={role.id}>{role.name}</option>}</For>
-      </select>
-      <button type="button" class="primary" disabled={!memberId()} onClick={() => void add()}>Add member</button>
-    </div></Show>
+    <Show when={!members.loading && !(members()?.length)}><p class="ps-hint">Nobody is on this project yet.</p></Show>
+    <Show when={props.canManage}><div class="ps-add-member"><select aria-label="Add project member" value={memberId()} disabled={!!busy()} onChange={event => setMemberId(event.currentTarget.value)}><option value="">Add somebody…</option><For each={available()}>{profile => <option value={profile.id}>{profile.display_name || profile.username}</option>}</For></select><button type="button" class="primary" disabled={!memberId() || !!busy()} onClick={() => void add()}>Add member</button></div></Show>
   </section>;
 }
 
-function ProjectCustomFields(props: { projectId: string; allowed: boolean }) {
+function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
+  const entityType = () => `issue:${props.projectId}`;
+  const [definitions, { refetch }] = createResource(entityType, type => platformApi.cfDefinitions(type));
+  const [name, setName] = createSignal("");
+  const [type, setType] = createSignal<CfType>("text");
+  const [options, setOptions] = createSignal("");
   const [error, setError] = createSignal("");
-  const [form, setForm] = createSignal(blankCf());
-  const [values, { refetch: reloadValues }] = createResource(() => props.projectId, id => id ? platformApi.cfGetValues("project", id) : Promise.resolve([]));
-  const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
-  createEffect(() => {
-    const next: Record<string, unknown> = {};
-    for (const field of values() ?? []) next[field.id] = parseJson(field.value_json) ?? parseJson(field.default_json) ?? (field.cf_type === "bool" ? false : "");
-    setDrafts(next);
-  });
-  const draft = (field: CfDefinition) => drafts()[field.id];
-  const setDraft = (field: CfDefinition, value: unknown) => setDrafts({ ...drafts(), [field.id]: value });
-  const saveValues = async () => {
+  const [busy, setBusy] = createSignal(false);
+  const create = async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (!props.canManage) return;
+    setError("");
     try {
-      await Promise.all((values() ?? []).map(field => platformApi.cfSetValue(field.id, props.projectId, JSON.stringify(draft(field)))));
-      setError(""); await reloadValues();
+      if (!name().trim()) throw new Error("Custom field name is required.");
+      const listOptions = options().split(",").map(value => value.trim()).filter(Boolean);
+      if (type() === "enum" && !listOptions.length) throw new Error("A list field needs at least one option.");
+      setBusy(true);
+      await platformApi.createCfDefinition({ entity_type: entityType(), cf_type: type(), name: name().trim(), constraints_json: type() === "enum" ? JSON.stringify({ options: listOptions }) : null });
+      setName(""); setOptions(""); await refetch();
     } catch (reason) { setError(humanError(reason)); }
+    finally { setBusy(false); }
   };
-  const addDefinition = async () => {
-    const input = form();
-    if (!input.name.trim()) { setError("Custom field name is required."); return; }
-    try {
-      const constraints_json = input.cf_type === "enum"
-        ? JSON.stringify({ options: input.constraints.split(",").map(value => value.trim()).filter(Boolean) })
-        : input.constraints.trim() || null;
-      if (input.cf_type === "enum" && !(parseJson(constraints_json) as { options?: unknown[] } | undefined)?.options?.length) throw new Error("List fields need at least one option.");
-      await platformApi.createCfDefinition({ entity_type: "project", cf_type: input.cf_type, name: input.name.trim(), constraints_json });
-      setForm(blankCf()); setError(""); await reloadValues();
-    } catch (reason) { setError(humanError(reason)); }
-  };
-  const archive = async (field: CfDefinition) => {
-    try { await platformApi.archiveCfDefinition(field.id, true); setError(""); await reloadValues(); }
+  const archive = async (definition: CfDefinition) => {
+    setError(""); setBusy(true);
+    try { await platformApi.archiveCfDefinition(definition.id, true); await refetch(); }
     catch (reason) { setError(humanError(reason)); }
+    finally { setBusy(false); }
   };
-  const fieldInput = (field: CfDefinition) => {
-    const value = draft(field);
-    if (field.cf_type === "bool") return <input type="checkbox" checked={Boolean(value)} disabled={!props.allowed} onChange={event => setDraft(field, event.currentTarget.checked)} />;
-    if (field.cf_type === "enum") {
-      const options = (parseJson(field.constraints_json) as { options?: unknown[] } | undefined)?.options ?? [];
-      return <select value={String(value ?? "")} disabled={!props.allowed} onChange={event => setDraft(field, event.currentTarget.value)}><option value="">Select…</option><For each={options}>{option => <option value={String(option)}>{String(option)}</option>}</For></select>;
-    }
-    if (field.cf_type === "profile") return <select value={String(value ?? "")} disabled={!props.allowed} onChange={event => setDraft(field, event.currentTarget.value)}><option value="">Select a member…</option><For each={profiles()?.filter(person => !person.archived)}>{person => <option value={person.id}>{person.display_name || person.username}</option>}</For></select>;
-    return <input type={field.cf_type === "date" ? "date" : field.cf_type === "int" ? "number" : "text"} value={String(value ?? "")} disabled={!props.allowed} onInput={event => setDraft(field, field.cf_type === "int" ? Number(event.currentTarget.value) : event.currentTarget.value)} />;
-  };
+  const optionsFor = (definition: CfDefinition) => { try { return JSON.parse(definition.constraints_json ?? "{}").options?.join(", ") ?? ""; } catch { return ""; } };
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Custom fields</h2></div>
-    <p class="ps-hint">Add typed project metadata for planning, reporting, and ownership. Definitions apply to every project; values stay on this project.</p>
+    <div class="ps-panel-head"><h2>Issue custom fields</h2></div>
+    <p class="ps-hint">Fields belong to this project’s issue tracker. They appear on every issue in this project; existing values are retained when a field is archived.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
-    <Show when={values.loading}><p class="ps-hint">Loading custom fields…</p></Show>
-    <div class="ps-custom-fields"><For each={values()}>{field => <label class="ps-field"><span>{field.name} <em>{field.cf_type}</em></span>{fieldInput(field)}
-      <Show when={props.allowed}><button type="button" class="ps-remove-field" onClick={() => void archive(field)}>Remove field</button></Show>
-    </label>}</For></div>
-    <Show when={!values.loading && !(values()?.length)}><p class="ps-hint">No custom fields yet. Add one below to capture project-specific information.</p></Show>
-    <Show when={props.allowed && (values()?.length)}><div class="ps-actions"><button type="button" class="primary" onClick={() => void saveValues()}>Save custom fields</button></div></Show>
-    <Show when={props.allowed}><div class="ps-add-field">
-      <input aria-label="Custom field name" placeholder="Field name" value={form().name} onInput={event => setForm({ ...form(), name: event.currentTarget.value })} />
-      <select aria-label="Custom field type" value={form().cf_type} onChange={event => setForm({ ...form(), cf_type: event.currentTarget.value as CfType })}><For each={CF_TYPES}>{type => <option value={type}>{type}</option>}</For></select>
-      <Show when={form().cf_type === "enum"}><input aria-label="Custom field options" placeholder="Options, separated by commas" value={form().constraints} onInput={event => setForm({ ...form(), constraints: event.currentTarget.value })} /></Show>
-      <Show when={form().cf_type === "text" || form().cf_type === "int"}><input aria-label="Custom field constraints" placeholder='Constraints JSON, e.g. {"min":0}' value={form().constraints} onInput={event => setForm({ ...form(), constraints: event.currentTarget.value })} /></Show>
-      <button type="button" class="primary" onClick={() => void addDefinition()}>Add field</button>
-    </div></Show>
+    <ul class="ps-fields"><For each={definitions()}>{definition => <li><div><strong>{definition.name}</strong><small>{CF_TYPES.find(item => item.value === definition.cf_type)?.label ?? definition.cf_type}<Show when={optionsFor(definition)}>{values => <> · {values()}</>}</Show></small></div><Show when={props.canManage}><button type="button" class="ghost" disabled={busy()} onClick={() => void archive(definition)}>Archive</button></Show></li>}</For></ul>
+    <Show when={!definitions.loading && !(definitions()?.length)}><p class="ps-hint ps-hint-quiet">No custom fields yet.</p></Show>
+    <Show when={props.canManage}><form class="ps-field-form" onSubmit={create}><label class="ps-field"><span>Field name</span><input value={name()} placeholder="e.g. Customer impact" onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Type</span><select value={type()} onChange={event => setType(event.currentTarget.value as CfType)}><For each={CF_TYPES}>{item => <option value={item.value}>{item.label} — {item.hint}</option>}</For></select></label><Show when={type() === "enum"}><label class="ps-field"><span>Options</span><input value={options()} placeholder="Low, Medium, High" onInput={event => setOptions(event.currentTarget.value)} /></label></Show><button class="primary" disabled={busy()}>Add field</button></form></Show>
   </section>;
 }
 
 export default function ProjectSettings() {
   const id = () => route().projectId ?? "";
   const project = createMemo(() => projects()?.find(item => item.id === id()));
-  const [name, setName] = createSignal(""); const [description, setDescription] = createSignal(""); const [deadline, setDeadline] = createSignal("");
-  const [error, setError] = createSignal(""); const [notice, setNotice] = createSignal(""); const [busy, setBusy] = createSignal(false); const [confirm, setConfirm] = createSignal(false);
-  createEffect(() => { const item = project(); setName(item?.name ?? ""); setDescription(item?.description ?? ""); setDeadline(item?.deadline ?? ""); });
-  const allowed = () => !!project() && (currentUser()?.role === "admin" || project()!.created_by === profileId());
-  const save = async () => {
-    const item = project(); if (!item || !allowed()) return;
-    try { if (!name().trim()) throw new Error("A project needs a name."); setBusy(true); await platformApi.updateProject({ ...item, name: name().trim(), description: description().trim() || null, deadline: deadline() || null }); await reloadProjects(); setNotice("Project details saved."); setError(""); }
-    catch (reason) { setError(humanError(reason)); } finally { setBusy(false); }
+  const [name, setName] = createSignal("");
+  const [description, setDescription] = createSignal("");
+  const [deadline, setDeadline] = createSignal("");
+  const [error, setError] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [confirmArchive, setConfirmArchive] = createSignal(false);
+  onMount(() => { void reloadProjects().catch(() => undefined); });
+  createEffect(() => { const value = project(); setName(value?.name ?? ""); setDescription(value?.description ?? ""); setDeadline(value?.deadline ?? ""); });
+  const actor = () => isWeb() ? currentUser()?.profile_id ?? "" : profileId();
+  const canManage = () => !!project() && (currentUser()?.role === "admin" || project()!.created_by === actor());
+  const save = async (event: SubmitEvent) => {
+    event.preventDefault(); const value = project(); if (!value || !canManage()) return;
+    setError(""); setBusy(true);
+    try { if (!name().trim()) throw new Error("A project needs a name."); await platformApi.updateProject({ ...value, name: name().trim(), description: description().trim() || null, deadline: deadline() || null }); await reloadProjects(); }
+    catch (reason) { setError(humanError(reason)); }
+    finally { setBusy(false); }
   };
   const archive = async () => {
-    const item = project(); if (!item || !allowed()) return;
-    try { setBusy(true); await platformApi.updateProject({ ...item, archived: true }); await reloadProjects(); setProjectId(""); navigate("Projects"); }
-    catch (reason) { setError(humanError(reason)); } finally { setBusy(false); }
+    const value = project(); if (!value || !canManage()) return;
+    setError(""); setBusy(true);
+    try { await platformApi.updateProject({ ...value, archived: true }); await reloadProjects(); setProjectId(""); navigate("Projects"); }
+    catch (reason) { setError(humanError(reason)); }
+    finally { setBusy(false); }
   };
   return <section class="ps-view">
-    <header class="ps-head"><div class="ps-identity"><div class="ps-mark">{(project()?.key ?? "··").slice(0, 2).toUpperCase()}</div><div><h1>Project settings</h1><p><span class="ps-keychip">{project()?.key ?? "—"}</span>{project()?.name ?? "Project unavailable"}</p></div></div></header>
+    <header class="ps-head"><div class="ps-identity"><span class="ps-mark" aria-hidden="true">{project()?.key?.slice(0, 2) || "P"}</span><div><h1>Project settings</h1><p>{project()?.name ?? "Project unavailable"}<Show when={project()?.key}><code class="ps-keychip">{project()!.key}</code></Show></p></div></div></header>
     <Show when={!project()}><p class="ps-empty" role="alert">This project does not exist or is unavailable.</p></Show>
-    <Show when={project()}><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><Show when={notice()}><p class="ps-notice" role="status">{notice()}</p></Show>
-      <Show when={!allowed()}><p class="ps-notice" role="status">Only the project owner or an administrator can change these settings.</p></Show>
-      <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>Project parameters</h2></div><p class="ps-hint">The name, summary, and target date shown throughout the project workspace.</p>
-        <label class="ps-field"><span>Name</span><input disabled={!allowed()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label>
-        <label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!allowed()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label>
-        <label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!allowed()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label>
-        <label class="ps-field"><span>Project key</span><input disabled value={project()!.key} /></label><p class="ps-hint ps-hint-quiet">The key prefixes issue numbers and cannot change after creation.</p>
-        <div class="ps-actions"><button type="button" class="primary" disabled={!allowed() || busy()} onClick={() => void save()}>{busy() ? "Saving…" : "Save parameters"}</button></div>
-      </section>
-      <section class="ps-panel"><div class="ps-panel-head"><h2>Access model</h2></div><p class="ps-hint">Project roles grant rights within this project only. Membership controls who can receive project work.</p><dl class="ps-access-summary"><dt>Owner</dt><dd>{project()!.created_by ? nameOf(profiles(), project()!.created_by!) : "Server-managed"}</dd><dt>Scope</dt><dd>Project · {project()!.key}</dd><dt>Custom metadata</dt><dd>Typed fields, shared definition set</dd></dl></section>
-      <ProjectMembers projectId={id()} allowed={allowed()} /><ProjectCustomFields projectId={id()} allowed={allowed()} /></div>
-      <section class="ps-danger"><div class="ps-danger-head"><h2>Danger zone</h2></div><div class="ps-danger-row"><div><strong>Archive this project</strong><p>Its work stays recoverable; nothing is permanently deleted.</p></div><Show when={allowed()}><Show when={confirm()} fallback={<button type="button" class="danger-outline" onClick={() => setConfirm(true)}>Archive project</button>}><div class="ps-confirm"><span>Archive “{project()!.name}”?</span><button type="button" class="ghost" onClick={() => setConfirm(false)}>Cancel</button><button type="button" class="danger" disabled={busy()} onClick={() => void archive()}>Confirm archive</button></div></Show></Show></div></section>
+    <Show when={project()}><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><Show when={!canManage()}><p class="ps-notice" role="status">Only the project owner or an administrator can change these settings.</p></Show>
+      <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>General</h2></div><form onSubmit={save}><label class="ps-field"><span>Project name</span><input disabled={!canManage()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!canManage()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label><label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!canManage()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label><Show when={canManage()}><div class="ps-actions"><button class="primary" disabled={busy()}>Save changes</button></div></Show></form></section><section class="ps-panel"><div class="ps-panel-head"><h2>Project identity</h2></div><p class="ps-hint">The key is permanent and identifies this project in issue links and integrations.</p><div class="ps-refrow"><div><span class="ps-reflabel">Project key</span><code class="ps-refid">{project()!.key}</code></div></div><div class="ps-refrow"><div><span class="ps-reflabel">Project ID</span><code class="ps-refid">{project()!.id}</code></div></div></section><ProjectMembers projectId={id()} owner={project()!.created_by} canManage={canManage()} /><ProjectCustomFields projectId={id()} canManage={canManage()} /></div>
+      <Show when={canManage()}><section class="ps-danger"><div class="ps-danger-head"><h2>Archive project</h2></div><div class="ps-danger-row"><p><strong>Archive {project()!.name}</strong>It disappears from active project lists. Project data remains available for restoration.</p><Show when={confirmArchive()} fallback={<button type="button" class="danger-outline" onClick={() => setConfirmArchive(true)}>Archive project</button>}><div class="ps-confirm"><span>Archive this project?</span><button type="button" class="danger" disabled={busy()} onClick={() => void archive()}>Confirm archive</button><button type="button" disabled={busy()} onClick={() => setConfirmArchive(false)}>Cancel</button></div></Show></div></section></Show>
     </Show>
   </section>;
 }
