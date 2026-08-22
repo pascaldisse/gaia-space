@@ -68,3 +68,7 @@
 .cal-agenda-link:hover{text-decoration:underline}
 .cal-side-add{width:100%;margin-top:var(--cal-space-4xl);padding:var(--cal-space-lg);border:var(--cal-hairline) dashed var(--surface-line-dashed);border-radius:var(--radius-option);background:transparent;color:var(--text-faint);cursor:pointer}
 .cal-side-add:hover{color:var(--text-strong);border-color:var(--accent)}
+.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
+.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
+.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
+.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}

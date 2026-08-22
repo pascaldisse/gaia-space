@@ -3,7 +3,7 @@ import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
 import { isMobileServer, openServerSetup } from "../mobile";
 import { NAV_GROUPS, defaultView, hiddenGroups, navLayout, setDefaultView, setNavLayout, toggleGroup } from "../nav";
-import { calendarFeedsApi } from "../api/calendar-feeds";
+import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { humanError, profileId } from "../session";
 import "./Settings.css";
@@ -16,8 +16,10 @@ const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLo
  *  text below for why, and `calendar_feeds.rs` for the sync mechanics. */
 function ConnectedCalendars() {
   const [feeds, { refetch: reloadFeeds }] = createResource(() => profileId(), profile => profile ? calendarFeedsApi.list(profile) : Promise.resolve([]));
+const [calendars] = createResource(() => profileId(), profile => profile ? calendarsApi.list(profile) : Promise.resolve([]));
   const [label, setLabel] = createSignal("");
   const [url, setUrl] = createSignal("");
+const [calendarId, setCalendarId] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
   const connect = async (event: SubmitEvent) => {
@@ -30,8 +32,8 @@ function ConnectedCalendars() {
     try {
       // `profile_id` is shape-only: the server always rebinds it to the
       // session, the same as every other personal write.
-      await calendarFeedsApi.save({ profile_id: owner, label: label().trim(), ics_url: url().trim() });
-      setLabel(""); setUrl(""); reloadFeeds();
+      await calendarFeedsApi.save({ profile_id: owner, label: label().trim(), ics_url: url().trim(), calendar_id: calendarId() || null });
+      setLabel(""); setUrl(""); setCalendarId(""); reloadFeeds();
     } catch (reason) { setError(humanError(reason)); }
     finally { setBusy(false); }
   };
@@ -62,11 +64,18 @@ function ConnectedCalendars() {
     <form class="feed-connect" onSubmit={connect}>
       <input placeholder="Label, e.g. My Gmail" aria-label="Calendar label" value={label()} onInput={e => setLabel(e.currentTarget.value)} />
       <input placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="Calendar address" value={url()} onInput={e => setUrl(e.currentTarget.value)} />
+      <select aria-label="Calendar destination" value={calendarId()} onChange={e => setCalendarId(e.currentTarget.value)}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></select>
       <button type="submit" class="primary" disabled={busy()}>Connect</button>
     </form>
   </div>;
 }
 
+function NamedCalendars() {
+const [calendars, { refetch }] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
+const [name, setName] = createSignal(""); const [color, setColor] = createSignal("#2563eb"); const [error, setError] = createSignal("");
+const save = async (event: SubmitEvent) => { event.preventDefault(); const owner=profileId(); if (!owner || !name().trim()) { setError("Select a profile and enter a calendar name."); return; } try { await calendarsApi.save({profile_id:owner,name:name().trim(),color:color(),visible:true}); setName(""); refetch(); } catch(reason) { setError(humanError(reason)); } };
+return <div class="settings-card"><h2>My calendars</h2><p class="settings-hint">Create named calendars for organizing connected and future writable calendars.</p><Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show><ul class="settings-groups feed-list"><For each={calendars() ?? []}>{calendar => <li class="settings-option feed-row"><span><strong><span aria-hidden="true" style={{color:calendar.color}}>●</span> {calendar.name}</strong><em class="settings-sub">{calendar.visible ? "Visible" : "Hidden"}</em></span><button type="button" class="danger" onClick={() => void calendarsApi.remove(calendar.id).then(() => refetch()).catch(reason => setError(humanError(reason)))}>Remove</button></li>}</For><Show when={!calendars.loading && !(calendars() ?? []).length}><li class="settings-sub">No named calendars yet.</li></Show></ul><form class="feed-connect" onSubmit={save}><input aria-label="Calendar name" placeholder="Calendar name" value={name()} onInput={e=>setName(e.currentTarget.value)} /><input aria-label="Calendar color" type="color" value={color()} onInput={e=>setColor(e.currentTarget.value)} /><button class="primary" type="submit">Add calendar</button></form></div>;
+}
 function SecuritySettings() {
 const [tokens, { refetch }] = createResource(() => permanentTokensApi.list());
 const [name, setName] = createSignal(""); const [oneTime, setOneTime] = createSignal(""); const [error, setError] = createSignal(""); const [busy, setBusy] = createSignal(false);
@@ -110,7 +119,8 @@ export default function Settings() {
       </div>
     </div>
 
-    <ConnectedCalendars />
+    <NamedCalendars />
+<ConnectedCalendars />
 <SecuritySettings />
 
     <Show when={isMobileServer()}><div class="settings-card">

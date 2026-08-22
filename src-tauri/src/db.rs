@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 46;
+pub const SCHEMA_VERSION: i64 = 51;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -409,6 +409,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 46 {
         tx.execute_batch(SCHEMA_V46)?;
     }
+    if version < 49 {
+        tx.execute_batch(SCHEMA_V49)?;
+    }
+    // V51: feed destinations are optional; legacy rows remain unassigned. Hand-built
+    // partial fixtures may predate V13 and have no feed table at all.
+    if version < 51 && table_exists(&tx, "calendar_feeds")? {
+        add_column_if_missing(&tx, "calendar_feeds", "calendar_id", "TEXT REFERENCES calendars(id) ON DELETE SET NULL")?;
+        tx.execute_batch(SCHEMA_V51)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -727,6 +736,18 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 /// `state` is the whole lifecycle: exactly one ACTIVE row signs, any number of RETIRING
 /// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
 /// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
+/// V49: named user calendars. Feed rows may opt into one, while legacy feeds
+/// intentionally remain unassigned until the user chooses a destination.
+pub(crate) const SCHEMA_V49: &str = r#"
+CREATE TABLE IF NOT EXISTS calendars (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#2563eb', visible INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS calendars_profile ON calendars(profile_id);
+"#;
+
+/// V51 indexes the optional feed destination used by Calendar filtering.
+pub(crate) const SCHEMA_V51: &str = r#"
+CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id);
+"#;
+
 pub(crate) const SCHEMA_V45: &str = r#"
 CREATE TABLE IF NOT EXISTS ide_connections (id TEXT PRIMARY KEY, ide TEXT NOT NULL, connected INTEGER NOT NULL DEFAULT 1, last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS ide_opened_repositories (connection_id TEXT NOT NULL REFERENCES ide_connections(id) ON DELETE CASCADE, repository TEXT NOT NULL, PRIMARY KEY(connection_id, repository));
@@ -1085,7 +1106,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 46);
+        assert_eq!(SCHEMA_VERSION, 51);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1715,5 +1736,22 @@ mod v39_webhook_migration_tests {
             SCHEMA_VERSION
         );
         assert!(!table_exists(&partial, "webhook_subscriptions").unwrap());
+    }
+
+    #[test]
+    fn v49_adds_profile_scoped_named_calendars() {
+        let temp = TempDb::new("gaia-space-v49-calendars");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES('work','default-org','Work','#2563eb',1,0)", []).expect("calendar insert");
+        let profile: String = conn
+            .query_row(
+                "SELECT profile_id FROM calendars WHERE id='work'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("calendar owner");
+        assert_eq!(profile, "default-org");
     }
 }

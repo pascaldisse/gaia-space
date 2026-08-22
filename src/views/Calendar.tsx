@@ -1,6 +1,7 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { personalApi, type CalendarItem } from "../api/personal";
 import { platformApi } from "../api/platform";
+import { calendarsApi } from "../api/calendar-feeds";
 import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import CallPanel from "./CallPanel";
 import { humanError, isWeb, profileId } from "../session";
@@ -30,6 +31,7 @@ const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", locati
 const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
+const [calendarFilter,setCalendarFilter] = createSignal("all");
 const [notice,setNotice] = createSignal("");
 const [invitee,setInvitee] = createSignal("");
 const range = () => view()==="month" ? monthRange(cursor()) : weekRange(cursor());
@@ -39,13 +41,14 @@ const [items,{refetch}] = createResource(() => { const [start,end]=range(); retu
   ([profile,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key) : Promise.resolve([]));
 const [meetings,{refetch:reloadMeetings}] = createResource(() => profileId(), profile => profile ? meetingsApi.list(profile) : Promise.resolve([]));
 const [projects] = createResource(() => platformApi.projects());
+const [calendars] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=route().projectId; return project ? loaded().filter(item=>item.project_id===project) : loaded(); };
+const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); return selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); };
 const shift = (amount:number) => { const next=new Date(cursor()); if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+7*amount); setCursor(next); };
 const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) result.push(new Date(day)); return result; };
 const events = (day:Date) => itemsOnDay(scoped(), day);
@@ -60,7 +63,7 @@ const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setDeadlineForm({ project_id:"", day:dateKey(day) });
 };
 const openEvent = (item:CalendarItem) => { setComposerDay(undefined); setSelected(item); setDraft(meetingOf(item)); };
-useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,source_id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null,date:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
+useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,source_id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null,calendar_id:null,date:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
 const create = async (event:SubmitEvent) => {
 event.preventDefault();
 setError(""); setNotice("");
@@ -71,7 +74,7 @@ const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
 const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false};
 await meetingsApi.create(meeting);
-setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,date:null});
+setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
 } catch (reason) { setError(humanError(reason)); }
 };
@@ -119,6 +122,7 @@ return <section class="calendar-view">
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
+<Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">
