@@ -1458,7 +1458,7 @@ mod tests {
         std::fs::write(project.join(".idea/.lock"), "live").unwrap();
         let sessions = discover_local_ide_sessions(
             &[format!("Visual Studio Code {}", project.display())],
-            &[project.clone()],
+            std::slice::from_ref(&project),
         );
         assert!(sessions.iter().any(|session| session.ide == "VS Code"
             && session.repositories == vec![project.to_string_lossy()]));
