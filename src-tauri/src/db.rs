@@ -24,6 +24,9 @@ pub fn enforce_foreign_keys(conn: &Connection) -> Result<()> {
 /// silently reintroduce orphan junction rows.
 pub fn open_at(path: impl AsRef<Path>) -> Result<Connection> {
     let conn = Connection::open(path.as_ref())?;
+    // Concurrent writers (webhook queue sweepers, the HTTP server's per-request
+    // connections) must wait for the write lock instead of failing the caller.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     enforce_foreign_keys(&conn)?;
     Ok(conn)
 }
@@ -351,7 +354,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // must stop being retried at some point. Both facts are per-subscription state, so
     // they are columns on `webhook_subscriptions`, added individually because older
     // databases may already carry a partially-applied batch.
-    if version < 39 {
+    // `webhook_subscriptions` may be absent in hand-built partial databases (test
+    // fixtures pinned to an old user_version), so the additive step is table-guarded.
+    if version < 39 && table_exists(&tx, "webhook_subscriptions")? {
         add_column_if_missing(&tx, "webhook_subscriptions", "secret", "TEXT")?;
         add_column_if_missing(
             &tx,
@@ -689,6 +694,14 @@ INSERT INTO role_assignments(id,role_id,profile_id,team_id,scope_type,scope_id,c
 DROP TABLE role_assignments_v36;
 "#;
 
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -1000,7 +1013,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 38);
+        assert_eq!(SCHEMA_VERSION, 39);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

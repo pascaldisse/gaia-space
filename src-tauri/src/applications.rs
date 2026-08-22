@@ -389,14 +389,42 @@ pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<Webho
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn retry_webhook_delivery(id: String) -> Result<WebhookDelivery> {
+    if !claim_delivery(&id, false)? {
+        // dead-lettered, already succeeded, or in flight elsewhere
+        let c = db::conn()?;
+        return c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[&id],read_delivery)
+            .map_err(|_| "webhook delivery not found".to_string())
+            .and_then(|d| Err(format!("webhook delivery {} is not retryable ({})", d.id, d.status)));
+    }
     deliver_delivery(&id)
 }
-/// Deliveries that are due now: FAILED, still inside their attempt budget
-/// (`next_attempt_at` non-NULL = not dead-lettered), and past their backoff.
+/// How long a claimed delivery stays invisible to other sweepers. A sweeper that
+/// dies mid-POST loses the lease and the row becomes due again — no row is stranded.
+const CLAIM_LEASE_SECS: i64 = 120;
+/// Take exclusive ownership of a delivery. One UPDATE, so two concurrent sweepers
+/// cannot both win: SQLite serialises the writes and the loser sees zero rows changed.
+/// A row is claimable unless it already succeeded, is dead-lettered
+/// (`next_attempt_at IS NULL`), or carries a live lease.
+/// `respect_backoff=false` is the operator's "retry now": it skips the waiting time but
+/// still refuses a row another worker is actively delivering.
+fn claim_delivery(id: &str, respect_backoff: bool) -> Result<bool> {
+    let c = db::conn()?;
+    let changed = c
+        .execute(
+            "UPDATE webhook_deliveries SET status='PENDING',next_attempt_at=unixepoch()+?2 \
+             WHERE id=?1 AND status<>'SUCCEEDED' AND next_attempt_at IS NOT NULL \
+             AND ((?3 = 0 AND status<>'PENDING') OR next_attempt_at<=unixepoch())",
+            params![id, CLAIM_LEASE_SECS, i64::from(respect_backoff)],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+/// Deliveries that are due now: inside their attempt budget (`next_attempt_at` non-NULL
+/// = not dead-lettered), past their backoff, and not held by a live claim lease.
 pub fn due_webhook_deliveries(limit: i64) -> Result<Vec<String>> {
     let c = db::conn()?;
     let mut q = c
-        .prepare("SELECT id FROM webhook_deliveries WHERE status='FAILED' AND next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch() ORDER BY next_attempt_at LIMIT ?1")
+        .prepare("SELECT id FROM webhook_deliveries WHERE status IN ('FAILED','PENDING') AND next_attempt_at IS NOT NULL AND next_attempt_at<=unixepoch() ORDER BY next_attempt_at LIMIT ?1")
         .map_err(|e| e.to_string())?;
     let rows = q
         .query_map([limit], |r| r.get::<_, String>(0))
@@ -413,6 +441,9 @@ pub fn process_webhook_queue(limit: i64) -> Result<Vec<WebhookDelivery>> {
     let limit = limit.clamp(1, 100);
     let mut out = Vec::new();
     for id in due_webhook_deliveries(limit)? {
+        if !claim_delivery(&id, true)? {
+            continue; // another sweeper owns it
+        }
         if let Ok(delivery) = deliver_delivery(&id) {
             out.push(delivery);
         }
@@ -1088,6 +1119,85 @@ mod delivery_tests {
             retry_webhook_delivery(dead.id).is_err(),
             "no retry past budget"
         );
+    }
+
+    #[test]
+    fn two_sweepers_deliver_a_due_row_exactly_once() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("webhook-race");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
+        listener.set_nonblocking(false).ok();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let hits = Arc::new(Mutex::new(0_usize));
+        let counted = hits.clone();
+        let server = std::thread::spawn(move || {
+            // first request = the initial delivery, then anything the sweepers send
+            for _ in 0..3 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0_u8; 2048];
+                let _ = stream.read(&mut buf);
+                *counted.lock().unwrap() += 1;
+                let _ = stream.write_all(
+                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        save_application(Application {
+            id: "app-race".into(),
+            name: "Race app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some(endpoint.clone()),
+            client_id: "race-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        save_webhook(WebhookSubscription {
+            id: "hook-race".into(),
+            application_id: "app-race".into(),
+            event_type: "IssueWebhookEvent".into(),
+            filters_json: None,
+            endpoint_uri: endpoint,
+            enabled: true,
+            secret: None,
+            max_attempts: 5,
+        })
+        .expect("hook");
+        let failed = deliver_webhook("hook-race".into(), "{}".into()).expect("delivery");
+        assert_eq!(failed.attempts, 1);
+        // make it due right now
+        db::conn()
+            .unwrap()
+            .execute(
+                "UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-1 WHERE id=?1",
+                [&failed.id],
+            )
+            .unwrap();
+        let a = std::thread::spawn(|| process_webhook_queue(1));
+        let b = std::thread::spawn(|| process_webhook_queue(1));
+        let delivered = a.unwrap_join() + b.unwrap_join();
+        assert_eq!(delivered, 1, "exactly one sweeper may own a due delivery");
+        drop(server);
+        assert_eq!(*hits.lock().unwrap(), 2, "initial POST + one retry POST");
+        let after = list_webhook_deliveries("hook-race".into()).expect("list");
+        assert_eq!(after[0].attempts, 2);
+    }
+
+    trait JoinCount {
+        fn unwrap_join(self) -> usize;
+    }
+    impl JoinCount for std::thread::JoinHandle<Result<Vec<WebhookDelivery>>> {
+        fn unwrap_join(self) -> usize {
+            self.join().expect("sweeper").expect("sweep").len()
+        }
     }
 
     #[test]
