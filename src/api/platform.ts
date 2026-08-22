@@ -11,7 +11,7 @@ export type Right = { id: string; code: string; title: string; description: stri
 export type ScopeType = "global" | "project" | "team" | "channel" | "document";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
 export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null }; 
-export type CfType = "text" | "int" | "date" | "enum" | "profile" | "bool";
+export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
   constraints_json: string | null; default_json: string | null; ordering: number; archived: boolean;
