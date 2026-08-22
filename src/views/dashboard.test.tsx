@@ -52,6 +52,14 @@ afterEach(() => {
 });
 
 describe("dashboard", () => {
+  test("does not request personalized data without a selected profile", async () => {
+    stubTauriIpc();
+    const host = await mount();
+    expect(host.textContent).toContain("No profile selected");
+    expect(calls.some((call) => call.command === "dashboard_aggregate")).toBe(false);
+    expect(calls.some((call) => call.command === "calendar_aggregate")).toBe(false);
+  });
+
   test("shows empty widget states rather than blank cards", async () => {
     stubTauriIpc();
     setProfileId("me");
