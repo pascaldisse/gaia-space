@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 20;
+pub const SCHEMA_VERSION: i64 = 21;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -191,6 +191,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 20 {
         tx.execute_batch(SCHEMA_V20)?;
     }
+    // V21: explicit per-document viewer/editor grants for private documents.
+    if version < 21 {
+        tx.execute_batch(SCHEMA_V21)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -264,6 +268,8 @@ CREATE TABLE IF NOT EXISTS safe_merge_runs (id TEXT PRIMARY KEY, review_id TEXT 
 CREATE TABLE IF NOT EXISTS document_folders (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, parent_id TEXT REFERENCES document_folders(id), name TEXT NOT NULL, description TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, folder_id TEXT REFERENCES document_folders(id), doc_type TEXT NOT NULL CHECK(doc_type IN ('text','file')), title TEXT NOT NULL, body TEXT, version INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
+CREATE TABLE IF NOT EXISTS document_permissions (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(document_id, recipient_type, recipient_id));
+CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
 CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
 CREATE TABLE IF NOT EXISTS pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
@@ -292,6 +298,17 @@ pub(crate) const SCHEMA_V12: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(issue_id, profile_id));
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
+"#;
+
+pub(crate) const SCHEMA_V21: &str = r#"
+CREATE TABLE IF NOT EXISTS document_permissions (
+ document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')),
+ recipient_id TEXT NOT NULL,
+ access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')),
+ PRIMARY KEY(document_id, recipient_type, recipient_id)
+);
+CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
 "#;
 
 pub(crate) const SCHEMA_V20: &str = r#"
@@ -677,6 +694,23 @@ mod tests {
         );
         let shared: i64 = conn.query_row("SELECT count(*) FROM (SELECT profile_id FROM users GROUP BY profile_id HAVING count(*) > 1)", [], |r| r.get(0)).unwrap();
         assert_eq!(shared, 0, "one profile per account");
+    }
+
+    #[test]
+    fn v20_database_gains_document_permissions() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        conn.execute("DROP TABLE document_permissions", [])
+            .expect("simulate V20 database");
+        conn.pragma_update(None, "user_version", 20)
+            .expect("V20 stamp");
+        migrate(&conn).expect("V21 migration");
+        let exists: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='document_permissions'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(exists, 1);
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[test]
