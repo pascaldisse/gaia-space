@@ -348,6 +348,8 @@ pub fn run() {
             personal::list_notifications,
             personal::mark_notification_read,
             personal::list_subscription_settings,
+            personal::get_dashboard_preferences,
+            personal::set_dashboard_preferences,
             personal::list_subscription_scopes,
             personal::save_subscription_scope,
             personal::delete_subscription_scope,

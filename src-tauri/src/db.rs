@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 41;
+pub const SCHEMA_VERSION: i64 = 45;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -383,6 +383,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             )?;
         }
     }
+    // V45: dashboard widget visibility is an account preference, not browser state.
+    // V43 is owned by the documents lane and V44 by its paired lane; preserve gaps.
+    if version < 45 { tx.execute_batch(SCHEMA_V45)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -701,6 +704,13 @@ CREATE INDEX IF NOT EXISTS meeting_recordings_meeting ON meeting_recordings(meet
 /// `state` is the whole lifecycle: exactly one ACTIVE row signs, any number of RETIRING
 /// rows co-sign until `expires_at`, after which delivery prunes them. `expires_at` is
 /// NULL for ACTIVE — the signing key never expires on its own, only by being replaced.
+pub(crate) const SCHEMA_V45: &str = r#"
+CREATE TABLE IF NOT EXISTS user_preferences (
+    profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    dashboard_hidden_widgets TEXT NOT NULL
+);
+"#;
+
 pub(crate) const SCHEMA_V41: &str = r#"
 CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
 CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);

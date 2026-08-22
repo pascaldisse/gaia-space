@@ -1,10 +1,10 @@
-import { createResource, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi } from "../api/personal";
 import { calendarEntries, dateKey } from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
-import { DASHBOARD_WIDGETS, hiddenWidgets, toggleWidget, widgetVisible } from "../dashboardPrefs";
+import { DASHBOARD_WIDGETS, hiddenWidgets, loadDashboardPrefs, toggleWidget, widgetVisible } from "../dashboardPrefs";
 import { navigate } from "../router";
 import { humanError, profileId } from "../session";
 import "./Dashboard.css";
@@ -38,7 +38,8 @@ export default function Dashboard() {
     to.setDate(to.getDate() + UPCOMING_DAYS);
     return [stamp(from), stamp(to), dateKey(from), dateKey(to)] as const;
   };
-  const [dashboard, { refetch: refetchDashboard }] = createResource(
+  createEffect(() => { void loadDashboardPrefs(profileId()); });
+const [dashboard, { refetch: refetchDashboard }] = createResource(
     profileId,
     (id) => (id ? personalApi.dashboard(id) : Promise.resolve(undefined)),
   );

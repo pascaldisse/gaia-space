@@ -896,6 +896,7 @@ enum CommandPolicy {
     CalendarFeedRead,
     CalendarFeedUpsert,
     CalendarFeedOwnerAction,
+    DashboardPreferencesWrite,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -914,7 +915,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "get_project" | "list_boards" | "list_issue_statuses" => CommandPolicy::ProjectRead,
         "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
-        "list_todos" | "dashboard_aggregate" => CommandPolicy::TodoRead,
+        "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
+        "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
         "save_calendar_feed" => CommandPolicy::CalendarFeedUpsert,
@@ -1594,6 +1596,10 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::DashboardPreferencesWrite => {
+            body.as_object_mut().and_then(|body| body.get_mut("preferences")).and_then(Value::as_object_mut).ok_or_else(|| err(StatusCode::BAD_REQUEST, "preferences are required"))?.insert("profile_id".into(), json!(user.profile_id));
+            Ok(())
+        }
         CommandPolicy::CalendarRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -2472,6 +2478,8 @@ async fn cmd(
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
     "dashboard_aggregate" => personal::dashboard_aggregate(profile_id: String),
+    "get_dashboard_preferences" => personal::get_dashboard_preferences(profile_id: String),
+    "set_dashboard_preferences" => personal::set_dashboard_preferences(preferences: personal::DashboardPreferences),
     "delete_board" => issues::delete_board(id: String),
     "delete_board_column" => issues::delete_board_column(id: String),
     "delete_checklist" => issues::delete_checklist(id: String),

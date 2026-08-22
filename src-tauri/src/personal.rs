@@ -632,6 +632,84 @@ pub(crate) fn subscription_enabled_on(
     }
     err(c.query_row("SELECT coalesce((SELECT enabled FROM subscription_settings WHERE profile_id=?1 AND event_type=?2),1)", params![profile_id, event_type], |row| row.get(0)))
 }
+/// Per-member dashboard widget visibility. `initialized` distinguishes an absent
+/// server preference from a deliberate empty selection during localStorage migration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DashboardPreferences {
+    pub profile_id: String,
+    pub hidden_widgets: Vec<String>,
+    pub initialized: bool,
+}
+const DASHBOARD_WIDGET_IDS: &[&str] = &["today", "calendar", "issues", "inbox", "absences"];
+fn clean_dashboard_widgets(ids: Vec<String>) -> Result<Vec<String>> {
+    let mut clean = Vec::new();
+    for id in ids {
+        if !DASHBOARD_WIDGET_IDS.contains(&id.as_str()) {
+            return Err(format!("Unknown dashboard widget: {id}"));
+        }
+        if !clean.contains(&id) {
+            clean.push(id);
+        }
+    }
+    Ok(clean)
+}
+pub(crate) fn dashboard_preferences_on(
+    c: &Connection,
+    profile_id: &str,
+) -> Result<DashboardPreferences> {
+    if profile_id.trim().is_empty() {
+        return Err("Dashboard profile is required".into());
+    }
+    let raw = err(c
+        .query_row(
+            "SELECT dashboard_hidden_widgets FROM user_preferences WHERE profile_id=?1",
+            [profile_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional())?;
+    match raw {
+        Some(raw) => Ok(DashboardPreferences {
+            profile_id: profile_id.to_string(),
+            hidden_widgets: clean_dashboard_widgets(
+                serde_json::from_str(&raw)
+                    .map_err(|_| "Invalid dashboard preferences in database")?,
+            )?,
+            initialized: true,
+        }),
+        None => Ok(DashboardPreferences {
+            profile_id: profile_id.to_string(),
+            hidden_widgets: Vec::new(),
+            initialized: false,
+        }),
+    }
+}
+pub(crate) fn save_dashboard_preferences_on(
+    c: &Connection,
+    preferences: DashboardPreferences,
+) -> Result<DashboardPreferences> {
+    if preferences.profile_id.trim().is_empty() {
+        return Err("Dashboard profile is required".into());
+    }
+    let hidden_widgets = clean_dashboard_widgets(preferences.hidden_widgets)?;
+    let encoded = serde_json::to_string(&hidden_widgets).map_err(|e| e.to_string())?;
+    err(c.execute("INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES(?1,?2) ON CONFLICT(profile_id) DO UPDATE SET dashboard_hidden_widgets=excluded.dashboard_hidden_widgets", params![preferences.profile_id, encoded]))?;
+    Ok(DashboardPreferences {
+        profile_id: preferences.profile_id,
+        hidden_widgets,
+        initialized: true,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_dashboard_preferences(profile_id: String) -> Result<DashboardPreferences> {
+    dashboard_preferences_on(&db::conn()?, &profile_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_dashboard_preferences(
+    preferences: DashboardPreferences,
+) -> Result<DashboardPreferences> {
+    save_dashboard_preferences_on(&db::conn()?, preferences)
+}
+
 fn read_scope(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubscriptionScope> {
     Ok(SubscriptionScope {
         profile_id: row.get(0)?,
@@ -1760,5 +1838,46 @@ mod full_text_tests {
                 .iter()
                 .any(|hit| hit.id == "d")
         );
+    }
+}
+
+#[cfg(test)]
+mod dashboard_preference_tests {
+    use super::*;
+    #[test]
+    fn dashboard_preferences_round_trip_and_validate_widgets() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        crate::db::seed(&c).unwrap();
+        assert!(
+            !dashboard_preferences_on(&c, "default-org")
+                .unwrap()
+                .initialized
+        );
+        let saved = save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "default-org".into(),
+                hidden_widgets: vec!["calendar".into(), "calendar".into(), "inbox".into()],
+                initialized: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.hidden_widgets, vec!["calendar", "inbox"]);
+        assert_eq!(
+            dashboard_preferences_on(&c, "default-org")
+                .unwrap()
+                .hidden_widgets,
+            vec!["calendar", "inbox"]
+        );
+        assert!(save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "default-org".into(),
+                hidden_widgets: vec!["nope".into()],
+                initialized: false
+            }
+        )
+        .is_err());
     }
 }
