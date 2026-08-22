@@ -38,6 +38,8 @@ pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod oauth;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod payload_dispatch;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
@@ -101,6 +103,11 @@ pub fn run() {
             applications::save_application,
             applications::delete_application,
             applications::rotate_app_secret,
+            payload_dispatch::app_signing_key,
+            payload_dispatch::rotate_app_signing_key,
+            payload_dispatch::parse_application_payload,
+            payload_dispatch::application_payload_classes,
+            payload_dispatch::dispatch_application_payload,
             applications::issue_app_token,
             applications::verify_app_token,
             applications::revoke_app_token,

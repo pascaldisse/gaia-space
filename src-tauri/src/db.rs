@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 51;
+pub const SCHEMA_VERSION: i64 = 52;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -418,6 +418,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "calendar_feeds", "calendar_id", "TEXT REFERENCES calendars(id) ON DELETE SET NULL")?;
         tx.execute_batch(SCHEMA_V51)?;
     }
+    // V52: each application owns one Ed25519 signing key pair used to sign outbound
+    // typed application payloads. The private key never leaves this table; the public
+    // key is what an app SDK verifies with, and rotation keeps the previous public key
+    // visible so a receiver mid-rotation can still validate an in-flight payload.
+    if version < 52 {
+        tx.execute_batch(SCHEMA_V52)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -746,6 +753,10 @@ CREATE INDEX IF NOT EXISTS calendars_profile ON calendars(profile_id);
 /// V51 indexes the optional feed destination used by Calendar filtering.
 pub(crate) const SCHEMA_V51: &str = r#"
 CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id);
+"#;
+
+pub(crate) const SCHEMA_V52: &str = r#"
+CREATE TABLE IF NOT EXISTS app_signing_keys (application_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, private_key TEXT NOT NULL, public_key TEXT NOT NULL, previous_key_id TEXT, previous_public_key TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 "#;
 
 pub(crate) const SCHEMA_V45: &str = r#"
@@ -1106,7 +1117,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 51);
+        assert_eq!(SCHEMA_VERSION, 52);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
