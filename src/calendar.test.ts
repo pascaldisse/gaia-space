@@ -2,7 +2,7 @@ import { expect, test, describe } from "bun:test";
 import { calendarEntries, dateKey, dayFromKey, entriesForDay, itemDayKey, itemsOnDay, kindPresence, localInput, meetingIdOf, meetingDraftError, monthCells, taskDraftError, deadlineDraftError } from "./calendar";
 import type { CalendarItem } from "./api/personal";
 
-const item = (over: Partial<CalendarItem>): CalendarItem => ({ id: "i", source_id: over.id ?? "i", kind: "task", title: "T", starts_at: 0, ends_at: null, project_id: null, date: null, ...over });
+const item = (over: Partial<CalendarItem>): CalendarItem => ({ id: "i", source_id: over.id ?? "i", kind: "task", title: "T", starts_at: 0, ends_at: null, project_id: null, calendar_id: null, date: null, ...over });
 
 describe("resolving an item back to its meeting", () => {
   test("an occurrence resolves to the series it was expanded from", () => {
@@ -87,7 +87,7 @@ describe("quick-create validation", () => {
 describe("overview display model", () => {
   const at = (day: number, hour = 0) => new Date(2026, 2, day, hour).getTime() / 1000;
   const item = (over: Partial<CalendarItem> & { id: string }): CalendarItem =>
-    ({ source_id: over.id, kind: "task", title: over.id.toUpperCase(), starts_at: at(3), ends_at: null, project_id: null, date: null, ...over });
+    ({ source_id: over.id, kind: "task", title: over.id.toUpperCase(), starts_at: at(3), ends_at: null, project_id: null, calendar_id: null, date: null, ...over });
 
   test("a date-only item keeps the day it was written as", () => {
     const entry = calendarEntries([item({ id: "a", date: "2026-03-03" })])[0];

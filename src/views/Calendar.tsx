@@ -63,7 +63,7 @@ const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setDeadlineForm({ project_id:"", day:dateKey(day) });
 };
 const openEvent = (item:CalendarItem) => { setComposerDay(undefined); setSelected(item); setDraft(meetingOf(item)); };
-useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,source_id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null,date:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
+useDeepLink("meeting", (id) => { const found=meetings()?.find(m=>m.id===id); if (found && draft()?.id!==id) { setDraft(found); setSelected({id:found.id,source_id:found.id,kind:"meeting",title:found.title,starts_at:found.starts_at,ends_at:found.ends_at,project_id:null,calendar_id:null,date:null}); } }, () => { setDraft(undefined); setSelected(undefined); });
 const create = async (event:SubmitEvent) => {
 event.preventDefault();
 setError(""); setNotice("");
@@ -74,7 +74,7 @@ const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
 const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false};
 await meetingsApi.create(meeting);
-setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,date:null});
+setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
 } catch (reason) { setError(humanError(reason)); }
 };
