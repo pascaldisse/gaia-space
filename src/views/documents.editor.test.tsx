@@ -121,6 +121,53 @@ describe("document editing surfaces", () => {
     expect(button(host, "Publish to Blog")).toBeUndefined();
   });
 
+  test("uploading a file files it as a document and selects it", async () => {
+    setProfileId("me");
+    calls.length = 0;
+    let uploaded = false;
+    const file = { id: "up1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "file", body_format: "text", title: "logo.png", body: "logo.png (4 bytes, image/png)", version: 1, archived: false, created_by: "me" };
+    serve({
+      list_document_folders: { ok: true, value: [] },
+      list_documents: () => ({ ok: true, value: uploaded ? [doc(), file] : [doc()] }),
+      upload_document_file: () => { uploaded = true; return { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, uploaded_by: "me", uploaded_at: 1 } }; },
+      read_document_file: { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, truncated: false, text: null, data_base64: "iVBORw==" } },
+    });
+    const host = await mount();
+
+    const path = host.querySelector('input[aria-label="File to upload"]') as HTMLInputElement;
+    expect(path).not.toBeNull();
+    path.value = "/srv/uploads/logo.png";
+    path.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    button(host, "↑ Upload")!.click();
+    await settle();
+
+    const call = calls.find((c) => c.cmd === "upload_document_file");
+    expect(call).not.toBeUndefined();
+    expect(call!.body.request.source_path).toBe("/srv/uploads/logo.png");
+    expect(call!.body.request.container_type).toBe("my-docs");
+    // The upload lands in the tree and opens as a preview, not as an empty editor.
+    expect(host.textContent).toContain("logo.png");
+    const img = host.querySelector(".file-preview img.file-image") as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+    expect(host.querySelector("textarea.editor-body")).toBeNull();
+  });
+
+  test("a text upload previews its decoded contents and announces truncation", async () => {
+    setProfileId("me");
+    serve({
+      list_document_folders: { ok: true, value: [] },
+      list_documents: { ok: true, value: [doc({ id: "up2", doc_type: "file", title: "notes.txt" })] },
+      read_document_file: { ok: true, value: { document_id: "up2", filename: "notes.txt", mime: "text/plain", size: 4096, truncated: true, text: "hello upload", data_base64: null } },
+    });
+    const host = await mount();
+    await open("up2");
+
+    expect(host.querySelector(".file-text")!.textContent).toBe("hello upload");
+    expect(host.textContent).toContain("preview truncated");
+  });
+
   test("a document you did not author offers no blog publish control", async () => {
     setProfileId("me");
     serve({

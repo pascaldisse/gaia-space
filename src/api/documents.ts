@@ -80,6 +80,38 @@ export type DocumentPublication = {
   public_slug: string | null;
 };
 
+// Uploaded files: the payload lives beside the database, the row carries metadata only.
+// Like the folder importer, uploading names a path on the *backend* filesystem, so the
+// command is desktop-only; the web transport does not expose it.
+export type DocumentFile = {
+  document_id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  uploaded_by: string | null;
+  uploaded_at: number;
+};
+
+export type UploadDocumentFileRequest = {
+  source_path: string;
+  container_type: ContainerType;
+  container_id: string | null;
+  folder_id: string | null;
+  title?: string | null;
+  created_by?: string | null;
+  max_file_bytes?: number;
+};
+
+export type DocumentFilePreview = {
+  document_id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  truncated: boolean;
+  text: string | null;
+  data_base64: string | null;
+};
+
 export const documentsApi = {
   // documents
   listDocuments: () => invoke<Document[]>("list_documents"),
@@ -109,6 +141,13 @@ export const documentsApi = {
     invoke<DocumentAccessRecipient[]>("list_book_access", { bookId }),
   updateBookAccess: (bookId: string, permissions: DocumentAccessRecipient[]) =>
     invoke<void>("update_book_access", { bookId, permissions }),
+
+  uploadFile: (request: UploadDocumentFileRequest) =>
+    invoke<DocumentFile>("upload_document_file", { request }),
+  getDocumentFile: (documentId: string) =>
+    invoke<DocumentFile | null>("get_document_file", { documentId }),
+  readDocumentFile: (documentId: string, maxBytes: number | null = null) =>
+    invoke<DocumentFilePreview>("read_document_file", { documentId, maxBytes }),
 
   importFolder: (request: DocumentImportRequest) =>
     invoke<DocumentImportSummary>("import_document_folder", { request }),

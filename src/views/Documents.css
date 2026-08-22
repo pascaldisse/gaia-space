@@ -469,3 +469,11 @@
 .rich-editable :first-child { margin-top: 0; }
 .blog-chip { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15em 0.5em; border-radius: 1em; background: var(--accent); color: #fff; }
 .blog-chip.archived { background: var(--dk-line); color: var(--text-muted); }
+
+/* Uploaded-file documents render their payload instead of an editor: the bytes live on
+   disk, so there is nothing here to edit — only to inspect. */
+.file-preview { padding: 0.9em; overflow: auto; display: grid; gap: 0.7em; align-content: start; }
+.file-meta { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: baseline; color: var(--text-muted); font-size: 0.85em; }
+.file-meta strong { color: inherit; font-size: 1.05em; }
+.file-image { max-width: 100%; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.4em; }
+.file-text { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; }

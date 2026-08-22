@@ -13,6 +13,7 @@ import {
   type DocumentFolder,
   type DocumentImportSummary,
   type DocumentBodyFormat,
+  type DocumentFilePreview,
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
@@ -323,6 +324,63 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     id ? documentsApi.listDocumentAccess(id) : Promise.resolve([]),
   );
   const [showSharing, setShowSharing] = createSignal(false);
+
+  // ---- uploaded files ----
+  // An upload is a document with doc_type='file': the tree, folders and permissions are
+  // the ordinary ones, only the payload lives outside the row. Preview is fetched lazily
+  // and capped by the backend, so selecting a large upload never pulls the whole file.
+  const [uploadPath, setUploadPath] = createSignal("");
+  const [uploading, setUploading] = createSignal(false);
+  async function uploadFile() {
+    const path = uploadPath().trim();
+    const cid = containerId();
+    if (!path || !cid) return;
+    setUploading(true);
+    try {
+      const file = await documentsApi.uploadFile({
+        source_path: path,
+        container_type: activeContainer(),
+        container_id: cid,
+        folder_id: selectedFolderId(),
+        created_by: actingProfileId(),
+      });
+      setUploadPath("");
+      await refetchDocuments();
+      setSelectedDocumentId(file.document_id);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setUploading(false);
+    }
+  }
+  const [filePreview] = createResource(
+    () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
+    (id) => (id ? documentsApi.readDocumentFile(id) : Promise.resolve(null)),
+  );
+  const previewDataUrl = (p: DocumentFilePreview) =>
+    p.data_base64 ? `data:${p.mime};base64,${p.data_base64}` : "";
+  function FilePreview(props: { preview: DocumentFilePreview }) {
+    const p = () => props.preview;
+    return (
+      <div class="file-preview" data-mime={p().mime}>
+        <div class="file-meta">
+          <strong>{p().filename}</strong>
+          <span>{p().mime}</span>
+          <span>{p().size} bytes</span>
+          <Show when={p().truncated}><span class="hint">preview truncated</span></Show>
+        </div>
+        <Show when={p().mime.startsWith("image/")}>
+          <img class="file-image" src={previewDataUrl(p())} alt={p().filename} />
+        </Show>
+        <Show when={p().text !== null}>
+          <pre class="file-text">{p().text}</pre>
+        </Show>
+        <Show when={p().text === null && !p().mime.startsWith("image/")}>
+          <p class="hint">No inline preview for this type — the file is stored and downloadable from disk.</p>
+        </Show>
+      </div>
+    );
+  }
 
   // ---- blog draft workflow ----
   // A personal document is the draft; publishing promotes it into a blog article that
@@ -895,6 +953,17 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   + Document
                 </button>
               </div>
+              <div class="new-item-row">
+                <input
+                  placeholder="path to a file to upload"
+                  aria-label="File to upload"
+                  value={uploadPath()}
+                  onInput={(e) => setUploadPath(e.currentTarget.value)}
+                />
+                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim()}>
+                  {uploading() ? "Uploading…" : "↑ Upload"}
+                </button>
+              </div>
               <p class="hint">
                 Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
               </p>
@@ -969,12 +1038,20 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </button>
                 </div>
 
-                <div class="editor-panes" classList={{ split: showPreview() }}>
-                  <EditorSurface format={doc().body_format} />
-                  <Show when={showPreview()}>
-                    <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
-                  </Show>
-                </div>
+                <Show when={doc().doc_type === "file"} fallback={
+                  <div class="editor-panes" classList={{ split: showPreview() }}>
+                    <EditorSurface format={doc().body_format} />
+                    <Show when={showPreview()}>
+                      <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
+                    </Show>
+                  </div>
+                }>
+                  <div class="editor-panes">
+                    <Show when={filePreview()} fallback={<p class="hint pad">{filePreview.loading ? "Loading file…" : "Uploaded file unavailable."}</p>}>
+                      {(preview) => <FilePreview preview={preview()} />}
+                    </Show>
+                  </div>
+                </Show>
               </>
             )}
           </Show>
