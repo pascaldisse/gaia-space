@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 const call=<T>(command:string,args:Record<string,unknown>={})=>invoke<T>(command,args);
 export type Devfile={id:string;project_id:string;path:string;name:string;content:string;generated:boolean;updated_at:number};
 export type IdeLaunch={url:string;ide:string;repository:string};
+export type IdeSession={id:string;ide:string;repositories:string[];last_seen_at:number};
 export type Application={id:string;name:string;description:string|null;application_type:"Application"|"InternalApp"|"MarketplaceApp"|"FeaturedIntegration";endpoint_uri:string|null;client_id:string;client_credentials_flow_enabled:boolean;code_flow_enabled:boolean;pkce_required:boolean;connection_status:"CONNECTING"|"FAILED_TO_CONNECT"|"RECONNECTING"|"CONNECTED";archived:boolean};
 export type WebhookSubscription={id:string;application_id:string;event_type:string;filters_json:string|null;endpoint_uri:string;enabled:boolean;secret:string|null;max_attempts:number};
 export type WebhookDelivery={id:string;webhook_id:string;payload_json:string;status:"PENDING"|"SUCCEEDED"|"FAILED";attempts:number;response_status:number|null;last_error:string|null;created_at:number;delivered_at:number|null;next_attempt_at:number|null};
