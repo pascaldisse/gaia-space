@@ -365,6 +365,29 @@ pub fn app_has_right(
     Ok(granted > 0)
 }
 
+/// Contexts an app may act in for one project: the project itself, then the org.
+/// A grant made org-wide covers every project; a project grant covers only itself.
+pub fn app_project_contexts(project_id: &str) -> [String; 2] {
+    [format!("project:{project_id}"), "org".to_string()]
+}
+
+/// True when any of `contexts` carries a stage-2 grant of `right_code`.
+/// Enforcement points need this shape: an org-wide grant must count without being
+/// re-declared per project.
+pub fn app_has_right_anywhere(
+    c: &rusqlite::Connection,
+    application_id: &str,
+    contexts: &[String],
+    right_code: &str,
+) -> Result<bool> {
+    for context in contexts {
+        if app_has_right(c, application_id, context, right_code)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The catalog an admin picks from, so the UI never invents a code.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn application_right_catalog() -> Result<Vec<RightDto>> {

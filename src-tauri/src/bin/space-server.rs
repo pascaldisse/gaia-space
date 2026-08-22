@@ -272,14 +272,106 @@ async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response:
     }))
 }
 
+/// OAuth scope is not authorization: a `read` token only says the *token* may read,
+/// while the two-stage rights model says whether the *application* was authorized in
+/// this context. Both must hold, so the external API answers with the projects the
+/// app was actually granted `Project.ViewProject` in — not the whole instance.
 async fn app_projects(
     headers: HeaderMap,
 ) -> Result<Json<Vec<platform::Project>>, axum::response::Response> {
-    let (token, _application) = app_bearer(&headers)?;
+    let (token, application) = app_bearer(&headers)?;
     app_read_scope(&token)?;
-    platform::list_projects().map(Json).map_err(|_| {
+    let all = platform::list_projects().map_err(|_| {
         err(StatusCode::INTERNAL_SERVER_ERROR, "project lookup failed").into_response()
+    })?;
+    let c = db::conn()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response())?;
+    let mut visible = Vec::new();
+    for project in all {
+        let contexts = app_rights::app_project_contexts(&project.id);
+        let granted =
+            app_rights::app_has_right_anywhere(&c, &application.id, &contexts, "Project.ViewProject")
+                .map_err(|_| {
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response()
+                })?;
+        if granted {
+            visible.push(project);
+        }
+    }
+    Ok(Json(visible))
+}
+
+#[derive(Deserialize)]
+struct AppIssueInput {
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[allow(clippy::result_large_err)]
+fn app_write_scope(token: &applications::AppToken) -> Result<(), axum::response::Response> {
+    if token
+        .scope
+        .split_whitespace()
+        .any(|scope| scope == "write" || scope == "*")
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            [(
+                header::WWW_AUTHENTICATE,
+                "Bearer error=\"insufficient_scope\", scope=\"write\"",
+            )],
+            Json(json!({"ok": false, "error": "insufficient_scope"})),
+        )
+            .into_response())
+    }
+}
+
+/// The first write the external app API offers, and the first consumer of the
+/// stage-2 grant: without `Project.CreateIssues` authorized in this project (or
+/// org-wide) the call is refused even with a `write` token.
+async fn app_create_issue(
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+    Json(input): Json<AppIssueInput>,
+) -> Result<Json<issues::Issue>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_write_scope(&token)?;
+    let c = db::conn()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response())?;
+    let contexts = app_rights::app_project_contexts(&project_id);
+    let granted =
+        app_rights::app_has_right_anywhere(&c, &application.id, &contexts, "Project.CreateIssues")
+            .map_err(|_| {
+                err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response()
+            })?;
+    drop(c);
+    if !granted {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.CreateIssues"})),
+        )
+            .into_response());
+    }
+    issues::create_issue(issues::IssueInput {
+        id: None,
+        project_id,
+        title: input.title,
+        description: input.description,
+        status_id: None,
+        assignee_id: None,
+        assignee_ids: Vec::new(),
+        // No profile row belongs to an application, so authorship stays unattributed
+        // rather than forging a person; the app identity is in the audit of the grant.
+        created_by: None,
+        due_date: None,
+        priority: None,
+        archived: None,
     })
+    .map(Json)
+    .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
 }
 
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
@@ -3307,6 +3399,10 @@ async fn main() {
         .route("/api/app/me", get(app_me))
         .route("/api/app/projects", get(app_projects))
         .route(
+            "/api/app/projects/{project_id}/issues",
+            post(app_create_issue),
+        )
+        .route(
             "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
             get(registry_generic_metadata),
         )
@@ -3468,6 +3564,104 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
+    }
+
+    /// The external app API consumes the stage-2 grant: a valid token with the right
+    /// OAuth scope still sees nothing and writes nothing until an admin authorized the
+    /// application in that context, and the grant scopes to exactly that project.
+    #[tokio::test]
+    async fn the_app_api_shows_and_writes_only_what_the_rights_model_authorized() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-rights','Rights App','Application','client-rights',1)", []).unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('p-granted','Granted','GRA','pa',1),('p-other','Other','OTH','pa',1);").unwrap();
+        drop(c);
+        platform::seed_rights().unwrap();
+        let secret = applications::rotate_app_secret("app-rights".into()).unwrap();
+        let token = applications::issue_app_token(
+            "client-rights".into(),
+            secret.client_secret,
+            Some("read write".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+
+        // Stage 0: nothing declared, nothing approved.
+        let (status, body) = status_and_body(
+            app_projects(bearer(&token)).await.unwrap().into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().unwrap().len(), 0);
+        let denied = app_create_issue(
+            bearer(&token),
+            Path("p-granted".to_string()),
+            Json(AppIssueInput {
+                title: "from app".into(),
+                description: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+        // Stage 1 + 2 in one project only.
+        app_rights::update_required_rights(
+            "app-rights".into(),
+            vec![
+                "Project.ViewProject".to_string(),
+                "Project.CreateIssues".to_string(),
+            ],
+            vec![],
+            Some(true),
+        )
+        .unwrap();
+        app_rights::approve_scope(
+            "app-rights".into(),
+            "project:p-granted".into(),
+            Some("uc".into()),
+            None,
+        )
+        .unwrap();
+
+        let (status, body) = status_and_body(
+            app_projects(bearer(&token)).await.unwrap().into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let ids: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["p-granted"]);
+
+        let created = app_create_issue(
+            bearer(&token),
+            Path("p-granted".to_string()),
+            Json(AppIssueInput {
+                title: "from app".into(),
+                description: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.0.title, "from app");
+        let still_denied = app_create_issue(
+            bearer(&token),
+            Path("p-other".to_string()),
+            Json(AppIssueInput {
+                title: "leak".into(),
+                description: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(still_denied.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
