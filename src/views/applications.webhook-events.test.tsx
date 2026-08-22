@@ -1,20 +1,18 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 const calls: { command: string; args: any }[] = [];
 const app = { id: "app-1", name: "Hooks", description: null, application_type: "Application" as const, endpoint_uri: "https://hooks.example/webhook", client_id: "client", client_credentials_flow_enabled: true, code_flow_enabled: false, pkce_required: false, connection_status: "CONNECTED" as const, archived: false };
-mock.module("@tauri-apps/api/core", () => ({
-  invoke: (command: string, args: any = {}) => {
-    calls.push({ command, args });
-    if (command === "list_applications") return Promise.resolve([app]);
-    if (command === "list_event_types") return Promise.resolve(["issue.created", "review.merged"]);
-    return Promise.resolve([]);
-  },
-}));
 import { render } from "solid-js/web";
 import Applications from "./Applications";
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; delete (window as any).__TAURI_INTERNALS__; });
 const mount = async () => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: (command: string, args: any = {}) => {
+    calls.push({ command, args });
+    if (command === "list_applications") return Promise.resolve([app]);
+    if (command === "list_event_types") return Promise.resolve(["issue.created", "review.merged"]);
+    return Promise.resolve([]);
+  } };
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(() => <Applications /> as any, host);
   await settle();
