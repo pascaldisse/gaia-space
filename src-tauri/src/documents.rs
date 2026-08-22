@@ -1289,7 +1289,11 @@ pub fn read_document_file(
     max_bytes: Option<u64>,
 ) -> Result<DocumentFilePreview> {
     let c = db::conn()?;
-    read_document_file_tx(&c, &document_id, max_bytes.unwrap_or_else(default_preview_bytes))
+    read_document_file_tx(
+        &c,
+        &document_id,
+        max_bytes.unwrap_or_else(default_preview_bytes),
+    )
 }
 
 pub(crate) fn read_document_file_tx(

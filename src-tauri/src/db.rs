@@ -1097,6 +1097,43 @@ mod tests {
         migrate(&conn).expect("idempotent");
     }
 
+    /// The integration lane merged three schema-touching branches into one serial
+    /// (V43 documents, V45 preferences). This walks the whole ladder from every version
+    /// those branches care about and re-runs it, so neither DDL depends on the other
+    /// having run first and neither breaks on a second pass.
+    #[test]
+    fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
+        for start in [0i64, 38, 41, 43, 44] {
+            let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
+            let conn = open_at(&temp).expect("database");
+            migrate(&conn).expect("first climb to head");
+            conn.pragma_update(None, "user_version", start).unwrap();
+            migrate(&conn).expect("replay from an older version");
+            migrate(&conn).expect("replaying twice is idempotent");
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION, "ladder from v{start} lands on head");
+            for table in ["documents", "document_files", "user_preferences"] {
+                assert!(
+                    table_exists(&conn, table).unwrap(),
+                    "v{start} replay must still leave {table} in place"
+                );
+            }
+            let file_columns: Vec<String> = conn
+                .prepare("PRAGMA table_info(document_files)")
+                .unwrap()
+                .query_map([], |r| r.get(1))
+                .unwrap()
+                .collect::<std::result::Result<_, _>>()
+                .unwrap();
+            assert!(
+                file_columns.iter().any(|c| c == "stored_path"),
+                "V43 document-file payload columns survive the replay from v{start}: {file_columns:?}"
+            );
+        }
+    }
+
     #[test]
     fn v45_dashboard_preferences_upgrade_and_rerun_are_idempotent() {
         let temp = TempDb::new("gaia-space-v45-dashboard-preferences");

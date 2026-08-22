@@ -1501,6 +1501,32 @@ pub fn dry_run_merge(
         None,
     )
 }
+/// Advance a branch ref to `new_oid`, but only if its tip is still the `expected_oid` we
+/// verified earlier. `force = true` is unavoidable here — the ref exists and moving it is
+/// the point — so the whole safety of the write lives in this re-read: a target that moved
+/// under us (someone else's push) aborts and keeps its own tip. The forced write therefore
+/// only ever extends the exact commit we checked, never replaces a stranger's work.
+fn advance_verified_ref(
+    repo: &git2::Repository,
+    target_branch: &str,
+    expected_oid: &str,
+    new_oid: git2::Oid,
+) -> Result<()> {
+    if branch_commit(repo, target_branch)?.id().to_string() != expected_oid {
+        return Err(
+            "target branch changed before finalization; merge commit left unreachable".into(),
+        );
+    }
+    repo.reference(
+        &format!("refs/heads/{target_branch}"),
+        new_oid,
+        true,
+        "gaia-space safe merge",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Final merge is deliberate, ref-only Git plumbing: no checkout or worktree mutation.
 /// It rechecks CI and both branch tips immediately before updating the target ref.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1570,23 +1596,7 @@ pub fn attempt_merge(
             &[&target, &source],
         )
         .map_err(|e| e.to_string())?;
-    // Re-read the ref just before its update; a concurrent target movement is never overwritten.
-    if branch_commit(&repo, &target_branch)?.id().to_string() != target_oid {
-        return Err(
-            "target branch changed before finalization; merge commit left unreachable".into(),
-        );
-    }
-    // `force = true` is required: the target branch ref already exists, and advancing an
-    // existing ref is the whole point. The safety is not in this flag but in the
-    // `target_oid` re-read directly above — a target that moved aborts before we get here,
-    // so the forced write only ever fast-forwards the tip we just verified.
-    repo.reference(
-        &format!("refs/heads/{target_branch}"),
-        merge_oid,
-        true,
-        "gaia-space safe merge",
-    )
-    .map_err(|e| e.to_string())?;
+    advance_verified_ref(&repo, &target_branch, &target_oid, merge_oid)?;
     c.execute(
         "UPDATE reviews SET state='Merged' WHERE id=?1",
         rusqlite::params![review_id],
@@ -2038,6 +2048,65 @@ mod tests {
     /// Real git2 merge + branch-ref update. `#[cfg(test)]`-gated: this code path does not
     /// exist in the shipped binary. Only ever runs here, against a throwaway repo.
     #[cfg(test)]
+    fn ancestor_of(repo: &Repository, ancestor: git2::Oid, descendant: git2::Oid) -> bool {
+        repo.graph_descendant_of(descendant, ancestor).unwrap()
+    }
+
+    #[test]
+    fn a_target_that_moved_under_us_is_never_force_overwritten() {
+        let (dir, repo) = clean_repo("force-write-drift");
+        let observed_target = branch_commit(&repo, "main").unwrap().id().to_string();
+        // A foreign commit lands on main after we read its tip — exactly the race the
+        // `force = true` write would otherwise destroy.
+        let foreign = plumb_commit(
+            &repo,
+            "refs/heads/main",
+            Some(git2::Oid::from_str(&observed_target).unwrap()),
+            "foreign.txt",
+            "someone else\n",
+        );
+        let feature = branch_commit(&repo, "feature").unwrap().id();
+
+        let err = advance_verified_ref(&repo, "main", &observed_target, feature)
+            .expect_err("a moved target must abort instead of being force-written");
+        assert!(
+            err.contains("target branch changed"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            branch_commit(&repo, "main").unwrap().id(),
+            foreign,
+            "the foreign commit must still be main's tip — nothing was stomped"
+        );
+
+        sweep(&dir);
+    }
+
+    #[test]
+    fn a_verified_target_advances_and_keeps_its_previous_tip_reachable() {
+        let (dir, repo) = clean_repo("force-write-verified");
+        let target_tip = branch_commit(&repo, "main").unwrap().id();
+        let path = dir.to_string_lossy().to_string();
+        let merge_oid = git2::Oid::from_str(
+            &execute_real_merge_in_test(&path, "feature", "main").expect("real merge"),
+        )
+        .unwrap();
+        // Put main back where it was so the guard sees the tip it verified.
+        repo.reference("refs/heads/main", target_tip, true, "reset")
+            .unwrap();
+
+        advance_verified_ref(&repo, "main", &target_tip.to_string(), merge_oid)
+            .expect("an unmoved target advances");
+
+        assert_eq!(branch_commit(&repo, "main").unwrap().id(), merge_oid);
+        assert!(
+            ancestor_of(&repo, target_tip, merge_oid),
+            "the previous target tip must remain an ancestor — no history dropped"
+        );
+
+        sweep(&dir);
+    }
+
     fn execute_real_merge_in_test(
         repo_path: &str,
         source_branch: &str,
