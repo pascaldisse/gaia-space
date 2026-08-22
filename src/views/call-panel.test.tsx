@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 import type { Meeting } from "../api/meetings";
 
 const calls: string[] = [];
+const ipcCommands: string[] = [];
 const remoteAudioAttachments: HTMLMediaElement[] = [];
 const devices = [{ deviceId: "mic-1", label: "Studio microphone" }];
 const participant = (isLocal: boolean) => ({
@@ -38,12 +39,15 @@ const { default: CallPanel } = await import("./CallPanel");
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
 const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, archived: false };
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; ipcCommands.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
 
 test("joining exposes native media controls, device selectors, and a clean leave", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
-    expect(command).toBe("join_meeting_call");
-    return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    ipcCommands.push(command);
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "start_meeting_recording") return { egress_id: "EG_1", status: "recording" };
+    if (command === "stop_meeting_recording") return { egress_id: "EG_1", status: "stopped" };
+    throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
@@ -59,8 +63,30 @@ test("joining exposes native media controls, device selectors, and a clean leave
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();
   await settle();
   expect(calls).toEqual(["microphone:true", "camera:true", "microphone:false", "camera:false", "screen:true"]);
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement).click();
+  await settle();
+  expect(ipcCommands).toContain("start_meeting_recording");
+  expect(host.textContent).toContain("Recording in progress");
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Stop recording") as HTMLButtonElement).click();
+  await settle();
+  expect(ipcCommands).toContain("stop_meeting_recording");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Leave call") as HTMLButtonElement).click();
   await settle();
   expect(calls).toContain("leave");
   expect(host.textContent).toContain("Join call");
+});
+
+test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+    ipcCommands.push(command);
+    if (command === "list_meeting_participants") return [{ meeting_id: "meeting-1", profile_id: "me", status: "invited" }];
+    throw new Error(`unexpected command: ${command}`);
+  } };
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={{ ...meeting, organizer_id: "host" }} identity="me" displayName="Me" />, host);
+  (host.querySelector("button") as HTMLButtonElement).click();
+  await settle();
+  expect(ipcCommands).toEqual(["list_meeting_participants"]);
+  expect(host.textContent).toContain("Lobby request sent");
+  expect(host.textContent).toContain("Waiting for admission…");
 });

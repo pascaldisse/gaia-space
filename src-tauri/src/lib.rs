@@ -256,6 +256,8 @@ pub fn run() {
             calls::start_livekit_server,
             calls::livekit_server_status,
             calls::join_meeting_call,
+            calls::start_meeting_recording,
+            calls::stop_meeting_recording,
             pipelines::list_pipeline_scripts,
             pipelines::create_pipeline_script,
             pipelines::update_pipeline_script,
