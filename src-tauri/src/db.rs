@@ -412,8 +412,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 49 {
         tx.execute_batch(SCHEMA_V49)?;
     }
-    // V51: feed destinations are optional; legacy rows remain unassigned.
-    if version < 51 {
+    // V51: feed destinations are optional; legacy rows remain unassigned. Hand-built
+    // partial fixtures may predate V13 and have no feed table at all.
+    if version < 51 && table_exists(&tx, "calendar_feeds")? {
         add_column_if_missing(&tx, "calendar_feeds", "calendar_id", "TEXT REFERENCES calendars(id) ON DELETE SET NULL")?;
         tx.execute_batch(SCHEMA_V51)?;
     }
