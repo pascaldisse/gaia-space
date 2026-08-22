@@ -49,5 +49,5 @@ test("project tasks filters persisted issues and links to the matching board", a
   tag.value = "t1";
   tag.dispatchEvent(new Event("change", { bubbles: true }));
   await wait();
-  expect(calls.filter(call => call.command === "list_issues").at(-1)?.body).toMatchObject({ project_id: "p1", tag_id: "t1" });
+  expect(calls.filter(call => call.command === "list_issues").slice(-1)[0]?.body).toMatchObject({ project_id: "p1", tag_id: "t1" });
 });
