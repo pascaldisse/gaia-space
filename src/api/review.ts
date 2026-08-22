@@ -74,8 +74,12 @@ export type QualityGateEvaluation = {
   approvals: number;
   min_approvals: number;
   matched_rules: number;
+  codeowner_paths: string[];
+  codeowner_approvers: string[];
 };
 
+export type ReviewStack = { id:string; project_id:string; repo_path:string; target_branch:string; source_branch:string; review_ids:string[] };
+export type NewReviewStack = ReviewStack;
 export type NewMergeRequest = {
   id: string;
   project_id: string;
@@ -128,6 +132,8 @@ export const reviewApi = {
 
   listGateRules: (projectId: string) =>
     invoke<QualityGateRule[]>("list_quality_gate_rules", { projectId }),
+  createStack: (input: NewReviewStack) => invoke<ReviewStack>("create_review_stack", { input }),
+  listStacks: (projectId: string) => invoke<ReviewStack[]>("list_review_stacks", { projectId }),
   createGateRule: (rule: QualityGateRule) => invoke<void>("create_quality_gate_rule", { rule }),
   updateGateRule: (rule: QualityGateRule) => invoke<void>("update_quality_gate_rule", { rule }),
   deleteGateRule: (id: string) => invoke<void>("delete_quality_gate_rule", { id }),

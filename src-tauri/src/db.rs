@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 21;
+pub const SCHEMA_VERSION: i64 = 24;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -195,6 +195,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 21 {
         tx.execute_batch(SCHEMA_V21)?;
     }
+    // V22: CODEOWNERS is read from each MR's source commit; no cache belongs in SQLite.
+    if version < 22 { tx.execute_batch(SCHEMA_V22)?; }
+    if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
+    if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -319,6 +323,28 @@ CREATE TABLE IF NOT EXISTS protected_branch_rules (
  allow_merge_json TEXT, linear_history INTEGER NOT NULL DEFAULT 0, bypass_quality_gate_json TEXT
 );
 CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_branch_rules(project_id, branch_pattern);
+"#;
+/// V21 reserves a distinct migration boundary for source-branch CODEOWNERS.
+/// Matching is computed from Git at gate evaluation; a copied file would go stale when
+/// an MR source branch advances.
+pub(crate) const SCHEMA_V22: &str = r#"
+CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+pub(crate) const SCHEMA_V24: &str = r#"
+CREATE TABLE IF NOT EXISTS review_external_checks (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, check_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), details TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(review_id,check_name));
+"#;
+pub(crate) const SCHEMA_V23: &str = r#"
+CREATE TABLE IF NOT EXISTS review_stacks (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ repo_path TEXT NOT NULL, target_branch TEXT NOT NULL, source_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS review_stack_items (
+ stack_id TEXT NOT NULL REFERENCES review_stacks(id) ON DELETE CASCADE,
+ review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+ ordering INTEGER NOT NULL, PRIMARY KEY(stack_id, review_id), UNIQUE(stack_id, ordering)
+);
+CREATE INDEX IF NOT EXISTS review_stack_items_review ON review_stack_items(review_id);
 "#;
 
 pub(crate) const SCHEMA_V18: &str = r#"
@@ -629,7 +655,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 21);
+        assert_eq!(SCHEMA_VERSION, 24);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

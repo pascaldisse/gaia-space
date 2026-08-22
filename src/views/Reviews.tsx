@@ -351,6 +351,9 @@ export default function Reviews() {
                   <ul><For each={gateEval()!.reasons}>{(reason) => <li>{reason}</li>}</For></ul>
                 </Show>
                 <p class="hint">{gateEval()?.approvals ?? 0} approval(s), matched {gateEval()?.matched_rules ?? 0} rule(s), needs {gateEval()?.min_approvals ?? 0}.</p>
+<Show when={gateEval()?.codeowner_paths.length}>
+<p class="hint">CODEOWNERS: {gateEval()!.codeowner_paths.join(", ")} · resolved approvers: {gateEval()!.codeowner_approvers.join(", ") || "none"}</p>
+</Show>
 
                 <details class="gate-rules">
                   <summary>Rules for this project ({gateRules()?.length ?? 0})</summary>
