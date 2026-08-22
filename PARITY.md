@@ -14,6 +14,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V36 → feat/w2-auth (B3: OAuth2 authorization-code, TOTP, permanent tokens) ☀
 - V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — V39 NOT to be taken by any other lane until V38 merges
+- V39 → feat/w3-webhooks (webhook_subscriptions.secret + max_attempts; signed delivery + bounded retry) ☀ — V38 already on master @b9a6f90
 
 TOTALS (8/8 audited, 356 rows): done 42 · partial 149 · stub 21 · missing 144. Matrix NOT green — steering loop active.
 
