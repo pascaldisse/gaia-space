@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents, events,
+    app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
+    events,
     issues,
     meetings,
     oauth, payload_dispatch, personal, pipelines, platform, review,
@@ -1407,6 +1408,14 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_webhook_deliveries"
         | "list_chatbots"
         | "list_chatbot_commands"
+        | "get_required_rights"
+        | "get_authorized_rights"
+        | "scope_approval_status"
+        | "application_right_catalog"
+        | "update_required_rights"
+        | "request_rights"
+        | "update_authorized_rights"
+        | "approve_scope"
         | "list_ui_extensions" => CommandPolicy::Session,
         "save_devfile"
         | "delete_devfile"
@@ -2873,6 +2882,14 @@ async fn cmd(
     "dispatch_application_payload" => payload_dispatch::dispatch_application_payload(application_id: String, payload_json: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
     "list_chatbot_commands" => chatbot::list_chatbot_commands(chatbot_id: String, user_id: String, prefix: Option<String>),
+    "get_required_rights" => app_rights::get_required_rights(application_id: String),
+    "update_required_rights" => app_rights::update_required_rights(application_id: String, right_codes_to_add: Vec<String>, right_codes_to_remove: Vec<String>, request_rights_in_authorized_contexts: Option<bool>),
+    "request_rights" => app_rights::request_rights(application_id: String, right_codes: Vec<String>),
+    "get_authorized_rights" => app_rights::get_authorized_rights(application_id: String, context_identifier: String),
+    "update_authorized_rights" => app_rights::update_authorized_rights(application_id: String, context_identifier: String, rights: Vec<String>, actor: Option<String>, comment: Option<String>),
+    "scope_approval_status" => app_rights::scope_approval_status(application_id: String, context_identifier: String),
+    "approve_scope" => app_rights::approve_scope(application_id: String, context_identifier: String, actor: Option<String>, comment: Option<String>),
+    "application_right_catalog" => app_rights::application_right_catalog(),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
     "list_ui_extensions" => applications::list_ui_extensions(application_id: String),
