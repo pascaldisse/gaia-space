@@ -30,7 +30,7 @@ const stubFetch = () => {
 };
 
 let dispose: (() => void) | undefined;
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; replies = {}; globalThis.fetch = realFetch; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; replies = {}; globalThis.fetch = realFetch; setProfileId(""); });
 
 const mount = () => {
   const host = document.createElement("div");

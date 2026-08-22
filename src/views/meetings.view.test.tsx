@@ -12,7 +12,7 @@ const realFetch = globalThis.fetch;
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(done => setTimeout(done, 35));
 
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; globalThis.fetch = realFetch; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; globalThis.fetch = realFetch; setProfileId(""); });
 
 function mount() {
   globalThis.fetch = (async (url: string, init: RequestInit) => {
