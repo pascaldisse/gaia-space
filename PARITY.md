@@ -15,6 +15,8 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — V39 NOT to be taken by any other lane until V38 merges
 - V39 → feat/w3-webhooks (webhook_subscriptions.secret + max_attempts; signed delivery + bounded retry) ☀ — V38 already on master @b9a6f90
+- V40 → ☘Kali (B4 doc rich-types; parent-issued, implementation in progress)
+- V41 → feat/w3-secrot (webhook secret rotation / key-ring) ☘
 
 TOTALS (8/8 audited, 356 rows): done 42 · partial 152 · stub 21 · missing 141. Matrix NOT green — steering loop active.
 
