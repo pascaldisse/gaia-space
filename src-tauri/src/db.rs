@@ -277,10 +277,32 @@ CREATE TABLE IF NOT EXISTS issue_assignees (issue_id TEXT NOT NULL REFERENCES is
 CREATE INDEX IF NOT EXISTS issue_assignees_profile ON issue_assignees(profile_id);
 INSERT OR IGNORE INTO issue_assignees(issue_id, profile_id) SELECT id, assignee_id FROM issues WHERE assignee_id IS NOT NULL AND assignee_id IN (SELECT id FROM profiles);
 "#;
+
+pub(crate) const SCHEMA_V16: &str = r#"
+CREATE UNIQUE INDEX IF NOT EXISTS blog_posts_draft_once ON blog_posts(draft_id) WHERE draft_id IS NOT NULL;
+CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(entity_type UNINDEXED, entity_id UNINDEXED, title, body, breadcrumb);
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'issue',id,title,coalesce(description,''),'Issue · ' || project_id FROM issues WHERE archived=0;
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'document',id,title,coalesce(body,''),'Document · ' || container_type FROM documents WHERE archived=0;
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'message',id,'Message',text,'Chat · ' || channel_id FROM messages WHERE archived=0;
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'blog',id,title,body,'Blog' FROM blog_posts WHERE archived=0;
+CREATE TRIGGER IF NOT EXISTS search_issues_ai AFTER INSERT ON issues WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('issue',new.id,new.title,coalesce(new.description,''),'Issue · ' || new.project_id); END;
+CREATE TRIGGER IF NOT EXISTS search_issues_au AFTER UPDATE ON issues BEGIN DELETE FROM search_index WHERE entity_type='issue' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'issue',new.id,new.title,coalesce(new.description,''),'Issue · ' || new.project_id WHERE new.archived=0; END;
+CREATE TRIGGER IF NOT EXISTS search_issues_ad AFTER DELETE ON issues BEGIN DELETE FROM search_index WHERE entity_type='issue' AND entity_id=old.id; END;
+CREATE TRIGGER IF NOT EXISTS search_documents_ai AFTER INSERT ON documents WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('document',new.id,new.title,coalesce(new.body,''),'Document · ' || new.container_type); END;
+CREATE TRIGGER IF NOT EXISTS search_documents_au AFTER UPDATE ON documents BEGIN DELETE FROM search_index WHERE entity_type='document' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'document',new.id,new.title,coalesce(new.body,''),'Document · ' || new.container_type WHERE new.archived=0; END;
+CREATE TRIGGER IF NOT EXISTS search_documents_ad AFTER DELETE ON documents BEGIN DELETE FROM search_index WHERE entity_type='document' AND entity_id=old.id; END;
+CREATE TRIGGER IF NOT EXISTS search_messages_ai AFTER INSERT ON messages WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('message',new.id,'Message',new.text,'Chat · ' || new.channel_id); END;
+CREATE TRIGGER IF NOT EXISTS search_messages_au AFTER UPDATE ON messages BEGIN DELETE FROM search_index WHERE entity_type='message' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'message',new.id,'Message',new.text,'Chat · ' || new.channel_id WHERE new.archived=0; END;
+CREATE TRIGGER IF NOT EXISTS search_messages_ad AFTER DELETE ON messages BEGIN DELETE FROM search_index WHERE entity_type='message' AND entity_id=old.id; END;
+CREATE TRIGGER IF NOT EXISTS search_blogs_ai AFTER INSERT ON blog_posts WHEN new.archived=0 BEGIN INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('blog',new.id,new.title,new.body,'Blog'); END;
+CREATE TRIGGER IF NOT EXISTS search_blogs_au AFTER UPDATE ON blog_posts BEGIN DELETE FROM search_index WHERE entity_type='blog' AND entity_id=old.id; INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'blog',new.id,new.title,new.body,'Blog' WHERE new.archived=0; END;
+CREATE TRIGGER IF NOT EXISTS search_blogs_ad AFTER DELETE ON blog_posts BEGIN DELETE FROM search_index WHERE entity_type='blog' AND entity_id=old.id; END;
+"#;
 pub(crate) const SCHEMA_V15: &str = r#"
-CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE, payload_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), attempts INTEGER NOT NULL DEFAULT 0, response_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), delivered_at INTEGER, next_attempt_at INTEGER);
-CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_created ON webhook_deliveries(webhook_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(status, next_attempt_at);
+CREATE TABLE IF NOT EXISTS blog_posts (id TEXT PRIMARY KEY, draft_id TEXT REFERENCES documents(id), title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', author_id TEXT NOT NULL REFERENCES profiles(id), team_id TEXT REFERENCES teams(id), project_id TEXT REFERENCES projects(id), location_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), published_at INTEGER NOT NULL DEFAULT (unixepoch()), archived INTEGER NOT NULL DEFAULT 0, archived_by TEXT REFERENCES profiles(id), archived_at INTEGER);
+CREATE INDEX IF NOT EXISTS blog_posts_published ON blog_posts(published_at DESC);
+CREATE INDEX IF NOT EXISTS blog_posts_author ON blog_posts(author_id,published_at DESC);
+CREATE TABLE IF NOT EXISTS blog_aliases (post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE, alias TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(post_id,alias));
 "#;
 pub(crate) const SCHEMA_V14: &str = r#"
 CREATE TABLE IF NOT EXISTS devfiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, path TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, generated INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(project_id,path));
