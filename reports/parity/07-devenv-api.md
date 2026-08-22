@@ -68,7 +68,7 @@ WIP:☀ `feat/tree-devenv-api` — devfile/deep-link + apps UI + webhook deliver
 - WIP:☀ completed · commits `b0dc34c` → `8e3a220`.
 - Devfile/open-IDE: SQLite V14 + Rust IPC/web dispatch → `src/api/applications.ts` → `src/views/Applications.tsx`; no cloud VM lifecycle.
 - Apps/webhooks/chatbots/UI extensions: registry + CRUD reachable in Applications view; Tauri handler and `/api/cmd/*` dispatch wired.
-- Webhook delivery/retry: SQLite V15 history; manual JSON POST, 10s timeout/no redirects, response/error capture, exponential retry schedule + UI retry.
+- Webhook delivery/retry status=partial: SQLite V15 history; manual JSON POST, 10s timeout/no redirects, response/error capture, exponential retry schedule + UI retry; replay contract `docs/webhook-receiver-guide.md:25-32`; durable ID header `src-tauri/src/applications.rs:352`.
 - Evidence: `src-tauri/src/applications.rs`; `src-tauri/src/db.rs`; `src-tauri/src/bin/space-server.rs`; `src/api/applications.ts`; `src/views/Applications.tsx`.
-- Verification: `applications::delivery_tests::webhook_delivery_posts_then_retries_after_an_http_failure` sends real localhost HTTP POST → 500 → retry → 204.
+- Verification status=done (manual retry path): `applications::delivery_tests::webhook_delivery_posts_then_retries_after_an_http_failure` asserts FAILED→SUCCEEDED / attempts 1→2 and durable delivery ID at `src-tauri/src/applications.rs:1044-1065`.
 - Remaining: app OAuth/keys/marketplace/app-rights; native chatbot payload dispatch; automatic domain event emission; cloud dev environments.

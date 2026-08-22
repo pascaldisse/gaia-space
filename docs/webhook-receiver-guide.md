@@ -27,6 +27,6 @@ identical captured request replayed while its timestamp is accepted; step 5 does
 Each send attempt obtains a new current Unix-seconds timestamp. A retry can
 therefore have a different signed tuple from the prior attempt, so the replay
 cache cannot deduplicate delivery events. Receivers needing event-level
-idempotency must use a stable delivery identifier. GAIA Space will send
+idempotency must use a stable delivery identifier. GAIA Space sends
 `x-gaia-space-delivery-id`, whose value is the durable `WebhookDelivery.id`;
 retain that value idempotently in addition to the replay tuple.
