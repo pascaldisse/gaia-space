@@ -1480,6 +1480,86 @@ mod delivery_tests {
         .is_err());
     }
 
+    /// End to end: an issue write must produce a delivery row for the subscription
+    /// whose filter accepts it, and none for the one that rejects it.
+    #[test]
+    fn an_issue_write_enqueues_only_the_matching_subscription() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("issue-fanout");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        save_application(Application {
+            id: "app-fanout".into(),
+            name: "Fan-out app".into(),
+            description: None,
+            application_type: "Application".into(),
+            endpoint_uri: Some("https://example.test/hook".into()),
+            client_id: "fanout-client".into(),
+            client_credentials_flow_enabled: true,
+            code_flow_enabled: false,
+            pkce_required: false,
+            connection_status: "CONNECTED".into(),
+            archived: false,
+        })
+        .expect("app");
+        let hook = |id: &str, filters: &str| WebhookSubscription {
+            id: id.into(),
+            application_id: "app-fanout".into(),
+            event_type: "issue.created".into(),
+            filters_json: Some(filters.into()),
+            endpoint_uri: "https://example.test/hook".into(),
+            enabled: true,
+            secret: None,
+            max_attempts: 5,
+        };
+        save_webhook(hook("hook-match", r#"{"issue.priority":"HIGH"}"#)).expect("matching hook");
+        save_webhook(hook("hook-miss", r#"{"issue.priority":"LOW"}"#)).expect("other hook");
+
+        let c = db::conn().expect("db");
+        c.execute(
+            "INSERT INTO projects(id,name,key,archived,created_at) VALUES('proj','Fan-out','FAN',0,0)",
+            [],
+        )
+        .expect("project");
+        drop(c);
+        let issue = crate::issues::create_issue(crate::issues::IssueInput {
+            id: Some("issue-fanout".into()),
+            project_id: "proj".into(),
+            title: "Urgent".into(),
+            description: None,
+            status_id: None,
+            assignee_id: None,
+            assignee_ids: vec![],
+            created_by: None,
+            due_date: None,
+            priority: Some("HIGH".into()),
+            archived: None,
+        })
+        .expect("issue");
+
+        let c = db::conn().expect("db");
+        let targets: Vec<String> = c
+            .prepare("SELECT webhook_id FROM webhook_deliveries ORDER BY webhook_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(targets, vec!["hook-match".to_string()]);
+        let (payload, status): (String, String) = c
+            .query_row(
+                "SELECT payload_json,status FROM webhook_deliveries WHERE webhook_id='hook-match'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("delivery row");
+        assert_eq!(status, "PENDING", "the row is durable before any send");
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(payload["event"], "issue.created");
+        assert_eq!(payload["issue"]["id"], issue.id);
+        assert_eq!(payload["issue"]["priority"], "HIGH");
+    }
+
     /// Validation runs before any DB access, so these need no database.
     #[test]
     fn undecidable_filters_are_refused_on_save() {
