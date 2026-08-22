@@ -433,8 +433,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_sprint"
         | "update_team"
         | "update_team_membership" => CommandPolicy::Session,
-        "list_devfiles" | "list_applications" | "list_webhooks" | "list_chatbots" | "list_ui_extensions" => CommandPolicy::Session,
-        "save_devfile" | "delete_devfile" | "open_in_ide" | "save_application" | "delete_application" | "save_webhook" | "delete_webhook" | "save_chatbot" | "delete_chatbot" | "save_ui_extension" | "delete_ui_extension" => CommandPolicy::Session,
+        "list_devfiles" | "list_applications" | "list_webhooks" | "list_webhook_deliveries" | "list_chatbots" | "list_ui_extensions" => CommandPolicy::Session,
+        "save_devfile" | "delete_devfile" | "open_in_ide" | "save_application" | "delete_application" | "save_webhook" | "delete_webhook" | "deliver_webhook" | "retry_webhook_delivery" | "save_chatbot" | "delete_chatbot" | "save_ui_extension" | "delete_ui_extension" => CommandPolicy::Session,
         _ => return None,
     })
 }
@@ -925,6 +925,9 @@ if name == "update_absence" { return absence_update(&user, &body); }
 "list_webhooks" => applications::list_webhooks(application_id: String),
 "save_webhook" => applications::save_webhook(value: applications::WebhookSubscription),
 "delete_webhook" => applications::delete_webhook(id: String),
+"deliver_webhook" => applications::deliver_webhook(webhook_id: String, payload_json: String),
+"retry_webhook_delivery" => applications::retry_webhook_delivery(id: String),
+"list_webhook_deliveries" => applications::list_webhook_deliveries(webhook_id: String),
 "list_chatbots" => applications::list_chatbots(application_id: String),
 "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
 "delete_chatbot" => applications::delete_chatbot(id: String),
