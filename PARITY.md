@@ -27,7 +27,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V56 → feat/w7-chatbot (two-stage application rights: developer-declared required rights vs. admin-approved authorized rights per context) ☀Vishnu-II
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 52 · partial 172 · stub 4 · missing 128. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 53 · partial 171 · stub 4 · missing 128. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -49,8 +49,8 @@ Worst gaps: swimlane grouping dimensions · matrix reports · external tracker i
 Worst gaps: per-format registry protocols · retention/immutability/CVE/ACLs · workers/artifacts/test-reporting · non-manual triggers+DSL · deployment integrations/webhooks.
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
-59 rows — done 9 · partial 31 · missing 19.
-Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
+59 rows — done 10 · partial 30 · missing 19.
+Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV write-back+multi-calendar exposure (Day/Schedule views landed).
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
 32 rows — done 4 · partial 14 · missing 14.

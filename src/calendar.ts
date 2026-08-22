@@ -73,4 +73,26 @@ export const calendarEntry = (item: CalendarItem): CalendarEntry => ({ ...item, 
 export const calendarEntries = (items: CalendarItem[]) => items.map(calendarEntry).sort((a, b) => a.day.localeCompare(b.day) || Number(b.allDay) - Number(a.allDay) || a.starts_at - b.starts_at || a.title.localeCompare(b.title));
 export const monthCells = (cursor: Date) => { const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1); start.setDate(start.getDate() - start.getDay()); return Array.from({ length: 42 }, (_, i) => { const day = new Date(start); day.setDate(start.getDate() + i); return day }) };
 export const entriesForDay = (items: CalendarEntry[], day: Date) => items.filter(item => item.day === dateKey(day));
+/* ── Day and Schedule ranges (KB §4.1 view set) ──────────────────────────────
+ * Month and Week are grids; Day is the same grid one column wide, and Schedule
+ * is a forward-running list of the days that actually carry something. Both
+ * take their day key from `dateKey`, so nothing shifts across time zones. */
+export const SCHEDULE_DAYS = 30;
+export const startOfLocalDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+export const dayRange = (date: Date) => { const start = startOfLocalDay(date); const end = new Date(start); end.setDate(end.getDate() + 1); return [start, end] as const };
+export const scheduleRange = (date: Date, span: number = SCHEDULE_DAYS) => { const start = startOfLocalDay(date); const end = new Date(start); end.setDate(end.getDate() + span); return [start, end] as const };
+
+/** Schedule rows: one entry per day that has items, in forward order. Empty days
+ *  are dropped — a schedule is what is scheduled, not a calendar of blanks. */
+export const scheduleDays = (items: readonly CalendarItem[], from: Date, span: number = SCHEDULE_DAYS) => {
+  const start = startOfLocalDay(from);
+  const rows: { day: Date; key: string; items: CalendarItem[] }[] = [];
+  for (let i = 0; i < span; i += 1) {
+    const day = new Date(start); day.setDate(start.getDate() + i);
+    const onDay = itemsOnDay(items, day);
+    if (onDay.length) rows.push({ day, key: dateKey(day), items: onDay });
+  }
+  return rows;
+};
+
 export const kindPresence = (items: CalendarEntry[]) => ((["meeting", "task", "deadline"] as const).filter(kind => items.some(item => item.kind === kind)));

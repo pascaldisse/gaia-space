@@ -72,3 +72,8 @@
 .calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
 .calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
 .calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
+
+.calendar-grid.day{grid-template-columns:minmax(0,1fr)}
+.calendar-grid.day .calendar-day{min-height:var(--cal-week-cell-min-h);border-right:0}
+.cal-schedule{display:flex;flex-direction:column;gap:var(--cal-space-xl);border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--cal-radius-grid);background:var(--cal-grid-bg);padding:var(--cal-space-xl)}
+.cal-schedule-day h3{margin:0 0 var(--cal-space-xs);font-size:.82rem;color:var(--text-faint)}

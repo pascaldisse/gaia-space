@@ -8,7 +8,7 @@ import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { ProfilePicker } from "../components/Pickers";
-import { dateKey, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, type QuickKind } from "../calendar";
+import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, type QuickKind } from "../calendar";
 import "./Calendar.css";
 import "./Meetings.css";
 const startOfDay = (date:Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -22,7 +22,7 @@ const quickKinds:QuickKind[] = ["meeting","task","deadline"];
 *  "Meetings" destination to keep in sync. */
 export default function Calendar() {
 const [cursor,setCursor] = createSignal(startOfDay(new Date()));
-const [view,setView] = createSignal<"month"|"week">("month");
+const [view,setView] = createSignal<"month"|"week"|"day"|"schedule">("month");
 const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
 const [selected,setSelected] = createSignal<CalendarItem>();
 const [composerDay,setComposerDay] = createSignal<Date>();
@@ -34,7 +34,7 @@ const [error,setError] = createSignal("");
 const [calendarFilter,setCalendarFilter] = createSignal("all");
 const [notice,setNotice] = createSignal("");
 const [invitee,setInvitee] = createSignal("");
-const range = () => view()==="month" ? monthRange(cursor()) : weekRange(cursor());
+const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
 const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
@@ -49,10 +49,13 @@ const [participants,{refetch:reloadParticipants}] = createResource(() => draft()
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
 const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); return selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); };
-const shift = (amount:number) => { const next=new Date(cursor()); if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+7*amount); setCursor(next); };
+// Each view steps by its own span: a month, a week, a day, or a schedule window.
+const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
 const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) result.push(new Date(day)); return result; };
 const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
+const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
+const weekdayHeads = () => view()==="day" ? [cursor().toLocaleDateString(undefined,{weekday:"short"})] : ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 // Only projects the session may still give a first deadline to are offered here;
 // existing deadlines are edited in Projects, where the whole project is in view.
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
@@ -116,6 +119,8 @@ return <section class="calendar-view">
 <div class="cal-viewtoggle" role="group" aria-label="Calendar range">
 <button classList={{active:view()==="month"}} aria-pressed={view()==="month"} onClick={()=>setView("month")}>Month</button>
 <button classList={{active:view()==="week"}} aria-pressed={view()==="week"} onClick={()=>setView("week")}>Week</button>
+<button classList={{active:view()==="day"}} aria-pressed={view()==="day"} onClick={()=>{setView("day");setCursor(selectedDay());}}>Day</button>
+<button classList={{active:view()==="schedule"}} aria-pressed={view()==="schedule"} onClick={()=>setView("schedule")}>Schedule</button>
 </div>
 <button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
 </div>}>Meetings, assigned task dates, and project deadlines visible to your session. Pick a day to see its agenda or add to it.</WorkspaceHeader>
@@ -127,8 +132,20 @@ return <section class="calendar-view">
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">
 <div>
-<div classList={{"calendar-grid":true,week:view()==="week"}} role="grid" aria-label="Calendar days">
-<For each={["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]}>{day=><strong class="calendar-weekday" role="columnheader">{day}</strong>}</For>
+<Show when={view()==="schedule"}>
+<div class="cal-schedule" role="list" aria-label="Schedule">
+{/* Empty days are not rows: a schedule lists what is scheduled. */}
+<Show when={schedule().length} fallback={<p class="cal-side-empty">Nothing scheduled in the next {SCHEDULE_DAYS} days.</p>}>
+<For each={schedule()}>{row=><section class="cal-schedule-day" role="listitem">
+<h3><time datetime={row.key}>{row.day.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})}</time></h3>
+<For each={row.items}>{event=><button class={`calendar-event ${event.kind}`} onClick={()=>{setSelectedDay(row.day);openEvent(event);}}><span class={`cal-tag ${event.kind}`}>{kindLabels[event.kind]}</span> {event.title}</button>}</For>
+</section>}</For>
+</Show>
+</div>
+</Show>
+<Show when={view()!=="schedule"}>
+<div classList={{"calendar-grid":true,week:view()==="week",day:view()==="day"}} role="grid" aria-label="Calendar days">
+<For each={weekdayHeads()}>{day=><strong class="calendar-weekday" role="columnheader">{day}</strong>}</For>
 <For each={days()}>{day=><article role="gridcell" tabindex={dateKey(day)===dateKey(selectedDay())?0:-1} aria-selected={dateKey(day)===dateKey(selectedDay())}
   aria-label={day.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
   classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),selected:dateKey(day)===dateKey(selectedDay())}}
@@ -140,6 +157,7 @@ return <section class="calendar-view">
 <For each={events(day)}>{event=><button class={`calendar-event ${event.kind}`} onClick={e=>{e.stopPropagation();setSelectedDay(day);openEvent(event);}}><span class={`cal-tag ${event.kind}`}>{kindLabels[event.kind]}</span> {event.title}</button>}</For>
 </article>}</For>
 </div>
+</Show>
 </div>
 <aside class="calendar-side" aria-label="Selected day">
 <div class="cal-side-head">
