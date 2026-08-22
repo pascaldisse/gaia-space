@@ -46,6 +46,25 @@ pub struct Message {
     pub edited_at: Option<i64>,
     pub thread_of: Option<String>,
     pub archived: bool,
+    #[serde(default)]
+    pub mention_ids: Vec<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessageAttachment {
+    pub id: String,
+    pub message_id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub byte_length: i64,
+    pub data_url: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewMessageAttachment {
+    pub id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub byte_length: i64,
+    pub data_url: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReactionSummary {
@@ -59,6 +78,7 @@ pub struct MessageView {
     pub message: Message,
     pub reply_count: i64,
     pub reactions: Vec<ReactionSummary>,
+    pub attachments: Vec<MessageAttachment>,
 }
 
 fn entity_channel_id(entity_type: &str, entity_id: &str) -> String {
@@ -261,6 +281,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         edited_at: r.get(5)?,
         thread_of: r.get(6)?,
         archived: r.get(7)?,
+        mention_ids: Vec::new(),
     })
 }
 fn reply_count_impl(c: &Connection, message_id: &str) -> Result<i64> {
@@ -295,13 +316,32 @@ fn reactions_for_impl(
         .map_err(|e| e.to_string());
     rows
 }
+fn attachments_for_impl(c: &Connection, message_id: &str) -> Result<Vec<MessageAttachment>> {
+    let mut statement = c.prepare("SELECT id,message_id,file_name,mime_type,byte_length,data_url FROM message_attachments WHERE message_id=?1 ORDER BY created_at,id").map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([message_id], |r| {
+            Ok(MessageAttachment {
+                id: r.get(0)?,
+                message_id: r.get(1)?,
+                file_name: r.get(2)?,
+                mime_type: r.get(3)?,
+                byte_length: r.get(4)?,
+                data_url: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())
+}
 fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Result<MessageView> {
     let reply_count = reply_count_impl(c, &m.id)?;
     let reactions = reactions_for_impl(c, &m.id, acting_profile_id)?;
+    let attachments = attachments_for_impl(c, &m.id)?;
     Ok(MessageView {
         message: m,
         reply_count,
         reactions,
+        attachments,
     })
 }
 fn list_messages_impl(
@@ -374,6 +414,27 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
     )
     .map_err(|e| e.to_string())?;
+    for profile_id in &message.mention_ids {
+        if message.author_id.as_deref() == Some(profile_id.as_str()) {
+            continue;
+        }
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1)",
+                [profile_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            continue;
+        }
+        c.execute(
+            "INSERT OR IGNORE INTO message_mentions(message_id,profile_id) VALUES(?1,?2)",
+            rusqlite::params![message.id, profile_id],
+        )
+        .map_err(|e| e.to_string())?;
+        c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{}:{}", message.id, profile_id), profile_id, message.text, message.id]).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 fn update_message_impl(c: &Connection, id: &str, text: &str) -> Result<()> {
@@ -535,6 +596,23 @@ pub fn create_message(message: Message) -> Result<MessageView> {
     let c = db::conn()?;
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_message_attachment(
+    message_id: String,
+    attachment: NewMessageAttachment,
+) -> Result<MessageAttachment> {
+    if !attachment.data_url.starts_with("data:")
+        || !(0..=10 * 1024 * 1024).contains(&attachment.byte_length)
+    {
+        return Err("invalid attachment".into());
+    }
+    let c = db::conn()?;
+    c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url]).map_err(|e| e.to_string())?;
+    attachments_for_impl(&c, &message_id)?
+        .into_iter()
+        .find(|item| item.id == attachment.id)
+        .ok_or_else(|| "attachment missing".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_message(id: String, text: String) -> Result<MessageView> {
