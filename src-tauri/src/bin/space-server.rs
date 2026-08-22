@@ -9,7 +9,9 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, devenv, documents, events, issues,
+    app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
+    events,
+    issues,
     meetings,
     oauth, payload_dispatch, personal, pipelines, platform, review,
 };
@@ -1405,6 +1407,15 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_webhooks"
         | "list_webhook_deliveries"
         | "list_chatbots"
+        | "list_chatbot_commands"
+        | "get_required_rights"
+        | "get_authorized_rights"
+        | "scope_approval_status"
+        | "application_right_catalog"
+        | "update_required_rights"
+        | "request_rights"
+        | "update_authorized_rights"
+        | "approve_scope"
         | "list_ui_extensions" => CommandPolicy::Session,
         "save_devfile"
         | "delete_devfile"
@@ -2870,6 +2881,15 @@ async fn cmd(
     "application_payload_classes" => payload_dispatch::application_payload_classes(),
     "dispatch_application_payload" => payload_dispatch::dispatch_application_payload(application_id: String, payload_json: String),
     "list_chatbots" => applications::list_chatbots(application_id: String),
+    "list_chatbot_commands" => chatbot::list_chatbot_commands(chatbot_id: String, user_id: String, prefix: Option<String>),
+    "get_required_rights" => app_rights::get_required_rights(application_id: String),
+    "update_required_rights" => app_rights::update_required_rights(application_id: String, right_codes_to_add: Vec<String>, right_codes_to_remove: Vec<String>, request_rights_in_authorized_contexts: Option<bool>),
+    "request_rights" => app_rights::request_rights(application_id: String, right_codes: Vec<String>),
+    "get_authorized_rights" => app_rights::get_authorized_rights(application_id: String, context_identifier: String),
+    "update_authorized_rights" => app_rights::update_authorized_rights(application_id: String, context_identifier: String, rights: Vec<String>, actor: Option<String>, comment: Option<String>),
+    "scope_approval_status" => app_rights::scope_approval_status(application_id: String, context_identifier: String),
+    "approve_scope" => app_rights::approve_scope(application_id: String, context_identifier: String, actor: Option<String>, comment: Option<String>),
+    "application_right_catalog" => app_rights::application_right_catalog(),
     "save_chatbot" => applications::save_chatbot(value: applications::ChatbotRegistration),
     "delete_chatbot" => applications::delete_chatbot(id: String),
     "list_ui_extensions" => applications::list_ui_extensions(application_id: String),
@@ -3681,6 +3701,64 @@ mod tests {
             HeaderMap::new(),
             "list_dev_environments",
             json!({"project_id":"demo-project"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    /// The two-stage rights model is reachable over the HTTP command route, and a
+    /// declaration alone still grants nothing until the scope is approved.
+    #[tokio::test]
+    async fn application_rights_are_two_stage_over_http() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('app-r','App R','Application','client-r')", []).unwrap();
+        drop(c);
+        let (status, seeded) = call(cookie("ta"), "seed_rights", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "seed: {seeded}");
+
+        let (status, declared) = call(
+            cookie("ta"),
+            "update_required_rights",
+            json!({"application_id":"app-r","right_codes_to_add":["Project.CreateIssues"],"right_codes_to_remove":[]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "declare: {declared}");
+        assert_eq!(declared["value"][0]["right_code"], "Project.CreateIssues");
+
+        let (_, pending) = call(
+            cookie("ta"),
+            "scope_approval_status",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project"}),
+        )
+        .await;
+        assert_eq!(pending["value"]["status"], "PENDING");
+
+        let (status, approved) = call(
+            cookie("ta"),
+            "approve_scope",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project","actor":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "approve: {approved}");
+        assert_eq!(approved["value"]["status"], "APPROVED");
+
+        // Independent check: the grant listing agrees with the approval result.
+        let (_, granted) = call(
+            cookie("ta"),
+            "get_authorized_rights",
+            json!({"application_id":"app-r","context_identifier":"project:demo-project"}),
+        )
+        .await;
+        assert_eq!(granted["value"][0]["right_code"], "Project.CreateIssues");
+        assert_eq!(granted["value"][0]["granted_by"], "pa");
+
+        // No session, no rights editor.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "get_required_rights",
+            json!({"application_id":"app-r"}),
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);

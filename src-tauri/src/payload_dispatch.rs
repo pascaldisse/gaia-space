@@ -44,7 +44,13 @@ pub fn dispatch_application_payload(
     dispatch_with(&db::conn()?, &application_id, &payload_json, post_payload)
 }
 
-type Transport = fn(&str, &Headers, &str) -> std::result::Result<(i64, String), String>;
+pub(crate) type Transport = fn(&str, &Headers, &str) -> std::result::Result<(i64, String), String>;
+
+/// The real HTTP transport, handed to callers that build their own dispatch (the chatbot
+/// slash-command callback) so the outbound path stays defined in exactly one place.
+pub(crate) fn post_payload_transport() -> Transport {
+    post_payload
+}
 
 /// Default freshness window for a signed payload, in seconds. Overridable per deployment
 /// through `GAIA_APP_PAYLOAD_MAX_AGE_SECS` — never hard-coded at a call site.

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 55;
+pub const SCHEMA_VERSION: i64 = 56;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -449,6 +449,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 55 {
         tx.execute_batch(SCHEMA_V55)?;
     }
+    // V56: two-stage application rights (KB §07 §2.2 `ApplicationRights`). What an app
+    // *declares it needs* and what an admin *granted it in one context* are different
+    // facts with different authors; keeping them in one table would make a developer's
+    // manifest edit silently widen a granted scope.
+    if version < 56 {
+        tx.execute_batch(SCHEMA_V56)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -782,6 +789,26 @@ CREATE INDEX IF NOT EXISTS calendar_feeds_calendar ON calendar_feeds(calendar_id
 pub(crate) const SCHEMA_V54: &str = r#"
 CREATE TABLE IF NOT EXISTS app_ssh_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
 CREATE TABLE IF NOT EXISTS app_gpg_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
+"#;
+
+pub(crate) const SCHEMA_V56: &str = r#"
+CREATE TABLE IF NOT EXISTS app_required_rights (
+    application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    right_code TEXT NOT NULL,
+    request_in_authorized_contexts INTEGER NOT NULL DEFAULT 0,
+    requested_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(application_id, right_code)
+);
+CREATE TABLE IF NOT EXISTS app_authorized_rights (
+    application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    context_identifier TEXT NOT NULL,
+    right_code TEXT NOT NULL,
+    granted_by TEXT,
+    comment TEXT NOT NULL DEFAULT '',
+    granted_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(application_id, context_identifier, right_code)
+);
+CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_rights(application_id, context_identifier);
 "#;
 
 pub(crate) const SCHEMA_V55: &str = r#"
@@ -1168,7 +1195,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 55);
+        assert_eq!(SCHEMA_VERSION, 56);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

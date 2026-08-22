@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod actor;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod app_rights;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod blogs;
@@ -14,6 +16,8 @@ pub mod blogs;
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod chatbot;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
 #[cfg(feature = "desktop")]
@@ -136,6 +140,15 @@ pub fn run() {
             applications::rotate_webhook_secret,
             applications::list_webhook_secrets,
             applications::list_chatbots,
+            chatbot::list_chatbot_commands,
+            app_rights::get_required_rights,
+            app_rights::update_required_rights,
+            app_rights::request_rights,
+            app_rights::get_authorized_rights,
+            app_rights::update_authorized_rights,
+            app_rights::scope_approval_status,
+            app_rights::approve_scope,
+            app_rights::application_right_catalog,
             applications::save_chatbot,
             applications::delete_chatbot,
             applications::list_ui_extensions,
