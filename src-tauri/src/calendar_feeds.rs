@@ -15,6 +15,103 @@ use std::time::Duration;
 
 type Result<T> = std::result::Result<T, String>;
 
+/// A named calendar is a user-owned container. Feed assignment is optional: an
+/// unassigned feed remains visible for backward compatibility while new feeds
+/// can be placed into a specific calendar.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Calendar {
+    pub id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub color: String,
+    pub visible: bool,
+}
+#[derive(Debug, Deserialize)]
+pub struct CalendarInput {
+    pub id: Option<String>,
+    pub profile_id: String,
+    pub name: String,
+    pub color: String,
+    pub visible: bool,
+}
+fn calendar_row(c: &Connection, id: &str) -> Result<Option<Calendar>> {
+    err(c
+        .query_row(
+            "SELECT id,profile_id,name,color,visible FROM calendars WHERE id=?1",
+            [id],
+            |r| {
+                Ok(Calendar {
+                    id: r.get(0)?,
+                    profile_id: r.get(1)?,
+                    name: r.get(2)?,
+                    color: r.get(3)?,
+                    visible: r.get(4)?,
+                })
+            },
+        )
+        .optional())
+}
+pub fn calendar_owner(id: &str) -> Result<Option<String>> {
+    let c = db::conn()?;
+    err(c
+        .query_row("SELECT profile_id FROM calendars WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
+        .optional())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_calendars(profile_id: String) -> Result<Vec<Calendar>> {
+    let c = db::conn()?;
+    let mut q = err(c.prepare(
+        "SELECT id,profile_id,name,color,visible FROM calendars WHERE profile_id=?1 ORDER BY name",
+    ))?;
+    let rows = err(q.query_map([profile_id], |r| {
+        Ok(Calendar {
+            id: r.get(0)?,
+            profile_id: r.get(1)?,
+            name: r.get(2)?,
+            color: r.get(3)?,
+            visible: r.get(4)?,
+        })
+    }))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_calendar(input: CalendarInput) -> Result<Calendar> {
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("A calendar needs a name.".into());
+    }
+    if !input.color.starts_with('#') || input.color.len() != 7 {
+        return Err("Calendar color must be a #RRGGBB value.".into());
+    }
+    let c = db::conn()?;
+    let id = match input.id {
+        Some(id) if calendar_row(&c, &id)?.is_some() => {
+            err(c.execute(
+                "UPDATE calendars SET name=?1,color=?2,visible=?3 WHERE id=?4",
+                params![name, input.color, input.visible, id],
+            ))?;
+            id
+        }
+        _ => {
+            let id = format!("calendar-{:x}", now());
+            err(c.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,input.profile_id,name,input.color,input.visible,now()]))?;
+            id
+        }
+    };
+    calendar_row(&c, &id)?.ok_or_else(|| "Calendar disappeared".into())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_calendar(id: String) -> Result<()> {
+    let c = db::conn()?;
+    if err(c.execute("DELETE FROM calendars WHERE id=?1", [id]))? == 0 {
+        return Err("Calendar not found".into());
+    };
+    Ok(())
+}
+
 fn new_id() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

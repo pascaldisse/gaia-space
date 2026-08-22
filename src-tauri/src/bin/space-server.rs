@@ -1016,6 +1016,8 @@ enum CommandPolicy {
     SearchRead,
     AbsenceWrite,
     CalendarFeedRead,
+    CalendarUpsert,
+    CalendarOwnerAction,
     CalendarFeedUpsert,
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
@@ -1041,6 +1043,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
         "calendar_aggregate" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
+        "list_calendars" => CommandPolicy::CalendarRead,
+        "save_calendar" => CommandPolicy::CalendarUpsert,
+        "delete_calendar" => CommandPolicy::CalendarOwnerAction,
         "save_calendar_feed" => CommandPolicy::CalendarFeedUpsert,
         "delete_calendar_feed" | "sync_calendar_feed" => CommandPolicy::CalendarFeedOwnerAction,
         "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
@@ -1734,6 +1739,41 @@ fn authorize_command(
         // List: same shape as CalendarRead. `id` present in `input` (an existing
         // feed) is checked against the DB-recorded owner before profile_id is
         // stamped on — admin bypasses ownership but never authorship.
+        CommandPolicy::CalendarUpsert => {
+            let input = body
+                .get_mut("input")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
+            if let Some(id) = input.get("id").and_then(Value::as_str) {
+                if user.role != "admin"
+                    && calendar_feeds::calendar_owner(id).ok().flatten().as_deref()
+                        != Some(&user.profile_id)
+                {
+                    return Err(err(
+                        StatusCode::FORBIDDEN,
+                        "only the owner can change this calendar",
+                    ));
+                }
+            }
+            input.insert("profile_id".into(), json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::CalendarOwnerAction => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if user.role != "admin"
+                && calendar_feeds::calendar_owner(&id)
+                    .ok()
+                    .flatten()
+                    .as_deref()
+                    != Some(&user.profile_id)
+            {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the owner can delete this calendar",
+                ));
+            }
+            Ok(())
+        }
         CommandPolicy::CalendarFeedRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -2733,6 +2773,9 @@ async fn cmd(
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
+    "list_calendars" => calendar_feeds::list_calendars(profile_id: String),
+    "save_calendar" => calendar_feeds::save_calendar(input: calendar_feeds::CalendarInput),
+    "delete_calendar" => calendar_feeds::delete_calendar(id: String),
     "save_calendar_feed" => calendar_feeds::save_calendar_feed(input: calendar_feeds::CalendarFeedInput),
     "delete_calendar_feed" => calendar_feeds::delete_calendar_feed(id: String),
     "sync_calendar_feed" => calendar_feeds::sync_calendar_feed(id: String),
