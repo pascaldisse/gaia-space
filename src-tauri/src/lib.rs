@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -22,8 +24,6 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;

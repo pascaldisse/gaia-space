@@ -11,6 +11,7 @@ import {
   type ChannelContentType,
   type ChannelSummary,
   type MessageView,
+  type NewMessageAttachment,
   type ProfileLite,
 } from "../api/chat";
 
@@ -139,14 +140,46 @@ export default function Chat() {
   });
 
   // ---- composing ----
+  type PendingAttachment = NewMessageAttachment;
   const [draft, setDraft] = createSignal("");
+  const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
+  const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
+  const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
+  const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
+  const mentionQuery = (text: string) => text.match(/(?:^|\s)@([^\s@]*)$/)?.[1].toLocaleLowerCase() ?? null;
+  const mentionCandidates = (text: string) => {
+    const query = mentionQuery(text);
+    if (query === null) return [];
+    return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && [profile.display_name, profile.username].some((value) => value.toLocaleLowerCase().includes(query))).slice(0, 5);
+  };
+  function selectMention(kind: "draft" | "thread", profile: ProfileLite) {
+    const text = kind === "draft" ? draft() : threadDraft();
+    const replace = text.replace(/(?:^|\s)@([^\s@]*)$/, (match) => match.startsWith(" ") ? ` @${profile.display_name} ` : `@${profile.display_name} `);
+    if (kind === "draft") { setDraft(replace); setDraftMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
+    else { setThreadDraft(replace); setThreadMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
+  }
+  async function queueAttachments(files: FileList | null, setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void) {
+    if (!files) return;
+    try {
+      const loaded = await Promise.all([...files].map((file) => new Promise<PendingAttachment>((resolve, reject) => {
+        if (file.size > 10 * 1024 * 1024) { reject(new Error(`${file.name} exceeds the 10 MiB attachment limit`)); return; }
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
+        reader.onload = () => resolve({ id: newId("attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url: String(reader.result) });
+        reader.readAsDataURL(file);
+      })));
+      setAttachments((items) => [...items, ...loaded]);
+    } catch (e) { fail(e); }
+  }
+  async function saveAttachments(messageId: string, attachments: PendingAttachment[]) { await Promise.all(attachments.map((attachment) => chatApi.addMessageAttachment(messageId, attachment))); }
   async function sendMessage() {
     const ch = activeChannelId();
     const p = actingProfileId();
     const text = draft().trim();
-    if (!ch || !p || !text) return;
+    const attachments = draftAttachments();
+    if (!ch || !p || (!text && !attachments.length)) return;
     try {
-      await chatApi.createMessage({
+      const message = await chatApi.createMessage({
         id: newId("msg"),
         channel_id: ch,
         author_id: p,
@@ -155,8 +188,10 @@ export default function Chat() {
         edited_at: null,
         thread_of: null,
         archived: false,
+        mention_ids: draftMentionIds(),
       });
-      setDraft("");
+      await saveAttachments(message.id, attachments);
+      setDraft(""); setDraftAttachments([]); setDraftMentionIds([]);
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -169,9 +204,10 @@ export default function Chat() {
     const root = threadRoot();
     const p = actingProfileId();
     const text = threadDraft().trim();
-    if (!root || !p || !text) return;
+    const attachments = threadAttachments();
+    if (!root || !p || (!text && !attachments.length)) return;
     try {
-      await chatApi.createMessage({
+      const message = await chatApi.createMessage({
         id: newId("msg"),
         channel_id: root.channel_id,
         author_id: p,
@@ -180,8 +216,10 @@ export default function Chat() {
         edited_at: null,
         thread_of: root.id,
         archived: false,
+        mention_ids: threadMentionIds(),
       });
-      setThreadDraft("");
+      await saveAttachments(message.id, attachments);
+      setThreadDraft(""); setThreadAttachments([]); setThreadMentionIds([]);
       refetchThread();
       refetchMessages();
       refetchChannels();
@@ -318,6 +356,12 @@ export default function Chat() {
                 </Show>
               </div>
               <div class="message-text">{m.text}</div>
+              <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
+                <div class="attachment-card">
+                  <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
+                  <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
+                </div>
+              )}</For></div></Show>
             </>
           }
         >
@@ -510,7 +554,7 @@ export default function Chat() {
         </div>
 
         <Show when={activeChannelId()}>
-          <div class="composer">
+          <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"
               value={draft()}
@@ -522,9 +566,10 @@ export default function Chat() {
                 }
               }}
             />
-            <button class="primary" onClick={sendMessage} disabled={!draft().trim()}>
-              Send
-            </button>
+            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
+            <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
+            <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={draftAttachments().length}><div class="pending-attachments"><For each={draftAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
           </div>
         </Show>
       </section>
@@ -590,7 +635,7 @@ export default function Chat() {
               <For each={threadReplies()}>{(m) => renderMessage(m, true)}</For>
             </Show>
           </div>
-          <div class="composer">
+          <div class="composer composer-wrap">
             <textarea
               placeholder="Reply in thread…"
               value={threadDraft()}
@@ -602,9 +647,10 @@ export default function Chat() {
                 }
               }}
             />
-            <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim()}>
-              Reply
-            </button>
+            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
+            <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
+            <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={threadAttachments().length}><div class="pending-attachments"><For each={threadAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setThreadAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
           </div>
         </Show>
       </aside>
