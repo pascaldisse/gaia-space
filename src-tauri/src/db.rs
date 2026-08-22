@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 40;
+pub const SCHEMA_VERSION: i64 = 41;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -370,6 +370,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 40 && table_exists(&tx, "documents")? {
         add_column_if_missing(&tx, "documents", "body_format", "TEXT NOT NULL DEFAULT 'text' CHECK(body_format IN ('text','rich-text','checklist','code'))")?;
     }
+    // V41: a webhook secret must be rotatable without a delivery gap, so the single
+    // `webhook_subscriptions.secret` column becomes a key ring. The column stays (older
+    // readers and `save_webhook` still use it) and its value is copied into the first
+    // ACTIVE row, so a database that never rotates behaves exactly as before.
+    if version < 41 {
+        tx.execute_batch(SCHEMA_V41)?;
+        if table_exists(&tx, "webhook_subscriptions")? {
+            tx.execute(
+                "INSERT INTO webhook_secrets(id,webhook_id,secret,state,created_at) SELECT 'whsec-'||id,id,secret,'ACTIVE',unixepoch() FROM webhook_subscriptions WHERE secret IS NOT NULL AND secret<>'' AND id NOT IN (SELECT webhook_id FROM webhook_secrets)",
+                [],
+            )?;
+        }
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -677,6 +690,15 @@ UPDATE users SET profile_id = 'profile-' || id
 /// - `last_error` carries the operator-visible transport error and the `UNCONFIRMED:`
 ///   marker that keeps a row whose remote state is unknown locked (fail closed);
 /// - the partial unique index is the single-active-recording-per-meeting boundary.
+/// V41 key ring. `state` is the whole lifecycle: exactly one ACTIVE row signs, any
+/// number of RETIRING rows co-sign until `expires_at`, after which delivery skips and
+/// deletes them. `expires_at` is NULL for ACTIVE (it never expires on its own).
+pub(crate) const SCHEMA_V41: &str = r#"
+CREATE TABLE IF NOT EXISTS webhook_secrets (id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, secret TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACTIVE','RETIRING')), created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER);
+CREATE INDEX IF NOT EXISTS webhook_secrets_webhook ON webhook_secrets(webhook_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS webhook_secrets_active ON webhook_secrets(webhook_id) WHERE state='ACTIVE';
+"#;
+
 pub(crate) const SCHEMA_V38: &str = r#"
 CREATE TABLE IF NOT EXISTS meeting_recordings (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, egress_id TEXT, status TEXT NOT NULL CHECK(status IN ('starting','recording','stopping','stopped','failed')), filepath TEXT, started_by TEXT REFERENCES profiles(id), started_at INTEGER NOT NULL DEFAULT (unixepoch()), stopped_at INTEGER, stop_attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS meeting_recordings_active ON meeting_recordings(meeting_id) WHERE status IN ('starting','recording','stopping');
@@ -1018,7 +1040,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 40);
+        assert_eq!(SCHEMA_VERSION, 41);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
