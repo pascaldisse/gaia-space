@@ -485,9 +485,16 @@ pub struct AppInstall {
     pub installed_at: i64,
 }
 const INSTALL_KINDS: [&str; 5] = ["MARKETPLACE", "LINK", "MANUAL", "JENKINS", "TEAMCITY"];
-pub(crate) fn rotate_app_secret_on(c: &rusqlite::Connection, application_id: &str) -> Result<AppSecret> {
+pub(crate) fn rotate_app_secret_on(
+    c: &rusqlite::Connection,
+    application_id: &str,
+) -> Result<AppSecret> {
     let client_id: String = c
-        .query_row("SELECT client_id FROM applications WHERE id=?1", [application_id], |r| r.get(0))
+        .query_row(
+            "SELECT client_id FROM applications WHERE id=?1",
+            [application_id],
+            |r| r.get(0),
+        )
         .map_err(|_| "application not found".to_string())?;
     let secret = crate::auth_security::opaque("spcs_");
     let hashed = crate::auth_security::hash(&secret)?;
@@ -500,10 +507,20 @@ pub(crate) fn rotate_app_secret_on(c: &rusqlite::Connection, application_id: &st
     c.execute("UPDATE app_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
     c.execute("UPDATE oauth_access_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
     c.execute("UPDATE oauth_auth_codes SET consumed_at=unixepoch() WHERE application_id=?1 AND consumed_at IS NULL", [application_id]).map_err(|e| e.to_string())?;
-    Ok(AppSecret { application_id: application_id.into(), client_id, client_secret: secret })
+    Ok(AppSecret {
+        application_id: application_id.into(),
+        client_id,
+        client_secret: secret,
+    })
 }
 /// client_credentials grant: verifies the app secret and mints an opaque bearer token.
-pub(crate) fn issue_app_token_on(c: &rusqlite::Connection, client_id: &str, client_secret: &str, scope: Option<String>, ttl_seconds: Option<i64>) -> Result<AppToken> {
+pub(crate) fn issue_app_token_on(
+    c: &rusqlite::Connection,
+    client_id: &str,
+    client_secret: &str,
+    scope: Option<String>,
+    ttl_seconds: Option<i64>,
+) -> Result<AppToken> {
     let row: Option<(String, bool, bool, String)> = c.query_row("SELECT a.id,a.client_credentials_flow_enabled,a.archived,coalesce(s.secret_hash,'') FROM applications a LEFT JOIN app_secrets s ON s.application_id=a.id WHERE a.client_id=?1",[client_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
     let Some((application_id, flow_enabled, archived, secret_hash)) = row else {
         return Err("invalid client credentials".into());
@@ -527,20 +544,50 @@ pub(crate) fn issue_app_token_on(c: &rusqlite::Connection, client_id: &str, clie
     let scope = scope.unwrap_or_default();
     let expires_at = chrono::Utc::now().timestamp() + ttl;
     c.execute("INSERT INTO app_tokens(id,application_id,token_hash,scope,created_at,expires_at) VALUES(?1,?2,?3,?4,unixepoch(),?5)",params![id,application_id,hashed,scope,expires_at]).map_err(|e|e.to_string())?;
-    Ok(AppToken { id, application_id, scope, expires_at: Some(expires_at), access_token: Some(raw) })
+    Ok(AppToken {
+        id,
+        application_id,
+        scope,
+        expires_at: Some(expires_at),
+        access_token: Some(raw),
+    })
 }
 /// Resolves a bearer token to its application; expired/revoked tokens resolve to None.
-pub(crate) fn verify_app_token_on(c: &rusqlite::Connection, token: &str) -> Result<Option<AppToken>> {
+pub(crate) fn verify_app_token_on(
+    c: &rusqlite::Connection,
+    token: &str,
+) -> Result<Option<AppToken>> {
     let mut q=c.prepare("SELECT id,application_id,token_hash,scope,expires_at FROM app_tokens WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<i64>>(4)?))).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     for (id, application_id, token_hash, scope, expires_at) in rows {
         if crate::auth_security::matches(token, &token_hash) {
-            return Ok(Some(AppToken { id, application_id, scope, expires_at, access_token: None }));
+            return Ok(Some(AppToken {
+                id,
+                application_id,
+                scope,
+                expires_at,
+                access_token: None,
+            }));
         }
     }
     Ok(None)
 }
-pub(crate) fn install_marketplace_app_on(c: &rusqlite::Connection, value: AppInstall) -> Result<AppInstall> {
+pub(crate) fn install_marketplace_app_on(
+    c: &rusqlite::Connection,
+    value: AppInstall,
+) -> Result<AppInstall> {
     required("install id", &value.id)?;
     required("application", &value.application_id)?;
     if !INSTALL_KINDS.contains(&value.install_kind.as_str()) {
@@ -550,8 +597,17 @@ pub(crate) fn install_marketplace_app_on(c: &rusqlite::Connection, value: AppIns
         return Err("marketplace installs require a marketplace app".into());
     }
     c.execute("INSERT INTO app_installs(id,marketplace_app_id,application_id,install_kind,installed_by,installed_at) VALUES(?1,?2,?3,?4,?5,unixepoch()) ON CONFLICT(id) DO UPDATE SET install_kind=excluded.install_kind,installed_by=excluded.installed_by",params![value.id,value.marketplace_app_id,value.application_id,value.install_kind,value.installed_by]).map_err(|e|e.to_string())?;
-    let installed_at: i64 = c.query_row("SELECT installed_at FROM app_installs WHERE id=?1", [&value.id], |r| r.get(0)).map_err(|e| e.to_string())?;
-    Ok(AppInstall { installed_at, ..value })
+    let installed_at: i64 = c
+        .query_row(
+            "SELECT installed_at FROM app_installs WHERE id=?1",
+            [&value.id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(AppInstall {
+        installed_at,
+        ..value
+    })
 }
 /// Issues a fresh client secret for an application; the plaintext is returned once.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -559,7 +615,12 @@ pub fn rotate_app_secret(application_id: String) -> Result<AppSecret> {
     rotate_app_secret_on(&db::conn()?, &application_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn issue_app_token(client_id: String, client_secret: String, scope: Option<String>, ttl_seconds: Option<i64>) -> Result<AppToken> {
+pub fn issue_app_token(
+    client_id: String,
+    client_secret: String,
+    scope: Option<String>,
+    ttl_seconds: Option<i64>,
+) -> Result<AppToken> {
     issue_app_token_on(&db::conn()?, &client_id, &client_secret, scope, ttl_seconds)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -569,7 +630,13 @@ pub fn verify_app_token(token: String) -> Result<Option<AppToken>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn revoke_app_token(id: String) -> Result<()> {
     let c = db::conn()?;
-    if c.execute("UPDATE app_tokens SET revoked_at=unixepoch() WHERE id=?1 AND revoked_at IS NULL", [id]).map_err(|e| e.to_string())? == 0 {
+    if c.execute(
+        "UPDATE app_tokens SET revoked_at=unixepoch() WHERE id=?1 AND revoked_at IS NULL",
+        [id],
+    )
+    .map_err(|e| e.to_string())?
+        == 0
+    {
         return Err("token not found".into());
     }
     Ok(())
@@ -578,14 +645,40 @@ pub fn revoke_app_token(id: String) -> Result<()> {
 pub fn list_app_tokens(application_id: String) -> Result<Vec<AppToken>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,application_id,scope,expires_at FROM app_tokens WHERE application_id=?1 AND revoked_at IS NULL ORDER BY created_at DESC").map_err(|e|e.to_string())?;
-    let rows = q.query_map([application_id], |r| Ok(AppToken { id: r.get(0)?, application_id: r.get(1)?, scope: r.get(2)?, expires_at: r.get(3)?, access_token: None })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([application_id], |r| {
+            Ok(AppToken {
+                id: r.get(0)?,
+                application_id: r.get(1)?,
+                scope: r.get(2)?,
+                expires_at: r.get(3)?,
+                access_token: None,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_marketplace_apps() -> Result<Vec<MarketplaceApp>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,name,vendor,description,capabilities_json,compatibility,listing_url FROM marketplace_apps ORDER BY name").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok(MarketplaceApp { id: r.get(0)?, name: r.get(1)?, vendor: r.get(2)?, description: r.get(3)?, capabilities_json: r.get(4)?, compatibility: r.get(5)?, listing_url: r.get(6)? })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok(MarketplaceApp {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                vendor: r.get(2)?,
+                description: r.get(3)?,
+                capabilities_json: r.get(4)?,
+                compatibility: r.get(5)?,
+                listing_url: r.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -593,10 +686,18 @@ pub fn save_marketplace_app(value: MarketplaceApp) -> Result<MarketplaceApp> {
     required("marketplace app id", &value.id)?;
     required("name", &value.name)?;
     required("vendor", &value.vendor)?;
-    if serde_json::from_str::<serde_json::Value>(&value.capabilities_json).ok().filter(|v| v.is_array()).is_none() {
+    if serde_json::from_str::<serde_json::Value>(&value.capabilities_json)
+        .ok()
+        .filter(|v| v.is_array())
+        .is_none()
+    {
         return Err("capabilities must be a JSON array".into());
     }
-    if value.listing_url.as_deref().is_some_and(|url| !valid_http(url)) {
+    if value
+        .listing_url
+        .as_deref()
+        .is_some_and(|url| !valid_http(url))
+    {
         return Err("listing URL must use HTTP(S)".into());
     }
     db::conn()?.execute("INSERT INTO marketplace_apps(id,name,vendor,description,capabilities_json,compatibility,listing_url) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET name=excluded.name,vendor=excluded.vendor,description=excluded.description,capabilities_json=excluded.capabilities_json,compatibility=excluded.compatibility,listing_url=excluded.listing_url",params![value.id,value.name,value.vendor,value.description,value.capabilities_json,value.compatibility,value.listing_url]).map_err(|e|e.to_string())?;
@@ -610,12 +711,29 @@ pub fn install_marketplace_app(value: AppInstall) -> Result<AppInstall> {
 pub fn list_app_installs() -> Result<Vec<AppInstall>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,marketplace_app_id,application_id,install_kind,installed_by,installed_at FROM app_installs ORDER BY installed_at DESC").map_err(|e|e.to_string())?;
-    let rows = q.query_map([], |r| Ok(AppInstall { id: r.get(0)?, marketplace_app_id: r.get(1)?, application_id: r.get(2)?, install_kind: r.get(3)?, installed_by: r.get(4)?, installed_at: r.get(5)? })).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([], |r| {
+            Ok(AppInstall {
+                id: r.get(0)?,
+                marketplace_app_id: r.get(1)?,
+                application_id: r.get(2)?,
+                install_kind: r.get(3)?,
+                installed_by: r.get(4)?,
+                installed_at: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn uninstall_app(id: String) -> Result<()> {
-    if db::conn()?.execute("DELETE FROM app_installs WHERE id=?1", [id]).map_err(|e| e.to_string())? == 0 {
+    if db::conn()?
+        .execute("DELETE FROM app_installs WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?
+        == 0
+    {
         return Err("install not found".into());
     }
     Ok(())
@@ -634,13 +752,28 @@ mod oauth_tests {
     fn client_credentials_issue_and_verify() {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
-        let token = issue_app_token_on(&c, "client-1", &secret.client_secret, Some("read".into()), Some(60)).unwrap();
+        let token = issue_app_token_on(
+            &c,
+            "client-1",
+            &secret.client_secret,
+            Some("read".into()),
+            Some(60),
+        )
+        .unwrap();
         let raw = token.access_token.clone().unwrap();
-        let verified = verify_app_token_on(&c, &raw).unwrap().expect("token verifies");
+        let verified = verify_app_token_on(&c, &raw)
+            .unwrap()
+            .expect("token verifies");
         assert_eq!(verified.application_id, "app");
         assert_eq!(verified.scope, "read");
         // Independent check: the plaintext is not what is stored.
-        let stored: String = c.query_row("SELECT token_hash FROM app_tokens WHERE id=?1", [&token.id], |r| r.get(0)).unwrap();
+        let stored: String = c
+            .query_row(
+                "SELECT token_hash FROM app_tokens WHERE id=?1",
+                [&token.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_ne!(stored, raw);
         assert!(verify_app_token_on(&c, "spat_wrong").unwrap().is_none());
     }
@@ -649,29 +782,77 @@ mod oauth_tests {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
         assert!(issue_app_token_on(&c, "client-1", "spcs_bogus", None, None).is_err());
-        assert!(issue_app_token_on(&c, "client-2", &secret.client_secret, None, None).is_err(), "flow disabled");
+        assert!(
+            issue_app_token_on(&c, "client-2", &secret.client_secret, None, None).is_err(),
+            "flow disabled"
+        );
         let token = issue_app_token_on(&c, "client-1", &secret.client_secret, None, None).unwrap();
         let raw = token.access_token.unwrap();
         rotate_app_secret_on(&c, "app").unwrap();
-        assert!(verify_app_token_on(&c, &raw).unwrap().is_none(), "rotation revokes old tokens");
+        assert!(
+            verify_app_token_on(&c, &raw).unwrap().is_none(),
+            "rotation revokes old tokens"
+        );
     }
     #[test]
     fn expired_token_does_not_verify() {
         let c = conn();
         let secret = rotate_app_secret_on(&c, "app").unwrap();
-        let token = issue_app_token_on(&c, "client-1", &secret.client_secret, None, Some(60)).unwrap();
+        let token =
+            issue_app_token_on(&c, "client-1", &secret.client_secret, None, Some(60)).unwrap();
         let raw = token.access_token.unwrap();
-        c.execute("UPDATE app_tokens SET expires_at=unixepoch()-1 WHERE id=?1", [&token.id]).unwrap();
+        c.execute(
+            "UPDATE app_tokens SET expires_at=unixepoch()-1 WHERE id=?1",
+            [&token.id],
+        )
+        .unwrap();
         assert!(verify_app_token_on(&c, &raw).unwrap().is_none());
     }
     #[test]
     fn install_kinds_are_validated() {
         let c = conn();
-        c.execute("INSERT INTO marketplace_apps(id,name,vendor) VALUES('m','Market App','Vendor')", []).unwrap();
-        let ok = install_marketplace_app_on(&c, AppInstall { id: "i1".into(), marketplace_app_id: Some("m".into()), application_id: "app".into(), install_kind: "MARKETPLACE".into(), installed_by: None, installed_at: 0 }).unwrap();
+        c.execute(
+            "INSERT INTO marketplace_apps(id,name,vendor) VALUES('m','Market App','Vendor')",
+            [],
+        )
+        .unwrap();
+        let ok = install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i1".into(),
+                marketplace_app_id: Some("m".into()),
+                application_id: "app".into(),
+                install_kind: "MARKETPLACE".into(),
+                installed_by: None,
+                installed_at: 0,
+            },
+        )
+        .unwrap();
         assert!(ok.installed_at > 0);
-        assert!(install_marketplace_app_on(&c, AppInstall { id: "i2".into(), marketplace_app_id: None, application_id: "app".into(), install_kind: "MARKETPLACE".into(), installed_by: None, installed_at: 0 }).is_err());
-        assert!(install_marketplace_app_on(&c, AppInstall { id: "i3".into(), marketplace_app_id: None, application_id: "app".into(), install_kind: "SMOKE".into(), installed_by: None, installed_at: 0 }).is_err());
+        assert!(install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i2".into(),
+                marketplace_app_id: None,
+                application_id: "app".into(),
+                install_kind: "MARKETPLACE".into(),
+                installed_by: None,
+                installed_at: 0
+            }
+        )
+        .is_err());
+        assert!(install_marketplace_app_on(
+            &c,
+            AppInstall {
+                id: "i3".into(),
+                marketplace_app_id: None,
+                application_id: "app".into(),
+                install_kind: "SMOKE".into(),
+                installed_by: None,
+                installed_at: 0
+            }
+        )
+        .is_err());
     }
 }
 #[cfg(test)]

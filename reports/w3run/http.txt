@@ -1,0 +1,43 @@
+token_len=64
+### auth/login
+{"user":{"display_name":"Administrator","id":"admin","profile_id":"profile-admin","role":"admin","username":"admin"}}
+### auth/login bad password
+{"error":"invalid username or password","ok":false} [401]
+### auth/me (no session)
+{"error":"unauthorized","ok":false} [401]
+### auth/me (session)
+{"user":{"display_name":"Administrator","id":"admin","profile_id":"profile-admin","role":"admin","username":"admin"}} [200]
+### cmd/list_projects
+{"ok":true,"value":[{"archived":false,"created_by":"default-org","deadline":null,"description":"Your persisted Space project","id":"demo-project","key":"DEMO","name":"Demo Project"}]} [200]
+### cmd/list_issues
+{"ok":true,"value":[]} [200]
+### cmd/list_channels
+{"error":"not available in web mode","ok":false} [501]
+### cmd/list_documents
+{"ok":true,"value":[]} [200]
+### cmd/calendar_aggregate
+{"error":"invalid argument `range_start`: invalid type: null, expected i64","ok":false} [400]
+### cmd/list_package_repositories
+{"ok":true,"value":[]} [200]
+### calendar_aggregate
+{"ok":true,"value":[]} [200]
+### create_issue
+{"error":"project_id is required","ok":false} [400]
+### list_issues
+{"ok":true,"value":[]} [200]
+### create_document
+{"error":"invalid argument `document`","ok":false} [403]
+### list_documents
+{"ok":true,"value":[]} [200]
+### list_messages
+{"error":"channel access denied","ok":false} [403]
+### list_calendar_feeds
+{"ok":true,"value":[]} [200]
+### create_issue {"input":{"project_id":"demo-project","title":"live-run smoke","description":"curl evidence"}}
+{"ok":true,"value":{"archived":false,"assignee_id":null,"assignee_ids":[],"created_by":null,"description":"curl evidence","due_date":null,"id":"issue-18ce28a757f7e578-0","number":1,"priority":null,"project_id":"demo-project","status_id":null,"title":"live-run smoke"}} [200]
+### list_issues {}
+{"ok":true,"value":[{"archived":false,"assignee_id":null,"assignee_ids":[],"created_by":null,"description":"curl evidence","due_date":null,"id":"issue-18ce28a757f7e578-0","number":1,"priority":null,"project_id":"demo-project","status_id":null,"title":"live-run smoke"}]} [200]
+### create_document {"document":{"id":"live-doc","container_type":"my-docs","container_id":"profile-admin","folder_id":null,"doc_type":"text","title":"Live doc","body":"hello","version":1,"archived":false,"created_by":"profile-admin"}}
+{"ok":true,"value":null} [200]
+### list_documents {}
+{"ok":true,"value":[{"archived":false,"body":"hello","container_id":"profile-admin","container_type":"my-docs","created_by":"profile-admin","doc_type":"text","folder_id":null,"id":"live-doc","title":"Live doc","version":1}]} [200]

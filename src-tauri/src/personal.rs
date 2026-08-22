@@ -657,7 +657,10 @@ pub(crate) fn save_subscription_scope_on(
     {
         return Err("Subscription profile, event type, and target ID are required".into());
     }
-    valid_target(&Some(scope.target_type.clone()), &Some(scope.target_id.clone()))?;
+    valid_target(
+        &Some(scope.target_type.clone()),
+        &Some(scope.target_id.clone()),
+    )?;
     err(c.execute("INSERT INTO subscription_scopes(profile_id,event_type,target_type,target_id,enabled) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,event_type,target_type,target_id) DO UPDATE SET enabled=excluded.enabled", params![scope.profile_id, scope.event_type, scope.target_type, scope.target_id, scope.enabled]))?;
     Ok(scope)
 }
@@ -1245,19 +1248,70 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(emit_notification_on(&c, &feed_input("issue.created", Some(("project", "project")))).unwrap().is_some(), "scope re-enables a muted event");
-        assert!(emit_notification_on(&c, &feed_input("issue.created", None)).unwrap().is_none(), "unscoped event stays muted");
-        assert!(emit_notification_on(&c, &feed_input("issue.created", Some(("project", "other")))).unwrap().is_none(), "wildcard scope mutes the target");
-        assert!(emit_notification_on(&c, &feed_input("blog.published", Some(("project", "project")))).unwrap().is_some(), "unknown event defaults to subscribed");
+        assert!(
+            emit_notification_on(
+                &c,
+                &feed_input("issue.created", Some(("project", "project")))
+            )
+            .unwrap()
+            .is_some(),
+            "scope re-enables a muted event"
+        );
+        assert!(
+            emit_notification_on(&c, &feed_input("issue.created", None))
+                .unwrap()
+                .is_none(),
+            "unscoped event stays muted"
+        );
+        assert!(
+            emit_notification_on(&c, &feed_input("issue.created", Some(("project", "other"))))
+                .unwrap()
+                .is_none(),
+            "wildcard scope mutes the target"
+        );
+        assert!(
+            emit_notification_on(
+                &c,
+                &feed_input("blog.published", Some(("project", "project")))
+            )
+            .unwrap()
+            .is_some(),
+            "unknown event defaults to subscribed"
+        );
         // Independent check: the count of stored rows, not the return values.
-        assert_eq!(c.query_row("SELECT count(*) FROM notifications", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM notifications", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
         assert_eq!(list_subscription_scopes_on(&c, "p").unwrap().len(), 2);
     }
     #[test]
     fn invalid_subscription_target_is_rejected() {
         let c = conn();
-        assert!(save_subscription_scope_on(&c, SubscriptionScope { profile_id: "p".into(), event_type: "e".into(), target_type: "galaxy".into(), target_id: "x".into(), enabled: true }).is_err());
-        assert!(emit_notification_on(&c, &NotificationInput { target_id: None, ..feed_input("e", Some(("project", "project"))) }).is_err(), "half a target is an error");
+        assert!(save_subscription_scope_on(
+            &c,
+            SubscriptionScope {
+                profile_id: "p".into(),
+                event_type: "e".into(),
+                target_type: "galaxy".into(),
+                target_id: "x".into(),
+                enabled: true
+            }
+        )
+        .is_err());
+        assert!(
+            emit_notification_on(
+                &c,
+                &NotificationInput {
+                    target_id: None,
+                    ..feed_input("e", Some(("project", "project")))
+                }
+            )
+            .is_err(),
+            "half a target is an error"
+        );
     }
     #[test]
     fn disabled_subscription_suppresses_emit() {

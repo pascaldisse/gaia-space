@@ -204,13 +204,30 @@ pub struct PackageVersion {
     pub immutable: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PackageVulnerability { pub id: String, pub package_version_id: String, pub cve_id: String, pub severity: String, pub affected_range: String, pub title: Option<String>, pub description: Option<String> }
+pub struct PackageVulnerability {
+    pub id: String,
+    pub package_version_id: String,
+    pub cve_id: String,
+    pub severity: String,
+    pub affected_range: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
 #[derive(Debug, Serialize)]
-pub struct DependencyOverview { pub version: PackageVersion, pub vulnerabilities: Vec<PackageVulnerability> }
+pub struct DependencyOverview {
+    pub version: PackageVersion,
+    pub vulnerabilities: Vec<PackageVulnerability>,
+}
 /// Scanner seam: deployments can replace this no-network default with a vetted scanner.
-pub trait VulnerabilityScanner: Send + Sync { fn scan(&self, version: &PackageVersion) -> Result<Vec<PackageVulnerability>>; }
+pub trait VulnerabilityScanner: Send + Sync {
+    fn scan(&self, version: &PackageVersion) -> Result<Vec<PackageVulnerability>>;
+}
 pub struct NoopVulnerabilityScanner;
-impl VulnerabilityScanner for NoopVulnerabilityScanner { fn scan(&self, _: &PackageVersion) -> Result<Vec<PackageVulnerability>> { Ok(vec![]) } }
+impl VulnerabilityScanner for NoopVulnerabilityScanner {
+    fn scan(&self, _: &PackageVersion) -> Result<Vec<PackageVulnerability>> {
+        Ok(vec![])
+    }
+}
 
 // ---------- script JSON model (the ".space.kts equivalent") ----------
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1160,42 +1177,109 @@ pub fn list_package_versions(
 /// never guessed from a remote registry.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MavenMetadata { group_id: String, artifact_id: String, version: String, checksum: Option<String>, snapshot: bool, deps: Vec<Value> }
+struct MavenMetadata {
+    group_id: String,
+    artifact_id: String,
+    version: String,
+    checksum: Option<String>,
+    snapshot: bool,
+    deps: Vec<Value>,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NpmMetadata { manifest: Value, deps: Value }
+struct NpmMetadata {
+    manifest: Value,
+    deps: Value,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NugetMetadata { framework_deps: Value }
+struct NugetMetadata {
+    framework_deps: Value,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PypiMetadata { files: Value, deps: Value }
+struct PypiMetadata {
+    files: Value,
+    deps: Value,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContainerMetadata { oci_manifest: Value, config: Value, history: Value, subject_referrers: Value }
+struct ContainerMetadata {
+    oci_manifest: Value,
+    config: Value,
+    history: Value,
+    subject_referrers: Value,
+}
 
 fn field(value: &serde_json::Map<String, Value>, name: &str, fallback: Value) -> Value {
     value.get(name).cloned().unwrap_or(fallback)
 }
 fn package_immutable_default() -> bool {
-    std::env::var("SPACE_PACKAGE_IMMUTABLE_DEFAULT").ok().and_then(|value| value.parse().ok()).unwrap_or_default()
+    std::env::var("SPACE_PACKAGE_IMMUTABLE_DEFAULT")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default()
 }
-fn typed_format_metadata(format: &str, package_name: &str, version: &str, metadata: &Value) -> Result<Value> {
-    let object = metadata.as_object().ok_or_else(|| "metadata must be a JSON object".to_string())?;
-    let projection = object.get("formatMetadata").and_then(Value::as_object).unwrap_or(object);
+fn typed_format_metadata(
+    format: &str,
+    package_name: &str,
+    version: &str,
+    metadata: &Value,
+) -> Result<Value> {
+    let object = metadata
+        .as_object()
+        .ok_or_else(|| "metadata must be a JSON object".to_string())?;
+    let projection = object
+        .get("formatMetadata")
+        .and_then(Value::as_object)
+        .unwrap_or(object);
     let typed = match format {
         "maven" => json!(MavenMetadata {
-            group_id: field(projection, "groupId", json!(package_name)).as_str().ok_or("maven groupId must be a string")?.into(),
-            artifact_id: field(projection, "artifactId", json!(package_name)).as_str().ok_or("maven artifactId must be a string")?.into(),
-            version: field(projection, "version", json!(version)).as_str().ok_or("maven version must be a string")?.into(),
-            checksum: projection.get("checksum").and_then(Value::as_str).map(str::to_owned),
-            snapshot: field(projection, "snapshot", json!(version.ends_with("-SNAPSHOT"))).as_bool().ok_or("maven snapshot must be boolean")?,
-            deps: field(projection, "deps", json!([])).as_array().ok_or("maven deps must be an array")?.clone(),
+            group_id: field(projection, "groupId", json!(package_name))
+                .as_str()
+                .ok_or("maven groupId must be a string")?
+                .into(),
+            artifact_id: field(projection, "artifactId", json!(package_name))
+                .as_str()
+                .ok_or("maven artifactId must be a string")?
+                .into(),
+            version: field(projection, "version", json!(version))
+                .as_str()
+                .ok_or("maven version must be a string")?
+                .into(),
+            checksum: projection
+                .get("checksum")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            snapshot: field(
+                projection,
+                "snapshot",
+                json!(version.ends_with("-SNAPSHOT"))
+            )
+            .as_bool()
+            .ok_or("maven snapshot must be boolean")?,
+            deps: field(projection, "deps", json!([]))
+                .as_array()
+                .ok_or("maven deps must be an array")?
+                .clone(),
         }),
-        "npm" => json!(NpmMetadata { manifest: field(projection, "manifest", metadata.clone()), deps: field(projection, "deps", json!({})) }),
-        "nuget" => json!(NugetMetadata { framework_deps: field(projection, "frameworkDeps", json!({})) }),
-        "pypi" => json!(PypiMetadata { files: field(projection, "files", json!([])), deps: field(projection, "deps", json!([])) }),
-        "container" => json!(ContainerMetadata { oci_manifest: field(projection, "ociManifest", json!({})), config: field(projection, "config", json!({})), history: field(projection, "history", json!([])), subject_referrers: field(projection, "subjectReferrers", json!([])) }),
+        "npm" => json!(NpmMetadata {
+            manifest: field(projection, "manifest", metadata.clone()),
+            deps: field(projection, "deps", json!({}))
+        }),
+        "nuget" => json!(NugetMetadata {
+            framework_deps: field(projection, "frameworkDeps", json!({}))
+        }),
+        "pypi" => json!(PypiMetadata {
+            files: field(projection, "files", json!([])),
+            deps: field(projection, "deps", json!([]))
+        }),
+        "container" => json!(ContainerMetadata {
+            oci_manifest: field(projection, "ociManifest", json!({})),
+            config: field(projection, "config", json!({})),
+            history: field(projection, "history", json!([])),
+            subject_referrers: field(projection, "subjectReferrers", json!([]))
+        }),
         _ => json!({}),
     };
     Ok(typed)
@@ -1216,7 +1300,7 @@ fn publish_package_version_tx(
     metadata_json: Option<&str>,
     payload_filename: Option<&str>,
     payload_content: Option<&[u8]>,
-immutable: Option<bool>,
+    immutable: Option<bool>,
 ) -> Result<PackageVersion> {
     validate_package_path_component(repository_id, "repository id")?;
     validate_package_path_component(package_name, "name")?;
@@ -1264,8 +1348,18 @@ immutable: Option<bool>,
     let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
     meta["_format"] = serde_json::Value::String(format);
     let id = format!("{repository_id}::{package_name}::{version}");
-    let existing_immutable: Option<bool> = conn.query_row("SELECT immutable FROM package_versions WHERE id=?1", params![&id], |r| r.get(0)).ok();
-    if existing_immutable == Some(true) { return Err(format!("package version {package_name}@{version} is immutable and cannot be republished")); }
+    let existing_immutable: Option<bool> = conn
+        .query_row(
+            "SELECT immutable FROM package_versions WHERE id=?1",
+            params![&id],
+            |r| r.get(0),
+        )
+        .ok();
+    if existing_immutable == Some(true) {
+        return Err(format!(
+            "package version {package_name}@{version} is immutable and cannot be republished"
+        ));
+    }
     // Deployment policy is parameterized; callers may override it per publish.
     let immutable = immutable.unwrap_or_else(package_immutable_default);
     conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json,format_metadata_json,immutable) VALUES(?1,?2,?3,?4,?5,?6,?7)
@@ -1417,12 +1511,33 @@ pub fn publish_package_version(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_package_vulnerability(vulnerability: PackageVulnerability) -> Result<()> {
     let c = db::conn()?;
-    c.execute("INSERT INTO package_vulnerabilities(id,package_version_id,cve_id,severity,affected_range,title,description) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(package_version_id,cve_id,affected_range) DO UPDATE SET severity=excluded.severity,title=excluded.title,description=excluded.description", params![vulnerability.id,vulnerability.package_version_id,vulnerability.cve_id,vulnerability.severity,vulnerability.affected_range,vulnerability.title,vulnerability.description]).map_err(|e|e.to_string())?; Ok(())
+    c.execute("INSERT INTO package_vulnerabilities(id,package_version_id,cve_id,severity,affected_range,title,description) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(package_version_id,cve_id,affected_range) DO UPDATE SET severity=excluded.severity,title=excluded.title,description=excluded.description", params![vulnerability.id,vulnerability.package_version_id,vulnerability.cve_id,vulnerability.severity,vulnerability.affected_range,vulnerability.title,vulnerability.description]).map_err(|e|e.to_string())?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dependency_overview(version_id: String) -> Result<DependencyOverview> {
-    let c=db::conn()?; let version=c.query_row("SELECT id,repository_id,package_name,version,metadata_json,format_metadata_json,created_at,accessed_at,downloads,pinned,immutable FROM package_versions WHERE id=?1",params![version_id],|r| Ok(PackageVersion{id:r.get(0)?,repository_id:r.get(1)?,package_name:r.get(2)?,version:r.get(3)?,metadata_json:r.get(4)?,format_metadata_json:r.get(5)?,created_at:r.get(6)?,accessed_at:r.get(7)?,downloads:r.get(8)?,pinned:r.get(9)?,immutable:r.get(10)?})).map_err(|_|"package version not found".to_string())?;
- let mut q=c.prepare("SELECT id,package_version_id,cve_id,severity,affected_range,title,description FROM package_vulnerabilities WHERE package_version_id=?1").map_err(|e|e.to_string())?; let vulnerabilities=q.query_map(params![version.id],|r|Ok(PackageVulnerability{id:r.get(0)?,package_version_id:r.get(1)?,cve_id:r.get(2)?,severity:r.get(3)?,affected_range:r.get(4)?,title:r.get(5)?,description:r.get(6)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(DependencyOverview{version,vulnerabilities})
+    let c = db::conn()?;
+    let version=c.query_row("SELECT id,repository_id,package_name,version,metadata_json,format_metadata_json,created_at,accessed_at,downloads,pinned,immutable FROM package_versions WHERE id=?1",params![version_id],|r| Ok(PackageVersion{id:r.get(0)?,repository_id:r.get(1)?,package_name:r.get(2)?,version:r.get(3)?,metadata_json:r.get(4)?,format_metadata_json:r.get(5)?,created_at:r.get(6)?,accessed_at:r.get(7)?,downloads:r.get(8)?,pinned:r.get(9)?,immutable:r.get(10)?})).map_err(|_|"package version not found".to_string())?;
+    let mut q=c.prepare("SELECT id,package_version_id,cve_id,severity,affected_range,title,description FROM package_vulnerabilities WHERE package_version_id=?1").map_err(|e|e.to_string())?;
+    let vulnerabilities = q
+        .query_map(params![version.id], |r| {
+            Ok(PackageVulnerability {
+                id: r.get(0)?,
+                package_version_id: r.get(1)?,
+                cve_id: r.get(2)?,
+                severity: r.get(3)?,
+                affected_range: r.get(4)?,
+                title: r.get(5)?,
+                description: r.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(DependencyOverview {
+        version,
+        vulnerabilities,
+    })
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]

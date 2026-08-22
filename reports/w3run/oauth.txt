@@ -1,0 +1,24 @@
+### cmd save_application
+{"ok":true,"value":{"application_type":"Application","archived":false,"client_credentials_flow_enabled":false,"client_id":"client-live","code_flow_enabled":true,"connection_status":"CONNECTED","description":null,"endpoint_uri":null,"id":"app-live","name":"Live Client","pkce_required":true}} [200]
+### POST /oauth/authorize
+{"ok":true,"value":{"expires_at":1787411469,"redirect_to":"https://client.example/cb?code=ac-05d902246d636aff21b0809f.b6ebf95c3b383b90b509f5278ff6dfcfd59788ce796b89d9f7ce8ae84da34b01&state=xyz"}} [200]
+### token: valid PKCE exchange
+{"error":"code_verifier length must be 43..=128","ok":false} [400]
+### token: replay same code
+{"error":"invalid authorization code","ok":false} [400]
+### token: unknown grant_type
+{"error":"unsupported grant_type","ok":false} [400]
+### token: unknown client
+{"error":"unknown client_id","ok":false} [400]
+### token: wrong verifier
+{"error":"invalid authorization code","ok":false} [400]
+### token: valid PKCE exchange (fresh code, 43-char verifier)
+{"ok":true,"value":{"access_token":"spoa_at-40035c955cc458d03debf152.9c564db6f51543c1700fac6c7781f5e77eadc6364c370beeaccbdf11869c7054","expires_in":3600,"scope":"project:read","token_type":"Bearer"}} [200]
+### token: replay of the same code
+{"error":"invalid authorization code","ok":false} [400]
+### cmd rotate_app_secret (make client confidential)
+{"ok":true,"value":{"application_id":"app-live","client_id":"client-live","client_secret":"spcs_cdba47b69c6201d1b11e22fdc135df45d33d564192a0780b885cb558af17ee80"}}
+### token: confidential client, WRONG client_secret
+{"error":"invalid client credentials","ok":false} [400]
+### token: confidential client, correct client_secret
+{"ok":true,"value":{"access_token":"spoa_at-f4f6a1532fc082651e9a4738.d7578252220b9f1a528f0ff428f6a059f9d46ee761d58d405e9305b9719ddc49","expires_in":3600,"scope":"project:read","token_type":"Bearer"}} [200]

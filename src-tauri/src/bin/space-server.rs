@@ -971,7 +971,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_app_tokens"
         | "save_marketplace_app"
         | "install_marketplace_app"
-        | "uninstall_app" => CommandPolicy::AppAdmin,
+        | "uninstall_app"
+        // The redirect allowlist decides where a code is delivered: it is a credential
+        // surface, so it answers to the same admin gate as the secrets themselves.
+        | "register_redirect_uri"
+        | "list_redirect_uris" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -2167,6 +2171,8 @@ async fn cmd(
     "delete_devfile" => applications::delete_devfile(id: String),
     "open_in_ide" => applications::open_in_ide(repository: String, ide: String),
     "list_applications" => applications::list_applications(),
+    "register_redirect_uri" => oauth::register_redirect_uri_cmd(application_id: String, redirect_uri: String),
+    "list_redirect_uris" => oauth::list_redirect_uris_cmd(application_id: String),
     "save_application" => applications::save_application(value: applications::Application),
     "delete_application" => applications::delete_application(id: String),
     "list_webhooks" => applications::list_webhooks(application_id: String),
@@ -2457,10 +2463,36 @@ async fn oauth_authorize(
 }
 /// Token endpoint (RFC 6749 §3.2): unauthenticated by session — the code plus, when
 /// registered, the PKCE verifier is the credential.
+/// Failures here — and only here — speak RFC 6749 §5.2 instead of the house
+/// `{"ok":false,"error":...}` envelope: an OAuth client parses §5.2 or nothing.
+/// Every other endpoint keeps the house shape, which the UIs depend on.
 async fn oauth_token(Json(req): Json<oauth::TokenRequest>) -> impl IntoResponse {
+    // §5.1/§5.2: token responses must never be cached — they carry a credential.
+    let no_store = [
+        (header::CACHE_CONTROL, "no-store"),
+        (header::PRAGMA, "no-cache"),
+    ];
     match oauth::exchange_code(&req, oauth::OAuthConfig::from_env()) {
-        Ok(token) => Json(json!({"ok":true,"value":token})).into_response(),
-        Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+        Ok(token) => (no_store, Json(json!({"ok":true,"value":token}))).into_response(),
+        Err(e) => {
+            let status = StatusCode::from_u16(e.http_status()).unwrap_or(StatusCode::BAD_REQUEST);
+            let body = Json(json!({"error":e.error,"error_description":e.error_description}));
+            if status == StatusCode::UNAUTHORIZED {
+                // §5.2: a 401 from the token endpoint MUST carry a challenge.
+                (
+                    status,
+                    [
+                        (header::CACHE_CONTROL, "no-store"),
+                        (header::PRAGMA, "no-cache"),
+                        (header::WWW_AUTHENTICATE, "Basic realm=\"oauth\""),
+                    ],
+                    body,
+                )
+                    .into_response()
+            } else {
+                (status, no_store, body).into_response()
+            }
+        }
     }
 }
 fn bootstrap() {
@@ -2702,10 +2734,18 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{secret}");
-        let client_secret = secret["value"]["client_secret"].as_str().unwrap().to_string();
+        let client_secret = secret["value"]["client_secret"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         // A live token from each flow, minted under that secret.
-        let (status, token) = call(cookie("tc"), "issue_app_token", json!({"client_id":"client-y","client_secret":client_secret,"ttl_seconds":60})).await;
+        let (status, token) = call(
+            cookie("tc"),
+            "issue_app_token",
+            json!({"client_id":"client-y","client_secret":client_secret,"ttl_seconds":60}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{token}");
         let app_token = token["value"]["access_token"].as_str().unwrap().to_string();
         let verifier = "verifier-0123456789012345678901234567890123456789";
@@ -5183,6 +5223,110 @@ mod tests {
             status,
             StatusCode::BAD_REQUEST,
             "a replay is refused: {value}"
+        );
+    }
+
+    /// RFC 6749 §5.1/§5.2 on the wire: the standard error object (never the house
+    /// `ok:false` envelope), 401 + `WWW-Authenticate` for a client-auth failure,
+    /// 400 otherwise, and `Cache-Control: no-store` on every answer.
+    #[tokio::test]
+    async fn oauth_token_errors_speak_rfc6749_section_5_2() {
+        let _serial = test_lock();
+        setup();
+        db::conn().unwrap().execute("INSERT INTO applications(id,name,application_type,client_id,code_flow_enabled,pkce_required) VALUES('app-e52','E52','Application','client-e52',1,1)",[]).unwrap();
+
+        let post = |body: Value| async move {
+            let response = oauth_token(Json(serde_json::from_value(body).unwrap()))
+                .await
+                .into_response();
+            let status = response.status();
+            let headers = response.headers().clone();
+            let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            (status, headers, value)
+        };
+
+        let (status, headers, value) = post(json!({
+            "grant_type":"password",
+            "client_id":"client-e52",
+            "code":"ac-x.y",
+            "redirect_uri":"https://client.example/cb"
+        }))
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"], json!("unsupported_grant_type"));
+        assert!(value["error_description"].is_string(), "{value}");
+        assert!(value.get("ok").is_none(), "§5.2 shape, not the house one");
+        assert_eq!(
+            headers.get(header::CACHE_CONTROL).unwrap(),
+            "no-store",
+            "§5.1: a token answer is never cached"
+        );
+
+        let (status, headers, value) = post(json!({
+            "grant_type":"authorization_code",
+            "client_id":"client-unknown",
+            "code":"ac-x.y",
+            "redirect_uri":"https://client.example/cb"
+        }))
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{value}");
+        assert_eq!(value["error"], json!("invalid_client"));
+        assert!(
+            headers.contains_key(header::WWW_AUTHENTICATE),
+            "§5.2: a 401 carries a challenge"
+        );
+
+        let (status, _, value) = post(json!({
+            "grant_type":"authorization_code",
+            "client_id":"client-e52",
+            "code":"ac-nope.deadbeef",
+            "redirect_uri":"https://client.example/cb"
+        }))
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"], json!("invalid_grant"), "{value}");
+    }
+
+    /// The redirect allowlist is reachable over HTTP — a server-only deployment can
+    /// register a code client without the desktop app — and only for an app admin.
+    #[tokio::test]
+    async fn register_redirect_uri_is_an_admin_only_command() {
+        let _serial = test_lock();
+        setup();
+        db::conn().unwrap().execute("INSERT INTO applications(id,name,application_type,client_id,code_flow_enabled,pkce_required) VALUES('app-reg','Reg','Application','client-reg',1,1)",[]).unwrap();
+        let args = json!({"application_id":"app-reg","redirect_uri":"https://client.example/cb"});
+
+        let (status, _) = call(HeaderMap::new(), "register_redirect_uri", args.clone()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no session, no write");
+        let (status, _) = call(cookie("ta"), "register_redirect_uri", args.clone()).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a member is not an app admin"
+        );
+
+        let (status, value) = call(cookie("tc"), "register_redirect_uri", args).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, value) = call(
+            cookie("tc"),
+            "list_redirect_uris",
+            json!({"application_id":"app-reg"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"], json!(["https://client.example/cb"]));
+
+        let (status, value) = call(
+            cookie("tc"),
+            "register_redirect_uri",
+            json!({"application_id":"app-reg","redirect_uri":"http://evil.example/cb"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "plain http off localhost stays out: {value}"
         );
     }
 
