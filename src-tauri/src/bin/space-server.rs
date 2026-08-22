@@ -2,7 +2,7 @@ use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{
     body::Bytes,
-    extract::{ConnectInfo, Path, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{any, get, patch, post, put},
@@ -2640,6 +2640,93 @@ async fn registry_npm_publish_manifest(
     }
 }
 
+const DEFAULT_DOCUMENT_UPLOAD_MAX_BYTES: usize = 50 * 1024 * 1024;
+
+fn document_upload_max_bytes(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_DOCUMENT_UPLOAD_MAX_BYTES)
+}
+
+#[derive(Deserialize)]
+struct WebDocumentUpload {
+    filename: String,
+    container_type: String,
+    container_id: Option<String>,
+    folder_id: Option<String>,
+    title: Option<String>,
+}
+
+/// Binary document ingress for browser clients. Metadata is query-encoded and the
+/// payload remains raw bytes, avoiding base64/JSON expansion and desktop paths.
+async fn document_upload(
+    h: HeaderMap,
+    Query(upload): Query<WebDocumentUpload>,
+    payload: Bytes,
+) -> axum::response::Response {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(e) => return e.into_response(),
+    };
+    let mut auth_body = json!({"document": {
+        "container_type": upload.container_type,
+        "container_id": upload.container_id,
+        "folder_id": upload.folder_id,
+        "created_by": user.profile_id,
+    }});
+    if let Err(e) = authorize_command(&user, "create_document", &mut auth_body) {
+        return e.into_response();
+    }
+    let document = auth_body["document"].as_object().expect("document object");
+    let request = documents::UploadDocumentFileBytesRequest {
+        filename: upload.filename,
+        container_type: document["container_type"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        container_id: document["container_id"].as_str().map(str::to_owned),
+        folder_id: document["folder_id"].as_str().map(str::to_owned),
+        title: upload.title,
+        created_by: document["created_by"].as_str().map(str::to_owned),
+    };
+    match documents::upload_document_file_bytes(
+        request,
+        &payload,
+        document_upload_max_bytes(env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref())
+            as u64,
+    ) {
+        Ok(file) => Json(json!({"ok":true,"value":file})).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+
+async fn document_download(
+    h: HeaderMap,
+    Path(document_id): Path<String>,
+) -> axum::response::Response {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(e) => return e.into_response(),
+    };
+    match documents::document_readable_by(&document_id, &user.profile_id) {
+        Ok(true) => match documents::read_document_file_bytes(&document_id) {
+            Ok((file, payload)) => (
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_str(&file.mime)
+                        .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                )],
+                payload,
+            )
+                .into_response(),
+            Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+        },
+        Ok(false) => err(StatusCode::FORBIDDEN, "document access denied").into_response(),
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error).into_response(),
+    }
+}
+
 async fn cmd(
     h: HeaderMap,
     Path(name): Path<String>,
@@ -3128,6 +3215,8 @@ async fn main() {
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
+        .route("/api/documents/upload", post(document_upload))
+        .route("/api/documents/files/{document_id}", get(document_download))
         .route("/api/app/me", get(app_me))
         .route("/api/app/projects", get(app_projects))
         .route(
@@ -3149,6 +3238,9 @@ async fn main() {
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
+        .layer(DefaultBodyLimit::max(document_upload_max_bytes(
+            env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref(),
+        )))
         .with_state(App::new());
     let port = env::var("SPACE_PORT")
         .ok()

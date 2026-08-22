@@ -102,6 +102,13 @@ export type UploadDocumentFileRequest = {
   max_file_bytes?: number;
 };
 
+export type WebDocumentUpload = {
+  container_type: ContainerType;
+  container_id: string | null;
+  folder_id: string | null;
+  title?: string | null;
+};
+
 export type DocumentFilePreview = {
   document_id: string;
   filename: string;
@@ -144,6 +151,25 @@ export const documentsApi = {
 
   uploadFile: (request: UploadDocumentFileRequest) =>
     invoke<DocumentFile>("upload_document_file", { request }),
+  uploadWebFile: async (file: File, request: WebDocumentUpload): Promise<DocumentFile> => {
+    const base = import.meta.env.BASE_URL;
+    const query = new URLSearchParams({
+      filename: file.name,
+      container_type: request.container_type,
+      ...(request.container_id ? { container_id: request.container_id } : {}),
+      ...(request.folder_id ? { folder_id: request.folder_id } : {}),
+      ...(request.title ? { title: request.title } : {}),
+    });
+    const response = await fetch(`${base}api/documents/upload?${query}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const body = await response.json() as { ok: boolean; value?: DocumentFile; error?: string };
+    if (!body.ok || !body.value) throw new Error(body.error ?? `upload failed (HTTP ${response.status})`);
+    return body.value;
+  },
   getDocumentFile: (documentId: string) =>
     invoke<DocumentFile | null>("get_document_file", { documentId }),
   readDocumentFile: (documentId: string, maxBytes: number | null = null) =>
