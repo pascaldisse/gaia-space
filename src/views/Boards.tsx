@@ -145,7 +145,7 @@ export default function Boards() {
     </div>
 
     <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
-      <div class="board-card-settings"><strong>Card fields</strong><For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field => <label><input type="checkbox" checked={cardSettings()?.fields.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>}</For></div>
+      <div class="board-card-settings"><strong>Card fields</strong><For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field => <label><input type="checkbox" checked={cardSettings()?.fields?.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>}</For></div>
       <div class="board-split">
         <div class="kanban">
           <For each={columns()}>{column =>

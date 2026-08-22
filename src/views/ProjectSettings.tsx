@@ -65,7 +65,7 @@ function ProjectMembers(props: { projectId: string; owner: string | null; canMan
   };
 
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Members and roles</h2></div>
+    <div class="ps-panel-head"><h2>Members and project roles</h2></div>
     <p class="ps-hint">Project members can access this project and be assigned to its work. A project role grants the rights configured for that role in this project only.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
     <ul class="ps-members">
@@ -121,7 +121,7 @@ function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
   };
   const optionsFor = (definition: CfDefinition) => { try { return JSON.parse(definition.constraints_json ?? "{}").options?.join(", ") ?? ""; } catch { return ""; } };
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Issue custom fields</h2></div>
+    <div class="ps-panel-head"><h2>Custom fields</h2></div>
     <p class="ps-hint">Fields belong to this project’s issue tracker. They appear on every issue in this project; existing values are retained when a field is archived.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
     <ul class="ps-fields"><For each={definitions()}>{definition => <li><div><strong>{definition.name}</strong><small>{CF_TYPES.find(item => item.value === definition.cf_type)?.label ?? definition.cf_type}<Show when={optionsFor(definition)}>{values => <> · {values()}</>}</Show></small></div><Show when={props.canManage}><button type="button" class="ghost" disabled={busy()} onClick={() => void archive(definition)}>Archive</button></Show></li>}</For></ul>
