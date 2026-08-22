@@ -6,12 +6,13 @@ import { navigate, route } from "../router";
 import "./ProjectSettings.css";
 
 const CF_TYPES: { value: CfType; label: string; hint: string }[] = [
-  { value: "text", label: "Text", hint: "Short text" },
-  { value: "int", label: "Number", hint: "Whole number" },
-  { value: "date", label: "Date", hint: "Calendar date" },
-  { value: "enum", label: "List", hint: "One choice from a list" },
-  { value: "profile", label: "Organization member", hint: "A member reference" },
-  { value: "bool", label: "Checkbox", hint: "Yes or no" },
+  { value: "text", label: "Text", hint: "Short text" }, { value: "text_list", label: "Text list", hint: "Multiple text values" },
+  { value: "int", label: "Number", hint: "Whole number" }, { value: "int_list", label: "Number list", hint: "Multiple whole numbers" },
+  { value: "enum", label: "List", hint: "One choice" }, { value: "enum_list", label: "List", hint: "Multiple choices" },
+  { value: "open_enum", label: "Open list", hint: "One free-form choice" }, { value: "open_enum_list", label: "Open list", hint: "Multiple free-form choices" },
+  { value: "bool", label: "Checkbox", hint: "Yes or no" }, { value: "date", label: "Date", hint: "Calendar date" }, { value: "datetime", label: "Date and time", hint: "Timestamp" },
+  { value: "percentage", label: "Percentage", hint: "0 to 100%" }, { value: "fraction", label: "Fraction", hint: "0 to 1" }, { value: "profile", label: "Organization member", hint: "Member reference" }, { value: "profile_list", label: "Organization members", hint: "Multiple members" },
+  { value: "team", label: "Team", hint: "Team reference" }, { value: "location", label: "Location", hint: "Location value" }, { value: "project", label: "Project", hint: "Project reference" }, { value: "url", label: "Link", hint: "http(s) URL" }, { value: "contact", label: "Contact", hint: "Contact reference" }, { value: "contact_list", label: "Contacts", hint: "Multiple contacts" }, { value: "autonumber", label: "Autonumber", hint: "Generated number" }, { value: "issue", label: "Issue", hint: "Issue reference" }, { value: "issue_list", label: "Issues", hint: "Multiple issues" },
 ];
 
 const nameOf = (id: string) => {
@@ -64,7 +65,7 @@ function ProjectMembers(props: { projectId: string; owner: string | null; canMan
   };
 
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Members and roles</h2></div>
+    <div class="ps-panel-head"><h2>Members and project roles</h2></div>
     <p class="ps-hint">Project members can access this project and be assigned to its work. A project role grants the rights configured for that role in this project only.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
     <ul class="ps-members">
@@ -105,9 +106,9 @@ function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
     try {
       if (!name().trim()) throw new Error("Custom field name is required.");
       const listOptions = options().split(",").map(value => value.trim()).filter(Boolean);
-      if (type() === "enum" && !listOptions.length) throw new Error("A list field needs at least one option.");
+      if ((type() === "enum" || type() === "enum_list") && !listOptions.length) throw new Error("A list field needs at least one option.");
       setBusy(true);
-      await platformApi.createCfDefinition({ entity_type: entityType(), cf_type: type(), name: name().trim(), constraints_json: type() === "enum" ? JSON.stringify({ options: listOptions }) : null });
+      await platformApi.createCfDefinition({ entity_type: entityType(), cf_type: type(), name: name().trim(), constraints_json: (type() === "enum" || type() === "enum_list") ? JSON.stringify({ options: listOptions }) : null });
       setName(""); setOptions(""); await refetch();
     } catch (reason) { setError(humanError(reason)); }
     finally { setBusy(false); }
@@ -120,12 +121,12 @@ function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
   };
   const optionsFor = (definition: CfDefinition) => { try { return JSON.parse(definition.constraints_json ?? "{}").options?.join(", ") ?? ""; } catch { return ""; } };
   return <section class="ps-panel ps-panel-wide">
-    <div class="ps-panel-head"><h2>Issue custom fields</h2></div>
+    <div class="ps-panel-head"><h2>Custom fields</h2></div>
     <p class="ps-hint">Fields belong to this project’s issue tracker. They appear on every issue in this project; existing values are retained when a field is archived.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
     <ul class="ps-fields"><For each={definitions()}>{definition => <li><div><strong>{definition.name}</strong><small>{CF_TYPES.find(item => item.value === definition.cf_type)?.label ?? definition.cf_type}<Show when={optionsFor(definition)}>{values => <> · {values()}</>}</Show></small></div><Show when={props.canManage}><button type="button" class="ghost" disabled={busy()} onClick={() => void archive(definition)}>Archive</button></Show></li>}</For></ul>
     <Show when={!definitions.loading && !(definitions()?.length)}><p class="ps-hint ps-hint-quiet">No custom fields yet.</p></Show>
-    <Show when={props.canManage}><form class="ps-field-form" onSubmit={create}><label class="ps-field"><span>Field name</span><input value={name()} placeholder="e.g. Customer impact" onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Type</span><select value={type()} onChange={event => setType(event.currentTarget.value as CfType)}><For each={CF_TYPES}>{item => <option value={item.value}>{item.label} — {item.hint}</option>}</For></select></label><Show when={type() === "enum"}><label class="ps-field"><span>Options</span><input value={options()} placeholder="Low, Medium, High" onInput={event => setOptions(event.currentTarget.value)} /></label></Show><button class="primary" disabled={busy()}>Add field</button></form></Show>
+    <Show when={props.canManage}><form class="ps-field-form" onSubmit={create}><label class="ps-field"><span>Field name</span><input value={name()} placeholder="e.g. Customer impact" onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Type</span><select value={type()} onChange={event => setType(event.currentTarget.value as CfType)}><For each={CF_TYPES}>{item => <option value={item.value}>{item.label} — {item.hint}</option>}</For></select></label><Show when={(type() === "enum" || type() === "enum_list")}><label class="ps-field"><span>Options</span><input value={options()} placeholder="Low, Medium, High" onInput={event => setOptions(event.currentTarget.value)} /></label></Show><button class="primary" disabled={busy()}>Add field</button></form></Show>
   </section>;
 }
 

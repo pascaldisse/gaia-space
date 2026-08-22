@@ -1207,9 +1207,33 @@ pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
 // Custom Fields engine (generic across entity_type: issue/profile/team/membership/...)
 // ---------------------------------------------------------------------------
 
-/// Supported `cf_type`s (KB 02 "custom fields — type system" subset chosen for
-/// this wave: text/int/date/enum/profile/bool).
-const CF_TYPES: &[&str] = &["text", "int", "date", "enum", "profile", "bool"];
+/// Complete Circlet issue custom-field type catalog (§02).
+const CF_TYPES: &[&str] = &[
+    "text",
+    "text_list",
+    "int",
+    "int_list",
+    "enum",
+    "enum_list",
+    "open_enum",
+    "open_enum_list",
+    "bool",
+    "date",
+    "datetime",
+    "percentage",
+    "fraction",
+    "profile",
+    "profile_list",
+    "team",
+    "location",
+    "project",
+    "url",
+    "contact",
+    "contact_list",
+    "autonumber",
+    "issue",
+    "issue_list",
+];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CfDefinition {
@@ -1259,7 +1283,7 @@ fn validate_cf_shape(cf_type: &str, constraints_json: Option<&str>) -> Result<()
             "Unsupported custom field type '{cf_type}' (expected one of {CF_TYPES:?})"
         ));
     }
-    if cf_type == "enum" {
+    if matches!(cf_type, "enum" | "enum_list") {
         let constraints: serde_json::Value = match constraints_json {
             Some(s) if !s.is_empty() => {
                 serde_json::from_str(s).map_err(|e| format!("Invalid constraints JSON: {e}"))?
@@ -1294,36 +1318,78 @@ fn validate_cf_value(
         }
         _ => serde_json::json!({}),
     };
+    let strings = |v: &serde_json::Value| -> Result<Vec<String>> {
+        if matches!(
+            cf_type,
+            "text_list"
+                | "enum_list"
+                | "open_enum_list"
+                | "profile_list"
+                | "contact_list"
+                | "issue_list"
+        ) {
+            v.as_array()
+                .ok_or_else(|| "Expected an array".to_string())?
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "Expected an array of strings".to_string())
+                })
+                .collect()
+        } else {
+            Ok(vec![v
+                .as_str()
+                .ok_or("Expected a string value")?
+                .to_owned()])
+        }
+    };
     match cf_type {
         "bool" => {
             if !value.is_boolean() {
                 return Err("Expected a boolean value".into());
             }
         }
-        "text" => {
-            let s = value.as_str().ok_or("Expected a string value")?;
-            if let Some(min) = constraints.get("minLength").and_then(|v| v.as_u64()) {
-                if (s.len() as u64) < min {
-                    return Err(format!("Value shorter than minLength {min}"));
+        "text" | "text_list" | "open_enum" | "open_enum_list" | "location" | "contact"
+        | "contact_list" | "team" | "project" | "profile" | "profile_list" | "issue"
+        | "issue_list" => {
+            for s in strings(&value)? {
+                if let Some(min) = constraints.get("minLength").and_then(|v| v.as_u64()) {
+                    if (s.len() as u64) < min {
+                        return Err(format!("Value shorter than minLength {min}"));
+                    }
                 }
-            }
-            if let Some(max) = constraints.get("maxLength").and_then(|v| v.as_u64()) {
-                if (s.len() as u64) > max {
-                    return Err(format!("Value longer than maxLength {max}"));
+                if let Some(max) = constraints.get("maxLength").and_then(|v| v.as_u64()) {
+                    if (s.len() as u64) > max {
+                        return Err(format!("Value longer than maxLength {max}"));
+                    }
                 }
             }
         }
-        "int" => {
-            let n = value.as_i64().ok_or("Expected an integer value")?;
-            if let Some(min) = constraints.get("min").and_then(|v| v.as_i64()) {
-                if n < min {
-                    return Err(format!("Value below min {min}"));
-                }
+        "url" => {
+            let s = value.as_str().ok_or("Expected a URL string")?;
+            if !(s.starts_with("http://") || s.starts_with("https://")) {
+                return Err("Expected an http(s) URL".into());
             }
-            if let Some(max) = constraints.get("max").and_then(|v| v.as_i64()) {
-                if n > max {
-                    return Err(format!("Value above max {max}"));
-                }
+        }
+        "int" | "autonumber" => {
+            if value.as_i64().is_none() {
+                return Err("Expected an integer value".into());
+            }
+        }
+        "int_list" => {
+            if !value
+                .as_array()
+                .map(|a| a.iter().all(|v| v.as_i64().is_some()))
+                .unwrap_or(false)
+            {
+                return Err("Expected an array of integers".into());
+            }
+        }
+        "percentage" | "fraction" => {
+            let n = value.as_f64().ok_or("Expected a number")?;
+            if !(0.0..=1.0).contains(&n) {
+                return Err("Expected a value from 0 to 1".into());
             }
         }
         "date" => {
@@ -1333,21 +1399,21 @@ fn validate_cf_value(
             chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
                 .map_err(|_| format!("Invalid date '{s}', expected YYYY-MM-DD"))?;
         }
-        "enum" => {
-            let s = value
-                .as_str()
-                .ok_or("Expected a string value for an enum field")?;
+        "datetime" => {
+            let s = value.as_str().ok_or("Expected an ISO datetime string")?;
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map_err(|_| format!("Invalid datetime '{s}', expected RFC3339"))?;
+        }
+        "enum" | "enum_list" => {
             let options = constraints
                 .get("options")
                 .and_then(|v| v.as_array())
                 .ok_or("Enum field is missing constraints.options")?;
-            let allowed = options.iter().any(|o| o.as_str() == Some(s));
-            if !allowed {
-                return Err(format!("'{s}' is not one of the allowed enum options"));
+            for s in strings(&value)? {
+                if !options.iter().any(|o| o.as_str() == Some(s.as_str())) {
+                    return Err(format!("'{s}' is not one of the allowed enum options"));
+                }
             }
-        }
-        "profile" => {
-            value.as_str().ok_or("Expected a profile id string")?;
         }
         other => return Err(format!("Unsupported custom field type: {other}")),
     }

@@ -16,8 +16,8 @@ Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob m
 Worst gaps: stacked cherry-pick/restack UI · quality gates external checks; CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
-33 rows — done 6 · partial 16 · stub 1 · missing 10.
-Worst gaps: custom-field types incomplete · swimlanes backend-only · board card config · matrix reports · external tracker integration.
+33 rows — done 8 · partial 15 · stub 0 · missing 10.
+Worst gaps: swimlane grouping dimensions · matrix reports · external tracker integration.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
 49 rows — done 2 · partial 14 · stub 1 · missing 32.

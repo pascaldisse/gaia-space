@@ -5,7 +5,7 @@ import { WorkspaceHeader } from "../components/WorkspaceHeader";
 
 const SCOPE_TYPES: ScopeType[] = ["global", "project", "team", "channel", "document"];
 const CF_ENTITY_TYPES = ["issue", "profile", "team", "membership"];
-const CF_TYPES: CfType[] = ["text", "int", "date", "enum", "profile", "bool"];
+const CF_TYPES: CfType[] = ["text", "text_list", "int", "int_list", "enum", "enum_list", "open_enum", "open_enum_list", "bool", "date", "datetime", "percentage", "fraction", "profile", "profile_list", "team", "location", "project", "url", "contact", "contact_list", "autonumber", "issue", "issue_list"];
 const blankRole = () => ({ name: "", description: "" });
 const blankCf = () => ({ entity_type: "issue", cf_type: "text" as CfType, name: "", constraints: "" });
 
@@ -94,7 +94,7 @@ export default function Admin() {
     if (!f.name.trim()) { setError("Custom field name is required."); return; }
     try {
       let constraints_json: string | null = null;
-      if (f.cf_type === "enum") {
+      if ((f.cf_type === "enum" || f.cf_type === "enum_list")) {
         const options = f.constraints.split(",").map(s => s.trim()).filter(Boolean);
         if (options.length === 0) throw new Error("Enum fields need comma-separated options.");
         constraints_json = JSON.stringify({ options });
@@ -181,7 +181,7 @@ export default function Admin() {
         <div class="inline-form-col">
           <input placeholder="Field name" value={cfForm().name} onInput={e => setCfForm({ ...cfForm(), name: e.currentTarget.value })} />
           <select value={cfForm().cf_type} onChange={e => setCfForm({ ...cfForm(), cf_type: e.currentTarget.value as CfType })}><For each={CF_TYPES}>{t => <option value={t}>{t}</option>}</For></select>
-          <Show when={cfForm().cf_type === "enum"}><input placeholder="Comma-separated options" value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
+          <Show when={(cfForm().cf_type === "enum" || cfForm().cf_type === "enum_list")}><input placeholder="Comma-separated options" value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
           <Show when={cfForm().cf_type === "int" || cfForm().cf_type === "text"}><input placeholder='Constraints JSON e.g. {"min":0,"max":100}' value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
           <button class="primary" onClick={saveCfDefinition}>Add field</button>
         </div>

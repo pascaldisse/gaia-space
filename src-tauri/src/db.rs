@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 24;
+pub const SCHEMA_VERSION: i64 = 25;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -199,6 +199,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 22 { tx.execute_batch(SCHEMA_V22)?; }
     if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
     if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
+    if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -330,6 +331,10 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
 "#;
+pub(crate) const SCHEMA_V25: &str = r#"
+CREATE TABLE IF NOT EXISTS board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
+"#;
+
 pub(crate) const SCHEMA_V24: &str = r#"
 CREATE TABLE IF NOT EXISTS review_external_checks (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, check_name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','SUCCEEDED','FAILED')), details TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(review_id,check_name));
 "#;
@@ -655,7 +660,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 24);
+        assert_eq!(SCHEMA_VERSION, 25);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

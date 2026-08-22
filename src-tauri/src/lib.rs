@@ -170,6 +170,8 @@ pub fn run() {
             issues::list_board_columns,
             issues::save_board_column,
             issues::delete_board_column,
+            issues::get_board_card_settings,
+            issues::save_board_card_settings,
             issues::move_issue_on_board,
             issues::list_board_issues,
             issues::list_backlog_issues,

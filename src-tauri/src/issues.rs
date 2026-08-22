@@ -85,6 +85,11 @@ pub struct Swimlane {
     pub ordering: i64,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BoardCardSettings {
+    pub board_id: String,
+    pub fields: Vec<String>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlanningTag {
     pub id: String,
     pub project_id: String,
@@ -294,10 +299,12 @@ fn list_issues_on(
     status_id: Option<&str>,
     assignee_id: Option<&str>,
     tag_id: Option<&str>,
+    custom_field_id: Option<&str>,
+    custom_field_value_json: Option<&str>,
     include_archived: bool,
 ) -> Result<Vec<Issue>> {
     let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
-    sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6=1 OR i.archived=0) ORDER BY i.project_id,i.number");
+    sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6 IS NULL OR EXISTS(SELECT 1 FROM cf_values cv WHERE cv.entity_id=i.id AND cv.definition_id=?6 AND (?7 IS NULL OR cv.value_json=?7))) AND (?8=1 OR i.archived=0) ORDER BY i.project_id,i.number");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(
         params![
@@ -306,6 +313,8 @@ fn list_issues_on(
             status_id,
             assignee_id,
             tag_id,
+            custom_field_id,
+            custom_field_value_json,
             include_archived
         ],
         read_issue,
@@ -324,6 +333,8 @@ pub fn list_issues(
     status_id: Option<String>,
     assignee_id: Option<String>,
     tag_id: Option<String>,
+    custom_field_id: Option<String>,
+    custom_field_value_json: Option<String>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Issue>> {
     let c = db::conn()?;
@@ -334,6 +345,8 @@ pub fn list_issues(
         status_id.as_deref(),
         assignee_id.as_deref(),
         tag_id.as_deref(),
+        custom_field_id.as_deref(),
+        custom_field_value_json.as_deref(),
         include_archived.unwrap_or(false),
     )
 }
@@ -811,6 +824,52 @@ pub fn delete_sprint(id: String) -> Result<()> {
     ))?;
     err(c.execute("DELETE FROM sprints WHERE id=?1", [id]))?;
     Ok(())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_board_card_settings(board_id: String) -> Result<BoardCardSettings> {
+    let c = db::conn()?;
+    let json: Option<String> = err(c
+        .query_row(
+            "SELECT fields_json FROM board_card_settings WHERE board_id=?1",
+            [&board_id],
+            |r| r.get(0),
+        )
+        .optional())?;
+    let fields = json
+        .map(|value| serde_json::from_str(&value).map_err(|e| e.to_string()))
+        .transpose()?
+        .unwrap_or_else(|| {
+            vec![
+                "priority".into(),
+                "due_date".into(),
+                "assignees".into(),
+                "checklists".into(),
+                "subitems".into(),
+            ]
+        });
+    Ok(BoardCardSettings { board_id, fields })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_board_card_settings(settings: BoardCardSettings) -> Result<BoardCardSettings> {
+    const CARD_FIELDS: &[&str] = &[
+        "priority",
+        "due_date",
+        "assignees",
+        "checklists",
+        "subitems",
+    ];
+    if settings
+        .fields
+        .iter()
+        .any(|field| !CARD_FIELDS.contains(&field.as_str()))
+    {
+        return Err("Unsupported board card field".into());
+    }
+    let c = db::conn()?;
+    let json = serde_json::to_string(&settings.fields).map_err(|e| e.to_string())?;
+    err(c.execute("INSERT INTO board_card_settings(board_id,fields_json) VALUES(?1,?2) ON CONFLICT(board_id) DO UPDATE SET fields_json=excluded.fields_json", params![settings.board_id, json]))?;
+    Ok(settings)
 }
 
 fn read_swimlane(r: &rusqlite::Row<'_>) -> rusqlite::Result<Swimlane> {

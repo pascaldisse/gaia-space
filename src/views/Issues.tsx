@@ -1,5 +1,6 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
+import { platformApi } from "../api/platform";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
@@ -16,21 +17,26 @@ export default function Issues() {
   const [statusFilter, setStatusFilter] = createSignal("");
   const [tagFilter, setTagFilter] = createSignal("");
   const [assigneeFilter, setAssigneeFilter] = createSignal("");
+  const [customFieldFilter, setCustomFieldFilter] = createSignal("");
+  const [customValueFilter, setCustomValueFilter] = createSignal("");
   const [selected, setSelected] = createSignal<Issue>();
   const [form, setForm] = createSignal(blank());
   const [error, setError] = createSignal("");
   const [issues, { refetch: reloadIssues }] = createResource(
-    () => [projectId(), query(), statusFilter(), tagFilter(), assigneeFilter()] as const,
-    ([project_id, text, status_id, tag_id, assignee_id]) => planningApi.issues({
+    () => [projectId(), query(), statusFilter(), tagFilter(), assigneeFilter(), customFieldFilter(), customValueFilter()] as const,
+    ([project_id, text, status_id, tag_id, assignee_id, custom_field_id, custom_value]) => planningApi.issues({
       project_id: project_id || undefined,
       text: text || undefined,
       status_id: status_id || undefined,
       tag_id: tag_id || undefined,
       assignee_id: assignee_id || undefined,
+      custom_field_id: custom_field_id || undefined,
+      custom_field_value_json: custom_field_id && custom_value ? JSON.stringify(custom_value) : undefined,
     }),
   );
   const [statuses, { refetch: reloadStatuses }] = createResource(projectId, id => id ? planningApi.statuses(id) : Promise.resolve([]));
   const [tags, { refetch: reloadTags }] = createResource(projectId, id => id ? planningApi.tags(id) : Promise.resolve([]));
+  const [customFields] = createResource(projectId, id => id ? platformApi.cfDefinitions(`issue:${id}`) : Promise.resolve([]));
   let deepLinkSequence = 0;
   const issueRoute = (issue: Issue) => ({ view: "Issues", entityType: "issue", entityId: issue.id, projectId: issue.project_id || projectId() || undefined });
   const select = (issue: Issue) => {
@@ -131,6 +137,8 @@ export default function Issues() {
           <select aria-label="Filter by status" value={statusFilter()} onChange={event => setStatusFilter(event.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
           <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
           <ProfilePicker label="Assignee" value={assigneeFilter()} onChange={setAssigneeFilter} allowAll />
+          <select aria-label="Filter by custom field" value={customFieldFilter()} disabled={!projectId()} onChange={event => { setCustomFieldFilter(event.currentTarget.value); setCustomValueFilter(""); }}><option value="">All custom fields</option><For each={customFields()}>{field => <option value={field.id}>{field.name}</option>}</For></select>
+          <Show when={customFieldFilter()}><input aria-label="Filter custom field value" placeholder="Exact custom value" value={customValueFilter()} onInput={event => setCustomValueFilter(event.currentTarget.value)} /></Show>
         </div>
         <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
         <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>

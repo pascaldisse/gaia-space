@@ -1941,7 +1941,7 @@ async fn cmd(
         let status_id = arg::<Option<String>>(&body, "status_id").ok().flatten();
         let assignee_id = arg::<Option<String>>(&body, "assignee_id").ok().flatten();
         let tag_id = arg::<Option<String>>(&body, "tag_id").ok().flatten();
-        return match issues::list_issues(None, text, status_id, assignee_id, tag_id, include_archived) {
+        return match issues::list_issues(None, text, status_id, assignee_id, tag_id, None, None, include_archived) {
             Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|issue| project_readable(&user,&issue.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
         };
@@ -2080,7 +2080,7 @@ async fn cmd(
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
     "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
-    "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, include_archived: Option<bool>),
+    "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
     "list_jobs" => pipelines::list_jobs(),
