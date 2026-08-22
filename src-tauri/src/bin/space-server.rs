@@ -512,11 +512,21 @@ fn registry_repo_auth(
     drop(c);
     match project_id {
         Some(project_id) => {
-            if project_readable(&user, &project_id).unwrap_or(false) {
-                Ok(user)
-            } else {
-                Err(denied())
+            if !project_readable(&user, &project_id).unwrap_or(false) {
+                return Err(denied());
             }
+            // Reading a project's repository is membership; publishing into it is not
+            // (☎Kali-VIII round 3): a member without a WRITER/MANAGER ACL row must not be
+            // able to push a release. Only the project's owner (or an admin, handled above)
+            // publishes without an explicit grant.
+            if write
+                && !project_owner(&project_id)
+                    .unwrap_or(None)
+                    .is_some_and(|owner| owner == user.profile_id)
+            {
+                return Err(denied());
+            }
+            Ok(user)
         }
         // An explicit ACL that does not name this caller is a refusal, not a fallthrough.
         None if acl_exists > 0 => Err(denied()),
@@ -4103,6 +4113,42 @@ mod tests {
                 .await
                 .status(),
             StatusCode::FORBIDDEN
+        );
+
+        // Membership reads the project's repository; publishing into it needs the owner or
+        // an explicit WRITER/MANAGER grant, so a plain member cannot push a release.
+        let c = db::conn().unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('proj-pkg','pb')",
+            [],
+        )
+        .unwrap();
+        drop(c);
+        assert_eq!(
+            registry_nuget_get(bearer("tb"), Path(("repo-owned".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            registry_nuget_put(
+                bearer("tb"),
+                Path(("repo-owned".into(), "Pkg/1.0.0/Pkg.1.0.0.nupkg".into())),
+                Bytes::from_static(b"nupkg"),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            registry_nuget_put(
+                bearer("ta"),
+                Path(("repo-owned".into(), "Pkg/1.0.0/Pkg.1.0.0.nupkg".into())),
+                Bytes::from_static(b"nupkg"),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
         );
 
         // An account admin still reaches both, and the unowned legacy repository is unchanged.

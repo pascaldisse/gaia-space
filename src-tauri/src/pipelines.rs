@@ -1348,6 +1348,21 @@ fn publish_package_version_tx(
     if payload_filename.is_some() != payload_content.is_some() {
         return Err("payload filename and content must be supplied together".into());
     }
+    // Read-check-write is one critical section: two publishers could otherwise both see
+    // "not published yet" and the second would overwrite the first (☎Kali-VIII B1 second
+    // half). `IMMEDIATE` takes the write lock up front, so the loser waits instead of
+    // racing. A caller that is already inside a transaction keeps its own.
+    let guard: Option<rusqlite::Transaction<'_>> = conn.unchecked_transaction().ok();
+    if guard.is_some() {
+        // A deferred transaction only takes the write lock at its first write, which would
+        // leave the check itself racy; this no-op write promotes it now, so a concurrent
+        // publisher of the same version waits rather than overwriting.
+        conn.execute(
+            "UPDATE package_repositories SET id=id WHERE id=?1",
+            params![repository_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let format: String = conn
         .query_row(
             "SELECT format FROM package_repositories WHERE id=?1",
@@ -1366,10 +1381,30 @@ fn publish_package_version_tx(
             |r| r.get(0),
         )
         .ok();
+    let stored_files = conn
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE id=?1",
+            params![&version_id_guard],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+        .and_then(|v| v.get("_files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
     if existing_immutable == Some(true) {
-        return Err(format!(
-            "package version {package_name}@{version} is immutable and cannot be republished"
-        ));
+        // Immutable means "published bytes never change", not "one file per version": a
+        // Maven deploy of the same GAV ships .pom, .jar and checksums as separate requests,
+        // and with an immutable-by-default repository the second one used to be refused
+        // outright (☎Kali-VIII B1 regression). A brand-new asset name is therefore allowed;
+        // replacing an asset already stored, or a metadata-only republish, is not.
+        let adds_new_asset = payload_filename
+            .is_some_and(|filename| !stored_files.contains_key(filename));
+        if !adds_new_asset {
+            return Err(format!(
+                "package version {package_name}@{version} is immutable and cannot be republished"
+            ));
+        }
     }
     let mut meta: serde_json::Value = match metadata_json {
         Some(s) if !s.trim().is_empty() => {
@@ -1442,6 +1477,9 @@ fn publish_package_version_tx(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
+    if let Some(guard) = guard {
+        guard.commit().map_err(|e| e.to_string())?;
+    }
     Ok(PackageVersion {
         id,
         repository_id: repository_id.into(),
@@ -2481,6 +2519,39 @@ mod tests {
             "manifest-A",
             "an immutable tag must still serve the bytes it was published with"
         );
+
+        // A Maven deploy of one GAV arrives as several requests. Immutable means the
+        // published bytes never change, not that a version may hold a single file, so a
+        // brand-new asset name is accepted while a metadata-only republish is not.
+        let second_asset = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("app.pom"),
+            Some(b"pom-bytes"),
+            Some(true),
+        )
+        .expect("a new asset for an immutable version is part of the same deploy");
+        let meta: serde_json::Value =
+            serde_json::from_str(&second_asset.metadata_json.unwrap()).unwrap();
+        assert!(meta["_files"]["manifest.json"].is_object());
+        assert!(meta["_files"]["app.pom"].is_object());
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "manifest-A");
+        assert!(publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            Some(r#"{"license":"MIT"}"#),
+            None,
+            None,
+            Some(true),
+        )
+        .is_err());
         sweep(&db_path);
         sweep(&base_dir);
     }
