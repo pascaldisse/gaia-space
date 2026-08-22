@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyCommand, mergeCommandListings, slashPrefix } from "./chatCommands";
+import { applyCommand, mapWithLimit, mergeCommandListings, slashPrefix } from "./chatCommands";
 import type { CommandListing } from "./api/applications";
 
 const listing = (over: Partial<CommandListing>): CommandListing => ({
@@ -60,5 +60,36 @@ describe("slash command discovery", () => {
 
   it("completes the draft with a trailing space so arguments can follow", () => {
     expect(applyCommand("deploy")).toBe("/deploy ");
+  });
+
+  it("never has more than the limit in flight and stops when superseded", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let started = 0;
+    const bots = Array.from({ length: 12 }, (_, i) => i);
+    const results = await mapWithLimit(bots, 4, async (bot) => {
+      started++;
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight--;
+      return bot;
+    });
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(results).toHaveLength(12);
+    expect(started).toBe(12);
+
+    let cancelledAfter = 0;
+    const partial = await mapWithLimit(
+      bots,
+      2,
+      async (bot) => {
+        cancelledAfter++;
+        return bot;
+      },
+      () => cancelledAfter >= 3,
+    );
+    expect(cancelledAfter).toBeLessThan(12);
+    expect(partial.length).toBeLessThan(12);
   });
 });

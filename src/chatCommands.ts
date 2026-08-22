@@ -50,6 +50,36 @@ export function mergeCommandListings(
   );
 }
 
+/** How many bot endpoints one keystroke may be in flight to at once. */
+export const COMMAND_FANOUT_LIMIT = 4;
+
+/**
+ * Bounded fan-out. A workspace with fifty bots must not turn one keystroke into fifty
+ * simultaneous outbound requests, and a superseded query must stop dispatching the
+ * moment it is superseded — `cancelled` is consulted before every call, so the work
+ * already scheduled is the only work that is wasted.
+ */
+export async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+  cancelled: () => boolean = () => false,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      if (cancelled()) return;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker),
+  );
+  return results.filter((value) => value !== undefined) as R[];
+}
+
 /** Picking an entry completes the command and leaves the caret after a space. */
 export function applyCommand(name: string): string {
   return `/${name} `;

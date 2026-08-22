@@ -355,10 +355,19 @@ async fn app_create_issue(
         )
             .into_response());
     }
+    // SQLite's NOT NULL accepts "": an empty title is refused here, where the request is.
+    let title = input.title.trim().to_string();
+    if title.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "title_required"})),
+        )
+            .into_response());
+    }
     issues::create_issue(issues::IssueInput {
         id: None,
         project_id,
-        title: input.title,
+        title,
         description: input.description,
         status_id: None,
         assignee_id: None,
@@ -1760,6 +1769,17 @@ fn authorize_command(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let policy =
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
+    // Slash-command discovery tells the bot who is typing. That identity is the
+    // session's, never the body's: otherwise any logged-in caller could ask a bot for
+    // another person's menu — and be announced to a third party as them.
+    // `user_id` is not in `bind_session_identity` because elsewhere it legitimately
+    // names someone else, so the rebinding is done here, for this command only.
+    if name == "list_chatbot_commands" {
+        if let Value::Object(object) = &mut *body {
+            object.insert("userId".to_string(), json!(user.profile_id));
+            object.insert("user_id".to_string(), json!(user.profile_id));
+        }
+    }
     if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
@@ -3651,6 +3671,17 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(created.0.title, "from app");
+        let empty_title = app_create_issue(
+            bearer(&token),
+            Path("p-granted".to_string()),
+            Json(AppIssueInput {
+                title: "   ".into(),
+                description: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(empty_title.status(), StatusCode::BAD_REQUEST);
         let still_denied = app_create_issue(
             bearer(&token),
             Path("p-other".to_string()),
@@ -3662,6 +3693,21 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(still_denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// ☎Kali-VIII finding: the bot is told who is typing, so that identity must be the
+    /// session's. A logged-in caller naming someone else would have a third-party bot
+    /// announced to as — and answered for — that other person.
+    #[tokio::test]
+    async fn slash_command_discovery_speaks_for_the_session_and_never_a_named_stranger() {
+        let _serial = test_lock();
+        setup();
+        let mut body = json!({"chatbotId": "bot-1", "userId": "pb", "prefix": "/dep"});
+        let alice = user_by_session_token("ta").unwrap();
+        authorize_command(&alice, "list_chatbot_commands", &mut body).unwrap();
+        assert_eq!(body["userId"], "pa");
+        assert_eq!(body["user_id"], "pa");
+        assert_eq!(body["prefix"], "/dep");
     }
 
     #[tokio::test]

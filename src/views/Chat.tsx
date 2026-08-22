@@ -15,7 +15,7 @@ import {
   type ProfileLite,
 } from "../api/chat";
 import { applicationsApi } from "../api/applications";
-import { applyCommand, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
+import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -179,13 +179,14 @@ export default function Chat() {
     if (prefix === null || !profile || !bots.length) { setCommandEntries([]); return; }
     let live = true;
     onCleanup(() => { live = false; });
-    // Debounced: one keystroke must not fan out to every bot endpoint.
+    // Debounced AND bounded: one keystroke must not fan out to every bot endpoint at
+    // once, and a superseded query stops dispatching instead of running to completion.
     const timer = setTimeout(async () => {
-      const answers = await Promise.all(bots.map(async (bot) => {
+      const answers = await mapWithLimit(bots, COMMAND_FANOUT_LIMIT, async (bot) => {
         try {
           return { listing: await applicationsApi.chatbotCommands(bot.id, profile, prefix), bot_name: bot.display_name };
         } catch { return null; }
-      }));
+      }, () => !live);
       if (!live) return;
       setCommandEntries(mergeCommandListings(answers.filter((a) => a !== null) as { listing: Awaited<ReturnType<typeof applicationsApi.chatbotCommands>>; bot_name: string }[]));
     }, 150);
