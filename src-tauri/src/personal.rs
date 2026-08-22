@@ -508,6 +508,17 @@ pub struct NotificationInput {
     pub body: Option<String>,
     pub entity_type: Option<String>,
     pub entity_id: Option<String>,
+    /// Optional subject the event belongs to (org/team/project/location/profile/entity).
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SubscriptionScope {
+    pub profile_id: String,
+    pub event_type: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub enabled: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SubscriptionSetting {
@@ -536,8 +547,14 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
         return Err("Notification recipient, event type, and title are required".into());
     }
     valid_anchor(&input.entity_type, &input.entity_id)?;
-    let enabled: bool = err(c.query_row("SELECT coalesce((SELECT enabled FROM subscription_settings WHERE profile_id=?1 AND event_type=?2),1)", params![input.recipient_id, input.event_type], |row| row.get(0)))?;
-    if !enabled {
+    valid_target(&input.target_type, &input.target_id)?;
+    if !subscription_enabled_on(
+        c,
+        &input.recipient_id,
+        &input.event_type,
+        input.target_type.as_deref(),
+        input.target_id.as_deref(),
+    )? {
         return Ok(None);
     }
     let id = input.id.clone().unwrap_or_else(|| new_id("notification"));
@@ -574,6 +591,99 @@ pub fn mark_notification_read(id: String) -> Result<()> {
     ))? == 0
     {
         return Err("Notification not found".into());
+    }
+    Ok(())
+}
+const TARGET_TYPES: [&str; 6] = ["org", "team", "project", "location", "profile", "entity"];
+fn valid_target(target_type: &Option<String>, target_id: &Option<String>) -> Result<()> {
+    if target_type.is_some() != target_id.is_some() {
+        return Err("Subscription targets require both target type and target ID".into());
+    }
+    if let Some(kind) = target_type.as_deref() {
+        if !TARGET_TYPES.contains(&kind) {
+            return Err(format!("Unknown subscription target type: {kind}"));
+        }
+    }
+    Ok(())
+}
+/// Precedence, most specific first: scope on (event,target) → scope on ('*',target)
+/// → per-event setting → subscribed by default. A disabled row at any level wins
+/// over the levels below it.
+pub(crate) fn subscription_enabled_on(
+    c: &Connection,
+    profile_id: &str,
+    event_type: &str,
+    target_type: Option<&str>,
+    target_id: Option<&str>,
+) -> Result<bool> {
+    if let (Some(kind), Some(id)) = (target_type, target_id) {
+        let scoped: Option<bool> = err(c.query_row(
+            "SELECT enabled FROM subscription_scopes WHERE profile_id=?1 AND target_type=?3 AND target_id=?4 AND event_type IN (?2,'*') ORDER BY event_type='*' LIMIT 1",
+            params![profile_id, event_type, kind, id],
+            |row| row.get(0),
+        ).optional())?;
+        if let Some(enabled) = scoped {
+            return Ok(enabled);
+        }
+    }
+    err(c.query_row("SELECT coalesce((SELECT enabled FROM subscription_settings WHERE profile_id=?1 AND event_type=?2),1)", params![profile_id, event_type], |row| row.get(0)))
+}
+fn read_scope(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubscriptionScope> {
+    Ok(SubscriptionScope {
+        profile_id: row.get(0)?,
+        event_type: row.get(1)?,
+        target_type: row.get(2)?,
+        target_id: row.get(3)?,
+        enabled: row.get(4)?,
+    })
+}
+pub(crate) fn list_subscription_scopes_on(
+    c: &Connection,
+    profile_id: &str,
+) -> Result<Vec<SubscriptionScope>> {
+    let mut statement = err(c.prepare("SELECT profile_id,event_type,target_type,target_id,enabled FROM subscription_scopes WHERE profile_id=?1 ORDER BY target_type,target_id,event_type"))?;
+    let rows = err(statement.query_map([profile_id], read_scope))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+pub(crate) fn save_subscription_scope_on(
+    c: &Connection,
+    scope: SubscriptionScope,
+) -> Result<SubscriptionScope> {
+    if scope.profile_id.trim().is_empty()
+        || scope.event_type.trim().is_empty()
+        || scope.target_id.trim().is_empty()
+    {
+        return Err("Subscription profile, event type, and target ID are required".into());
+    }
+    valid_target(&Some(scope.target_type.clone()), &Some(scope.target_id.clone()))?;
+    err(c.execute("INSERT INTO subscription_scopes(profile_id,event_type,target_type,target_id,enabled) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,event_type,target_type,target_id) DO UPDATE SET enabled=excluded.enabled", params![scope.profile_id, scope.event_type, scope.target_type, scope.target_id, scope.enabled]))?;
+    Ok(scope)
+}
+/// Subscriptions scoped to a subject for one profile.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_subscription_scopes(profile_id: String) -> Result<Vec<SubscriptionScope>> {
+    list_subscription_scopes_on(&db::conn()?, &profile_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_subscription_scope(scope: SubscriptionScope) -> Result<SubscriptionScope> {
+    save_subscription_scope_on(&db::conn()?, scope)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_subscription_scope(
+    profile_id: String,
+    event_type: String,
+    target_type: String,
+    target_id: String,
+) -> Result<()> {
+    let c = db::conn()?;
+    if err(c.execute(
+        "DELETE FROM subscription_scopes WHERE profile_id=?1 AND event_type=?2 AND target_type=?3 AND target_id=?4",
+        params![profile_id, event_type, target_type, target_id],
+    ))? == 0
+    {
+        return Err("Subscription scope not found".into());
     }
     Ok(())
 }
@@ -1094,6 +1204,61 @@ mod tests {
         assert_eq!(todo.source_entity_type.as_deref(), Some("review"));
         assert_eq!(todo.source_entity_id.as_deref(), Some("r-1"));
     }
+    fn feed_input(event: &str, target: Option<(&str, &str)>) -> NotificationInput {
+        NotificationInput {
+            id: None,
+            recipient_id: "p".into(),
+            event_type: event.into(),
+            title: "Event".into(),
+            body: None,
+            entity_type: None,
+            entity_id: None,
+            target_type: target.map(|t| t.0.to_string()),
+            target_id: target.map(|t| t.1.to_string()),
+        }
+    }
+    #[test]
+    fn scoped_subscription_beats_event_default_and_wildcard() {
+        let c = conn();
+        // Muted globally for the event, but re-enabled for one project target.
+        c.execute("INSERT INTO subscription_settings(profile_id,event_type,enabled) VALUES('p','issue.created',0)", []).unwrap();
+        save_subscription_scope_on(
+            &c,
+            SubscriptionScope {
+                profile_id: "p".into(),
+                event_type: "issue.created".into(),
+                target_type: "project".into(),
+                target_id: "project".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        // Wildcard mute on another project.
+        save_subscription_scope_on(
+            &c,
+            SubscriptionScope {
+                profile_id: "p".into(),
+                event_type: "*".into(),
+                target_type: "project".into(),
+                target_id: "other".into(),
+                enabled: false,
+            },
+        )
+        .unwrap();
+        assert!(emit_notification_on(&c, &feed_input("issue.created", Some(("project", "project")))).unwrap().is_some(), "scope re-enables a muted event");
+        assert!(emit_notification_on(&c, &feed_input("issue.created", None)).unwrap().is_none(), "unscoped event stays muted");
+        assert!(emit_notification_on(&c, &feed_input("issue.created", Some(("project", "other")))).unwrap().is_none(), "wildcard scope mutes the target");
+        assert!(emit_notification_on(&c, &feed_input("blog.published", Some(("project", "project")))).unwrap().is_some(), "unknown event defaults to subscribed");
+        // Independent check: the count of stored rows, not the return values.
+        assert_eq!(c.query_row("SELECT count(*) FROM notifications", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(list_subscription_scopes_on(&c, "p").unwrap().len(), 2);
+    }
+    #[test]
+    fn invalid_subscription_target_is_rejected() {
+        let c = conn();
+        assert!(save_subscription_scope_on(&c, SubscriptionScope { profile_id: "p".into(), event_type: "e".into(), target_type: "galaxy".into(), target_id: "x".into(), enabled: true }).is_err());
+        assert!(emit_notification_on(&c, &NotificationInput { target_id: None, ..feed_input("e", Some(("project", "project"))) }).is_err(), "half a target is an error");
+    }
     #[test]
     fn disabled_subscription_suppresses_emit() {
         let c = conn();
@@ -1108,6 +1273,8 @@ mod tests {
                 body: None,
                 entity_type: None,
                 entity_id: None,
+                target_type: None,
+                target_id: None,
             },
         )
         .unwrap();

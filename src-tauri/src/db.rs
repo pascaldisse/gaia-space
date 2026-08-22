@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 27;
+pub const SCHEMA_VERSION: i64 = 29;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -211,6 +211,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V26)?;
     }
     if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
+    // V29: subscriptions gain a target scope (org/team/project/location/profile/entity).
+    if version < 29 { tx.execute_batch(SCHEMA_V29)?; }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -341,6 +343,11 @@ CREATE INDEX IF NOT EXISTS protected_branch_rules_project_pattern ON protected_b
 /// an MR source branch advances.
 pub(crate) const SCHEMA_V22: &str = r#"
 CREATE INDEX IF NOT EXISTS reviews_project_target_source ON reviews(project_id, target_branch, source_branch);
+"#;
+/// Personal feeds: a subscription can be scoped to a subject, not only an event type.
+pub(crate) const SCHEMA_V29: &str = r#"
+CREATE TABLE IF NOT EXISTS subscription_scopes (profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, event_type TEXT NOT NULL, target_type TEXT NOT NULL CHECK(target_type IN ('org','team','project','location','profile','entity')), target_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type, target_type, target_id));
+CREATE INDEX IF NOT EXISTS subscription_scopes_target ON subscription_scopes(target_type, target_id);
 "#;
 /// Auth-only credentials; V26 is owned by packages.
 pub(crate) const SCHEMA_V27: &str = r#"
@@ -688,7 +695,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 27);
+        assert_eq!(SCHEMA_VERSION, 29);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

@@ -955,6 +955,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_safe_merge_runs"
         | "list_sprints"
         | "list_subscription_settings"
+        | "list_subscription_scopes"
         | "list_swimlanes" => CommandPolicy::Session,
         "list_team_memberships"
         | "list_teams"
@@ -979,6 +980,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "save_checklist_item"
         | "save_planning_tag"
         | "save_subscription_setting"
+        | "save_subscription_scope"
+        | "delete_subscription_scope"
         | "save_swimlane" => CommandPolicy::Session,
         "save_time_tracking_entry"
         | "schedule_deployment"
@@ -2155,6 +2158,7 @@ async fn cmd(
     "delete_quality_gate_rule" => review::delete_quality_gate_rule(id: String),
     "delete_role_assignment" => platform::delete_role_assignment(id: String),
     "delete_sprint" => issues::delete_sprint(id: String),
+    "delete_subscription_scope" => personal::delete_subscription_scope(profile_id: String, event_type: String, target_type: String, target_id: String),
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
     "delete_swimlane" => issues::delete_swimlane(id: String),
     "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
@@ -2236,6 +2240,7 @@ async fn cmd(
     "list_roles" => platform::list_roles(),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
     "list_sprints" => issues::list_sprints(board_id: Option<String>),
+    "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
     "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
     "list_team_memberships" => platform::list_team_memberships(team_id: Option<String>, profile_id: Option<String>),
@@ -2275,6 +2280,7 @@ async fn cmd(
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
     "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
+    "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
     "save_swimlane" => issues::save_swimlane(input: issues::SwimlaneInput),
     "save_time_tracking_entry" => issues::save_time_tracking_entry(input: issues::TimeEntryInput),
