@@ -155,6 +155,9 @@ export const reviewApi = {
     invoke<QualityGateRule[]>("list_quality_gate_rules", { projectId }),
   createStack: (input: NewReviewStack) => invoke<ReviewStack>("create_review_stack", { input }),
   listStacks: (projectId: string) => invoke<ReviewStack[]>("list_review_stacks", { projectId }),
+  listMyStacks: (profileId: string) => invoke<ReviewStack[]>("list_my_review_stacks", { profileId }),
+  // Dissolves the stacking relation only; member merge requests and branches survive.
+  removeStack: (stackId: string) => invoke<void>("remove_review_stack", { stackId }),
   // committer defaults to the repo's configured signature; pass null explicitly so the
   // Rust Option arms are unambiguous over the IPC boundary.
   restackStack: (stackId: string, dryRun: boolean, committerName: string | null = null, committerEmail: string | null = null) =>

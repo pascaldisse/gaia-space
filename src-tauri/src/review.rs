@@ -561,6 +561,91 @@ pub fn list_review_stacks(project_id: String) -> Result<Vec<ReviewStack>> {
         Ok(ReviewStack { id, project_id, repo_path, target_branch, source_branch, review_ids })
     }).collect()
 }
+fn stack_rows_tx(c: &Connection, sql: &str, arg: &str) -> Result<Vec<ReviewStack>> {
+    let rows: Vec<(String, String, String, String, String)> = {
+        let mut s = c.prepare(sql).map_err(|e| e.to_string())?;
+        let collected = s
+            .query_map(rusqlite::params![arg], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        collected
+    };
+    rows.into_iter()
+        .map(
+            |(id, project_id, repo_path, target_branch, source_branch)| {
+                let mut items = c
+                    .prepare(
+                        "SELECT review_id FROM review_stack_items WHERE stack_id=?1 ORDER BY ordering",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let review_ids = items
+                    .query_map(rusqlite::params![&id], |r| r.get(0))
+                    .map_err(|e| e.to_string())?
+                    .collect::<std::result::Result<Vec<String>, _>>()
+                    .map_err(|e| e.to_string())?;
+                Ok(ReviewStack {
+                    id,
+                    project_id,
+                    repo_path,
+                    target_branch,
+                    source_branch,
+                    review_ids,
+                })
+            },
+        )
+        .collect()
+}
+
+/// Stacks that contain at least one review the profile participates in — KB
+/// `StackedDiffsService.listMyStacks`. Ordering matches `list_review_stacks`.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_my_review_stacks(profile_id: String) -> Result<Vec<ReviewStack>> {
+    let c = db::conn()?;
+    list_my_review_stacks_tx(&c, &profile_id)
+}
+
+fn list_my_review_stacks_tx(c: &Connection, profile_id: &str) -> Result<Vec<ReviewStack>> {
+    stack_rows_tx(
+        c,
+        "SELECT s.id,s.project_id,s.repo_path,s.target_branch,s.source_branch FROM review_stacks s \
+         WHERE EXISTS (SELECT 1 FROM review_stack_items i \
+           JOIN review_participants p ON p.review_id=i.review_id \
+           WHERE i.stack_id=s.id AND p.profile_id=?1) ORDER BY s.created_at",
+        profile_id,
+    )
+}
+
+/// Dissolve a stack — KB `StackedDiffsService.removeStack`. The member merge requests and
+/// their branches survive untouched; only the stacking relation goes away.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_review_stack(stack_id: String) -> Result<()> {
+    let c = db::conn()?;
+    remove_review_stack_tx(&c, &stack_id)
+}
+
+fn remove_review_stack_tx(c: &Connection, stack_id: &str) -> Result<()> {
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    let removed = tx
+        .execute(
+            "DELETE FROM review_stacks WHERE id=?1",
+            rusqlite::params![stack_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if removed == 0 {
+        return Err(format!("review stack '{stack_id}' not found"));
+    }
+    tx.execute(
+        "DELETE FROM review_stack_items WHERE stack_id=?1",
+        rusqlite::params![stack_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// When a stack parent lands, children based on its source branch are retargeted to the
 /// newly advanced target branch; no refs are changed by this database operation.
 fn retarget_stacked_children_tx(conn: &Connection, review_id: &str) -> Result<i64> {
@@ -1930,6 +2015,45 @@ mod tests {
         )
         .unwrap();
         assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+
+        drop(db_path);
+    }
+
+    /// Unstacking is a relation-only delete: the merge requests must survive it.
+    #[test]
+    fn removing_a_stack_keeps_its_merge_requests() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('s1','demo-project',1,'MR','Opened','f1','main','T','/tmp/x')", []).unwrap();
+        conn.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES('st','demo-project','/tmp/x','main','f1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES('st','s1',0)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,their_turn) VALUES('s1','default-org','Author',0)", []).unwrap();
+        let mine = list_my_review_stacks_tx(&conn, "default-org").expect("my stacks");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].review_ids, vec!["s1".to_string()]);
+        assert!(list_my_review_stacks_tx(&conn, "stranger")
+            .unwrap()
+            .is_empty());
+
+        remove_review_stack_tx(&conn, "st").expect("remove");
+        assert!(remove_review_stack_tx(&conn, "st").is_err(), "second removal reports the missing stack");
+        let stacks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM review_stacks", [], |r| r.get(0))
+            .unwrap();
+        let items: i64 = conn
+            .query_row("SELECT COUNT(*) FROM review_stack_items", [], |r| r.get(0))
+            .unwrap();
+        let reviews: i64 = conn
+            .query_row("SELECT COUNT(*) FROM reviews WHERE id='s1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!((stacks, items, reviews), (0, 0, 1));
 
         drop(db_path);
     }

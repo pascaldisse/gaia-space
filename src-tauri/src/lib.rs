@@ -259,6 +259,8 @@ pub fn run() {
             review::delete_protected_branch_rule,
             review::create_review_stack,
             review::list_review_stacks,
+            review::list_my_review_stacks,
+            review::remove_review_stack,
             review::stack_cherry_pick,
             review::restack_stack,
             review::record_external_check,

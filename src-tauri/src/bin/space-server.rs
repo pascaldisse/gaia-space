@@ -1292,6 +1292,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
         | "list_review_stacks"
+        | "list_my_review_stacks"
+        | "remove_review_stack"
         | "list_review_discussions"
         | "list_review_participants"
         | "list_reviews"
@@ -2968,6 +2970,8 @@ async fn cmd(
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
     "list_review_stacks" => review::list_review_stacks(project_id: String),
+    "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
+    "remove_review_stack" => review::remove_review_stack(stack_id: String),
     "list_review_discussions" => review::list_review_discussions(review_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
     "list_reviews" => review::list_reviews(),

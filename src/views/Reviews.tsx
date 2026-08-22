@@ -224,6 +224,16 @@ export default function Reviews() {
       setError(String(err));
     }
   }
+  // Dissolves the stack; the member merge requests stay open.
+  async function removeStack(stackId: string) {
+    try {
+      await reviewApi.removeStack(stackId);
+      setRestackSteps([]);
+      refetchStacks();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
   async function runCherryPick(e: SubmitEvent) {
     e.preventDefault();
     const id = selectedId();
@@ -497,6 +507,7 @@ export default function Reviews() {
                         <span class="hint">{stack.review_ids.length} member(s)</span>
                         <button class="ghost small" onClick={() => runRestack(stack.id, true)}>Preview restack</button>
                         <button class="ghost small" onClick={() => runRestack(stack.id, false)}>Restack</button>
+                        <button class="ghost small" onClick={() => removeStack(stack.id)}>Unstack</button>
                       </li>
                     )}
                   </For>

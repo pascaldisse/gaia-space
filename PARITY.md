@@ -23,16 +23,17 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V49/V51 → feat/w5-caldav (named calendars · feed attribution) ☀ — merged
 - V52 → feat/w6-payload (per-app Ed25519 signing keys for typed application payload dispatch) ☀
 
-TOTALS (8/8 audited, 356 rows): done 46 · partial 172 · stub 4 · missing 134. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 47 · partial 171 · stub 4 · missing 134. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.
 
 ## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md; Varuna-III stage 3)
-52 rows — done 2 · partial 22 · stub 1 · missing 27.
+52 rows — done 3 · partial 21 · stub 1 · missing 27.
 Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21); ordered MR stacks create/list and retarget open children after parent merge landed (V22; `review::tests::merged_stack_parent_retargets_open_children_only`).
-Worst gaps: stacked cherry-pick/restack UI · quality gates external checks; CODEOWNERS team owners/full gitignore negation remain partial.
+Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
+Worst gaps: quality-gate application/role principals and bypass permissions; CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
 33 rows — done 8 · partial 17 · stub 0 · missing 8.
