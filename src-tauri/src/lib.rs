@@ -48,6 +48,8 @@ pub mod payload_dispatch;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod package_registry;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod platform;
