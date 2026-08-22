@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; archived:boolean };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
 export type MeetingOccurrence = { id:string; meeting_id:string; title:string; starts_at:number; ends_at:number; location:string|null };
-export type LivekitConfig = { server_path?:string; host?:string; port?:number; api_key?:string; api_secret?:string };
+export type LivekitConfig = { server_path?:string; host?:string; port?:number; api_key?:string; api_secret?:string; egress_url?:string; recording_filepath?:string };
 export type CallJoin = { url:string; room:string; token:string };
 export type CallRecording = { egress_id:string; status:"recording"|"stopped" };
 export type LivekitStatus = { running:boolean; url:string; pid:number|null };

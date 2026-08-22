@@ -31,6 +31,11 @@ pub struct LivekitConfig {
     pub port: Option<u16>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
+    /// Optional HTTP endpoint for the LiveKit Egress RPC service. Credentials stay
+    /// in the native process and are never exposed to the Solid webview.
+    pub egress_url: Option<String>,
+    /// File path on the Egress worker; supports `{room_name}` / `{time}` templates.
+    pub recording_filepath: Option<String>,
 }
 
 impl Default for LivekitConfig {
@@ -41,6 +46,8 @@ impl Default for LivekitConfig {
             port: None,
             api_key: None,
             api_secret: None,
+            egress_url: None,
+            recording_filepath: None,
         }
     }
 }
@@ -72,6 +79,18 @@ impl LivekitConfig {
     }
     fn url(&self) -> String {
         format!("ws://{}:{}", self.host(), self.port())
+    }
+    fn egress_url(&self) -> String {
+        self.egress_url
+            .clone()
+            .or_else(|| std::env::var("LIVEKIT_EGRESS_URL").ok())
+            .unwrap_or_else(|| format!("http://{}:{}", self.host(), self.port()))
+    }
+    fn recording_filepath(&self) -> String {
+        self.recording_filepath
+            .clone()
+            .or_else(|| std::env::var("LIVEKIT_RECORDING_FILEPATH").ok())
+            .unwrap_or_else(|| "recordings/{room_name}-{time}.mp4".into())
     }
 }
 
@@ -204,6 +223,8 @@ struct VideoGrant {
     can_publish_sources: Vec<String>,
     #[serde(rename = "canSubscribe")]
     can_subscribe: bool,
+    #[serde(rename = "roomRecord")]
+    room_record: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +267,7 @@ fn token_for(
             can_publish: true,
             can_publish_sources: DEFAULT_SOURCES.into_iter().map(str::to_owned).collect(),
             can_subscribe: true,
+            room_record: false,
         },
         attributes: [(
             "room_admin".into(),
@@ -298,10 +320,8 @@ pub fn join_meeting_call(
         .optional()
         .map_err(|e| e.to_string())?;
     let is_organizer = meeting.organizer_id.as_deref() == Some(participant_id.as_str());
-    if !is_organizer && !matches!(rsvp.as_deref(), Some("invited") | Some("accepted")) {
-        return Err(
-            "Only the organizer or an invited participant can join this meeting call".into(),
-        );
+    if !is_organizer && !matches!(rsvp.as_deref(), Some("accepted")) {
+        return Err("Waiting for organizer admission: only accepted participants can join this meeting call".into());
     }
     let config = config.unwrap_or_default();
     let status = ensure_server(config.clone())?;
@@ -316,6 +336,170 @@ pub fn join_meeting_call(
             is_organizer,
         )?,
         room,
+    })
+}
+
+/// Active LiveKit room-composite Egress handle. The Egress worker writes the
+/// recording; Gaia only submits authorized start/stop requests.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Serialize)]
+pub struct CallRecording {
+    pub egress_id: String,
+    pub status: String,
+}
+
+#[cfg(feature = "desktop")]
+static RECORDINGS: LazyLock<Mutex<std::collections::BTreeMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(std::collections::BTreeMap::new()));
+
+#[cfg(feature = "desktop")]
+fn recording_authorized(
+    _app: &AppHandle,
+    meeting_id: &str,
+    participant_id: &str,
+) -> Result<String> {
+    let meeting = meetings::get_meeting_scoped(meeting_id.to_owned(), participant_id.to_owned())?
+        .ok_or("Meeting not found")?;
+    if meeting.archived {
+        return Err("Cannot record an archived meeting".into());
+    }
+    if meeting.organizer_id.as_deref() != Some(participant_id) {
+        return Err("Only the meeting organizer can control recording".into());
+    }
+    Ok(room_for_meeting(meeting_id))
+}
+
+#[cfg(feature = "desktop")]
+fn egress_token(config: &LivekitConfig, room: String) -> Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as usize;
+    let claims = LivekitClaims {
+        iss: config.api_key(),
+        sub: "gaia-space-egress".into(),
+        name: "GAIA Space recorder".into(),
+        exp: now + TOKEN_LIFETIME_SECONDS as usize,
+        nbf: now,
+        video: VideoGrant {
+            room,
+            room_join: false,
+            room_admin: true,
+            can_update_own_metadata: false,
+            can_publish: false,
+            can_publish_sources: vec![],
+            can_subscribe: false,
+            room_record: true,
+        },
+        attributes: std::collections::BTreeMap::new(),
+    };
+    encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(config.api_secret().as_bytes()),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "desktop")]
+fn egress_rpc(
+    config: &LivekitConfig,
+    method: &str,
+    room: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let endpoint = format!(
+        "{}/twirp/livekit.Egress/{method}",
+        config.egress_url().trim_end_matches('/')
+    );
+    let response = reqwest::blocking::Client::new()
+        .post(endpoint)
+        .bearer_auth(egress_token(config, room.to_owned())?)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("LiveKit Egress request failed: {e}"))?;
+    let status = response.status();
+    let payload = response.text().map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("LiveKit Egress returned {status}: {payload}"));
+    }
+    serde_json::from_str(&payload).map_err(|e| format!("LiveKit Egress returned invalid JSON: {e}"))
+}
+
+/// Start a room-composite MP4 Egress job. Requires a deployed Egress worker and
+/// writable `LIVEKIT_RECORDING_FILEPATH`; missing infrastructure fails visibly.
+#[cfg(feature = "desktop")]
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn start_meeting_recording(
+    app: AppHandle,
+    meeting_id: String,
+    participant_id: String,
+    config: Option<LivekitConfig>,
+) -> Result<CallRecording> {
+    let room = recording_authorized(&app, &meeting_id, &participant_id)?;
+    let config = config.unwrap_or_default();
+    if RECORDINGS
+        .lock()
+        .map_err(|_| "recording state lock poisoned".to_string())?
+        .contains_key(&meeting_id)
+    {
+        return Err("This meeting is already recording".into());
+    }
+    let response = egress_rpc(
+        &config,
+        "StartRoomCompositeEgress",
+        &room,
+        serde_json::json!({
+            "room_name": room,
+            "layout": "grid",
+            "file_outputs": [{ "filepath": config.recording_filepath() }],
+        }),
+    )?;
+    let egress_id = response
+        .get("egress_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or("LiveKit Egress did not return an egress_id")?
+        .to_owned();
+    RECORDINGS
+        .lock()
+        .map_err(|_| "recording state lock poisoned".to_string())?
+        .insert(meeting_id, egress_id.clone());
+    Ok(CallRecording {
+        egress_id,
+        status: "recording".into(),
+    })
+}
+
+#[cfg(feature = "desktop")]
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn stop_meeting_recording(
+    app: AppHandle,
+    meeting_id: String,
+    participant_id: String,
+    config: Option<LivekitConfig>,
+) -> Result<CallRecording> {
+    let room = recording_authorized(&app, &meeting_id, &participant_id)?;
+    let config = config.unwrap_or_default();
+    let egress_id = RECORDINGS
+        .lock()
+        .map_err(|_| "recording state lock poisoned".to_string())?
+        .get(&meeting_id)
+        .cloned()
+        .ok_or("No active recording is known for this meeting")?;
+    egress_rpc(
+        &config,
+        "StopEgress",
+        &room,
+        serde_json::json!({ "egress_id": egress_id }),
+    )?;
+    RECORDINGS
+        .lock()
+        .map_err(|_| "recording state lock poisoned".to_string())?
+        .remove(&meeting_id);
+    Ok(CallRecording {
+        egress_id,
+        status: "stopped".into(),
     })
 }
 
@@ -354,6 +538,27 @@ mod tests {
                 && decoded.claims.video.can_subscribe
         );
         assert!(decoded.claims.video.room_admin);
+        assert!(!decoded.claims.video.room_record);
         assert_eq!(decoded.claims.video.can_publish_sources, DEFAULT_SOURCES);
+    }
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn egress_token_has_only_room_record_grant() {
+        let config = LivekitConfig {
+            api_key: Some("test-key".into()),
+            api_secret: Some("test-secret".into()),
+            ..Default::default()
+        };
+        let token = egress_token(&config, room_for_meeting("m-1")).unwrap();
+        let decoded = decode::<LivekitClaims>(
+            &token,
+            &DecodingKey::from_secret(b"test-secret"),
+            &Validation::new(Algorithm::HS256),
+        )
+        .unwrap();
+        assert!(decoded.claims.video.room_record);
+        assert!(!decoded.claims.video.room_join);
+        assert!(!decoded.claims.video.can_publish);
+        assert!(!decoded.claims.video.can_subscribe);
     }
 }
