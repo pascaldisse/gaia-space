@@ -2744,11 +2744,61 @@ fn bootstrap() {
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
     }
 }
+/// Background delivery ticker configuration, read from the environment.
+///
+/// `None` = ticker disabled. Kept pure (env values in, config out) so the policy is
+/// unit-testable without spawning anything: no hardcoded behaviour, only defaults.
+fn webhook_ticker_config(secs: Option<&str>, batch: Option<&str>) -> Option<(u64, i64)> {
+    let secs = secs
+        .and_then(|x| x.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_WEBHOOK_TICK_SECS);
+    if secs == 0 {
+        return None; // explicit opt-out
+    }
+    let batch = batch
+        .and_then(|x| x.trim().parse::<i64>().ok())
+        .filter(|x| *x > 0)
+        .unwrap_or(DEFAULT_WEBHOOK_TICK_BATCH)
+        .clamp(1, 100);
+    Some((secs, batch))
+}
+const DEFAULT_WEBHOOK_TICK_SECS: u64 = 15;
+const DEFAULT_WEBHOOK_TICK_BATCH: i64 = 20;
+
+/// Spawns the retry-queue sweeper. Delivery is blocking (rusqlite + blocking HTTP), so
+/// each sweep runs on the blocking pool; a failing sweep is logged, never fatal.
+fn spawn_webhook_ticker() {
+    let Some((secs, batch)) = webhook_ticker_config(
+        env::var("SPACE_WEBHOOK_TICK_SECS").ok().as_deref(),
+        env::var("SPACE_WEBHOOK_TICK_BATCH").ok().as_deref(),
+    ) else {
+        return;
+    };
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(secs));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            match tokio::task::spawn_blocking(move || applications::process_webhook_queue(batch))
+                .await
+            {
+                Ok(Ok(done)) if !done.is_empty() => {
+                    eprintln!("webhook ticker: swept {} deliveries", done.len());
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => eprintln!("webhook ticker: sweep failed: {e}"),
+                Err(e) => eprintln!("webhook ticker: sweep task panicked: {e}"),
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
     let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
     db::set_db_path(PathBuf::from(p));
     bootstrap();
+    spawn_webhook_ticker();
     let app = Router::new()
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -2798,6 +2848,24 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webhook_ticker_config_defaults_and_optout() {
+        assert_eq!(
+            webhook_ticker_config(None, None),
+            Some((DEFAULT_WEBHOOK_TICK_SECS, DEFAULT_WEBHOOK_TICK_BATCH))
+        );
+        // explicit 0 seconds = disabled, the only way to turn the sweeper off
+        assert_eq!(webhook_ticker_config(Some("0"), Some("5")), None);
+        assert_eq!(webhook_ticker_config(Some(" 5 "), Some("7")), Some((5, 7)));
+        // garbage falls back to defaults rather than disabling delivery silently
+        assert_eq!(
+            webhook_ticker_config(Some("nope"), Some("-3")),
+            Some((DEFAULT_WEBHOOK_TICK_SECS, DEFAULT_WEBHOOK_TICK_BATCH))
+        );
+        // batch is clamped to the same bound process_webhook_queue enforces
+        assert_eq!(webhook_ticker_config(Some("30"), Some("9999")), Some((30, 100)));
+    }
     use axum::body::to_bytes;
     use std::sync::{Mutex, OnceLock};
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
