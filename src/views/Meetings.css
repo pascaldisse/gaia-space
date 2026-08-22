@@ -20,3 +20,22 @@
 .mc-organizer .ep-caption{font-family:var(--font-head);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#9fb0cc;margin-bottom:2px}
 .mc-submit{margin:16px 20px 20px;padding:11px!important;border-radius:9px!important;font-size:13px}
 @media(max-width:1000px){.mc-when{grid-template-columns:1fr}}
+
+/* Native LiveKit conference surface. Uses the existing Space tokens rather than a second theme. */
+.call-panel{display:grid;gap:12px;padding:16px;background:var(--ctl-bg)}
+.call-heading{align-items:flex-start}
+.call-heading h3{margin:0}.call-heading p{margin:3px 0 0}.call-heading .danger{border-color:var(--status-danger-ink)}
+.call-stage{min-height:180px;padding:8px;border:1px solid var(--surface-border);border-radius:10px;background:#08101f}
+.call-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:0}
+.call-tile{position:relative;display:grid;grid-template-rows:1fr auto;min-height:142px;overflow:hidden;padding:0;background:#0b1220;color:#fff;border:1px solid #263657;border-radius:8px}
+.call-tile video{width:100%;height:100%;min-height:118px;aspect-ratio:16/9;object-fit:cover;background:#060a14;border-radius:0}
+.call-screen-tile{grid-column:span 2}.call-screen-tile video{object-fit:contain}
+.call-tile footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;background:rgba(5,12,26,.94)}
+.call-tile strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem}.call-tile small{color:#a8badb;font-size:.74rem}.call-avatar{display:grid;place-items:center;min-height:118px;background:linear-gradient(135deg,#233a68,#17233f);font-family:var(--font-head);font-size:2.1rem;font-weight:700;color:var(--accent)}
+.call-empty{margin:0;padding:40px 16px;text-align:center;color:var(--text-faint)}
+.call-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.call-toolbar button{min-height:34px}.call-toolbar button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--text-strong)}
+.call-device-picker{position:relative}.call-device-picker summary{padding:7px 10px;border:1px solid var(--surface-border);border-radius:7px;background:var(--ctl-bg-raised);font-family:var(--font-head);font-weight:500;cursor:pointer}.call-device-picker[open] summary{border-color:var(--accent)}
+.call-devices{position:absolute;z-index:4;right:0;bottom:calc(100% + 8px);display:grid;gap:9px;min-width:250px;padding:12px;border:1px solid var(--surface-border);border-radius:9px;background:var(--surface);box-shadow:0 12px 28px rgba(0,0,0,.4)}
+.call-device{display:grid;gap:4px;font-size:.78rem;color:var(--text-faint)}.call-device select{max-width:250px;padding:7px 8px;border:1px solid var(--surface-border);border-radius:6px;background:var(--ctl-bg);color:var(--text)}.call-device select:focus{outline:2px solid var(--accent);outline-offset:1px}.call-device select:disabled{opacity:.6}
+.call-capture{margin:0}.call-room{display:block}.call-audio{display:none}
+@media(max-width:620px){.call-heading{gap:8px}.call-screen-tile{grid-column:span 1}.call-tiles{grid-template-columns:1fr}.call-toolbar{display:grid;grid-template-columns:1fr 1fr}.call-device-picker summary{height:100%;box-sizing:border-box}.call-devices{right:auto;left:0;bottom:auto;top:calc(100% + 8px);min-width:min(250px,calc(100vw - 64px))}}
