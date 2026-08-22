@@ -4,7 +4,7 @@ Sources: docs/space-knowledge-base/01→08 (KB) + legacy/flutter/ (legacy). Stat
 
 Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 99 pass/0 fail · vite build ✓.
 
-LEDGER (衝突禁 · same-domain double-start forbidden): ☀build-crown → WIP:☀ 07 (feat/tree-devenv-api merged aeaa227) · WIP:☀ 01 (feat/tree-review) · WIP:☀ 02 (feat/tree-fields) · WIP:☀ 04 (feat/tree-chatdocs) · WIP:☀ 06 (feat/tree-blogsearch) · WIP:☀ 08 (feat/tree-callsx) · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (feat/parity-05-auth; rebasing onto master — applications domain ceded to ☀ 07, auth tables→SCHEMA_V16).
+LEDGER (衝突禁 · same-domain double-start forbidden): ☀build-crown → WIP:☀ 07 (feat/tree-devenv-api merged aeaa227) · WIP:☀ 01 (feat/tree-review) · WIP:☀ 02 (feat/tree-fields) · WIP:☀ 04 (feat/tree-chatdocs) · WIP:☀ 06 (feat/tree-blogsearch) · WIP:☀ 08 (feat/tree-callsx) · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (feat/parity-05-auth; rebasing onto master — applications domain ceded to ☀ 07, auth tables→SCHEMA_V26 (reserved); 03 packages→SCHEMA_V27 (reserved)).
 
 TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
 
