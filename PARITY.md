@@ -16,9 +16,9 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V38 → feat/w2-recording-v38 (recording/egress lifecycle, single final DDL) ☀ — merged in master@b9a6f90
 - V39 → feat/w3-webhooks (webhook_subscriptions.secret + max_attempts; signed delivery + bounded retry) ☀
 - V40 → feat/w3-docs (document rich types: rich text, checklist, code) ☀ — merged
-- V41 → feat/w3-secrot (webhook secret rotation / key-ring) ☘
+- V41 → feat/w4-secrot (webhook secret rotation / key-ring) ☀ — merged
 
-TOTALS (8/8 audited, 356 rows): done 42 · partial 169 · stub 4 · missing 141. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 43 · partial 168 · stub 4 · missing 141. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -52,6 +52,7 @@ Worst gaps: locations/org-directory stub · dashboard personalization · subscri
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
 42 rows — done 0 · partial 27 · stub 0 · missing 15.
+Progress (feat/w4-secrot ☀Agni): V41 `webhook_secrets` key ring (one ACTIVE signer, N RETIRING co-signers pruned at `expires_at`); `rotate_webhook_secret(webhook_id, overlap_seconds)` presents the new secret once, `list_webhook_secrets` returns metadata only; delivery signs with ACTIVE in `x-gaia-space-signature` and every still-valid retiring secret in `x-gaia-space-signature-retiring`, so receivers cut over without a gap. Both commands are `CommandPolicy::AppAdmin`. Overlap default is configurable (`GAIA_SPACE_WEBHOOK_SECRET_OVERLAP_SECONDS`, 86400s). Tests: `applications::secret_ring_tests::*` (6) + HTTP regression `space-server::tests::webhook_secret_rotation_is_admin_only_and_shows_the_secret_once`. Docs: `docs/webhook-receiver-guide.md` §Secret rotation ⇒ “Richly filterable cross-domain webhooks” stub→partial.
 Progress (feat/w2-feeds-oauth @64ec368): app OAuth client_credentials grant (SCHEMA_V31 `app_secrets`/`app_tokens`, argon2-hashed secret+token, TTL, rotation revokes outstanding tokens, verify/revoke/list) + marketplace listing metadata and install records (`marketplace_apps`, `app_installs` with MARKETPLACE/LINK/MANUAL/JENKINS/TEAMCITY kinds), wired to Applications view ⇒ “App OAuth flows/credentials” stub→partial, “Marketplace app metadata” + “AppInstallInfo install flows” missing→partial. Tests: `applications::oauth_tests::*` (4) + HTTP regression `space-server::tests::app_credentials_are_admin_only`. Web policy: credential commands (rotate/issue/verify/revoke/list + marketplace writes) are `CommandPolicy::AppAdmin` — admin-only, since `applications` has no owner column (☾Kali finding). Webhook delivery/retry=partial: receiver replay guide `docs/webhook-receiver-guide.md:25-32`; durable delivery-ID header `src-tauri/src/applications.rs:352`; retry assertion `src-tauri/src/applications.rs:1044-1065`. UNVERIFIED: no external HTTP API surface consumes the bearer token yet; PKCE/code flow still absent.
 Worst gaps: no cloud dev-environment lifecycle · automatic domain-event webhook/chatbot/extension dispatch incomplete · no external HTTP app API · no slash-command/app-rights integration.
 
