@@ -6,6 +6,14 @@ Baseline gates 2026-08-22 (independent run): tsc=0 · cargo check=0 · bun test 
 
 LEDGER (衝突禁 · same-domain double-start forbidden): WIP:☀ 06 feeds + 07 OAuth/marketplace (worktree ../gaia-space-w2-feeds-oauth, branch feat/w2-feeds-oauth; SCHEMA_V29 feeds, SCHEMA_V31 app OAuth — odd versions reserved by this lane) · ☀build-crown → WIP:☀ 07 (feat/tree-devenv-api merged aeaa227) · WIP:☀ 01 (feat/tree-review) · WIP:☀ 02 (feat/tree-fields) · WIP:☀ 04 (feat/tree-chatdocs) · WIP:☀ 06 (feat/tree-blogsearch) · WIP:☀ 08 (feat/tree-callsx) · ☾shadow builders → WIP:☾ 03 packages (worktree ../gaia-space-pkg, branch feat/parity-03-packages) + WIP:☾ 05 auth (feat/parity-05-auth; rebasing onto master — applications domain ceded to ☀ 07, auth tables→SCHEMA_V27 (reserved; 03 landed as V26 @9f9c367)).
 
+MIGRATION RESERVATIONS (take a number only after adding a row here):
+- V29, V31 → feat/w2-feeds-oauth (scoped feeds; app OAuth/marketplace) — merges first
+- V32, V33 → feat/w2-pkg (typed registry metadata; immutability + CVE ledger)
+- V34 → feat/w2-docs (document publish + KB book grants)
+- V35 → reserved ☾
+- V36 → feat/w2-auth (B3: OAuth2 authorization-code, TOTP, permanent tokens) ☀
+- V37 → feat/w2-rights (B4: full Right taxonomy enforcement) ☀
+
 TOTALS (8/8 audited, 358 rows): done 33 · partial 130 · stub 25 · missing 170. Matrix NOT green — steering loop active.
 
 NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter era). Every row below re-verified against current src/ + src-tauri/ by audit lane. Rows marked UNVERIFIED until lane evidence lands.

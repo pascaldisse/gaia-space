@@ -28,9 +28,11 @@ pub mod issues;
 pub mod meetings;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod auth_security;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod auth_security;
+pub mod oauth;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

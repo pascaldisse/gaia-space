@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 34;
+pub const SCHEMA_VERSION: i64 = 36;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -83,6 +83,16 @@ impl Drop for TempDb {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// `SPACE_DB` is process-global: any test that repoints it must hold this guard, or a
+/// sibling test running in parallel loses its database mid-assertion.
+#[cfg(test)]
+pub fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub fn conn() -> Result<Connection, String> {
@@ -196,21 +206,57 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V21)?;
     }
     // V22: CODEOWNERS is read from each MR's source commit; no cache belongs in SQLite.
-    if version < 22 { tx.execute_batch(SCHEMA_V22)?; }
-    if version < 23 { tx.execute_batch(SCHEMA_V23)?; }
-    if version < 24 { add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?; tx.execute_batch(SCHEMA_V24)?; }
-    if version < 25 { tx.execute_batch(SCHEMA_V25)?; }
+    if version < 22 {
+        tx.execute_batch(SCHEMA_V22)?;
+    }
+    if version < 23 {
+        tx.execute_batch(SCHEMA_V23)?;
+    }
+    if version < 24 {
+        add_column_if_missing(&tx, "quality_gate_rules", "external_checks_json", "TEXT")?;
+        tx.execute_batch(SCHEMA_V24)?;
+    }
+    if version < 25 {
+        tx.execute_batch(SCHEMA_V25)?;
+    }
     if version < 26 {
         add_column_if_missing(&tx, "package_repositories", "retention_days", "INTEGER")?;
-        add_column_if_missing(&tx, "package_repositories", "retention_version_count", "INTEGER")?;
-        add_column_if_missing(&tx, "package_repositories", "retain_downloaded", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "package_repositories", "access_level", "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC'))")?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "retention_version_count",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "retain_downloaded",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_repositories",
+            "access_level",
+            "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PROJECT','PUBLIC'))",
+        )?;
         add_column_if_missing(&tx, "package_versions", "accessed_at", "INTEGER")?;
-        add_column_if_missing(&tx, "package_versions", "downloads", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "package_versions", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(
+            &tx,
+            "package_versions",
+            "downloads",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "package_versions",
+            "pinned",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         tx.execute_batch(SCHEMA_V26)?;
     }
-    if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
+    if version < 27 {
+        tx.execute_batch(SCHEMA_V27)?;
+    }
     // V29: subscriptions gain a target scope (org/team/project/location/profile/entity).
     if version < 29 { tx.execute_batch(SCHEMA_V29)?; }
     // V31: application OAuth credentials/tokens and the marketplace install model.
@@ -229,6 +275,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "documents", "published_at", "INTEGER")?;
         add_column_if_missing(&tx, "documents", "public_slug", "TEXT")?;
         tx.execute_batch(SCHEMA_V34)?;
+    }
+    // V36: the authorization-code flow. V31 already owns `app_secrets`, so V36 no
+    // longer declares it — a confidential client has exactly one secret, whichever
+    // grant it uses.
+    if version < 36 {
+        tx.execute_batch(SCHEMA_V36)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -374,6 +426,18 @@ CREATE TABLE IF NOT EXISTS app_installs (id TEXT PRIMARY KEY, marketplace_app_id
 pub(crate) const SCHEMA_V29: &str = r#"
 CREATE TABLE IF NOT EXISTS subscription_scopes (profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, event_type TEXT NOT NULL, target_type TEXT NOT NULL CHECK(target_type IN ('org','team','project','location','profile','entity')), target_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(profile_id, event_type, target_type, target_id));
 CREATE INDEX IF NOT EXISTS subscription_scopes_target ON subscription_scopes(target_type, target_id);
+"#;
+/// V36: OAuth2 authorization-code flow (oauth.rs). The client secret it authenticates
+/// against is the V31 `app_secrets` row: one application, one secret, shared with the
+/// client_credentials grant. Redirect URIs are an exact-match
+/// allowlist; codes and access tokens keep only their Argon2 digest at rest, and a
+/// code row is retired by `consumed_at` on first use.
+pub(crate) const SCHEMA_V36: &str = r#"
+CREATE TABLE IF NOT EXISTS oauth_redirect_uris (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, PRIMARY KEY(application_id, redirect_uri));
+CREATE TABLE IF NOT EXISTS oauth_auth_codes (id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, redirect_uri TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', code_challenge TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER);
+CREATE INDEX IF NOT EXISTS oauth_auth_codes_expiry ON oauth_auth_codes(expires_at, consumed_at);
+CREATE TABLE IF NOT EXISTS oauth_access_tokens (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, scope TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS oauth_access_tokens_user_active ON oauth_access_tokens(user_id, revoked_at);
 "#;
 /// Auth-only credentials; V26 is owned by packages.
 /// Document publication (public link) and KB book grants. A book is the top-level
@@ -745,7 +809,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 34);
+        assert_eq!(SCHEMA_VERSION, 36);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -825,7 +889,9 @@ mod tests {
             .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='document_permissions'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(exists, 1);
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
     }
 
