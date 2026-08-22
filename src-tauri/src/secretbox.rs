@@ -23,7 +23,11 @@ fn cipher() -> Result<ChaCha20Poly1305, String> {
             bytes.len()
         ));
     }
-    Ok(ChaCha20Poly1305::new(Key::from_slice(&bytes)))
+    // Length is checked above, so this conversion cannot fail. `expect` (not `?`)
+    // keeps the original `Key::from_slice` panic-on-wrong-length semantics exactly:
+    // a wrong length here would be a bug in the check above, not a config error.
+    let key = Key::try_from(bytes.as_slice()).expect("key length checked to be 32 bytes");
+    Ok(ChaCha20Poly1305::new(&key))
 }
 
 /// True when the deployment is configured to hold retrievable secrets at all.
@@ -36,11 +40,11 @@ pub fn seal(plaintext: &str) -> Result<String, String> {
     let cipher = cipher()?;
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
     let mut sealed = nonce_bytes.to_vec();
     sealed.extend(
         cipher
-            .encrypt(nonce, plaintext.as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|_| "encryption failed".to_string())?,
     );
     Ok(STANDARD.encode(sealed))
@@ -56,7 +60,12 @@ pub fn open(sealed: &str) -> Result<String, String> {
     }
     let (nonce, body) = raw.split_at(12);
     let plain = cipher
-        .decrypt(Nonce::from_slice(nonce), body)
+        .decrypt(
+            // `raw.len() >= 13` is enforced above, so the 12-byte prefix always
+            // converts; panicking here preserves the old `from_slice` behaviour.
+            &Nonce::try_from(nonce).expect("nonce slice is exactly 12 bytes"),
+            body,
+        )
         .map_err(|_| "stored secret failed authentication (wrong key or tampering)".to_string())?;
     String::from_utf8(plain).map_err(|_| "stored secret is not valid UTF-8".into())
 }
