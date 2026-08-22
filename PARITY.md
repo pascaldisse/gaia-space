@@ -11,10 +11,9 @@ NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter
 |---|---|---|---|
 | (lane fills) | KB01 | UNVERIFIED | |
 
-## 02 Planning / Issues / Boards (audit lane: pending)
-| feature | src | status | evidence |
-|---|---|---|---|
-| (lane fills) | KB02 | UNVERIFIED | |
+## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
+33 rows — done 6 · partial 16 · stub 1 · missing 10.
+Worst gaps: custom-field types incomplete · swimlanes backend-only · board card config · matrix reports · external tracker integration.
 
 ## 03 Packages & CI/CD & Deployments (audit lane: pending)
 | feature | src | status | evidence |
