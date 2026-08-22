@@ -245,6 +245,7 @@ pub fn run() {
             review::list_review_stacks,
             review::record_external_check,
             review::list_external_checks,
+            review::delete_external_check,
             review::list_quality_gate_rules,
             review::create_quality_gate_rule,
             review::update_quality_gate_rule,

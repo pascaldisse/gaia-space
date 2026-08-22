@@ -65,6 +65,11 @@
 .new-rule-form { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; font-size: 12px; }
 .new-rule-form input[type="number"] { width: 60px; }
 
+.check-status { font-size: 11px; padding: 0 6px; border-radius: 10px; }
+.check-pending { background: var(--status-neutral-bg); color: var(--status-neutral-ink); }
+.check-succeeded { background: var(--status-success-bg); color: var(--status-success-ink); }
+.check-failed { background: var(--status-danger-bg); color: var(--status-danger-ink); }
+
 .safe-merge-actions { display: flex; gap: 8px; }
 .merge-runs { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .merge-runs li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; border: 1px solid var(--surface-border); border-radius: 5px; padding: 5px 8px; }

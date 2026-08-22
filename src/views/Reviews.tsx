@@ -5,6 +5,7 @@ import {
   newId,
   type Review,
   type ReviewDiscussion,
+  type ExternalCheckStatus,
 } from "../api/review";
 import { Diff } from "../Diff";
 import { useDeepLink, linkProps, route } from "../router";
@@ -106,6 +107,9 @@ export default function Reviews() {
   const [mergeRuns, { refetch: refetchMergeRuns }] = createResource(selectedId, (id) =>
     id ? reviewApi.listMergeRuns(id) : Promise.resolve([]),
   );
+  const [externalChecks, { refetch: refetchExternalChecks }] = createResource(selectedId, (id) =>
+    id ? reviewApi.listExternalChecks(id) : Promise.resolve([]),
+  );
   const diffKey = () => {
     const r = selected();
     const p = diffRepoPath();
@@ -189,6 +193,42 @@ export default function Reviews() {
     try {
       await reviewApi.deleteGateRule(id);
       refetchGateRules();
+      refetchGateEval();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
+  const [checkName, setCheckName] = createSignal("");
+  const [checkStatus, setCheckStatus] = createSignal<ExternalCheckStatus>("PENDING");
+  const [checkDetails, setCheckDetails] = createSignal("");
+  async function recordCheck(e: SubmitEvent) {
+    e.preventDefault();
+    const id = selectedId();
+    if (!id || !checkName().trim()) return;
+    try {
+      await reviewApi.recordExternalCheck({
+        review_id: id,
+        check_name: checkName().trim(),
+        status: checkStatus(),
+        details: checkDetails().trim() || null,
+        updated_at: 0,
+      });
+      setCheckName("");
+      setCheckDetails("");
+      refetchExternalChecks();
+      refetchGateEval();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function deleteCheck(name: string) {
+    const id = selectedId();
+    if (!id) return;
+    try {
+      await reviewApi.deleteExternalCheck(id, name);
+      refetchExternalChecks();
       refetchGateEval();
     } catch (err) {
       setError(String(err));
@@ -373,6 +413,32 @@ export default function Reviews() {
                     <input type="number" min="0" value={ruleApprovals()} onInput={(e) => setRuleApprovals(Number(e.currentTarget.value))} />
                     <label><input type="checkbox" checked={ruleCodeowners()} onChange={(e) => setRuleCodeowners(e.currentTarget.checked)} /> CODEOWNERS</label>
                     <button class="ghost">Add rule</button>
+                  </form>
+                </details>
+
+                <details class="gate-rules external-checks" open>
+                  <summary>External checks ({externalChecks()?.length ?? 0})</summary>
+                  <ul>
+                    <For each={externalChecks()} fallback={<li class="hint">No external checks reported.</li>}>
+                      {(check) => (
+                        <li>
+                          <span class={`check-status check-${check.status.toLowerCase()}`}>{check.status}</span>
+                          <code>{check.check_name}</code>
+                          <Show when={check.details}><span class="hint">{check.details}</span></Show>
+                          <button class="ghost small" onClick={() => deleteCheck(check.check_name)}>×</button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <form class="new-rule-form" onSubmit={recordCheck}>
+                    <input placeholder="check name (e.g. ci/build)" value={checkName()} onInput={(e) => setCheckName(e.currentTarget.value)} />
+                    <select value={checkStatus()} onChange={(e) => setCheckStatus(e.currentTarget.value as ExternalCheckStatus)}>
+                      <option value="PENDING">pending</option>
+                      <option value="SUCCEEDED">success</option>
+                      <option value="FAILED">failure</option>
+                    </select>
+                    <input class="grow" placeholder="details (optional)" value={checkDetails()} onInput={(e) => setCheckDetails(e.currentTarget.value)} />
+                    <button class="ghost">Report check</button>
                   </form>
                 </details>
               </section>

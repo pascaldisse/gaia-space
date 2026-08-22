@@ -78,6 +78,15 @@ export type QualityGateEvaluation = {
   codeowner_approvers: string[];
 };
 
+export type ExternalCheckStatus = "PENDING" | "SUCCEEDED" | "FAILED";
+export type ExternalCheck = {
+  review_id: string;
+  check_name: string;
+  status: ExternalCheckStatus;
+  details: string | null;
+  updated_at: number;
+};
+
 export type ReviewStack = { id:string; project_id:string; repo_path:string; target_branch:string; source_branch:string; review_ids:string[] };
 export type NewReviewStack = ReviewStack;
 export type NewMergeRequest = {
@@ -139,6 +148,11 @@ export const reviewApi = {
   deleteGateRule: (id: string) => invoke<void>("delete_quality_gate_rule", { id }),
   evaluateGate: (reviewId: string) =>
     invoke<QualityGateEvaluation>("evaluate_quality_gate", { reviewId }),
+
+  listExternalChecks: (reviewId: string) => invoke<ExternalCheck[]>("list_external_checks", { reviewId }),
+  recordExternalCheck: (check: ExternalCheck) => invoke<void>("record_external_check", { check }),
+  deleteExternalCheck: (reviewId: string, checkName: string) =>
+    invoke<void>("delete_external_check", { reviewId, checkName }),
 
   listMergeRuns: (reviewId: string) => invoke<SafeMergeRun[]>("list_safe_merge_runs", { reviewId }),
   dryRunMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string) =>
