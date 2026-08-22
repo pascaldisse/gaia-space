@@ -326,7 +326,7 @@ pub(crate) fn parse_webhook_filter(raw: &str) -> Result<WebhookFilter> {
         if key == "event" {
             let names = value
                 .as_array()
-                .ok_or_else(|| "webhook filter \"event\" must be an array of event names")?;
+                .ok_or("webhook filter \"event\" must be an array of event names")?;
             let mut events = Vec::with_capacity(names.len());
             for name in names {
                 let name = name.as_str().ok_or_else(|| {
@@ -473,6 +473,54 @@ pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<Webho
     drop(c);
     deliver_delivery(&id)
 }
+static NEXT_DELIVERY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Unique within a process even when several deliveries are enqueued inside the
+/// same nanosecond tick.
+fn new_delivery_id() -> Result<String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let seq = NEXT_DELIVERY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(format!("delivery-{nanos:x}-{seq:x}"))
+}
+
+/// Domain fan-out seam: select the enabled subscriptions for `event_type`, keep the
+/// ones whose filter accepts the payload, and make the delivery rows **durable**.
+///
+/// Enqueue only — no HTTP happens here, so a domain module can call this right
+/// after its write without holding a transaction open across the network. The
+/// existing queue/retry path (`retry_webhook_delivery`, the sweeper) does the send.
+/// Returns the delivery IDs created.
+pub(crate) fn enqueue_event(event_type: &str, payload: &serde_json::Value) -> Result<Vec<String>> {
+    let body = serde_json::to_string(payload).map_err(|e| e.to_string())?;
+    let c = db::conn()?;
+    let subscriptions: Vec<(String, Option<String>)> = c
+        .prepare(
+            "SELECT id,filters_json FROM webhook_subscriptions WHERE event_type=?1 AND enabled=1 ORDER BY id",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map([event_type], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut created = Vec::new();
+    for (webhook_id, filters) in subscriptions {
+        if !webhook_filter_allows(filters.as_deref(), event_type, payload) {
+            continue;
+        }
+        let id = new_delivery_id()?;
+        c.execute(
+            "INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status) VALUES(?1,?2,?3,'PENDING')",
+            params![id, webhook_id, body],
+        )
+        .map_err(|e| e.to_string())?;
+        created.push(id);
+    }
+    Ok(created)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn retry_webhook_delivery(id: String) -> Result<WebhookDelivery> {
     if !claim_delivery(&id, false)? {
