@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { platformApi, type CfDefinition, type CfType, type RoleAssignment } from "../api/platform";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
@@ -138,6 +138,7 @@ export default function ProjectSettings() {
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [confirmArchive, setConfirmArchive] = createSignal(false);
+  onMount(() => { void reloadProjects().catch(() => undefined); });
   createEffect(() => { const value = project(); setName(value?.name ?? ""); setDescription(value?.description ?? ""); setDeadline(value?.deadline ?? ""); });
   const actor = () => isWeb() ? currentUser()?.profile_id ?? "" : profileId();
   const canManage = () => !!project() && (currentUser()?.role === "admin" || project()!.created_by === actor());
