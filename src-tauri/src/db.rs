@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -171,6 +171,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 15 {
         tx.execute_batch(SCHEMA_V15)?;
+    }
+    if version < 16 {
+        tx.execute_batch(SCHEMA_V16)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -755,3 +758,10 @@ mod tests {
         drop(temp);
     }
 }
+
+pub(crate) const SCHEMA_V16: &str = r#"
+CREATE TABLE IF NOT EXISTS message_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, data_url TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments(message_id);
+CREATE TABLE IF NOT EXISTS message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id), PRIMARY KEY(message_id, profile_id));
+CREATE INDEX IF NOT EXISTS message_mentions_profile ON message_mentions(profile_id);
+"#;
