@@ -474,6 +474,7 @@ mod delivery_tests {
 
     #[test]
     fn webhook_delivery_posts_then_retries_after_an_http_failure() {
+        let _serial = db::test_serial();
         let temp = db::TempDb::new("webhook-delivery");
         db::migrate_path(&temp).expect("migration");
         std::env::set_var("SPACE_DB", temp.path());

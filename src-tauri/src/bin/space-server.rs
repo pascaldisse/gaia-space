@@ -9,8 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    applications, blogs, calendar_feeds, calls, chat, db, documents, issues, meetings, personal,
-    pipelines, platform, review,
+    applications, blogs, calendar_feeds, calls, chat, db, documents, issues, meetings, oauth,
+    personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -1166,7 +1166,13 @@ fn nested_id(body: &Value, key: &str) -> Option<String> {
 fn document_id(body: &Value, name: &str) -> Option<String> {
     if name == "update_document" {
         nested_id(body, "document")
-    } else if matches!(name, "restore_doc_version" | "list_doc_versions" | "list_document_access" | "update_document_access") {
+    } else if matches!(
+        name,
+        "restore_doc_version"
+            | "list_doc_versions"
+            | "list_document_access"
+            | "update_document_access"
+    ) {
         arg(body, "document_id").ok()
     } else {
         arg(body, "id").ok()
@@ -1239,7 +1245,16 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
-fn require_catalog_right(user: &User, right: gaia_space_lib::rights::Right, scope_type: &str, scope_id: Option<&str>) -> Result<(), (StatusCode, Json<Value>)> { let c=db::conn().map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,&e))?; platform::require_right_on(&c,&user.profile_id,right,scope_type,scope_id).map_err(|_|err(StatusCode::FORBIDDEN,"right required")) }
+fn require_catalog_right(
+    user: &User,
+    right: gaia_space_lib::rights::Right,
+    scope_type: &str,
+    scope_id: Option<&str>,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    platform::require_right_on(&c, &user.profile_id, right, scope_type, scope_id)
+        .map_err(|_| err(StatusCode::FORBIDDEN, "right required"))
+}
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
 fn authorize_command(
@@ -1332,8 +1347,19 @@ fn authorize_command(
                 .and_then(|input| input.get("project_id").or_else(|| input.get("projectId")))
                 .and_then(Value::as_str)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "project_id is required"))?;
-            if !project_readable(user, project_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { return Err(err(StatusCode::FORBIDDEN, "project access denied")); }
-            if name == "create_issue" { require_catalog_right(user, gaia_space_lib::rights::Right::CreateIssue, "project", Some(project_id))?; }
+            if !project_readable(user, project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+            }
+            if name == "create_issue" {
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::CreateIssue,
+                    "project",
+                    Some(project_id),
+                )?;
+            }
             Ok(())
         }
         // Only the owner or an admin decides who belongs to a project.
@@ -1620,7 +1646,15 @@ fn authorize_command(
             _ => unreachable!("identity-write policy must name an identity-write command"),
         }
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
-        CommandPolicy::DocumentCreate => { bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?; require_catalog_right(user, gaia_space_lib::rights::Right::CreateDocument, "global", None) }
+        CommandPolicy::DocumentCreate => {
+            bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?;
+            require_catalog_right(
+                user,
+                gaia_space_lib::rights::Right::CreateDocument,
+                "global",
+                None,
+            )
+        }
         CommandPolicy::DocumentReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -1751,7 +1785,22 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::Session => {
-            if name == "create_message" { let message=body.get("message").ok_or_else(||err(StatusCode::BAD_REQUEST,"invalid message"))?; let channel_id:String=arg(message,"channel_id").map_err(|e|err(StatusCode::BAD_REQUEST,&e))?; if !chat_channel_access(&user.profile_id,&channel_id){return Err(err(StatusCode::FORBIDDEN,"channel access denied"));} require_catalog_right(user,gaia_space_lib::rights::Right::PostMessage,"channel",Some(&channel_id))?; }
+            if name == "create_message" {
+                let message = body
+                    .get("message")
+                    .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid message"))?;
+                let channel_id: String =
+                    arg(message, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
             if matches!(
                 name,
                 "list_messages"
@@ -2321,6 +2370,46 @@ async fn cmd(
     "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
     })
 }
+/// OAuth2 authorization endpoint (RFC 6749 §3.1). The resource owner is the caller's
+/// own session — consent is the act of POSTing here — and the answer is the redirect
+/// target the client must be sent to, never a token.
+async fn oauth_authorize(
+    h: HeaderMap,
+    Json(req): Json<oauth::AuthorizeRequest>,
+) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(e) => return e.into_response(),
+    };
+    match oauth::authorize(&user.id, &req, oauth::OAuthConfig::from_env()) {
+        Ok(grant) => {
+            let mut location = format!(
+                "{}{}code={}",
+                grant.redirect_uri,
+                if grant.redirect_uri.contains('?') {
+                    "&"
+                } else {
+                    "?"
+                },
+                grant.code
+            );
+            if let Some(state) = grant.state.as_deref() {
+                location.push_str(&format!("&state={state}"));
+            }
+            Json(json!({"ok":true,"value":{"redirect_to":location,"expires_at":grant.expires_at}}))
+                .into_response()
+        }
+        Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+    }
+}
+/// Token endpoint (RFC 6749 §3.2): unauthenticated by session — the code plus, when
+/// registered, the PKCE verifier is the credential.
+async fn oauth_token(Json(req): Json<oauth::TokenRequest>) -> impl IntoResponse {
+    match oauth::exchange_code(&req, oauth::OAuthConfig::from_env()) {
+        Ok(token) => Json(json!({"ok":true,"value":token})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
+    }
+}
 fn bootstrap() {
     let c = db::conn().expect("database");
     db::seed(&c).expect("seed");
@@ -2363,6 +2452,8 @@ async fn main() {
             "/api/registry/{repository_id}/npm/{package_name}",
             put(registry_npm_publish).get(registry_npm_metadata),
         )
+        .route("/oauth/authorize", post(oauth_authorize))
+        .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
         .with_state(App::new());
     let port = env::var("SPACE_PORT")
@@ -2981,10 +3072,16 @@ mod tests {
         let _serial = test_lock();
         setup();
         let c = db::conn().unwrap();
-        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", []).unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", [])
+            .unwrap();
         c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('design-dora','pd','design')", []).unwrap();
         let document = json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pa","folder_id":null,"doc_type":"text","title":"Shared plan","body":"first","version":1,"archived":false,"created_by":"pa"});
-        let (status, value) = call(cookie("ta"), "create_document", json!({"document":document})).await;
+        let (status, value) = call(
+            cookie("ta"),
+            "create_document",
+            json!({"document":document}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
 
         let grants = json!({"document_id":"shared-private-doc","permissions":[
@@ -2993,28 +3090,76 @@ mod tests {
         ]});
         let (status, value) = call(cookie("ta"), "update_document_access", grants).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        let grant_count: i64 = c.query_row("SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'", [], |row| row.get(0)).unwrap();
+        let grant_count: i64 = c
+            .query_row(
+                "SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(grant_count, 2, "shares persisted");
         let (stored_container, stored_creator, grant_profile): (String, String, String) = c.query_row("SELECT d.container_type,d.created_by,dp.recipient_id FROM documents d JOIN document_permissions dp ON dp.document_id=d.id WHERE d.id='shared-private-doc' AND dp.recipient_type='profile'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-        assert_eq!((stored_container.as_str(), stored_creator.as_str(), grant_profile.as_str()), ("my-docs", "pa", "pb"));
-        assert!(documents::document_readable_by("shared-private-doc", "pb").unwrap(), "direct viewer grant resolves");
+        assert_eq!(
+            (
+                stored_container.as_str(),
+                stored_creator.as_str(),
+                grant_profile.as_str()
+            ),
+            ("my-docs", "pa", "pb")
+        );
+        assert!(
+            documents::document_readable_by("shared-private-doc", "pb").unwrap(),
+            "direct viewer grant resolves"
+        );
 
         let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(value["value"][0]["id"], json!("shared-private-doc"), "{value}");
-        let (status, value) = call(cookie("tb"), "list_document_access", json!({"document_id":"shared-private-doc"})).await;
+        assert_eq!(
+            value["value"][0]["id"],
+            json!("shared-private-doc"),
+            "{value}"
+        );
+        let (status, value) = call(
+            cookie("tb"),
+            "list_document_access",
+            json!({"document_id":"shared-private-doc"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"].as_array().unwrap().len(), 2);
-        let (status, _) = call(cookie("tb"), "save_document", json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"})).await;
+        let (status, _) = call(
+            cookie("tb"),
+            "save_document",
+            json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot edit");
-        let (status, _) = call(cookie("tb"), "update_document_access", json!({"document_id":"shared-private-doc","permissions":[]})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an editor/viewer cannot delegate sharing");
+        let (status, _) = call(
+            cookie("tb"),
+            "update_document_access",
+            json!({"document_id":"shared-private-doc","permissions":[]}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an editor/viewer cannot delegate sharing"
+        );
 
-        let (status, value) = call(cookie("td"), "save_document", json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"})).await;
+        let (status, value) = call(
+            cookie("td"),
+            "save_document",
+            json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["body"], json!("edited"));
         let (status, _) = call(cookie("td"), "move_document", json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pd","folder_id":null})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an editor cannot move a shared document");
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an editor cannot move a shared document"
+        );
         let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='shared-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
         assert_eq!(actor, "pd", "the web gateway binds the editor identity");
     }
@@ -4712,5 +4857,103 @@ mod tests {
             StatusCode::FORBIDDEN,
             "a stranger may not fetch the article by id"
         );
+    }
+
+    /// The two HTTP endpoints end to end: consent answers with a redirect carrying the
+    /// code, and the token endpoint trades that code (plus the PKCE verifier) exactly once.
+    #[tokio::test]
+    async fn oauth_authorization_code_round_trips_over_http_and_refuses_a_replay() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        use sha2::{Digest, Sha256};
+        let _serial = test_lock();
+        setup();
+        let verifier = "http-verifier-01234567890123456789012345678901";
+        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+        db::conn().unwrap().execute("INSERT INTO applications(id,name,application_type,client_id,code_flow_enabled,pkce_required) VALUES('app-http','HTTP App','Application','client-http',1,1)",[]).unwrap();
+        oauth::register_redirect_uri("app-http", "https://client.example/cb").unwrap();
+
+        let (status, value) = status_and_body(
+            oauth_authorize(
+                cookie("ta"),
+                Json(
+                    serde_json::from_value(json!({
+                        "client_id":"client-http",
+                        "redirect_uri":"https://client.example/cb",
+                        "response_type":"code",
+                        "scope":"project:read",
+                        "state":"s1",
+                        "code_challenge":challenge,
+                        "code_challenge_method":"S256"
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let redirect = value["value"]["redirect_to"].as_str().unwrap().to_string();
+        assert!(redirect.ends_with("&state=s1"), "{redirect}");
+        let code = redirect
+            .split("code=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap()
+            .to_string();
+
+        let exchange = |code: String| async move {
+            status_and_body(
+                oauth_token(Json(
+                    serde_json::from_value(json!({
+                        "grant_type":"authorization_code",
+                        "client_id":"client-http",
+                        "code":code,
+                        "redirect_uri":"https://client.example/cb",
+                        "code_verifier":verifier
+                    }))
+                    .unwrap(),
+                ))
+                .await
+                .into_response(),
+            )
+            .await
+        };
+        let (status, value) = exchange(code.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["token_type"], json!("Bearer"));
+        assert_eq!(value["value"]["scope"], json!("project:read"));
+        let (status, value) = exchange(code).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a replay is refused: {value}"
+        );
+    }
+
+    /// Without a session there is no resource owner to consent.
+    #[tokio::test]
+    async fn oauth_authorize_requires_a_session() {
+        let _serial = test_lock();
+        setup();
+        let (status, _) = status_and_body(
+            oauth_authorize(
+                HeaderMap::new(),
+                Json(
+                    serde_json::from_value(json!({
+                        "client_id":"client-http",
+                        "redirect_uri":"https://client.example/cb",
+                        "response_type":"code"
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 }
