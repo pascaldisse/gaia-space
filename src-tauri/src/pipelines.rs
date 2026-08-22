@@ -1793,6 +1793,7 @@ mod tests {
             Some(r#"{"license":"MIT"}"#),
             Some("left-pad-1.2.3.tgz"),
             Some(b"fake package payload bytes"),
+            None,
         )
         .unwrap();
         assert_eq!(pv.package_name, "left-pad");
@@ -1826,6 +1827,7 @@ mod tests {
             "1.0.0",
             Some("not json"),
             None,
+            None,
             None
         )
         .is_err());
@@ -1847,7 +1849,8 @@ mod tests {
                     "1.0.0",
                     None,
                     Some("pkg.tgz"),
-                    Some(b"payload")
+                    Some(b"payload"),
+                    None
                 )
                 .is_err(),
                 "repository id {repository_id:?}"
@@ -1872,7 +1875,8 @@ mod tests {
                     "1.0.0",
                     None,
                     Some("pkg.tgz"),
-                    Some(b"payload")
+                    Some(b"payload"),
+                    None
                 )
                 .is_err(),
                 "package name {package_name:?}"
@@ -1897,7 +1901,8 @@ mod tests {
                     version,
                     None,
                     Some("pkg.tgz"),
-                    Some(b"payload")
+                    Some(b"payload"),
+                    None
                 )
                 .is_err(),
                 "version {version:?}"
@@ -1922,7 +1927,8 @@ mod tests {
                     "1.0.0",
                     None,
                     Some(filename),
-                    Some(b"payload")
+                    Some(b"payload"),
+                    None
                 )
                 .is_err(),
                 "payload filename {filename:?}"

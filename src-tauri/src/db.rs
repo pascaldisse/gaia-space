@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 31;
+pub const SCHEMA_VERSION: i64 = 33;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -211,9 +211,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V26)?;
     }
     if version < 27 { tx.execute_batch(SCHEMA_V27)?; }
-    // V30: normalized, format-specific package metadata alongside legacy generic JSON.
-    if version < 30 { tx.execute_batch(SCHEMA_V30)?; }
-    if version < 31 { tx.execute_batch(SCHEMA_V31)?; }
+    // V32: normalized, format-specific package metadata alongside legacy generic JSON.
+    if version < 32 {
+        add_column_if_missing(&tx, "package_versions", "format_metadata_json", "TEXT")?;
+        tx.execute_batch(SCHEMA_V32)?;
+    }
+    if version < 33 {
+        add_column_if_missing(&tx, "package_versions", "immutable", "INTEGER NOT NULL DEFAULT 0")?;
+        tx.execute_batch(SCHEMA_V33)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -353,11 +359,10 @@ CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT
 CREATE INDEX IF NOT EXISTS invitations_active ON invitations(expires_at, uses);
 CREATE TABLE IF NOT EXISTS user_totp (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret_sealed TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, enrolled_at INTEGER NOT NULL);
 "#;
-/// V30 owns typed registry metadata. The existing `metadata_json` remains a lossless
+/// V32 owns typed registry metadata. The existing `metadata_json` remains a lossless
 /// generic envelope for compatibility; this column is the validated, per-format projection.
-/// V31: package-version immutability and local vulnerability ledger.
-pub(crate) const SCHEMA_V31: &str = r#"
-ALTER TABLE package_versions ADD COLUMN immutable INTEGER NOT NULL DEFAULT 0;
+/// V33: package-version immutability and local vulnerability ledger.
+pub(crate) const SCHEMA_V33: &str = r#"
 CREATE TABLE IF NOT EXISTS package_vulnerabilities (
  id TEXT PRIMARY KEY, package_version_id TEXT NOT NULL REFERENCES package_versions(id) ON DELETE CASCADE,
  cve_id TEXT NOT NULL, severity TEXT NOT NULL, affected_range TEXT NOT NULL, title TEXT, description TEXT,
@@ -366,8 +371,9 @@ CREATE TABLE IF NOT EXISTS package_vulnerabilities (
 CREATE INDEX IF NOT EXISTS package_vulnerabilities_version ON package_vulnerabilities(package_version_id);
 "#;
 
-pub(crate) const SCHEMA_V30: &str = r#"
-ALTER TABLE package_versions ADD COLUMN format_metadata_json TEXT;
+// Columns are added via add_column_if_missing (idempotent); this batch holds the rest.
+pub(crate) const SCHEMA_V32: &str = r#"
+SELECT 1;
 "#;
 
 pub(crate) const SCHEMA_V26: &str = r#"
@@ -708,7 +714,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 31);
+        assert_eq!(SCHEMA_VERSION, 33);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
