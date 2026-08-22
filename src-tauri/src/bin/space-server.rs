@@ -1453,7 +1453,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_thread_replies"
         | "list_time_tracking_entries"
         | "livekit_server_status"
-        | "mark_channel_read" => CommandPolicy::Session,
+        | "mark_channel_read"
+        | "package_retention_candidates"
+        | "repository_vulnerability_report" => CommandPolicy::Session,
         "apply_package_retention"
         | "move_issue_on_board"
         | "publish_package_version"
@@ -3442,6 +3444,8 @@ async fn cmd(
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
+    "package_retention_candidates" => pipelines::package_retention_candidates(repository_id: String),
+    "repository_vulnerability_report" => pipelines::repository_vulnerability_report(repository_id: String, min_severity: Option<String>),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>, immutable: Option<bool>),
     "add_package_vulnerability" => pipelines::add_package_vulnerability(vulnerability: pipelines::PackageVulnerability),
     "dependency_overview" => pipelines::dependency_overview(version_id: String),

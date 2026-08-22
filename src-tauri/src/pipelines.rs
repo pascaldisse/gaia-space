@@ -1847,6 +1847,11 @@ pub fn add_package_vulnerability(vulnerability: PackageVulnerability) -> Result<
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dependency_overview(version_id: String) -> Result<DependencyOverview> {
     let c = db::conn()?;
+    dependency_overview_conn(&c, &version_id)
+}
+
+/// Connection-scoped core of `dependency_overview`.
+pub fn dependency_overview_conn(c: &Connection, version_id: &str) -> Result<DependencyOverview> {
     let version=c.query_row("SELECT id,repository_id,package_name,version,metadata_json,format_metadata_json,created_at,accessed_at,downloads,pinned,immutable FROM package_versions WHERE id=?1",params![version_id],|r| Ok(PackageVersion{id:r.get(0)?,repository_id:r.get(1)?,package_name:r.get(2)?,version:r.get(3)?,metadata_json:r.get(4)?,format_metadata_json:r.get(5)?,created_at:r.get(6)?,accessed_at:r.get(7)?,downloads:r.get(8)?,pinned:r.get(9)?,immutable:r.get(10)?})).map_err(|_|"package version not found".to_string())?;
     let mut q=c.prepare("SELECT id,package_version_id,cve_id,severity,affected_range,title,description FROM package_vulnerabilities WHERE package_version_id=?1").map_err(|e|e.to_string())?;
     let vulnerabilities = q
@@ -1868,6 +1873,69 @@ pub fn dependency_overview(version_id: String) -> Result<DependencyOverview> {
         version,
         vulnerabilities,
     })
+}
+
+/// Repository-wide CVE ledger query: every stored version that carries at least one recorded
+/// vulnerability, most severe first. Reads only the local ledger populated by
+/// `add_package_vulnerability` — no scanner is invoked and no network call is made here.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repository_vulnerability_report(
+    repository_id: String,
+    min_severity: Option<String>,
+) -> Result<Vec<DependencyOverview>> {
+    let c = db::conn()?;
+    repository_vulnerability_report_conn(&c, &repository_id, min_severity.as_deref())
+}
+
+/// Connection-scoped core of `repository_vulnerability_report`.
+pub fn repository_vulnerability_report_conn(
+    c: &Connection,
+    repository_id: &str,
+    min_severity: Option<&str>,
+) -> Result<Vec<DependencyOverview>> {
+    let floor = min_severity
+        .map(severity_rank)
+        .unwrap_or(i64::MIN);
+    let mut statement = c
+        .prepare("SELECT DISTINCT package_version_id FROM package_vulnerabilities WHERE package_version_id IN (SELECT id FROM package_versions WHERE repository_id=?1)")
+        .map_err(|e| e.to_string())?;
+    let ids = statement
+        .query_map(params![repository_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(statement);
+    let mut report = Vec::new();
+    for id in ids {
+        let mut overview = dependency_overview_conn(c, &id)?;
+        overview
+            .vulnerabilities
+            .retain(|v| severity_rank(&v.severity) >= floor);
+        if !overview.vulnerabilities.is_empty() {
+            report.push(overview);
+        }
+    }
+    report.sort_by_key(|overview| {
+        -overview
+            .vulnerabilities
+            .iter()
+            .map(|v| severity_rank(&v.severity))
+            .max()
+            .unwrap_or(0)
+    });
+    Ok(report)
+}
+
+/// CVSS qualitative severity ordering. Unknown spellings rank lowest so an unrecognised
+/// label never silently outranks a real CRITICAL.
+fn severity_rank(severity: &str) -> i64 {
+    match severity.to_ascii_uppercase().as_str() {
+        "CRITICAL" => 4,
+        "HIGH" => 3,
+        "MEDIUM" | "MODERATE" => 2,
+        "LOW" => 1,
+        _ => 0,
+    }
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1927,39 +1995,87 @@ pub fn remove_package_repository_acl(repository_id: String, profile_id: String) 
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// One version a retention policy would delete, with the rule that condemned it. Computing
+/// candidates is separated from deleting them so the UI can preview a policy (Space shows the
+/// cleanup preview before it runs) and so the rule can be tested without destroying rows.
+#[derive(Debug, Clone, Serialize)]
+pub struct RetentionCandidate {
+    pub id: String,
+    pub package_name: String,
+    pub version: String,
+    pub created_at: i64,
+    pub downloads: i64,
+    /// `"age"`, `"count"` or `"age+count"` — which policy limb matched.
+    pub reason: String,
+}
+
+/// Versions the repository's retention policy would delete, newest-first per package.
+/// Pinned versions are excluded by the query; downloaded ones are excluded when the policy
+/// says `retain_downloaded`. Grouping is by `package_name` — a version's identity, not its
+/// row id spelling.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn apply_package_retention(repository_id: String) -> Result<usize> {
+pub fn package_retention_candidates(repository_id: String) -> Result<Vec<RetentionCandidate>> {
     let c = db::conn()?;
+    package_retention_candidates_conn(&c, &repository_id)
+}
+
+/// Connection-scoped core of `package_retention_candidates` — pure read, no deletion.
+pub fn package_retention_candidates_conn(
+    c: &Connection,
+    repository_id: &str,
+) -> Result<Vec<RetentionCandidate>> {
     let (days,count,retain):(Option<i64>,Option<i64>,bool)=c.query_row("SELECT retention_days,retention_version_count,retain_downloaded FROM package_repositories WHERE id=?1",params![repository_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"package repository not found".to_string())?;
     let cutoff = days
         .filter(|value| *value >= 0)
         .map(|value| now_secs() - value * 86_400);
-    let mut statement=c.prepare("SELECT id,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC").map_err(|e|e.to_string())?;
+    let mut statement=c.prepare("SELECT id,package_name,version,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC").map_err(|e|e.to_string())?;
     let versions = statement
         .query_map(params![repository_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
             ))
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    let mut seen = std::collections::HashMap::<String, usize>::new();
-    let mut removed = 0;
-    for (id, created, downloads) in versions {
-        let ordinal = seen
-            .entry(id.rsplit("::").nth(1).unwrap_or("").to_string())
-            .or_default();
+    let mut seen = std::collections::HashMap::<String, i64>::new();
+    let mut candidates = Vec::new();
+    for (id, package_name, version, created_at, downloads) in versions {
+        let ordinal = seen.entry(package_name.clone()).or_default();
         *ordinal += 1;
-        let old_by_days = cutoff.is_some_and(|time| created < time);
-        let old_by_count = count.is_some_and(|limit| *ordinal as i64 > limit.max(0));
-        if (old_by_days || old_by_count) && !(retain && downloads > 0) {
-            c.execute("DELETE FROM package_versions WHERE id=?1", params![id])
-                .map_err(|e| e.to_string())?;
-            removed += 1;
+        let old_by_days = cutoff.is_some_and(|time| created_at < time);
+        let old_by_count = count.is_some_and(|limit| *ordinal > limit.max(0));
+        if !(old_by_days || old_by_count) || (retain && downloads > 0) {
+            continue;
         }
+        let reason = match (old_by_days, old_by_count) {
+            (true, true) => "age+count",
+            (true, false) => "age",
+            _ => "count",
+        };
+        candidates.push(RetentionCandidate {
+            id,
+            package_name,
+            version,
+            created_at,
+            downloads,
+            reason: reason.into(),
+        });
+    }
+    Ok(candidates)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn apply_package_retention(repository_id: String) -> Result<usize> {
+    let candidates = package_retention_candidates(repository_id)?;
+    let mut removed = 0;
+    for candidate in candidates {
+        delete_package_version(candidate.id)?;
+        removed += 1;
     }
     Ok(removed)
 }
@@ -2251,6 +2367,68 @@ mod tests {
             d1_after, "OBSOLETE",
             "promoting deploy-2 to CURRENT must supersede deploy-1"
         );
+        sweep(&db_path);
+    }
+
+    /// Retention preview: the policy names exactly the versions it would delete and why.
+    /// The count limit is per package (never per repository), and pinned or still-downloaded
+    /// versions survive when the policy says so.
+    #[test]
+    fn retention_candidates_group_per_package_and_carry_a_reason() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode,retention_version_count,retain_downloaded) VALUES('repo-r','r','npm','HOSTING',1,1)", []).unwrap();
+        let now = now_secs();
+        for (id, name, version, created, downloads, pinned) in [
+            ("v-a1", "alpha", "1.0.0", now, 0, 0),
+            ("v-a2", "alpha", "0.9.0", now - 10, 0, 0),
+            ("v-b1", "beta", "2.0.0", now, 0, 0),
+            ("v-b2", "beta", "1.9.0", now - 10, 7, 0),
+            ("v-b3", "beta", "1.8.0", now - 20, 0, 1),
+        ] {
+            conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,created_at,downloads,pinned) VALUES(?1,'repo-r',?2,?3,?4,?5,?6)", params![id,name,version,created,downloads,pinned]).unwrap();
+        }
+        let candidates = package_retention_candidates_conn(&conn, "repo-r").unwrap();
+        let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
+        // alpha keeps 1 newest → 0.9.0 condemned. beta keeps 1: 1.9.0 has downloads and the
+        // policy retains downloaded; 1.8.0 is pinned and never enters the query.
+        assert_eq!(ids, vec!["v-a2"]);
+        assert_eq!(candidates[0].package_name, "alpha");
+        assert_eq!(candidates[0].reason, "count");
+
+        // Age limb: an explicit day cutoff condemns by age, independently of the count rule.
+        conn.execute("UPDATE package_repositories SET retention_version_count=NULL,retention_days=0,retain_downloaded=0 WHERE id='repo-r'", []).unwrap();
+        conn.execute(
+            "UPDATE package_versions SET created_at=?1 WHERE id='v-a2'",
+            params![now - 86_400],
+        )
+        .unwrap();
+        let aged = package_retention_candidates_conn(&conn, "repo-r").unwrap();
+        assert!(aged.iter().any(|c| c.id == "v-a2" && c.reason == "age"));
+        assert!(
+            !aged.iter().any(|c| c.id == "v-b3"),
+            "pinned versions are never candidates"
+        );
+        sweep(&db_path);
+    }
+
+    /// The CVE ledger query reports only versions of the requested repository, filters by
+    /// severity floor and orders most severe first. It reads the local ledger only.
+    #[test]
+    fn vulnerability_report_filters_by_severity_and_repository() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-v','v','npm','HOSTING'),('repo-other','o','npm','HOSTING')", []).unwrap();
+        conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,created_at) VALUES('pv-low','repo-v','a','1.0.0',1),('pv-crit','repo-v','b','1.0.0',1),('pv-out','repo-other','c','1.0.0',1)", []).unwrap();
+        conn.execute("INSERT INTO package_vulnerabilities(id,package_version_id,cve_id,severity,affected_range) VALUES('x1','pv-low','CVE-1','LOW','<1'),('x2','pv-crit','CVE-2','CRITICAL','<1'),('x3','pv-out','CVE-3','HIGH','<1')", []).unwrap();
+        let all = repository_vulnerability_report_conn(&conn, "repo-v", None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].version.id, "pv-crit", "most severe first");
+        let high = repository_vulnerability_report_conn(&conn, "repo-v", Some("HIGH")).unwrap();
+        assert_eq!(high.len(), 1);
+        assert_eq!(high[0].vulnerabilities[0].cve_id, "CVE-2");
+        assert_eq!(severity_rank("moderate"), severity_rank("MEDIUM"));
+        assert_eq!(severity_rank("nonsense"), 0);
         sweep(&db_path);
     }
 

@@ -381,6 +381,8 @@ pub fn run() {
             pipelines::set_package_repository_acl,
             pipelines::remove_package_repository_acl,
             pipelines::apply_package_retention,
+            pipelines::package_retention_candidates,
+            pipelines::repository_vulnerability_report,
             pipelines::set_package_version_pinned,
             pipelines::delete_package_version,
             personal::list_todos,
