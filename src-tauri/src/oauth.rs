@@ -176,34 +176,15 @@ fn code_client(client_id: &str) -> Result<Client> {
 }
 
 /// Registers/rotates the client secret of a confidential client. Plaintext is returned
-/// once and never stored. Sibling lane `feat/w2-feeds-oauth` owns the same `app_secrets`
-/// table for client_credentials (`applications::rotate_app_secret_on`); after that merge
-/// this helper collapses into it — the table DDL here is byte-identical on purpose.
+/// once and never stored.
+///
+/// There is exactly one rotation in the system: `applications::rotate_app_secret_on`.
+/// Both flows authenticate against the same `app_secrets` row, so two rotations would
+/// mean one flow could silently keep a retired secret alive. This is a thin,
+/// code-flow-shaped view over that single source.
 pub fn rotate_client_secret(application_id: &str) -> Result<String> {
-    let c = db::conn()?;
-    let known: bool = c
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM applications WHERE id=?1)",
-            [application_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if !known {
-        return Err("application not found".into());
-    }
-    let raw = format!("spcs_{}", secret(32));
-    c.execute(
-        "INSERT INTO app_secrets(application_id,secret_hash,created_at) VALUES(?1,?2,unixepoch()) ON CONFLICT(application_id) DO UPDATE SET secret_hash=excluded.secret_hash,created_at=unixepoch()",
-        params![application_id, hash(&raw)?],
-    )
-    .map_err(|e| e.to_string())?;
-    // Rotation retires outstanding grants: an old secret must not keep access.
-    c.execute(
-        "UPDATE oauth_access_tokens SET revoked_at=unixepoch() WHERE application_id=?1 AND revoked_at IS NULL",
-        [application_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(raw)
+    crate::applications::rotate_app_secret_on(&db::conn()?, application_id)
+        .map(|s| s.client_secret)
 }
 
 /// RFC 6749 §2.3/§4.1.3: a confidential client MUST authenticate at the token endpoint.
@@ -644,6 +625,62 @@ mod tests {
                 access_token_owner(&token.access_token).unwrap(),
                 None,
                 "rotating the secret retires tokens minted under the old one"
+            );
+        });
+    }
+
+    /// The two flows share one secret, so they must share one rotation. A token that
+    /// survived rotation on the sibling table would be an old secret still buying access.
+    #[test]
+    fn one_rotation_retires_both_grant_families() {
+        with_db(|| {
+            let app_id = app("c9", false);
+            db::conn()
+                .unwrap()
+                .execute(
+                    "UPDATE applications SET client_credentials_flow_enabled=1 WHERE id=?1",
+                    [&app_id],
+                )
+                .unwrap();
+            let cfg = OAuthConfig::default();
+            let secret = rotate_client_secret(&app_id).unwrap();
+            // (a) an authorization-code access token
+            let grant = authorize("u1", &request("c9", Some(&s256(VERIFIER))), cfg).unwrap();
+            let mut req = token_request("c9", &grant.code, Some(VERIFIER));
+            req.client_secret = Some(secret.clone());
+            let code_token = exchange_code(&req, cfg).unwrap().access_token;
+            // (b) a client_credentials bearer token
+            let app_token = crate::applications::issue_app_token(
+                "c9".into(),
+                secret.clone(),
+                None,
+                Some(60),
+            )
+            .unwrap()
+            .access_token
+            .unwrap();
+            // (c) a code minted under the old secret, not yet exchanged
+            let pending = authorize("u1", &request("c9", Some(&s256(VERIFIER))), cfg).unwrap();
+            assert!(access_token_owner(&code_token).unwrap().is_some());
+            assert!(crate::applications::verify_app_token(app_token.clone())
+                .unwrap()
+                .is_some());
+
+            rotate_client_secret(&app_id).unwrap();
+
+            assert!(
+                access_token_owner(&code_token).unwrap().is_none(),
+                "the code-flow token dies with the secret"
+            );
+            assert!(
+                crate::applications::verify_app_token(app_token).unwrap().is_none(),
+                "the client_credentials token dies with the secret"
+            );
+            let mut stale = token_request("c9", &pending.code, Some(VERIFIER));
+            stale.client_secret = Some(secret);
+            assert!(
+                exchange_code(&stale, cfg).is_err(),
+                "a code minted under the old secret mints nothing"
             );
         });
     }

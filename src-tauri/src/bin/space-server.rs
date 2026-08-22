@@ -2685,6 +2685,85 @@ mod tests {
             StatusCode::FORBIDDEN
         );
     }
+    /// ☀Ganga: one secret, one rotation. Over HTTP there is a single rotate command, and
+    /// it must retire the authorization-code grants too — not just `app_tokens`.
+    #[tokio::test]
+    async fn rotating_over_http_retires_both_grant_families() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled,code_flow_enabled) VALUES('app-y','App Y','Application','client-y',1,1)", []).unwrap();
+        drop(c);
+        oauth::register_redirect_uri("app-y", "https://client.example/cb").unwrap();
+        let (status, secret) = call(
+            cookie("tc"),
+            "rotate_app_secret",
+            json!({"application_id":"app-y"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{secret}");
+        let client_secret = secret["value"]["client_secret"].as_str().unwrap().to_string();
+
+        // A live token from each flow, minted under that secret.
+        let (status, token) = call(cookie("tc"), "issue_app_token", json!({"client_id":"client-y","client_secret":client_secret,"ttl_seconds":60})).await;
+        assert_eq!(status, StatusCode::OK, "{token}");
+        let app_token = token["value"]["access_token"].as_str().unwrap().to_string();
+        let verifier = "verifier-0123456789012345678901234567890123456789";
+        let challenge = {
+            use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+            use sha2::{Digest, Sha256};
+            URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
+        };
+        let grant = oauth::authorize(
+            "ua",
+            &oauth::AuthorizeRequest {
+                client_id: "client-y".into(),
+                redirect_uri: "https://client.example/cb".into(),
+                response_type: "code".into(),
+                scope: "project:read".into(),
+                state: None,
+                code_challenge: Some(challenge),
+                code_challenge_method: Some("S256".into()),
+            },
+            oauth::OAuthConfig::default(),
+        )
+        .unwrap();
+        let code_token = oauth::exchange_code(
+            &oauth::TokenRequest {
+                grant_type: "authorization_code".into(),
+                client_id: "client-y".into(),
+                code: grant.code,
+                redirect_uri: "https://client.example/cb".into(),
+                code_verifier: Some(verifier.into()),
+                client_secret: Some(client_secret),
+            },
+            oauth::OAuthConfig::default(),
+        )
+        .unwrap()
+        .access_token;
+        assert!(oauth::access_token_owner(&code_token).unwrap().is_some());
+
+        let (status, rotated) = call(
+            cookie("tc"),
+            "rotate_app_secret",
+            json!({"application_id":"app-y"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{rotated}");
+
+        let (status, verified) =
+            call(cookie("tc"), "verify_app_token", json!({"token":app_token})).await;
+        assert_eq!(status, StatusCode::OK, "{verified}");
+        assert!(
+            verified["value"].is_null(),
+            "the client_credentials token died with the secret: {verified}"
+        );
+        assert!(
+            oauth::access_token_owner(&code_token).unwrap().is_none(),
+            "the code-flow token died with the secret"
+        );
+    }
+
     #[tokio::test]
     async fn login_limiter_refuses_correct_password_during_lockout() {
         let _serial = test_lock();
