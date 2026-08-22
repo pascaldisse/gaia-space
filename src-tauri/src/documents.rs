@@ -1110,6 +1110,18 @@ fn default_max_upload_bytes() -> u64 {
     25 * 1024 * 1024
 }
 
+/// Web-upload metadata. The HTTP transport supplies bytes separately, never a
+/// server filesystem path.
+#[derive(Debug, Deserialize)]
+pub struct UploadDocumentFileBytesRequest {
+    pub filename: String,
+    pub container_type: String,
+    pub container_id: Option<String>,
+    pub folder_id: Option<String>,
+    pub title: Option<String>,
+    pub created_by: Option<String>,
+}
+
 /// Preview payload: base64 for binary types, decoded text for textual ones. Capped, so
 /// opening a huge upload in the UI transfers a preview instead of the whole file.
 #[derive(Debug, Serialize, Deserialize)]
@@ -1176,6 +1188,78 @@ fn stored_name(document_id: &str, filename: &str) -> String {
 pub fn upload_document_file(request: UploadDocumentFileRequest) -> Result<DocumentFile> {
     let c = db::conn()?;
     upload_document_file_tx(&c, &upload_dir()?, request)
+}
+
+/// Stores bytes accepted by the web transport. The server passes its configured
+/// ceiling so transport and persistence policy cannot silently diverge.
+pub fn upload_document_file_bytes(
+    request: UploadDocumentFileBytesRequest,
+    bytes: &[u8],
+    max_file_bytes: u64,
+) -> Result<DocumentFile> {
+    if bytes.len() as u64 > max_file_bytes {
+        return Err(format!(
+            "file is {} bytes, over the {} byte upload limit",
+            bytes.len(),
+            max_file_bytes
+        ));
+    }
+    let source = std::path::Path::new(&request.filename);
+    let filename = source
+        .file_name()
+        .filter(|_| source.components().count() == 1)
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "filename must be a plain file name".to_string())?;
+    let c = db::conn()?;
+    let store = upload_dir()?;
+    let document_id = generated_id("doc");
+    let mime = mime_for(&filename);
+    let target = store.join(stored_name(&document_id, &filename));
+    std::fs::write(&target, bytes).map_err(|e| format!("store upload: {e}"))?;
+    let title = request
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(&filename)
+        .to_string();
+    let body = format!("{filename} ({} bytes, {mime})", bytes.len());
+    let inserted = c.execute(
+        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'file','text',?5,?6,1,0,?7)",
+        rusqlite::params![document_id, request.container_type, request.container_id, request.folder_id, title, body, request.created_by],
+    );
+    if let Err(e) = inserted {
+        let _ = std::fs::remove_file(&target);
+        return Err(e.to_string());
+    }
+    c.execute(
+        "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
+        rusqlite::params![
+            generated_id("docver"),
+            document_id,
+            body,
+            request.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![document_id, filename, mime, bytes.len() as i64, target.to_string_lossy().to_string(), request.created_by]).map_err(|e| e.to_string())?;
+    get_document_file_tx(&c, &document_id)?.ok_or_else(|| "stored upload vanished".into())
+}
+
+pub fn read_document_file_bytes(document_id: &str) -> Result<(DocumentFile, Vec<u8>)> {
+    let c = db::conn()?;
+    let file = get_document_file_tx(&c, document_id)?
+        .ok_or_else(|| "uploaded file not found".to_string())?;
+    let stored_path: String = c
+        .query_row(
+            "SELECT stored_path FROM document_files WHERE document_id=?1",
+            [document_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "uploaded file not found".to_string())?;
+    let bytes = std::fs::read(stored_path).map_err(|e| format!("read upload: {e}"))?;
+    Ok((file, bytes))
 }
 
 pub(crate) fn upload_document_file_tx(
