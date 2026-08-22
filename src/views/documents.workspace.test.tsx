@@ -98,6 +98,32 @@ describe("documents workspace composition", () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
+  test("the owner can inspect person and team document grants", async () => {
+    setProfileId("me");
+    serve({
+      list_document_folders: { ok: true, value: [] },
+      list_documents: { ok: true, value: [{ id: "private-doc", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", title: "Private plan", body: "", version: 1, archived: false, created_by: "me" }] },
+      list_profiles: { ok: true, value: [{ id: "me", display_name: "Me" }, { id: "viewer", display_name: "A Viewer" }] },
+      list_teams: { ok: true, value: [{ id: "team-1", name: "Design" }] },
+      list_document_access: { ok: true, value: [{ recipient_type: "profile", recipient_id: "viewer", access_level: "viewer" }] },
+    });
+    const host = await mount();
+    registerViews(["Documents"]);
+    navigate({ view: "Documents", entityType: "document", entityId: "private-doc", containerType: "my-docs", containerId: "me" });
+    await settle();
+
+    const share = [...host.querySelectorAll("button")].find((button) => button.textContent === "Share") as HTMLButtonElement;
+    expect(share).not.toBeUndefined();
+    share.click();
+    await settle();
+
+    expect(host.textContent).toContain("Share document");
+    expect(host.textContent).toContain("A Viewer");
+    expect(host.textContent).toContain("Viewer");
+    expect(host.textContent).toContain("Person");
+    expect(host.textContent).toContain("Team");
+  });
+
   test("the folder tree is keyboard-operable and announces its expansion state", async () => {
     setProfileId("me");
     serve({

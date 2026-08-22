@@ -1229,7 +1229,11 @@ fn authorize_command(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let policy =
         command_policy(name).ok_or_else(|| err(StatusCode::FORBIDDEN, "command denied"))?;
-    if !matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin" {
+    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
+        && policy != CommandPolicy::DocumentAccessWrite
+    {
+        // Access recipient ids intentionally name *other* people/teams; rebinding them
+        // to the caller would turn every share into a self-grant.
         bind_session_identity(body, &user.profile_id);
     }
     match policy {
@@ -2799,6 +2803,47 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read_at, None);
+    }
+
+    #[tokio::test]
+    async fn document_sharing_grants_person_view_and_team_editor_without_acl_delegation() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('design','Design')", []).unwrap();
+        c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('design-dora','pd','design')", []).unwrap();
+        let document = json!({"id":"shared-private-doc","container_type":"my-docs","container_id":"pa","folder_id":null,"doc_type":"text","title":"Shared plan","body":"first","version":1,"archived":false,"created_by":"pa"});
+        let (status, value) = call(cookie("ta"), "create_document", json!({"document":document})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+
+        let grants = json!({"document_id":"shared-private-doc","permissions":[
+            {"recipient_type":"profile","recipient_id":"pb","access_level":"viewer"},
+            {"recipient_type":"team","recipient_id":"design","access_level":"editor"}
+        ]});
+        let (status, value) = call(cookie("ta"), "update_document_access", grants).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let grant_count: i64 = c.query_row("SELECT count(*) FROM document_permissions WHERE document_id='shared-private-doc'", [], |row| row.get(0)).unwrap();
+        assert_eq!(grant_count, 2, "shares persisted");
+        let (stored_container, stored_creator, grant_profile): (String, String, String) = c.query_row("SELECT d.container_type,d.created_by,dp.recipient_id FROM documents d JOIN document_permissions dp ON dp.document_id=d.id WHERE d.id='shared-private-doc' AND dp.recipient_type='profile'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!((stored_container.as_str(), stored_creator.as_str(), grant_profile.as_str()), ("my-docs", "pa", "pb"));
+        assert!(documents::document_readable_by("shared-private-doc", "pb").unwrap(), "direct viewer grant resolves");
+
+        let (status, value) = call(cookie("tb"), "list_documents", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"][0]["id"], json!("shared-private-doc"), "{value}");
+        let (status, value) = call(cookie("tb"), "list_document_access", json!({"document_id":"shared-private-doc"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"].as_array().unwrap().len(), 2);
+        let (status, _) = call(cookie("tb"), "save_document", json!({"id":"shared-private-doc","title":"stolen","body":"no","actor":"pb"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot edit");
+        let (status, _) = call(cookie("tb"), "update_document_access", json!({"document_id":"shared-private-doc","permissions":[]})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an editor/viewer cannot delegate sharing");
+
+        let (status, value) = call(cookie("td"), "save_document", json!({"id":"shared-private-doc","title":"Team plan","body":"edited","actor":"pa"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["body"], json!("edited"));
+        let actor: String = c.query_row("SELECT created_by FROM doc_versions WHERE document_id='shared-private-doc' AND version=2", [], |row| row.get(0)).unwrap();
+        assert_eq!(actor, "pd", "the web gateway binds the editor identity");
     }
 
     #[tokio::test]

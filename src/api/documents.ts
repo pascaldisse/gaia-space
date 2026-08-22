@@ -47,6 +47,12 @@ export type DocVersion = {
   created_at: number;
 };
 
+export type DocumentAccessRecipient = {
+  recipient_type: "profile" | "team";
+  recipient_id: string;
+  access_level: "viewer" | "editor";
+};
+
 export const documentsApi = {
   // documents
   listDocuments: () => invoke<Document[]>("list_documents"),
@@ -61,6 +67,10 @@ export const documentsApi = {
   listDocVersions: (documentId: string) => invoke<DocVersion[]>("list_doc_versions", { documentId }),
   restoreDocVersion: (documentId: string, version: number, actor: string | null) =>
     invoke<Document>("restore_doc_version", { documentId, version, actor }),
+  listDocumentAccess: (documentId: string) =>
+    invoke<DocumentAccessRecipient[]>("list_document_access", { documentId }),
+  updateDocumentAccess: (documentId: string, permissions: DocumentAccessRecipient[]) =>
+    invoke<void>("update_document_access", { documentId, permissions }),
 
   // folders
   listDocumentFolders: () => invoke<DocumentFolder[]>("list_document_folders"),
@@ -71,5 +81,6 @@ export const documentsApi = {
 
   // read-only cross-lane lookups (owned elsewhere, only invoked here)
   listProfiles: () => invoke<{ id: string; username: string; display_name: string; archived?: boolean }[]>("list_profiles"),
+  listTeams: () => invoke<{ id: string; name: string; archived?: boolean }[]>("list_teams"),
   listProjects: () => invoke<{ id: string; name: string; key: string }[]>("list_projects"),
 };
