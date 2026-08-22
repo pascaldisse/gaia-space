@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod calls;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -22,8 +24,6 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod calls;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
@@ -161,6 +161,8 @@ pub fn run() {
             issues::list_board_columns,
             issues::save_board_column,
             issues::delete_board_column,
+            issues::get_board_card_settings,
+            issues::save_board_card_settings,
             issues::move_issue_on_board,
             issues::list_board_issues,
             issues::list_backlog_issues,

@@ -85,6 +85,11 @@ pub struct Swimlane {
     pub ordering: i64,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BoardCardSettings {
+    pub board_id: String,
+    pub fields: Vec<String>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlanningTag {
     pub id: String,
     pub project_id: String,
@@ -811,6 +816,52 @@ pub fn delete_sprint(id: String) -> Result<()> {
     ))?;
     err(c.execute("DELETE FROM sprints WHERE id=?1", [id]))?;
     Ok(())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_board_card_settings(board_id: String) -> Result<BoardCardSettings> {
+    let c = db::conn()?;
+    let json: Option<String> = err(c
+        .query_row(
+            "SELECT fields_json FROM board_card_settings WHERE board_id=?1",
+            [&board_id],
+            |r| r.get(0),
+        )
+        .optional())?;
+    let fields = json
+        .map(|value| serde_json::from_str(&value).map_err(|e| e.to_string()))
+        .transpose()?
+        .unwrap_or_else(|| {
+            vec![
+                "priority".into(),
+                "due_date".into(),
+                "assignees".into(),
+                "checklists".into(),
+                "subitems".into(),
+            ]
+        });
+    Ok(BoardCardSettings { board_id, fields })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_board_card_settings(settings: BoardCardSettings) -> Result<BoardCardSettings> {
+    const CARD_FIELDS: &[&str] = &[
+        "priority",
+        "due_date",
+        "assignees",
+        "checklists",
+        "subitems",
+    ];
+    if settings
+        .fields
+        .iter()
+        .any(|field| !CARD_FIELDS.contains(&field.as_str()))
+    {
+        return Err("Unsupported board card field".into());
+    }
+    let c = db::conn()?;
+    let json = serde_json::to_string(&settings.fields).map_err(|e| e.to_string())?;
+    err(c.execute("INSERT INTO board_card_settings(board_id,fields_json) VALUES(?1,?2) ON CONFLICT(board_id) DO UPDATE SET fields_json=excluded.fields_json", params![settings.board_id, json]))?;
+    Ok(settings)
 }
 
 fn read_swimlane(r: &rusqlite::Row<'_>) -> rusqlite::Result<Swimlane> {

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -169,6 +169,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 14 {
         tx.execute_batch(SCHEMA_V14)?;
     }
+    if version < 15 {
+        tx.execute_batch(SCHEMA_V15)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -282,6 +285,10 @@ CREATE INDEX IF NOT EXISTS chatbot_registrations_application ON chatbot_registra
 CREATE TABLE IF NOT EXISTS ui_extensions (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, extension_type TEXT NOT NULL, display_name TEXT NOT NULL, unique_code TEXT NOT NULL UNIQUE, iframe_url TEXT, enabled INTEGER NOT NULL DEFAULT 1);
 CREATE INDEX IF NOT EXISTS ui_extensions_application ON ui_extensions(application_id);
 "#;
+pub(crate) const SCHEMA_V15: &str = r#"
+CREATE TABLE IF NOT EXISTS board_card_settings (board_id TEXT PRIMARY KEY REFERENCES boards(id), fields_json TEXT NOT NULL DEFAULT '["priority","due_date","assignees","checklists","subitems"]');
+"#;
+
 pub(crate) const SCHEMA_V13: &str = r#"
 CREATE TABLE IF NOT EXISTS calendar_feeds (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id), label TEXT NOT NULL, ics_url_sealed TEXT NOT NULL, created_at INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, event_count INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS calendar_feeds_profile ON calendar_feeds(profile_id);
@@ -509,13 +516,22 @@ mod tests {
         seed(&conn).expect("seed");
         conn.pragma_update(None, "user_version", 13).unwrap();
         migrate(&conn).expect("v14");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 14);
         conn.execute("INSERT INTO devfiles(id,project_id,path,name,content,generated) VALUES('d','demo-project','.space/dev.devfile.yaml','Dev','schemaVersion: 2.2.0',0)", []).unwrap();
         conn.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('a','App','Application','client')", []).unwrap();
         conn.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('w','a','IssueWebhookEvent','https://example.test/hook')", []).unwrap();
-        conn.execute("DELETE FROM applications WHERE id='a'", []).unwrap();
-        let orphaned: i64 = conn.query_row("SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM applications WHERE id='a'", [])
+            .unwrap();
+        let orphaned: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM webhook_subscriptions WHERE application_id='a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(orphaned, 0, "extension rows cascade with their application");
     }
 
@@ -531,10 +547,19 @@ mod tests {
         // Simulate a database stamped at V10 and migrate forward again.
         conn.pragma_update(None, "user_version", 10).unwrap();
         migrate(&conn).expect("v11");
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, SCHEMA_VERSION, "schema version is monotonic and lands on head");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "schema version is monotonic and lands on head"
+        );
         assert_eq!(SCHEMA_VERSION, 14);
-        let notes: Option<String> = conn.query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        let notes: Option<String> = conn
+            .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(notes, None, "legacy rows keep NULL notes");
         let content: String = conn
             .query_row("SELECT content FROM todos WHERE id='legacy'", [], |r| {

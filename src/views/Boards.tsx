@@ -1,5 +1,5 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Board, type BoardColumn, type Issue, type Status } from "../api/issues";
+import { planningApi, type Board, type BoardColumn, type BoardCardSettings, type Issue, type Status } from "../api/issues";
 import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
@@ -22,6 +22,8 @@ export default function Boards() {
   const [template, setTemplate] = createSignal("kanban");
   const [newColumn, setNewColumn] = createSignal("");
   const [newSprint, setNewSprint] = createSignal("");
+  const [newSwimlane, setNewSwimlane] = createSignal("");
+  const [activeSwimlane, setActiveSwimlane] = createSignal<string>();
   const [openIssue, setOpenIssue] = createSignal<string>();
   const [menu, setMenu] = createSignal<{ column: BoardColumn; x: number; y: number }>();
   // Cards name their assignee — without the directory a card shows a raw profile id.
@@ -32,6 +34,8 @@ export default function Boards() {
   createEffect(() => { if (boards()?.length && !board()) setBoard(boards()![0]); if (board() && !boards()?.some(b => b.id === board()!.id)) setBoard(boards()?.[0]); });
   const [columns, { refetch: reloadColumns }] = createResource(() => board()?.id, id => id ? planningApi.columns(id) : Promise.resolve([]));
   const [sprints, { refetch: reloadSprints }] = createResource(() => board()?.id, id => id ? planningApi.sprints(id) : Promise.resolve([]));
+  const [swimlanes, { refetch: reloadSwimlanes }] = createResource(() => [board()?.id, sprintId()] as const, ([id, sprint]) => id ? planningApi.swimlanes(id, sprint) : Promise.resolve([]));
+  const [cardSettings, { refetch: reloadCardSettings }] = createResource(() => board()?.id, id => id ? planningApi.cardSettings(id) : Promise.resolve<BoardCardSettings>({ board_id: "", fields: [] }));
   const [issues, { refetch: reloadIssues }] = createResource(() => [board()?.id, sprintId()] as const, ([id, sprint]) => id ? planningApi.boardIssues(id, sprint) : Promise.resolve([]));
 
   /** Ensure a status of this name exists in the project; return its id. */
@@ -87,7 +91,7 @@ export default function Boards() {
     try {
       const statusId = (await ensureMapped(column)).status_ids[0] ?? "";
       const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
-      await planningApi.move(b.id, issue.id, column.id, sprintId());
+      await planningApi.move(b.id, issue.id, column.id, sprintId(), undefined, activeSwimlane());
       setCardTitle(""); setComposeIn(undefined); await reloadStatuses(); reloadColumns(); reloadIssues(); setOpenIssue(issue.id);
     } catch (reason) { setError(humanError(reason)); }
   };
@@ -103,7 +107,7 @@ export default function Boards() {
   };
   const move = async (issueId: string, columnId: string) => {
     const b = board(); const column = columns()?.find(c => c.id === columnId); if (!b || !column) return;
-    try { await ensureMapped(column); await planningApi.move(b.id, issueId, columnId, sprintId()); await reloadIssues(); }
+    try { await ensureMapped(column); await planningApi.move(b.id, issueId, columnId, sprintId(), undefined, activeSwimlane()); await reloadIssues(); }
     catch (reason) { setError(humanError(reason)); }
   };
   // Drag and drop: the card carries its id, the column is the drop target.
@@ -134,11 +138,14 @@ export default function Boards() {
           <option value="">All board issues</option>
           <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
         </select>
+        <div class="inline-form"><input placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /><button onClick={async () => { const b = board(); const name = newSwimlane().trim(); if (!b || !name) return; try { await planningApi.saveSwimlane({ board_id: b.id, sprint_id: sprintId() ?? null, name, is_default: !(swimlanes()?.length), }); setNewSwimlane(""); reloadSwimlanes(); } catch (reason) { setError(humanError(reason)); } }}>Lane</button></div>
+        <select aria-label="Swimlane" value={activeSwimlane() ?? ""} onChange={e => setActiveSwimlane(e.currentTarget.value || undefined)}><option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For></select>
         <div class="inline-form"><input placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /><button onClick={async () => { const b = board(); if (!b || !newSprint().trim()) return; try { const s = await planningApi.createSprint({ board_id: b.id, name: newSprint().trim(), starts_on: null, ends_on: null, description: null }); setNewSprint(""); setSprintId(s.id); reloadSprints(); } catch (reason) { setError(humanError(reason)); } }}>Sprint</button></div>
       </Show>
     </div>
 
-    <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b =>
+    <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
+      <div class="board-card-settings"><strong>Card fields</strong><For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field => <label><input type="checkbox" checked={cardSettings()?.fields.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>}</For></div>
       <div class="board-split">
         <div class="kanban">
           <For each={columns()}>{column =>
@@ -160,7 +167,7 @@ export default function Boards() {
                    onDragLeave={() => { if (dragOver() === column.id) setDragOver(undefined); }}
                    onDrop={event => onDrop(event, column)}>
                 <For each={cardsOf(column)}>{issue =>
-                  <IssueCard issue={issue} statuses={statuses()} active={openIssue() === issue.id} onOpen={() => setOpenIssue(issue.id)}
+                  <IssueCard issue={issue} statuses={statuses()} fields={cardSettings()?.fields ?? []} active={openIssue() === issue.id} onOpen={() => setOpenIssue(issue.id)}
                     targets={columns()?.filter(c => c.id !== column.id) ?? []} onMove={target => move(issue.id, target)} />
                 }</For>
                 <Show when={!cardsOf(column).length}><p class="column-empty">No issues</p></Show>
@@ -193,12 +200,12 @@ export default function Boards() {
         <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
         <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} onAdd={issueId => move(issueId, (columns() ?? [])[0]?.id ?? "")} moved={reloadIssues} /></section>
       </div>
-    }</Show>
+    </>}</Show>
   </section>;
 }
 
 /** A card carries what the work actually is: who, when, and its to-do progress. */
-function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; onOpen: () => void; targets: BoardColumn[]; onMove: (columnId: string) => void }) {
+function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[]; active: boolean; onOpen: () => void; targets: BoardColumn[]; onMove: (columnId: string) => void }) {
   const [detail] = createResource(() => props.issue.id, id => planningApi.issue(id));
   const [items] = createResource(() => detail()?.checklists?.[0]?.id, id => id ? planningApi.items(id) : Promise.resolve([]));
   const nameOf = (id: string) => { const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
@@ -213,11 +220,11 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; active: boolean; 
     <div class="card-top"><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
     <strong class="card-title">{props.issue.title}</strong>
     <div class="card-meta">
-      <Show when={props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
-      <Show when={props.issue.due_date}>{due => <span classList={{ "task-tag": true, due: true, overdue: overdue() }}>{due()}</span>}</Show>
-      <For each={people()}>{id => <span class="task-tag assignee">{nameOf(id)}</span>}</For>
-      <Show when={items()?.length}><span class="task-tag checklist">☑ {doneCount()}/{items()!.length}</span></Show>
-      <Show when={detail()?.children?.length}><span class="task-tag sub">⊞ {detail()!.children.length}</span></Show>
+      <Show when={props.fields.includes("priority") && props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
+      <Show when={props.fields.includes("due_date") && props.issue.due_date}>{due => <span classList={{ "task-tag": true, due: true, overdue: overdue() }}>{due()}</span>}</Show>
+      <For each={props.fields.includes("assignees") ? people() : []}>{id => <span class="task-tag assignee">{nameOf(id)}</span>}</For>
+      <Show when={props.fields.includes("checklists") && items()?.length}><span class="task-tag checklist">☑ {doneCount()}/{items()!.length}</span></Show>
+      <Show when={props.fields.includes("subitems") && detail()?.children?.length}><span class="task-tag sub">⊞ {detail()!.children.length}</span></Show>
     </div>
     <Show when={props.targets.length}>
       <div class="card-move"><For each={props.targets}>{target => <button title={`Move to ${target.name}`} onClick={event => { event.stopPropagation(); props.onMove(target.id); }}>→ {target.name}</button>}</For></div>
