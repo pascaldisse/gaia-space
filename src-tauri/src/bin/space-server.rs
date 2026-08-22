@@ -5,7 +5,7 @@ use axum::{
     extract::{ConnectInfo, Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
-    routing::{get, patch, post, put},
+    routing::{any, get, patch, post, put},
     Json, Router,
 };
 use gaia_space_lib::{
@@ -343,6 +343,133 @@ fn registry_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> 
         )
             .into_response()
     })
+}
+/// CalDAV deliberately accepts only HTTP Basic credentials. It reuses the same
+/// active-user lookup and Argon2 verification as login and package registries;
+/// calendar software cannot rely on browser cookies or interactive redirects.
+#[allow(clippy::result_large_err)]
+fn caldav_auth(headers: &HeaderMap) -> Result<User, axum::response::Response> {
+    let denied = || {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                header::WWW_AUTHENTICATE,
+                "Basic realm=\"gaia-space CalDAV\"".to_string(),
+            )],
+            "CalDAV authentication required",
+        )
+            .into_response()
+    };
+    let encoded = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .strip_prefix("Basic ")
+                .or_else(|| value.strip_prefix("basic "))
+        })
+        .ok_or_else(denied)?;
+    use base64::Engine as _;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| denied())?;
+    let decoded = String::from_utf8(decoded).map_err(|_| denied())?;
+    let (username, password) = decoded.split_once(':').ok_or_else(denied)?;
+    user_by_password(username, password).map_err(|_| denied())
+}
+fn ics_escape(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+fn ics_time(seconds: i64) -> String {
+    chrono::DateTime::from_timestamp(seconds, 0)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH)
+        .format("%Y%m%dT%H%M%SZ")
+        .to_string()
+}
+fn caldav_ics(profile_id: &str, calendar_id: &str) -> Result<String, String> {
+    let c = db::conn()?;
+    let owned: Option<i64> = c
+        .query_row(
+            "SELECT 1 FROM calendars WHERE id=?1 AND profile_id=?2",
+            params![calendar_id, profile_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if owned.is_none() {
+        return Err("calendar not found".into());
+    }
+    let mut q = c.prepare("SELECT e.uid,e.occurrence_key,e.title,e.starts_at,e.ends_at,e.all_day_date FROM calendar_feed_events e JOIN calendar_feeds f ON f.id=e.feed_id WHERE f.profile_id=?1 AND f.calendar_id=?2 ORDER BY e.starts_at,e.uid,e.occurrence_key").map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map(params![profile_id, calendar_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//GAIA Space//CalDAV Export//EN\r\nCALSCALE:GREGORIAN\r\n");
+    for row in rows {
+        let (uid, occurrence, title, starts_at, ends_at, all_day) =
+            row.map_err(|e| e.to_string())?;
+        out.push_str("BEGIN:VEVENT\r\n");
+        out.push_str(&format!(
+            "UID:{}-{}\r\nSUMMARY:{}\r\n",
+            ics_escape(&uid),
+            ics_escape(&occurrence),
+            ics_escape(&title)
+        ));
+        if let Some(day) = all_day {
+            out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", day.replace('-', "")));
+        } else {
+            out.push_str(&format!("DTSTART:{}\r\n", ics_time(starts_at)));
+        }
+        if let Some(end) = ends_at {
+            out.push_str(&format!("DTEND:{}\r\n", ics_time(end)));
+        }
+        out.push_str("END:VEVENT\r\n");
+    }
+    out.push_str("END:VCALENDAR\r\n");
+    Ok(out)
+}
+async fn caldav_collection(
+    headers: HeaderMap,
+    Path(calendar_id): Path<String>,
+) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    match caldav_ics(&user.profile_id, &calendar_id) {
+        Ok(_) => (StatusCode::MULTI_STATUS, [(header::CONTENT_TYPE, "application/xml; charset=utf-8")], format!("<?xml version=\"1.0\"?><D:multistatus xmlns:D=\"DAV:\"><D:response><D:href>/caldav/{calendar_id}/calendar.ics</D:href></D:response></D:multistatus>")).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+async fn caldav_calendar(
+    headers: HeaderMap,
+    Path(calendar_id): Path<String>,
+) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    match caldav_ics(&user.profile_id, &calendar_id) {
+        Ok(ics) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/calendar; charset=utf-8")],
+            ics,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
@@ -2992,6 +3119,8 @@ async fn main() {
     bootstrap();
     spawn_webhook_ticker();
     let app = Router::new()
+        .route("/caldav/{calendar_id}/", any(caldav_collection))
+        .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
@@ -3147,6 +3276,17 @@ mod tests {
         headers.insert(
             header::AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        headers
+    }
+    fn basic(username: &str, password: &str) -> HeaderMap {
+        use base64::Engine as _;
+        let mut headers = HeaderMap::new();
+        let value =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
     }
@@ -3780,6 +3920,64 @@ mod tests {
             StatusCode::OK,
             "an account admin may still grant the role"
         );
+    }
+
+    #[tokio::test]
+    async fn caldav_basic_auth_exports_only_the_requested_named_calendar() {
+        let _serial = test_lock();
+        setup();
+        set_password("alice", "correct-horse-battery-staple");
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES('work','pa','Work','#2563eb',1,1),('private','pa','Private','#dc2626',1,1)", []).unwrap();
+        c.execute("INSERT INTO calendar_feeds(id,profile_id,label,ics_url_sealed,calendar_id,created_at,event_count) VALUES('work-feed','pa','Work feed','sealed','work',1,1),('private-feed','pa','Private feed','sealed','private',1,1)", []).unwrap();
+        c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('work-feed','work-uid','1704067200','Work planning',1704067200,1704070800,NULL),('private-feed','private-uid','1704153600','Private event',1704153600,NULL,NULL)", []).unwrap();
+        drop(c);
+
+        let denied = caldav_calendar(HeaderMap::new(), Path("work".into())).await;
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            denied.headers()[header::WWW_AUTHENTICATE],
+            "Basic realm=\"gaia-space CalDAV\""
+        );
+        let collection = caldav_collection(
+            basic("alice", "correct-horse-battery-staple"),
+            Path("work".into()),
+        )
+        .await;
+        assert_eq!(collection.status(), StatusCode::MULTI_STATUS);
+        let collection_text = String::from_utf8(
+            to_bytes(collection.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(collection_text.contains("/caldav/work/calendar.ics"));
+        let calendar = caldav_calendar(
+            basic("alice", "correct-horse-battery-staple"),
+            Path("work".into()),
+        )
+        .await;
+        assert_eq!(calendar.status(), StatusCode::OK);
+        assert_eq!(
+            calendar.headers()[header::CONTENT_TYPE],
+            "text/calendar; charset=utf-8"
+        );
+        let ics = String::from_utf8(
+            to_bytes(calendar.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(ics.contains("BEGIN:VCALENDAR\r\n") && ics.contains("BEGIN:VEVENT\r\n"));
+        assert!(ics.contains("SUMMARY:Work planning"));
+        assert!(
+            !ics.contains("Private event"),
+            "named calendar exports must stay separated"
+        );
+        let wrong_password = caldav_calendar(basic("alice", "wrong"), Path("work".into())).await;
+        assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
