@@ -15,6 +15,7 @@ import {
   type DocumentBodyFormat,
 } from "../api/documents";
 import { profileId as sessionProfileId, profileLocked } from "../session";
+import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 
 const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
   { key: "my-docs", label: "My Documents" },
@@ -378,7 +379,10 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const doc = selectedDocument();
     if (!doc) return;
     try {
-      const saved = await documentsApi.saveDocument(doc.id, editTitle().trim() || doc.title, editBody(), actingProfileId());
+      // rich-text is stored as HTML and rendered with innerHTML, so it is sanitized on
+      // the way in as well as on the way out — a hostile paste must never reach the row.
+      const body = doc.body_format === "rich-text" ? sanitizeRichHtml(editBody()) : editBody();
+      const saved = await documentsApi.saveDocument(doc.id, editTitle().trim() || doc.title, body, actingProfileId());
       setEditTitle(saved.title);
       setEditBody(saved.body ?? "");
       await refetchDocuments();
@@ -463,11 +467,140 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   }
   function DocumentRenderer(props: { format: () => DocumentBodyFormat }) {
     return <Show when={props.format()} keyed>{(format) => {
-      if (format === "rich-text") return <div class="document-renderer rich-text-renderer" data-format="rich-text" innerHTML={editBody()} />;
+      if (format === "rich-text") return <div class="document-renderer rich-text-renderer" data-format="rich-text" innerHTML={sanitizeRichHtml(editBody())} />;
       if (format === "checklist") return <ul class="document-renderer checklist-renderer" data-format="checklist"><For each={checklistLines(editBody())}>{(item, index) => <li classList={{ done: item.done }}><label><input type="checkbox" checked={item.done} onChange={() => toggleChecklistLine(index())} /><span>{item.text}</span></label></li>}</For></ul>;
       if (format === "code") return <CodeRenderer />;
       return <div class="document-renderer markdown-renderer" data-format="text" innerHTML={renderedMarkdown()} />;
     }}</Show>;
+  }
+
+  // ---- editing surfaces ----
+  const MD_BUTTONS: { cmd: MarkdownCommand; label: string; title: string }[] = [
+    { cmd: "bold", label: "B", title: "Bold" },
+    { cmd: "italic", label: "I", title: "Italic" },
+    { cmd: "strike", label: "S", title: "Strikethrough" },
+    { cmd: "code", label: "<>", title: "Inline code" },
+    { cmd: "h1", label: "H1", title: "Heading 1" },
+    { cmd: "h2", label: "H2", title: "Heading 2" },
+    { cmd: "h3", label: "H3", title: "Heading 3" },
+    { cmd: "ul", label: "•–", title: "Bullet list" },
+    { cmd: "ol", label: "1.", title: "Numbered list" },
+    { cmd: "quote", label: "”", title: "Quote" },
+    { cmd: "link", label: "🔗", title: "Link" },
+  ];
+  // execCommand is deprecated but is still the only cross-browser way to edit a
+  // contenteditable selection without shipping a document model; output is sanitized.
+  const RICH_BUTTONS: { cmd: string; arg?: string; label: string; title: string }[] = [
+    { cmd: "bold", label: "B", title: "Bold" },
+    { cmd: "italic", label: "I", title: "Italic" },
+    { cmd: "underline", label: "U", title: "Underline" },
+    { cmd: "strikeThrough", label: "S", title: "Strikethrough" },
+    { cmd: "formatBlock", arg: "h2", label: "H2", title: "Heading 2" },
+    { cmd: "formatBlock", arg: "h3", label: "H3", title: "Heading 3" },
+    { cmd: "insertUnorderedList", label: "•–", title: "Bullet list" },
+    { cmd: "insertOrderedList", label: "1.", title: "Numbered list" },
+    { cmd: "formatBlock", arg: "blockquote", label: "”", title: "Quote" },
+    { cmd: "removeFormat", label: "✗", title: "Clear formatting" },
+  ];
+
+  let bodyArea: HTMLTextAreaElement | undefined;
+  function runMarkdownCommand(cmd: MarkdownCommand) {
+    const area = bodyArea;
+    if (!area) return;
+    const result = applyMarkdownCommand(editBody(), { start: area.selectionStart, end: area.selectionEnd }, cmd);
+    setEditBody(result.body);
+    // Restore the caret after Solid flushes the new value, or a second click would
+    // operate on a collapsed selection at position 0.
+    queueMicrotask(() => {
+      area.focus();
+      area.setSelectionRange(result.start, result.end);
+    });
+  }
+
+  let richArea: HTMLDivElement | undefined;
+  // The contenteditable is only re-seeded when the *document* changes: writing back on
+  // every keystroke would move the caret to the end of the node on each input event.
+  createEffect((prevId: string | null | undefined) => {
+    const id = selectedDocumentId();
+    if (id !== prevId && richArea) richArea.innerHTML = sanitizeRichHtml(editBody());
+    return id;
+  }, null);
+
+  function RichTextEditor() {
+    return (
+      <div class="rich-editor">
+        <div class="format-toolbar" role="toolbar" aria-label="Rich text formatting">
+          <For each={RICH_BUTTONS}>
+            {(b) => (
+              <button
+                type="button"
+                class="ghost small format-button"
+                title={b.title}
+                aria-label={b.title}
+                // mousedown+preventDefault keeps the selection inside the editable.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  richArea?.focus();
+                  document.execCommand(b.cmd, false, b.arg);
+                  if (richArea) setEditBody(sanitizeRichHtml(richArea.innerHTML));
+                }}
+              >
+                {b.label}
+              </button>
+            )}
+          </For>
+        </div>
+        <div
+          class="editor-body rich-editable"
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Rich text body"
+          contentEditable
+          ref={(el) => {
+            richArea = el;
+            el.innerHTML = sanitizeRichHtml(editBody());
+          }}
+          onInput={(e) => setEditBody(sanitizeRichHtml(e.currentTarget.innerHTML))}
+          // Paste is the main injection route: force plain text, never foreign markup.
+          onPaste={(e) => {
+            e.preventDefault();
+            const text = e.clipboardData?.getData("text/plain") ?? "";
+            document.execCommand("insertText", false, text);
+            if (richArea) setEditBody(sanitizeRichHtml(richArea.innerHTML));
+          }}
+        />
+      </div>
+    );
+  }
+
+  function EditorSurface(props: { format: DocumentBodyFormat }) {
+    return (
+      <Show when={props.format === "rich-text"} fallback={
+        <div class="plain-editor">
+          <Show when={props.format === "text"}>
+            <div class="format-toolbar" role="toolbar" aria-label="Markdown formatting">
+              <For each={MD_BUTTONS}>
+                {(b) => (
+                  <button type="button" class="ghost small format-button" title={b.title} aria-label={b.title}
+                    onMouseDown={(e) => e.preventDefault()} onClick={() => runMarkdownCommand(b.cmd)}>
+                    {b.label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+          <textarea
+            class="editor-body"
+            ref={(el) => (bodyArea = el)}
+            value={editBody()}
+            onInput={(e) => setEditBody(e.currentTarget.value)}
+            placeholder={props.format === "checklist" ? "One item per line…" : props.format === "code" ? "Code…" : "Markdown body…"}
+          />
+        </div>
+      }>
+        <RichTextEditor />
+      </Show>
+    );
   }
 
   function FolderRow(props: { folder: DocumentFolder; depth: number }) {
@@ -772,7 +905,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
 
                 <div class="editor-panes" classList={{ split: showPreview() }}>
-                  <textarea class="editor-body" value={editBody()} onInput={(e) => setEditBody(e.currentTarget.value)} placeholder={doc().body_format === "checklist" ? "One item per line…" : doc().body_format === "code" ? "Code…" : doc().body_format === "rich-text" ? "Rich text / HTML…" : "Markdown body…"} />
+                  <EditorSurface format={doc().body_format} />
                   <Show when={showPreview()}>
                     <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
                   </Show>

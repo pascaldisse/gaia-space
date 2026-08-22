@@ -456,3 +456,14 @@
 .code-renderer pre { margin: 0; padding: 0.75em 0; overflow-x: auto; background: var(--dk-row-hover-bg); border-radius: var(--dk-radius-md); }
 .code-line { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); min-height: 1.5em; }
 .code-line-number { user-select: none; text-align: right; padding-right: 0.9em; color: var(--text-muted); border-right: var(--dk-hairline) solid var(--dk-line); margin-right: 0.9em; }
+
+/* Editing surfaces: the toolbar sits inside the editing pane so the split preview keeps
+   two equal columns, and the rich-text editable reuses .editor-body metrics with prose
+   typography instead of the monospace source font. */
+.plain-editor, .rich-editor { display: flex; flex-direction: column; min-height: 0; border-right: var(--dk-hairline) solid var(--dk-line); }
+.plain-editor .editor-body, .rich-editor .editor-body { border-right: 0; flex: 1; min-height: 0; }
+.format-toolbar { display: flex; flex-wrap: wrap; gap: 0.2em; padding: 0.3em 0.4em; border-bottom: var(--dk-hairline) solid var(--dk-line); background: var(--dk-editor-bg); }
+.format-button { min-width: 2.1em; font-weight: 600; }
+.rich-editable { overflow: auto; font-family: inherit; font-size: 1em; outline: none; }
+.rich-editable:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.rich-editable :first-child { margin-top: 0; }
