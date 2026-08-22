@@ -79,7 +79,7 @@ pub struct ReviewStack {
     pub review_ids: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ExternalCheck { pub review_id: String, pub check_name: String, pub status: String, pub details: Option<String> }
+pub struct ExternalCheck { pub review_id: String, pub check_name: String, pub status: String, pub details: Option<String>, #[serde(default)] pub updated_at: i64 }
 #[derive(Debug, Deserialize)]
 pub struct NewReviewStack {
     pub id: String,
@@ -500,6 +500,259 @@ fn retarget_stacked_children_tx(conn: &Connection, review_id: &str) -> Result<i6
     match (source,target) { (Some(source),Some(target)) => conn.execute("UPDATE reviews SET target_branch=?3 WHERE project_id=?1 AND target_branch=?2 AND state='Opened' AND id IN (SELECT review_id FROM review_stack_items)",rusqlite::params![project_id,source,target]).map(|count| count as i64).map_err(|e|e.to_string()), _ => Ok(0) }
 }
 
+// ---------- stack cherry-pick / restack ----------
+// Both operations replay commits through libgit2's in-memory index and then move branch
+// refs. Like safe merge, they never touch a working directory, so a stack can be restacked
+// while the operator has unrelated work checked out.
+const DEFAULT_COMMITTER_NAME: &str = "GAIA Space";
+const DEFAULT_COMMITTER_EMAIL: &str = "space@localhost";
+
+/// One stack member's replay plan/result. `applied` is false for a dry run or a conflict.
+#[derive(Debug, Serialize)]
+pub struct RestackStep {
+    pub review_id: String,
+    pub branch: String,
+    pub onto_branch: String,
+    pub replayed: Vec<String>,
+    pub new_tip: Option<String>,
+    pub conflicts: Vec<String>,
+    pub applied: bool,
+}
+
+fn committer_signature(
+    repo: &Repository,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<git2::Signature<'static>> {
+    match (name, email) {
+        (Some(name), Some(email)) => git2::Signature::now(name, email).map_err(|e| e.to_string()),
+        _ => match repo.signature() {
+            Ok(sig) => Ok(sig),
+            Err(_) => git2::Signature::now(DEFAULT_COMMITTER_NAME, DEFAULT_COMMITTER_EMAIL)
+                .map_err(|e| e.to_string()),
+        },
+    }
+}
+
+/// Commits reachable from `tip` but not from `base`, oldest first — the replay order.
+fn commits_to_replay(repo: &Repository, base: git2::Oid, tip: git2::Oid) -> Result<Vec<git2::Oid>> {
+    let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .map_err(|e| e.to_string())?;
+    walk.push(tip).map_err(|e| e.to_string())?;
+    if repo.find_commit(base).is_ok() {
+        walk.hide(base).map_err(|e| e.to_string())?;
+    }
+    walk.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Replays one commit onto `onto`, keeping the original author. Returns the conflicting
+/// paths instead of a new commit when the pick does not apply cleanly.
+fn cherry_pick_onto(
+    repo: &Repository,
+    commit: &git2::Commit,
+    onto: &git2::Commit,
+    committer: &git2::Signature,
+) -> Result<(Option<git2::Oid>, Vec<String>)> {
+    let mut index = repo
+        .cherrypick_commit(commit, onto, 0, None)
+        .map_err(|e| e.to_string())?;
+    if index.has_conflicts() {
+        let mut conflicts = Vec::new();
+        for entry in index.conflicts().map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if let Some(p) = entry.our.or(entry.their).or(entry.ancestor) {
+                conflicts.push(String::from_utf8_lossy(&p.path).to_string());
+            }
+        }
+        return Ok((None, conflicts));
+    }
+    let tree_oid = index.write_tree_to(repo).map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+    let message = commit.message().unwrap_or("cherry-pick");
+    let oid = repo
+        .commit(None, &commit.author(), committer, message, &tree, &[onto])
+        .map_err(|e| e.to_string())?;
+    Ok((Some(oid), Vec::new()))
+}
+
+fn review_source_branch(conn: &Connection, review_id: &str) -> Result<(String, String)> {
+    let (source, repo): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT source_branch,repo_path FROM reviews WHERE id=?1",
+            rusqlite::params![review_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| format!("merge request '{review_id}' not found"))?;
+    match (source, repo) {
+        (Some(source), Some(repo)) => Ok((source, repo)),
+        _ => Err(format!(
+            "merge request '{review_id}' has no source branch or repository"
+        )),
+    }
+}
+
+/// Picks an arbitrary commit onto a stacked merge request's source branch, moving that
+/// branch ref. A conflict leaves every ref untouched.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn stack_cherry_pick(
+    review_id: String,
+    commit_oid: String,
+    committer_name: Option<String>,
+    committer_email: Option<String>,
+) -> Result<RestackStep> {
+    let c = db::conn()?;
+    stack_cherry_pick_tx(&c, review_id, commit_oid, committer_name, committer_email)
+}
+fn stack_cherry_pick_tx(
+    c: &Connection,
+    review_id: String,
+    commit_oid: String,
+    committer_name: Option<String>,
+    committer_email: Option<String>,
+) -> Result<RestackStep> {
+    let (branch, repo_path) = review_source_branch(c, &review_id)?;
+    let repo = open(&repo_path)?;
+    let picked_oid = git2::Oid::from_str(&commit_oid).map_err(|e| e.to_string())?;
+    let picked = repo.find_commit(picked_oid).map_err(|e| e.to_string())?;
+    let tip = branch_commit(&repo, &branch)?;
+    let committer =
+        committer_signature(&repo, committer_name.as_deref(), committer_email.as_deref())?;
+    let (new_tip, conflicts) = cherry_pick_onto(&repo, &picked, &tip, &committer)?;
+    if let Some(new_tip) = new_tip {
+        let commit = repo.find_commit(new_tip).map_err(|e| e.to_string())?;
+        repo.branch(&branch, &commit, true).map_err(|e| e.to_string())?;
+    }
+    Ok(RestackStep {
+        review_id,
+        branch: branch.clone(),
+        onto_branch: branch,
+        replayed: vec![commit_oid],
+        new_tip: new_tip.map(|o| o.to_string()),
+        conflicts,
+        applied: new_tip.is_some(),
+    })
+}
+
+/// Replays every stack member onto its predecessor's new tip, in stack order: item 0 lands
+/// on the stack target branch, item n on item n-1. Original tips are read up front, so each
+/// member's own commits are identified against the base it had *before* anything moved.
+/// `dry_run` computes the same plan without writing a commit or moving a ref.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn restack_stack(
+    stack_id: String,
+    dry_run: bool,
+    committer_name: Option<String>,
+    committer_email: Option<String>,
+) -> Result<Vec<RestackStep>> {
+    let c = db::conn()?;
+    restack_stack_tx(&c, stack_id, dry_run, committer_name, committer_email)
+}
+fn restack_stack_tx(
+    c: &Connection,
+    stack_id: String,
+    dry_run: bool,
+    committer_name: Option<String>,
+    committer_email: Option<String>,
+) -> Result<Vec<RestackStep>> {
+    let (repo_path, target_branch): (String, String) = c
+        .query_row(
+            "SELECT repo_path,target_branch FROM review_stacks WHERE id=?1",
+            rusqlite::params![stack_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| format!("review stack '{stack_id}' not found"))?;
+    let review_ids: Vec<String> = {
+        let mut s = c
+            .prepare("SELECT review_id FROM review_stack_items WHERE stack_id=?1 ORDER BY ordering")
+            .map_err(|e| e.to_string())?;
+        let ids: Vec<String> = s
+            .query_map(rusqlite::params![stack_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        ids
+    };
+    let repo = open(&repo_path)?;
+    let committer =
+        committer_signature(&repo, committer_name.as_deref(), committer_email.as_deref())?;
+
+    let mut members: Vec<(String, String, git2::Oid)> = Vec::new();
+    for review_id in &review_ids {
+        let (branch, member_repo) = review_source_branch(c, review_id)?;
+        if member_repo != repo_path {
+            return Err(format!(
+                "merge request '{review_id}' is not in the stack's repository"
+            ));
+        }
+        let tip = branch_commit(&repo, &branch)?.id();
+        members.push((review_id.clone(), branch, tip));
+    }
+
+    let mut steps = Vec::new();
+    let mut previous_original = branch_commit(&repo, &target_branch)?.id();
+    let mut base_oid = previous_original;
+    let mut onto_branch = target_branch.clone();
+    for (review_id, branch, original_tip) in members {
+        let old_base = repo
+            .merge_base(original_tip, previous_original)
+            .unwrap_or(previous_original);
+        let replay = commits_to_replay(&repo, old_base, original_tip)?;
+        let mut step = RestackStep {
+            review_id: review_id.clone(),
+            branch: branch.clone(),
+            onto_branch: onto_branch.clone(),
+            replayed: replay.iter().map(|o| o.to_string()).collect(),
+            new_tip: None,
+            conflicts: Vec::new(),
+            applied: false,
+        };
+        if old_base == base_oid {
+            // Already sitting on the new base: nothing to replay, the ref stays put.
+            step.new_tip = Some(original_tip.to_string());
+            step.replayed.clear();
+            steps.push(step);
+            previous_original = original_tip;
+            base_oid = original_tip;
+            onto_branch = branch;
+            continue;
+        }
+        let mut tip_oid = base_oid;
+        let mut conflicted = false;
+        for oid in &replay {
+            let commit = repo.find_commit(*oid).map_err(|e| e.to_string())?;
+            let onto = repo.find_commit(tip_oid).map_err(|e| e.to_string())?;
+            let (new_oid, conflicts) = cherry_pick_onto(&repo, &commit, &onto, &committer)?;
+            match new_oid {
+                Some(new_oid) => tip_oid = new_oid,
+                None => {
+                    step.conflicts = conflicts;
+                    conflicted = true;
+                    break;
+                }
+            }
+        }
+        if conflicted {
+            // A conflicted member invalidates every base below it; stop instead of guessing.
+            steps.push(step);
+            return Ok(steps);
+        }
+        step.new_tip = Some(tip_oid.to_string());
+        if !dry_run {
+            let commit = repo.find_commit(tip_oid).map_err(|e| e.to_string())?;
+            repo.branch(&branch, &commit, true)
+                .map_err(|e| e.to_string())?;
+            step.applied = true;
+        }
+        steps.push(step);
+        previous_original = original_tip;
+        base_oid = tip_oid;
+        onto_branch = branch;
+    }
+    Ok(steps)
+}
+
 // ---------- protected branches: per-action allow-lists ----------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProtectedBranchRule {
@@ -827,15 +1080,22 @@ fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOw
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn record_external_check(check: ExternalCheck) -> Result<()> {
+    if check.check_name.trim().is_empty() { return Err("external check needs a name".into()); }
     if !matches!(check.status.as_str(), "PENDING" | "SUCCEEDED" | "FAILED") { return Err("external check status must be PENDING, SUCCEEDED, or FAILED".into()); }
     db::conn()?.execute("INSERT INTO review_external_checks(review_id,check_name,status,details,updated_at) VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(review_id,check_name) DO UPDATE SET status=excluded.status,details=excluded.details,updated_at=excluded.updated_at", rusqlite::params![check.review_id,check.check_name,check.status,check.details]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_external_checks(review_id: String) -> Result<Vec<ExternalCheck>> {
-    let c=db::conn()?; let mut s=c.prepare("SELECT review_id,check_name,status,details FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
-    let checks = s.query_map(rusqlite::params![review_id],|r|Ok(ExternalCheck{review_id:r.get(0)?,check_name:r.get(1)?,status:r.get(2)?,details:r.get(3)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
+    let c=db::conn()?; let mut s=c.prepare("SELECT review_id,check_name,status,details,updated_at FROM review_external_checks WHERE review_id=?1 ORDER BY check_name").map_err(|e|e.to_string())?;
+    let checks = s.query_map(rusqlite::params![review_id],|r|Ok(ExternalCheck{review_id:r.get(0)?,check_name:r.get(1)?,status:r.get(2)?,details:r.get(3)?,updated_at:r.get(4)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string())?;
     Ok(checks)
+}
+/// Operators retract a check that no longer applies; the gate stops waiting on it.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_external_check(review_id: String, check_name: String) -> Result<()> {
+    db::conn()?.execute("DELETE FROM review_external_checks WHERE review_id=?1 AND check_name=?2", rusqlite::params![review_id, check_name]).map_err(|e|e.to_string())?;
+    Ok(())
 }
 fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<QualityGateEvaluation> {
     let (project_id, target_branch): (String, Option<String>) = conn
@@ -1380,6 +1640,106 @@ mod tests {
 
         drop(db_path);
         sweep(&dir);
+    }
+
+    #[test]
+    fn restack_replays_each_member_onto_the_new_base_and_dry_run_writes_nothing() {
+        let dir = throwaway_dir("restack");
+        let repo = Repository::init(&dir).unwrap();
+        let base = plumb_commit(&repo, "refs/heads/main", None, "base.txt", "base\n");
+        let a = plumb_commit(&repo, "refs/heads/feat-a", Some(base), "a.txt", "a\n");
+        plumb_commit(&repo, "refs/heads/feat-b", Some(a), "b.txt", "b\n");
+        // main advances after the stack was cut: both members must be replayed.
+        plumb_commit(&repo, "refs/heads/main", Some(base), "main2.txt", "main2\n");
+        let path = dir.to_string_lossy().to_string();
+
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        for (number, (id, branch)) in [("mr-a", "feat-a"), ("mr-b", "feat-b")].into_iter().enumerate() {
+            conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES(?1,'demo-project',?4,'MR','Opened',?2,'main','T',?3)", rusqlite::params![id, branch, path, number as i64 + 1]).unwrap();
+        }
+        conn.execute("INSERT INTO review_stacks(id,project_id,repo_path,target_branch,source_branch) VALUES('st','demo-project',?1,'main','feat-b')", rusqlite::params![path]).unwrap();
+        conn.execute("INSERT INTO review_stack_items(stack_id,review_id,ordering) VALUES('st','mr-a',0),('st','mr-b',1)", []).unwrap();
+
+        let before_a = branch_commit(&repo, "feat-a").unwrap().id();
+        let plan = restack_stack_tx(&conn, "st".into(), true, None, None).expect("dry run");
+        assert_eq!(plan.len(), 2);
+        assert!(plan.iter().all(|s| s.conflicts.is_empty() && !s.applied));
+        assert_eq!(plan[0].replayed.len(), 1);
+        assert_eq!(plan[1].replayed.len(), 1);
+        assert_eq!(branch_commit(&repo, "feat-a").unwrap().id(), before_a, "dry run moved a ref");
+
+        let done = restack_stack_tx(&conn, "st".into(), false, None, None).expect("restack");
+        assert!(done.iter().all(|s| s.applied), "steps: {done:?}");
+        let main_tip = branch_commit(&repo, "main").unwrap().id();
+        let a_tip = branch_commit(&repo, "feat-a").unwrap();
+        let b_tip = branch_commit(&repo, "feat-b").unwrap();
+        assert_eq!(a_tip.parent_id(0).unwrap(), main_tip, "feat-a not on main tip");
+        assert_eq!(b_tip.parent_id(0).unwrap(), a_tip.id(), "feat-b not on feat-a tip");
+        // Replayed content survives the move.
+        assert!(b_tip.tree().unwrap().get_name("a.txt").is_some());
+        assert!(b_tip.tree().unwrap().get_name("main2.txt").is_some());
+
+        // Idempotent: a second restack finds every member already based correctly.
+        let again = restack_stack_tx(&conn, "st".into(), false, None, None).expect("restack twice");
+        assert!(again.iter().all(|s| s.replayed.is_empty()), "steps: {again:?}");
+        assert_eq!(branch_commit(&repo, "feat-b").unwrap().id(), b_tip.id());
+
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn stack_cherry_pick_moves_the_source_branch_and_reports_conflicts() {
+        let (dir, repo) = conflicting_repo("stack-pick");
+        let path = dir.to_string_lossy().to_string();
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('mr-c','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
+
+        let main_tip = branch_commit(&repo, "main").unwrap().id();
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let conflicted =
+            stack_cherry_pick_tx(&conn, "mr-c".into(), main_tip.to_string(), None, None).expect("pick");
+        assert!(!conflicted.applied);
+        assert_eq!(conflicted.conflicts, vec!["conflict.txt".to_string()]);
+        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before, "conflict moved the ref");
+
+        let clean = plumb_commit(&repo, "refs/heads/side", Some(main_tip), "side.txt", "side\n");
+        let picked =
+            stack_cherry_pick_tx(&conn, "mr-c".into(), clean.to_string(), None, None).expect("pick");
+        assert!(picked.applied);
+        let tip = branch_commit(&repo, "feature").unwrap();
+        assert_eq!(tip.id().to_string(), picked.new_tip.unwrap());
+        assert_eq!(tip.parent_id(0).unwrap(), before);
+        assert!(tip.tree().unwrap().get_name("side.txt").is_some());
+
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn pending_external_check_blocks_gate_until_succeeded_or_removed() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,target_branch,title) VALUES('rx','demo-project',9,'MR','Opened','main','T')", []).unwrap();
+        conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals) VALUES('rulex','demo-project','main',0)", []).unwrap();
+        assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+
+        conn.execute("INSERT INTO review_external_checks(review_id,check_name,status) VALUES('rx','ci/build','PENDING')", []).unwrap();
+        let blocked = evaluate_quality_gate_tx(&conn, "rx").unwrap();
+        assert!(!blocked.satisfied);
+        assert!(blocked.reasons.iter().any(|r| r.contains("ci/build")), "reasons: {:?}", blocked.reasons);
+
+        conn.execute("UPDATE review_external_checks SET status='SUCCEEDED' WHERE review_id='rx'", []).unwrap();
+        assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+
+        conn.execute("UPDATE review_external_checks SET status='FAILED' WHERE review_id='rx'", []).unwrap();
+        assert!(!evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+        conn.execute("DELETE FROM review_external_checks WHERE review_id='rx' AND check_name='ci/build'", []).unwrap();
+        assert!(evaluate_quality_gate_tx(&conn, "rx").unwrap().satisfied);
+
+        drop(db_path);
     }
 
     #[test]

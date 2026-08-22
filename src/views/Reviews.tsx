@@ -5,6 +5,8 @@ import {
   newId,
   type Review,
   type ReviewDiscussion,
+  type ExternalCheckStatus,
+  type RestackStep,
 } from "../api/review";
 import { Diff } from "../Diff";
 import { useDeepLink, linkProps, route } from "../router";
@@ -106,6 +108,9 @@ export default function Reviews() {
   const [mergeRuns, { refetch: refetchMergeRuns }] = createResource(selectedId, (id) =>
     id ? reviewApi.listMergeRuns(id) : Promise.resolve([]),
   );
+  const [externalChecks, { refetch: refetchExternalChecks }] = createResource(selectedId, (id) =>
+    id ? reviewApi.listExternalChecks(id) : Promise.resolve([]),
+  );
   const diffKey = () => {
     const r = selected();
     const p = diffRepoPath();
@@ -189,6 +194,70 @@ export default function Reviews() {
     try {
       await reviewApi.deleteGateRule(id);
       refetchGateRules();
+      refetchGateEval();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // ---------- stacked merge requests (cherry-pick / restack) ----------
+  const [stacks, { refetch: refetchStacks }] = createResource(
+    () => selected()?.project_id,
+    (id) => (id ? reviewApi.listStacks(id) : Promise.resolve([])),
+  );
+  const [restackSteps, setRestackSteps] = createSignal<RestackStep[]>([]);
+  const [pickOid, setPickOid] = createSignal("");
+  async function runRestack(stackId: string, dryRun: boolean) {
+    try {
+      setRestackSteps(await reviewApi.restackStack(stackId, dryRun));
+      if (!dryRun) refetchStacks();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function runCherryPick(e: SubmitEvent) {
+    e.preventDefault();
+    const id = selectedId();
+    if (!id || !pickOid().trim()) return;
+    try {
+      const step = await reviewApi.stackCherryPick(id, pickOid().trim());
+      setRestackSteps([step]);
+      setPickOid("");
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
+  const [checkName, setCheckName] = createSignal("");
+  const [checkStatus, setCheckStatus] = createSignal<ExternalCheckStatus>("PENDING");
+  const [checkDetails, setCheckDetails] = createSignal("");
+  async function recordCheck(e: SubmitEvent) {
+    e.preventDefault();
+    const id = selectedId();
+    if (!id || !checkName().trim()) return;
+    try {
+      await reviewApi.recordExternalCheck({
+        review_id: id,
+        check_name: checkName().trim(),
+        status: checkStatus(),
+        details: checkDetails().trim() || null,
+        updated_at: 0,
+      });
+      setCheckName("");
+      setCheckDetails("");
+      refetchExternalChecks();
+      refetchGateEval();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function deleteCheck(name: string) {
+    const id = selectedId();
+    if (!id) return;
+    try {
+      await reviewApi.deleteExternalCheck(id, name);
+      refetchExternalChecks();
       refetchGateEval();
     } catch (err) {
       setError(String(err));
@@ -375,6 +444,69 @@ export default function Reviews() {
                     <button class="ghost">Add rule</button>
                   </form>
                 </details>
+
+                <details class="gate-rules external-checks" open>
+                  <summary>External checks ({externalChecks()?.length ?? 0})</summary>
+                  <ul>
+                    <For each={externalChecks()} fallback={<li class="hint">No external checks reported.</li>}>
+                      {(check) => (
+                        <li>
+                          <span class={`check-status check-${check.status.toLowerCase()}`}>{check.status}</span>
+                          <code>{check.check_name}</code>
+                          <Show when={check.details}><span class="hint">{check.details}</span></Show>
+                          <button class="ghost small" onClick={() => deleteCheck(check.check_name)}>×</button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <form class="new-rule-form" onSubmit={recordCheck}>
+                    <input placeholder="check name (e.g. ci/build)" value={checkName()} onInput={(e) => setCheckName(e.currentTarget.value)} />
+                    <select value={checkStatus()} onChange={(e) => setCheckStatus(e.currentTarget.value as ExternalCheckStatus)}>
+                      <option value="PENDING">pending</option>
+                      <option value="SUCCEEDED">success</option>
+                      <option value="FAILED">failure</option>
+                    </select>
+                    <input class="grow" placeholder="details (optional)" value={checkDetails()} onInput={(e) => setCheckDetails(e.currentTarget.value)} />
+                    <button class="ghost">Report check</button>
+                  </form>
+                </details>
+              </section>
+
+              <section class="review-stacks">
+                <h3>Stack</h3>
+                <p class="hint">Restack replays each member onto its predecessor's new tip through libgit2's in-memory index, then moves the branch refs — the working directory is never touched. A conflicting member stops the run before any ref below it moves.</p>
+                <ul class="stack-list">
+                  <For each={stacks()?.filter((s) => s.review_ids.includes(review().id))} fallback={<li class="hint">This merge request is not in a stack.</li>}>
+                    {(stack) => (
+                      <li>
+                        <code>{stack.source_branch} → {stack.target_branch}</code>
+                        <span class="hint">{stack.review_ids.length} member(s)</span>
+                        <button class="ghost small" onClick={() => runRestack(stack.id, true)}>Preview restack</button>
+                        <button class="ghost small" onClick={() => runRestack(stack.id, false)}>Restack</button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+                <form class="new-rule-form" onSubmit={runCherryPick}>
+                  <input class="grow" placeholder="commit sha to cherry-pick onto this MR's source branch" value={pickOid()} onInput={(e) => setPickOid(e.currentTarget.value)} />
+                  <button class="ghost">Cherry-pick</button>
+                </form>
+                <Show when={restackSteps().length}>
+                  <ul class="restack-steps">
+                    <For each={restackSteps()}>
+                      {(step) => (
+                        <li classList={{ conflicted: step.conflicts.length > 0 }}>
+                          <code>{step.branch}</code> onto <code>{step.onto_branch}</code>
+                          <span class="hint">
+                            {step.conflicts.length
+                              ? `conflicts: ${step.conflicts.join(", ")}`
+                              : `${step.replayed.length} commit(s) ${step.applied ? "replayed" : "planned"}${step.new_tip ? ` → ${step.new_tip.slice(0, 8)}` : ""}`}
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
               </section>
 
               <section class="safe-merge">
