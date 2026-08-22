@@ -313,9 +313,11 @@ pub fn list_rights() -> Result<Vec<Right>> {
 }
 fn seed_rights_on(c: &Connection) -> Result<usize> {
     for (code, title, description, right_type, right_group) in rights::CATALOG {
+        let implied_rights_json = serde_json::to_string(&rights::default_implied_rights(code))
+            .map_err(|e| e.to_string())?;
         err(c.execute(
-            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group) VALUES(?1,?2,?3,?4,?5,?6)",
-            params![new_id("right"), code, title, description, right_type, right_group],
+            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group,implied_rights_json,propagation,descriptor_json) VALUES(?1,?2,?3,?4,?5,?6,?7,'NONE','{}')",
+            params![new_id("right"), code, title, description, right_type, right_group, implied_rights_json],
         ))?;
     }
     err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
@@ -544,7 +546,7 @@ fn check_right_on(
         return Ok(false);
     }
     let mut s = err(c.prepare(
-        "SELECT ra.scope_type, ra.scope_id, r.code
+        "SELECT ra.scope_type, ra.scope_id, r.code, r.implied_rights_json
          FROM role_assignments ra
          JOIN role_rights rr ON rr.role_id = ra.role_id
          JOIN rights r ON r.id = rr.right_id
@@ -556,12 +558,37 @@ fn check_right_on(
             r.get::<_, String>(0)?,
             r.get::<_, Option<String>>(1)?,
             r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
         ))
     }))?
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())?;
-    for (assignment_scope_type, assignment_scope_id, granted_code) in rows {
-        if !rights::implies(&granted_code, right_code) {
+    let mut descriptor_statement = err(c.prepare("SELECT code,implied_rights_json FROM rights"))?;
+    let descriptor_rows = err(descriptor_statement
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))))?;
+    let descriptors: std::collections::BTreeMap<String, Vec<String>> = descriptor_rows
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(code, json)| (code, serde_json::from_str(&json).unwrap_or_default()))
+        .collect();
+    for (assignment_scope_type, assignment_scope_id, granted_code, _) in rows {
+        let mut pending = vec![granted_code.as_str()];
+        let mut seen = std::collections::BTreeSet::new();
+        let mut granted = false;
+        while let Some(code) = pending.pop() {
+            if !seen.insert(code) {
+                continue;
+            }
+            if code == right_code {
+                granted = true;
+                break;
+            }
+            if let Some(implied) = descriptors.get(code) {
+                pending.extend(implied.iter().map(String::as_str));
+            }
+        }
+        if !granted {
             continue;
         }
         if assignment_scope_type == "global" {

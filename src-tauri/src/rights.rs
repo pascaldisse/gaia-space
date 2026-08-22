@@ -409,7 +409,7 @@ pub enum Propagation {
 
 /// True if `granted` transitively contains `requested`. This remains code-based so
 /// catalog rows and descriptors added by a server stay forward-compatible.
-pub fn implies(granted: &str, requested: &str) -> bool {
+pub fn default_implies(granted: &str, requested: &str) -> bool {
     if granted == requested || granted == "Global.Superadmin" {
         return true;
     }
@@ -442,14 +442,33 @@ pub const IMPLIED_RIGHTS: &[(&str, &str)] = &[
     ("Document.EditDocuments", "Document.CreateDocuments"),
 ];
 
+/// Initial catalog descriptor only. Runtime resolution reads the persisted
+/// `implied_rights_json` column, so administrator changes take effect directly.
+pub fn default_implied_rights(code: &str) -> Vec<&'static str> {
+    if code == "Global.Superadmin" {
+        return CATALOG
+            .iter()
+            .map(|(code, ..)| *code)
+            .filter(|child| *child != code)
+            .collect();
+    }
+    IMPLIED_RIGHTS
+        .iter()
+        .filter_map(|(parent, child)| (*parent == code).then_some(*child))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn implied_rights_are_transitive_and_directional() {
-        assert!(implies("Project.VcsAdmin", "Project.VcsRead"));
-        assert!(implies("Channel.ManageChannel", "Channel.PostMessages"));
-        assert!(!implies("Project.VcsRead", "Project.VcsAdmin"));
+        assert!(default_implies("Project.VcsAdmin", "Project.VcsRead"));
+        assert!(default_implies(
+            "Channel.ManageChannel",
+            "Channel.PostMessages"
+        ));
+        assert!(!default_implies("Project.VcsRead", "Project.VcsAdmin"));
     }
 }
