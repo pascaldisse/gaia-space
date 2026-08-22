@@ -13,7 +13,7 @@ use gaia_space_lib::{
     events,
     issues,
     meetings,
-    oauth, payload_dispatch, personal, pipelines, platform, review,
+    oauth, package_registry, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -2745,6 +2745,250 @@ async fn registry_maven_get(
         Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
     }
 }
+/// NuGet V3: `GET .../nuget/index.json` service index, `GET .../nuget/{id}/index.json`
+/// version list, `GET|PUT .../nuget/{id}/{version}/{file}` flat-container assets.
+async fn registry_nuget_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    if path.trim_matches('/') == "index.json" {
+        let base = registry_base_url(&headers, &repository_id, "nuget");
+        return (
+            StatusCode::OK,
+            Json(package_registry::nuget_service_index(&base)),
+        )
+            .into_response();
+    }
+    let (package_name, version, filename) = match package_registry::nuget_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let Some(version) = version else {
+        return match package_registry::nuget_version_index(&repository_id, &package_name) {
+            Ok(document) => (StatusCode::OK, Json(document)).into_response(),
+            Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+        };
+    };
+    match pipelines::registry_asset(&repository_id, &package_name, &version, &filename) {
+        Ok(payload) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            payload,
+        )
+            .into_response(),
+        Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+    }
+}
+async fn registry_nuget_put(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, version, filename) = match package_registry::nuget_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let Some(version) = version else {
+        return err(StatusCode::BAD_REQUEST, "nuget upload needs {id}/{version}/{file}")
+            .into_response();
+    };
+    let metadata = json!({"formatMetadata": {"id": package_name, "version": version}});
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &version,
+        Some(&metadata.to_string()),
+        Some(&filename),
+        Some(&payload),
+    ) {
+        Ok(_) => (StatusCode::CREATED, Json(json!({"ok": true}))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+/// PyPI simple API (PEP 503): `GET .../pypi/{name}/` project page, `GET .../pypi/{name}/{file}`
+/// distribution download. Uploads keep the legacy generic route — PEP 694 upload is not built.
+async fn registry_pypi_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, filename) = match package_registry::pypi_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let Some(filename) = filename else {
+        return match package_registry::pypi_simple_project(&repository_id, &package_name) {
+            Ok(html) => (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                html,
+            )
+                .into_response(),
+            Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+        };
+    };
+    // A distribution filename does not carry the stored version reliably, so the version that
+    // actually holds this file is resolved from storage rather than parsed out of the name.
+    let versions = match package_registry::stored_versions("pypi", &repository_id, &package_name) {
+        Ok(rows) => rows,
+        Err(error) => return err(StatusCode::NOT_FOUND, &error).into_response(),
+    };
+    for row in versions {
+        // Storage keeps the publisher's spelling; the request carries the normalized name.
+        if let Ok(payload) =
+            pipelines::registry_asset(&repository_id, &row.package_name, &row.version, &filename)
+        {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                payload,
+            )
+                .into_response();
+        }
+    }
+    err(StatusCode::NOT_FOUND, "pypi distribution not found").into_response()
+}
+/// Composer: `GET .../composer/packages.json` root document and
+/// `GET .../composer/p2/{vendor}/{package}.json` version metadata.
+async fn registry_composer_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    match package_registry::composer_coordinates(&path) {
+        Ok(None) => {
+            let base = registry_base_url(&headers, &repository_id, "composer");
+            (
+                StatusCode::OK,
+                Json(package_registry::composer_packages_json(&base)),
+            )
+                .into_response()
+        }
+        Ok(Some(package_name)) => {
+            match package_registry::composer_package_metadata(&repository_id, &package_name) {
+                Ok(document) => (StatusCode::OK, Json(document)).into_response(),
+                Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+            }
+        }
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+/// OCI distribution spec v2 (read side): tag list, tag-addressed manifest, referrers.
+/// Blob addressing needs a content-addressed store this registry does not have yet, so it is
+/// reported as unsupported rather than faked.
+async fn registry_oci_get(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, target) = match package_registry::oci_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    match target {
+        package_registry::OciTarget::TagList => {
+            match package_registry::oci_tag_list(&repository_id, &package_name) {
+                Ok(document) => (StatusCode::OK, Json(document)).into_response(),
+                Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+            }
+        }
+        package_registry::OciTarget::Referrers { digest } => {
+            match package_registry::oci_referrers(&repository_id, &package_name, &digest) {
+                Ok(document) => (StatusCode::OK, Json(document)).into_response(),
+                Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+            }
+        }
+        package_registry::OciTarget::Manifest { reference } => {
+            match pipelines::registry_asset(
+                &repository_id,
+                &package_name,
+                &reference,
+                "manifest.json",
+            ) {
+                Ok(payload) => (
+                    StatusCode::OK,
+                    [(
+                        header::CONTENT_TYPE,
+                        "application/vnd.oci.image.manifest.v1+json",
+                    )],
+                    payload,
+                )
+                    .into_response(),
+                Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+            }
+        }
+        package_registry::OciTarget::Blob { .. } => err(
+            StatusCode::NOT_IMPLEMENTED,
+            "blob addressing requires a content-addressed store (not implemented)",
+        )
+        .into_response(),
+    }
+}
+/// `PUT /v2/{name}/manifests/{tag}` stores one tagged manifest as a package version.
+async fn registry_oci_put(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(response) = registry_auth(&headers) {
+        return response;
+    }
+    let (package_name, target) = match package_registry::oci_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    let package_registry::OciTarget::Manifest { reference } = target else {
+        return err(
+            StatusCode::NOT_IMPLEMENTED,
+            "only tagged manifest upload is supported",
+        )
+        .into_response();
+    };
+    let manifest: Value = match serde_json::from_slice(&payload) {
+        Ok(value) => value,
+        Err(error) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                &format!("invalid oci manifest: {error}"),
+            )
+            .into_response()
+        }
+    };
+    let subject = manifest
+        .get("subject")
+        .and_then(|s| s.get("digest"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let metadata = json!({
+        "formatMetadata": {
+            "ociManifest": manifest,
+            "subject": subject,
+        }
+    });
+    match pipelines::publish_registry_bytes(
+        &repository_id,
+        &package_name,
+        &reference,
+        Some(&metadata.to_string()),
+        Some("manifest.json"),
+        Some(&payload),
+    ) {
+        Ok(_) => (StatusCode::CREATED, Json(json!({"ok": true}))).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
 async fn registry_npm_publish_manifest(
     repository_id: String,
     package_name: String,
@@ -3438,6 +3682,22 @@ async fn main() {
             "/api/registry/{repository_id}/maven/{*path}",
             put(registry_maven_put).get(registry_maven_get),
         )
+        .route(
+            "/api/registry/{repository_id}/nuget/{*path}",
+            put(registry_nuget_put).get(registry_nuget_get),
+        )
+        .route(
+            "/api/registry/{repository_id}/pypi/{*path}",
+            get(registry_pypi_get),
+        )
+        .route(
+            "/api/registry/{repository_id}/composer/{*path}",
+            get(registry_composer_get),
+        )
+        .route(
+            "/api/registry/{repository_id}/v2/{*path}",
+            put(registry_oci_put).get(registry_oci_get),
+        )
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
@@ -3708,6 +3968,182 @@ mod tests {
         assert_eq!(body["userId"], "pa");
         assert_eq!(body["user_id"], "pa");
         assert_eq!(body["prefix"], "/dep");
+    }
+
+    /// NuGet/PyPI/Composer/OCI protocol endpoints, end to end over HTTP: publish through the
+    /// format's own upload path where it has one, then resolve through the document the real
+    /// client fetches. Unauthenticated access must be refused on the same paths.
+    #[tokio::test]
+    async fn format_registry_protocols_are_reachable_over_http() {
+        let _serial = test_lock();
+        setup();
+        let package_dir = env::temp_dir().join(format!("gaia-space-registry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&package_dir);
+        env::set_var("SPACE_PACKAGE_DIR", &package_dir);
+        let c = db::conn().unwrap();
+        for (id, format) in [
+            ("repo-nuget", "nuget"),
+            ("repo-pypi", "pypi"),
+            ("repo-composer", "composer"),
+            ("repo-oci", "container"),
+        ] {
+            c.execute(
+                "INSERT INTO package_repositories(id,name,format,mode) VALUES(?1,?1,?2,'HOSTING')",
+                params![id, format],
+            )
+            .unwrap();
+        }
+        drop(c);
+
+        // NuGet: flat-container upload → service index → version list.
+        let put = registry_nuget_put(
+            bearer("ta"),
+            Path(("repo-nuget".into(), "Newtonsoft.Json/13.0.1/Newtonsoft.Json.13.0.1.nupkg".into())),
+            Bytes::from_static(b"nupkg-bytes"),
+        )
+        .await;
+        assert_eq!(put.status(), StatusCode::CREATED);
+        let (status, body) = status_and_body(
+            registry_nuget_get(bearer("ta"), Path(("repo-nuget".into(), "index.json".into()))).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["version"], "3.0.0");
+        let (status, body) = status_and_body(
+            registry_nuget_get(
+                bearer("ta"),
+                Path(("repo-nuget".into(), "newtonsoft.json/index.json".into())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["versions"], json!(["13.0.1"]));
+        assert_eq!(
+            registry_nuget_get(HeaderMap::new(), Path(("repo-nuget".into(), "index.json".into())))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let nupkg = registry_nuget_get(
+            bearer("ta"),
+            Path((
+                "repo-nuget".into(),
+                "Newtonsoft.Json/13.0.1/Newtonsoft.Json.13.0.1.nupkg".into(),
+            )),
+        )
+        .await;
+        assert_eq!(nupkg.status(), StatusCode::OK);
+
+        // PyPI: publish through the shared registry writer, resolve through the simple index.
+        pipelines::publish_registry_bytes(
+            "repo-pypi",
+            "Flask-Login",
+            "0.6.3",
+            Some(r#"{"formatMetadata":{"files":["flask_login-0.6.3.tar.gz"]}}"#),
+            Some("flask_login-0.6.3.tar.gz"),
+            Some(b"sdist"),
+        )
+        .unwrap();
+        let simple = registry_pypi_get(bearer("ta"), Path(("repo-pypi".into(), "flask.login/".into()))).await;
+        assert_eq!(simple.status(), StatusCode::OK);
+        let html = String::from_utf8(to_bytes(simple.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(html.contains("flask_login-0.6.3.tar.gz"), "{html}");
+        let file = registry_pypi_get(
+            bearer("ta"),
+            Path(("repo-pypi".into(), "flask-login/flask_login-0.6.3.tar.gz".into())),
+        )
+        .await;
+        assert_eq!(file.status(), StatusCode::OK);
+
+        // Composer: root document points at p2, p2 lists the stored version.
+        pipelines::publish_registry_bytes(
+            "repo-composer",
+            "monolog/monolog",
+            "3.5.0",
+            Some(r#"{"formatMetadata":{"description":"logging"}}"#),
+            None,
+            None,
+        )
+        .unwrap();
+        let (status, body) = status_and_body(
+            registry_composer_get(bearer("ta"), Path(("repo-composer".into(), "packages.json".into()))).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["metadata-url"].as_str().unwrap().ends_with("/p2/%package%.json"));
+        let (status, body) = status_and_body(
+            registry_composer_get(
+                bearer("ta"),
+                Path(("repo-composer".into(), "p2/Monolog/Monolog.json".into())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["packages"]["monolog/monolog"][0]["version"], "3.5.0");
+        assert_eq!(body["packages"]["monolog/monolog"][0]["description"], "logging");
+
+        // OCI: tagged manifest upload, tag list, referrers by subject digest.
+        let manifest = json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"});
+        assert_eq!(
+            registry_oci_put(
+                bearer("ta"),
+                Path(("repo-oci".into(), "Library/Nginx/manifests/1.25".into())),
+                Bytes::from(manifest.to_string()),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let signature = json!({"schemaVersion":2,"subject":{"digest":"sha256:deadbeef"}});
+        assert_eq!(
+            registry_oci_put(
+                bearer("ta"),
+                Path(("repo-oci".into(), "library/nginx/manifests/sig-1".into())),
+                Bytes::from(signature.to_string()),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let (status, body) = status_and_body(
+            registry_oci_get(bearer("ta"), Path(("repo-oci".into(), "library/nginx/tags/list".into()))).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["name"], "library/nginx");
+        assert_eq!(body["tags"], json!(["1.25", "sig-1"]));
+        let (status, body) = status_and_body(
+            registry_oci_get(
+                bearer("ta"),
+                Path(("repo-oci".into(), "library/nginx/referrers/sha256:deadbeef".into())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["manifests"][0]["reference"], "sig-1");
+        let stored_manifest = registry_oci_get(
+            bearer("ta"),
+            Path(("repo-oci".into(), "library/nginx/manifests/1.25".into())),
+        )
+        .await;
+        assert_eq!(stored_manifest.status(), StatusCode::OK);
+
+        // Blob addressing is honestly unimplemented rather than faked.
+        assert_eq!(
+            registry_oci_get(
+                bearer("ta"),
+                Path(("repo-oci".into(), "library/nginx/blobs/sha256:cafe".into())),
+            )
+            .await
+            .status(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        env::remove_var("SPACE_PACKAGE_DIR");
+        let _ = std::fs::remove_dir_all(&package_dir);
     }
 
     #[tokio::test]
