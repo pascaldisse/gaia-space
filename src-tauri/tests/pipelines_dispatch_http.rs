@@ -53,10 +53,14 @@ impl Server {
     /// Session cookie of the seeded admin, i.e. the most privileged caller there is: if a
     /// command is refused for this caller it is refused for everyone.
     fn call(&self, command: &str, body: Value) -> (u16, Value) {
+        self.call_as("test-admin-session", command, body)
+    }
+
+    fn call_as(&self, session: &str, command: &str, body: Value) -> (u16, Value) {
         let response = self
             .client
             .post(format!("{}/api/cmd/{command}", self.base))
-            .header(reqwest::header::COOKIE, "space_session=test-admin-session")
+            .header(reqwest::header::COOKIE, format!("space_session={session}"))
             .json(&body)
             .send()
             .expect("cmd request");
@@ -101,7 +105,24 @@ fn start_server() -> Server {
          VALUES('test-admin-session','u-admin',unixepoch(),unixepoch()+3600)",
         [],
     )
-    .expect("seed session");
+    .expect("seed admin session");
+    conn.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-member','member','Member',1)",
+        [],
+    )
+    .expect("seed member profile");
+    conn.execute(
+        "INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) \
+         VALUES('u-member','member','x','Member','p-member','member',1,1)",
+        [],
+    )
+    .expect("seed member user");
+    conn.execute(
+        "INSERT INTO sessions(token,user_id,created_at,expires_at) \
+         VALUES('test-member-session','u-member',unixepoch(),unixepoch()+3600)",
+        [],
+    )
+    .expect("seed member session");
     drop(conn);
 
     let child = Command::new(env!("CARGO_BIN_EXE_space-server"))
@@ -217,6 +238,21 @@ fn web_dispatch_reaches_the_event_driven_pipeline_commands() {
     );
     assert_eq!(status, 200, "due_scheduled_runs: {value}");
     assert_eq!(value["value"], json!([]));
+}
+
+/// RED — schedule dispatch scans every unarchived pipeline script and has no project argument.
+/// A plain session must not turn this server-wide lifecycle command into an unscoped job runner.
+/// The seeded database contains no scripts, so this proves the authorization boundary without
+/// spawning an actual job process.
+#[test]
+fn ordinary_session_cannot_start_global_schedule_dispatch() {
+    let server = start_server();
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "due_scheduled_runs",
+        json!({"now": 1_700_000_000i64}),
+    );
+    assert_eq!(status, 403, "ordinary session reached global schedule dispatch: {value}");
 }
 
 /// RED companion: an event whose repository does not match the script must be refused by the
