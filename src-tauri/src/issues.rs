@@ -332,6 +332,29 @@ pub struct TimeEntryInput {
     pub description: Option<String>,
 }
 
+/// Bulk board placement. Every selected issue is placed atomically in one column.
+#[derive(Debug, Deserialize)]
+pub struct BulkBoardMoveInput {
+    pub board_id: String,
+    pub issue_ids: Vec<String>,
+    pub column_id: String,
+    pub sprint_id: Option<String>,
+    pub swimlane_id: Option<String>,
+}
+/// Bulk removal returns issues to the board's manual backlog (no board position).
+#[derive(Debug, Deserialize)]
+pub struct BulkBoardRemoveInput {
+    pub board_id: String,
+    pub issue_ids: Vec<String>,
+}
+/// `None` is the board-level backlog; a sprint id assigns every selected board issue.
+#[derive(Debug, Deserialize)]
+pub struct BulkSprintUpdateInput {
+    pub board_id: String,
+    pub issue_ids: Vec<String>,
+    pub sprint_id: Option<String>,
+}
+
 fn read_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<Issue> {
     Ok(Issue {
         id: r.get(0)?,
@@ -1088,6 +1111,142 @@ pub fn list_backlog_issues(board_id: String) -> Result<Vec<Issue>> {
     fill_assignees(&c, &mut rows)?;
     Ok(rows)
 }
+fn nonempty_unique_ids(issue_ids: &[String]) -> Result<()> {
+    if issue_ids.is_empty() || issue_ids.iter().any(|id| id.is_empty()) {
+        return Err("Select at least one issue".into());
+    }
+    let mut unique = issue_ids.to_vec();
+    unique.sort();
+    unique.dedup();
+    if unique.len() != issue_ids.len() {
+        return Err("An issue can be selected only once".into());
+    }
+    Ok(())
+}
+
+fn checked_board_project(c: &Connection, board_id: &str) -> Result<String> {
+    err(c.query_row(
+        "SELECT project_id FROM boards WHERE id=?1",
+        [board_id],
+        |r| r.get(0),
+    ))
+}
+
+fn checked_issue_project(c: &Connection, issue_ids: &[String], project_id: &str) -> Result<()> {
+    for issue_id in issue_ids {
+        let issue_project: String = err(c.query_row(
+            "SELECT project_id FROM issues WHERE id=?1",
+            [issue_id],
+            |r| r.get(0),
+        ))?;
+        if issue_project != project_id {
+            return Err("Every selected issue must belong to the board project".into());
+        }
+    }
+    Ok(())
+}
+
+/// Space's bulk `addIssuesToBacklogs` equivalent: selected project issues enter one
+/// board column together, retaining a deterministic contiguous order.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn bulk_move_issues_on_board(input: BulkBoardMoveInput) -> Result<()> {
+    nonempty_unique_ids(&input.issue_ids)?;
+    let c = db::conn()?;
+    let project_id = checked_board_project(&c, &input.board_id)?;
+    checked_issue_project(&c, &input.issue_ids, &project_id)?;
+    let status_id: String = err(c.query_row("SELECT cs.status_id FROM board_columns bc JOIN column_statuses cs ON cs.column_id=bc.id WHERE bc.id=?1 AND bc.board_id=?2 ORDER BY cs.status_id LIMIT 1", params![input.column_id, input.board_id], |r| r.get(0)).optional())?.ok_or_else(|| "Column needs at least one mapped status before moving issues".to_string())?;
+    if let Some(sprint_id) = &input.sprint_id {
+        let sprint_board: String = err(c.query_row(
+            "SELECT board_id FROM sprints WHERE id=?1 AND archived=0",
+            [sprint_id],
+            |r| r.get(0),
+        ))?;
+        if sprint_board != input.board_id {
+            return Err("Sprint must belong to the board".into());
+        }
+    }
+    let first_position: i64 = err(c.query_row(
+        "SELECT coalesce(max(position),-1)+1 FROM issue_board_positions WHERE board_id=?1",
+        [&input.board_id],
+        |r| r.get(0),
+    ))?;
+    let tx = err(c.unchecked_transaction())?;
+    for (offset, issue_id) in input.issue_ids.iter().enumerate() {
+        err(tx.execute(
+            "UPDATE issues SET status_id=?2 WHERE id=?1",
+            params![issue_id, status_id],
+        ))?;
+        err(tx.execute("INSERT INTO issue_board_positions(issue_id,board_id,sprint_id,swimlane_id,position) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(issue_id,board_id) DO UPDATE SET sprint_id=excluded.sprint_id,swimlane_id=excluded.swimlane_id,position=excluded.position", params![issue_id, input.board_id, input.sprint_id, input.swimlane_id, first_position + offset as i64]))?;
+    }
+    err(tx.commit())
+}
+
+/// Space's bulk `removeIssuesFromBacklogs` equivalent: atomically remove board membership.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn bulk_remove_issues_from_board(input: BulkBoardRemoveInput) -> Result<()> {
+    nonempty_unique_ids(&input.issue_ids)?;
+    let c = db::conn()?;
+    checked_board_project(&c, &input.board_id)?;
+    for issue_id in &input.issue_ids {
+        let present: Option<i64> = err(c
+            .query_row(
+                "SELECT 1 FROM issue_board_positions WHERE board_id=?1 AND issue_id=?2",
+                params![input.board_id, issue_id],
+                |r| r.get(0),
+            )
+            .optional())?;
+        if present.is_none() {
+            return Err("Every selected issue must be on the board".into());
+        }
+    }
+    let tx = err(c.unchecked_transaction())?;
+    for issue_id in &input.issue_ids {
+        err(tx.execute(
+            "DELETE FROM issue_board_positions WHERE board_id=?1 AND issue_id=?2",
+            params![input.board_id, issue_id],
+        ))?;
+    }
+    err(tx.commit())
+}
+
+/// Space's `bulkUpdateIssuesSprints`: preserve board membership/status while changing sprint.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn bulk_update_issues_sprints(input: BulkSprintUpdateInput) -> Result<()> {
+    nonempty_unique_ids(&input.issue_ids)?;
+    let c = db::conn()?;
+    checked_board_project(&c, &input.board_id)?;
+    if let Some(sprint_id) = &input.sprint_id {
+        let sprint_board: String = err(c.query_row(
+            "SELECT board_id FROM sprints WHERE id=?1 AND archived=0",
+            [sprint_id],
+            |r| r.get(0),
+        ))?;
+        if sprint_board != input.board_id {
+            return Err("Sprint must belong to the board".into());
+        }
+    }
+    for issue_id in &input.issue_ids {
+        let present: Option<i64> = err(c
+            .query_row(
+                "SELECT 1 FROM issue_board_positions WHERE board_id=?1 AND issue_id=?2",
+                params![input.board_id, issue_id],
+                |r| r.get(0),
+            )
+            .optional())?;
+        if present.is_none() {
+            return Err("Every selected issue must be on the board".into());
+        }
+    }
+    let tx = err(c.unchecked_transaction())?;
+    for issue_id in &input.issue_ids {
+        err(tx.execute(
+            "UPDATE issue_board_positions SET sprint_id=?3 WHERE board_id=?1 AND issue_id=?2",
+            params![input.board_id, issue_id, input.sprint_id],
+        ))?;
+    }
+    err(tx.commit())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_issue_from_board(board_id: String, issue_id: String) -> Result<()> {
     let c = db::conn()?;
@@ -1772,6 +1931,12 @@ mod tests {
         let c = crate::db::open_in_memory().unwrap();
         c.execute_batch("CREATE TABLE issues(id TEXT PRIMARY KEY,project_id TEXT,number INT,title TEXT,description TEXT,status_id TEXT,assignee_id TEXT,created_by TEXT,due_date TEXT,archived INT);CREATE TABLE issue_statuses(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,resolved INT,color TEXT,ordering INT,archived INT DEFAULT 0);CREATE TABLE boards(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,backlog_type TEXT,archived INT);CREATE TABLE board_columns(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,ordering INT);CREATE TABLE column_statuses(column_id TEXT,status_id TEXT);CREATE TABLE sprints(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,state TEXT,starts_on TEXT,ends_on TEXT,description TEXT,archived INT);CREATE TABLE issue_board_positions(issue_id TEXT,board_id TEXT,sprint_id TEXT,swimlane_id TEXT,position INT,PRIMARY KEY(issue_id,board_id));CREATE TABLE issue_links(id TEXT,issue_id TEXT,linked_issue_id TEXT,link_type TEXT);").unwrap();
         c
+    }
+    #[test]
+    fn bulk_selection_requires_unique_nonempty_issue_ids() {
+        assert!(nonempty_unique_ids(&[]).is_err());
+        assert!(nonempty_unique_ids(&["i".into(), "i".into()]).is_err());
+        assert!(nonempty_unique_ids(&["i1".into(), "i2".into()]).is_ok());
     }
     #[test]
     fn tracker_link_schema_rejects_mismatched_target_shape() {
