@@ -48,7 +48,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 62 · partial 179 · stub 4 · missing 111. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 63 · partial 180 · stub 4 · missing 109. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
