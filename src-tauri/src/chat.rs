@@ -259,6 +259,50 @@ pub struct MessageView {
     pub reply_count: i64,
     pub reactions: Vec<ReactionSummary>,
     pub attachments: Vec<MessageAttachment>,
+    /// Links extracted from the text at write time, with any preview already unfurled.
+    /// Never fetched on this path — reading history must not make outbound requests.
+    #[serde(default)]
+    pub links: Vec<crate::chat_links::MessageLink>,
+}
+
+/// One page of channel history, newest-first, plus the cursor that continues it.
+/// `next_cursor` is `None` exactly when the page reached the beginning of history, so a
+/// client never has to guess from a short page whether more exists.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessagePage {
+    pub messages: Vec<MessageView>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+/// Default page size when a caller does not state one, and the hard ceiling it may ask
+/// for. Both are constants here, never a literal at a call site.
+pub const DEFAULT_PAGE_LIMIT: i64 = 50;
+pub const MAX_PAGE_LIMIT: i64 = 100;
+
+/// A cursor is the (created_at, id) pair of the last row already delivered, base64'd so
+/// no client parses or forges its parts — it is a position, not a query. The pair, not
+/// the timestamp alone: imported messages share timestamps and a timestamp-only cursor
+/// would silently drop or repeat every tie.
+fn encode_cursor(created_at: i64, id: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{created_at}:{id}"))
+}
+
+fn decode_cursor(cursor: &str) -> Result<(i64, String)> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor.as_bytes())
+        .map_err(|_| "invalid cursor".to_string())?;
+    let raw = String::from_utf8(raw).map_err(|_| "invalid cursor".to_string())?;
+    let (ts, id) = raw
+        .split_once(':')
+        .ok_or_else(|| "invalid cursor".to_string())?;
+    let ts: i64 = ts.parse().map_err(|_| "invalid cursor".to_string())?;
+    if id.is_empty() {
+        return Err("invalid cursor".to_string());
+    }
+    Ok((ts, id.to_string()))
 }
 
 fn entity_channel_id(entity_type: &str, entity_id: &str) -> String {
@@ -643,12 +687,113 @@ fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Resul
     let attachments = attachments_for_impl(c, &m.id)?;
     let mut m = m;
     m.mention_ids = mentions_for_impl(c, &m.id)?;
+    let links = crate::chat_links::links_for(c, &m.id)?;
     Ok(MessageView {
         message: m,
         reply_count,
         reactions,
         attachments,
+        links,
     })
+}
+
+/// Keyset page of a channel's history (roots when `thread_of` is None, one thread's
+/// replies otherwise), newest first, continuing strictly before `cursor`.
+///
+/// Keyset, not OFFSET: history grows while a reader pages, and an offset would make every
+/// new message shift the window and duplicate a row. The ACL is checked here, on every
+/// page — a cursor is not a capability and must never stand in for channel membership.
+fn list_messages_page_impl(
+    c: &Connection,
+    channel_id: &str,
+    thread_of: Option<&str>,
+    cursor: Option<&str>,
+    limit: Option<i64>,
+    acting_profile_id: Option<&str>,
+) -> Result<MessagePage> {
+    if !channel_allows_actor(c, channel_id, acting_profile_id)? {
+        return Err("channel access denied".to_string());
+    }
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+    if let Some(root) = thread_of {
+        // A thread is addressed by its root, but the root's channel is what the ACL was
+        // checked against: refuse a root from some other channel instead of paging it.
+        let root_channel: Option<String> = c
+            .query_row("SELECT channel_id FROM messages WHERE id=?1", [root], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if root_channel.as_deref() != Some(channel_id) {
+            return Err("thread does not belong to this channel".to_string());
+        }
+    }
+    let (cursor_ts, cursor_id) = match cursor {
+        Some(raw) => decode_cursor(raw)?,
+        None => (i64::MAX, String::new()),
+    };
+    // Fetch one extra row: presence of row `limit+1` is what proves more history exists,
+    // without a second COUNT query that could disagree with this one.
+    let sql = format!(
+        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind \
+         FROM messages WHERE channel_id=?1 AND archived=0 AND {} \
+         AND (created_at < ?2 OR (created_at = ?2 AND id < ?3)) \
+         ORDER BY created_at DESC, id DESC LIMIT ?4",
+        if thread_of.is_some() {
+            "thread_of = ?5"
+        } else {
+            "thread_of IS NULL AND ?5 IS NULL"
+        }
+    );
+    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut msgs: Vec<Message> = s
+        .query_map(
+            rusqlite::params![channel_id, cursor_ts, cursor_id, limit + 1, thread_of],
+            message_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let has_more = msgs.len() as i64 > limit;
+    msgs.truncate(limit as usize);
+    let next_cursor = if has_more {
+        msgs.last().map(|m| encode_cursor(m.created_at, &m.id))
+    } else {
+        None
+    };
+    let messages = msgs
+        .into_iter()
+        .map(|m| to_view(c, m, acting_profile_id))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(MessagePage {
+        messages,
+        next_cursor,
+        has_more,
+    })
+}
+
+/// Unfurl the pending links of one message. The read ACL of the owning channel gates it —
+/// otherwise anyone could make the server fetch on behalf of a channel they cannot read,
+/// and learn the answer.
+fn unfurl_message_links_impl(
+    c: &Connection,
+    message_id: &str,
+    acting_profile_id: Option<&str>,
+    fetch: &dyn Fn(&str) -> Result<crate::chat_links::FetchedDoc>,
+) -> Result<Vec<crate::chat_links::MessageLink>> {
+    let channel_id: String = c
+        .query_row(
+            "SELECT channel_id FROM messages WHERE id=?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "message not found".to_string())?;
+    if !channel_allows_actor(c, &channel_id, acting_profile_id)? {
+        return Err("channel access denied".to_string());
+    }
+    crate::chat_links::unfurl_links_with(c, message_id, fetch)
 }
 fn list_messages_impl(
     c: &Connection,
@@ -1557,6 +1702,7 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         &message.text,
         &message.mention_ids,
     )?;
+    crate::chat_links::sync_links_on(c, &message.id, &message.text)?;
     crate::channel_feeds::route_message_on(
         c,
         &message.channel_id,
@@ -1656,6 +1802,10 @@ fn update_message_impl(
     if changed == 0 {
         return Err("message not found".to_string());
     }
+    // An edit re-derives the link set: a URL that survives keeps its preview, one that
+    // left loses it, one that arrived is `pending` — an edit must never become an
+    // outbound request.
+    crate::chat_links::sync_links_on(c, id, text)?;
     // Omitting `mention_ids` leaves the mentions untouched: an old client that only
     // knows how to edit text must not silently strip everyone off the message.
     if let Some(mention_ids) = mention_ids {
@@ -1927,6 +2077,41 @@ pub fn list_messages(
 ) -> Result<Vec<MessageView>> {
     list_messages_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
 }
+/// Paged history. `cursor` continues a previous page; `limit` is clamped to
+/// `MAX_PAGE_LIMIT` server-side, so a client asking for a million rows gets one page.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_messages_page(
+    channel_id: String,
+    thread_of: Option<String>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+    acting_profile_id: Option<String>,
+) -> Result<MessagePage> {
+    list_messages_page_impl(
+        &db::conn()?,
+        &channel_id,
+        thread_of.as_deref(),
+        cursor.as_deref(),
+        limit,
+        acting_profile_id.as_deref(),
+    )
+}
+
+/// Fetch previews for a message's still-unfurled links. Explicit, server-side, ACL-gated,
+/// and never invoked from a read path.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn unfurl_message_links(
+    message_id: String,
+    acting_profile_id: Option<String>,
+) -> Result<Vec<crate::chat_links::MessageLink>> {
+    unfurl_message_links_impl(
+        &db::conn()?,
+        &message_id,
+        acting_profile_id.as_deref(),
+        &crate::chat_links::fetch_url,
+    )
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_pinned_messages(
     channel_id: String,
@@ -3614,6 +3799,272 @@ mod tests {
         let fetched = get_channel_impl(&c, &entity_channel_id("issue", "issue-42")).unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().name.as_deref(), Some("Issue #42"));
+        drop(c);
+        drop(path);
+    }
+
+    // ---- V118: history paging + link unfurling ---------------------------------
+
+    /// All rows share one `created_at` on purpose: a timestamp-only cursor would drop or
+    /// repeat rows here, so this fixture is the tie-break test's whole point.
+    fn seed_history(c: &Connection, channel: &str, count: usize) {
+        seed_scheduler(c, channel);
+        for i in 0..count {
+            c.execute(
+                "INSERT INTO messages(id,channel_id,author_id,text,created_at,thread_of,archived,pinned,content_kind) \
+                 VALUES(?1,?2,'default-org',?3,100,NULL,0,0,'text')",
+                rusqlite::params![format!("m-{i:02}"), channel, format!("line {i}")],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn paging_walks_a_tied_timestamp_history_exactly_once() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-page", 7);
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page =
+                list_messages_page_impl(&c, "chan-page", None, cursor.as_deref(), Some(3), None)
+                    .unwrap();
+            seen.extend(page.messages.iter().map(|m| m.message.id.clone()));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => {
+                    assert!(!page.has_more);
+                    break;
+                }
+            }
+        }
+        // Every row once, newest id first (ids tie on time, so id breaks it).
+        let mut unique = seen.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), 7, "paging repeated or skipped rows: {seen:?}");
+        assert_eq!(seen.first().unwrap(), "m-06");
+        assert_eq!(seen.last().unwrap(), "m-00");
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_page_limit_is_clamped_and_a_forged_cursor_is_refused() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-clamp", 3);
+
+        let huge =
+            list_messages_page_impl(&c, "chan-clamp", None, None, Some(1_000_000), None).unwrap();
+        assert_eq!(huge.messages.len(), 3);
+        assert!(!huge.has_more);
+        // A zero/negative page is a client bug, not an infinite loop generator.
+        let tiny = list_messages_page_impl(&c, "chan-clamp", None, None, Some(0), None).unwrap();
+        assert_eq!(tiny.messages.len(), 1);
+        assert!(tiny.has_more);
+
+        assert_eq!(
+            list_messages_page_impl(&c, "chan-clamp", None, Some("not-a-cursor!!"), None, None)
+                .unwrap_err(),
+            "invalid cursor"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_cursor_is_not_a_capability_and_a_thread_must_belong_to_its_channel() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "mallory"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-private".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .unwrap();
+        post(&c, "chan-private", "m-secret", "alice", &[]).unwrap();
+        let page =
+            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice")).unwrap();
+        assert_eq!(page.messages.len(), 1);
+        // Same channel, same (absent) cursor, different reader: the ACL is re-checked on
+        // every page, so holding a cursor grants nothing.
+        assert_eq!(
+            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("mallory"))
+                .unwrap_err(),
+            "channel access denied"
+        );
+
+        seed_history(&c, "chan-other", 1);
+        assert_eq!(
+            list_messages_page_impl(
+                &c,
+                "chan-other",
+                Some("m-secret"),
+                None,
+                Some(5),
+                Some("mallory")
+            )
+            .unwrap_err(),
+            "thread does not belong to this channel"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn thread_replies_page_separately_from_channel_roots() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-thr", 1);
+        for i in 0..3 {
+            c.execute(
+                "INSERT INTO messages(id,channel_id,author_id,text,created_at,thread_of,archived,pinned,content_kind) \
+                 VALUES(?1,'chan-thr','default-org','re',?2,'m-00',0,0,'text')",
+                rusqlite::params![format!("r-{i}"), 200 + i],
+            )
+            .unwrap();
+        }
+        let roots = list_messages_page_impl(&c, "chan-thr", None, None, None, None).unwrap();
+        assert_eq!(roots.messages.len(), 1);
+        let replies =
+            list_messages_page_impl(&c, "chan-thr", Some("m-00"), None, Some(2), None).unwrap();
+        assert_eq!(replies.messages.len(), 2);
+        assert!(replies.has_more);
+        let rest = list_messages_page_impl(
+            &c,
+            "chan-thr",
+            Some("m-00"),
+            replies.next_cursor.as_deref(),
+            Some(2),
+            None,
+        )
+        .unwrap();
+        assert_eq!(rest.messages.len(), 1);
+        assert!(!rest.has_more);
+        assert!(rest.next_cursor.is_none());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn links_are_extracted_on_write_and_re_derived_on_edit() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-link");
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-link".into(),
+                channel_id: "chan-link".into(),
+                author_id: Some("default-org".into()),
+                text: "read https://a.example/x and https://b.example/y".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: vec![],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+        let view = list_messages_page_impl(&c, "chan-link", None, None, None, None).unwrap();
+        let links = &view.messages[0].links;
+        assert_eq!(links.len(), 2);
+        assert!(links.iter().all(|l| l.status == "pending"));
+
+        // Pretend the first was unfurled, then edit the text: the survivor keeps its
+        // preview, the dropped URL takes its own with it.
+        unfurl_message_links_impl(&c, "m-link", None, &|_url| {
+            Ok(crate::chat_links::FetchedDoc {
+                content_type: "text/html".into(),
+                body: "<html><head><title>Kept</title></head></html>".into(),
+            })
+        })
+        .unwrap();
+        update_message_impl(&c, "m-link", "only https://a.example/x now", None).unwrap();
+        let links = crate::chat_links::links_for(&c, "m-link").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://a.example/x");
+        assert_eq!(links[0].title.as_deref(), Some("Kept"));
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn unfurling_needs_the_channel_and_a_refusal_is_recorded_not_retried() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "mallory"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-unf".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .unwrap();
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-unf".into(),
+                channel_id: "chan-unf".into(),
+                author_id: Some("alice".into()),
+                text: "http://169.254.169.254/latest/meta-data".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: vec![],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+
+        // An outsider cannot make the server fetch on behalf of a channel they cannot read.
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            unfurl_message_links_impl(&c, "m-unf", Some("mallory"), &|_u| {
+                calls.set(calls.get() + 1);
+                Ok(crate::chat_links::FetchedDoc {
+                    content_type: "text/html".into(),
+                    body: String::new(),
+                })
+            })
+            .unwrap_err(),
+            "channel access denied"
+        );
+        assert_eq!(calls.get(), 0, "a denied request must not reach the network");
+
+        // The member's request runs, the guard refuses the link-local address, and the
+        // refusal is terminal: a second request does not re-dial.
+        let links = unfurl_message_links_impl(&c, "m-unf", Some("alice"), &|url| {
+            calls.set(calls.get() + 1);
+            crate::chat_links::fetch_url(url)
+        })
+        .unwrap();
+        assert_eq!(links[0].status, "refused");
+        assert!(links[0].title.is_none());
+        assert_eq!(calls.get(), 1);
+        unfurl_message_links_impl(&c, "m-unf", Some("alice"), &|url| {
+            calls.set(calls.get() + 1);
+            crate::chat_links::fetch_url(url)
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1, "a refused link must not be re-fetched");
         drop(c);
         drop(path);
     }

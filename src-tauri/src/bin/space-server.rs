@@ -2320,6 +2320,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_pinned_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
+        // Paging is reading: same policy as `list_messages`, and the channel ACL check
+        // below runs on every page — a cursor is a position, never a capability.
+        "list_messages_page" => CommandPolicy::Session,
+        // Unfurling makes this server fetch a URL, so it is gated by the read ACL of the
+        // channel the message lives in (resolved server-side from `message_id`).
+        "unfurl_message_links" => CommandPolicy::Session,
         // Both are scoped to the caller by `bind_session_identity` rewriting `profile_id`,
         // so one session can never read another profile's mentions inbox or badge.
         "list_mentions_for_profile" | "count_unread_mentions" => CommandPolicy::Session,
@@ -3593,6 +3599,7 @@ fn authorize_command(
             if matches!(
                 name,
                 "list_messages"
+                    | "list_messages_page"
                     | "list_pinned_messages"
                     | "save_message_draft"
                     | "get_message_draft"
@@ -3658,6 +3665,17 @@ fn authorize_command(
                 // A poll is readable/votable only from inside its channel; chat.rs still
                 // owns the author-only close and the closed/ownership rules.
                 if !chat_poll_channel(&poll_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if name == "unfurl_message_links" {
+                let message_id: String =
+                    arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                // The caller's `channel_id` is never consulted: the channel is whatever
+                // the message actually belongs to.
+                if !chat_message_channel(&message_id)
                     .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
                 {
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
@@ -4829,6 +4847,7 @@ async fn cmd(
     "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_pinned_messages" => chat::list_pinned_messages(channel_id: String, acting_profile_id: Option<String>),
+    "list_messages_page" => chat::list_messages_page(channel_id: String, thread_of: Option<String>, cursor: Option<String>, limit: Option<i64>, acting_profile_id: Option<String>),
     "list_message_drafts" => chat::list_message_drafts(author_id: String),
     "get_message_draft" => chat::get_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
     "list_channel_typing" => chat::list_channel_typing(channel_id: String, acting_profile_id: Option<String>, ttl_secs: Option<i64>),
@@ -4973,6 +4992,7 @@ async fn cmd(
     "create_poll" => chat::create_poll(id: String, channel_id: String, author_id: String, question: String, options: Vec<String>, multiple_choice: Option<bool>, anonymous: Option<bool>),
     "vote_poll" => chat::vote_poll(poll_id: String, voter_id: String, option_ids: Vec<String>),
     "close_poll" => chat::close_poll(poll_id: String, author_id: String),
+    "unfurl_message_links" => chat::unfurl_message_links(message_id: String, acting_profile_id: Option<String>),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),

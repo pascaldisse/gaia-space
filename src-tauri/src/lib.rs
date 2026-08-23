@@ -23,6 +23,8 @@ pub mod channel_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod chat_links;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chatbot;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -356,6 +358,8 @@ pub fn run() {
             chat::list_channel_polls,
             chat::vote_poll,
             chat::close_poll,
+            chat::list_messages_page,
+            chat::unfurl_message_links,
             chat::list_mentions_for_profile,
             chat::count_unread_mentions,
             chat::delete_message,

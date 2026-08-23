@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 117;
+pub const SCHEMA_VERSION: i64 = 118;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -640,6 +640,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         && table_exists(&tx, "profiles")?
     {
         tx.execute_batch(SCHEMA_V117)?;
+    }
+    // V118: the URLs a message carries are extracted once at write time (rows, not a
+    // re-parse at read time) and their unfurled metadata is cached per message, so a
+    // preview is only ever readable through the channel ACL of the message that owns it.
+    if version < 118 && table_exists(&tx, "messages")? {
+        tx.execute_batch(SCHEMA_V118)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1601,6 +1607,32 @@ CREATE TABLE IF NOT EXISTS message_poll_votes (
 CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(option_id);
 "#;
 
+/// V118: history paging needs a stable total order, and unfurling needs somewhere to put
+/// what it fetched. `message_links` is the extracted link set of a message — position
+/// keeps the text order, the row dies with the message. Preview metadata lives on the
+/// same row (not in a global url→preview table) so that a fetched title is reachable only
+/// through the message that carries it, i.e. through that channel's ACL: a global cache
+/// would let anybody confirm which URLs private channels talk about. `status` records the
+/// outcome so a refused (SSRF-guarded) or failed fetch is not retried on every read.
+pub(crate) const SCHEMA_V118: &str = r#"
+CREATE TABLE IF NOT EXISTS message_links (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','ok','refused','failed')),
+    title TEXT,
+    description TEXT,
+    site_name TEXT,
+    error TEXT,
+    fetched_at INTEGER,
+    PRIMARY KEY(message_id, position)
+);
+CREATE INDEX IF NOT EXISTS message_links_message ON message_links(message_id, position);
+-- Keyset paging reads (channel, created_at DESC, id DESC) for roots and per thread.
+CREATE INDEX IF NOT EXISTS messages_channel_page ON messages(channel_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS messages_thread_page ON messages(thread_of, created_at DESC, id DESC);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -2011,7 +2043,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 117);
+        assert_eq!(SCHEMA_VERSION, 118);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
