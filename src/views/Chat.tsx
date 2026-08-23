@@ -15,6 +15,7 @@ import {
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
+  type ScheduledMessage,
 } from "../api/chat";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
@@ -235,6 +236,89 @@ export default function Chat() {
     if (!ch || !p) return;
     chatApi.deleteMessageDraft(ch, p).catch(fail);
     chatApi.setChannelTyping(ch, p, false).catch(fail);
+  }
+
+  // ---- scheduled messages ----
+  // The picker speaks local wall clock (that is what a human schedules in); the wire
+  // carries UTC epoch seconds only, so the conversion happens exactly here.
+  const [scheduleAt, setScheduleAt] = createSignal("");
+  const [scheduleOpen, setScheduleOpen] = createSignal(false);
+  const [scheduleEditId, setScheduleEditId] = createSignal<string | null>(null);
+  const [scheduled, setScheduled] = createSignal<ScheduledMessage[]>([]);
+
+  function localToEpochSecs(value: string): number | null {
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  function epochToLocalInput(secs: number): string {
+    const d = new Date(secs * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const scheduledLabel = (row: ScheduledMessage) =>
+    new Date(row.scheduled_at * 1000).toLocaleString();
+
+  function refreshScheduled() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) { setScheduled([]); return; }
+    chatApi
+      .listScheduledMessages(p, ch, "pending")
+      .then((rows) => {
+        if (activeChannelId() === ch && actingProfileId() === p) setScheduled(rows);
+      })
+      .catch(fail);
+  }
+  createEffect(() => { activeChannelId(); actingProfileId(); refreshScheduled(); });
+
+  function resetScheduleForm() {
+    setScheduleOpen(false);
+    setScheduleEditId(null);
+    setScheduleAt("");
+  }
+
+  // One button, two meanings: with an edit target it reschedules/rewrites that intent,
+  // otherwise it postpones whatever is in the composer.
+  async function submitSchedule() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    const when = localToEpochSecs(scheduleAt());
+    if (!ch || !p || when === null) return;
+    const editing = scheduleEditId();
+    const text = draft().trim();
+    try {
+      if (editing) {
+        await chatApi.updateScheduledMessage(editing, p, text ? text : null, when);
+      } else {
+        if (!text) return;
+        await chatApi.scheduleMessage({ id: newId("sched"), channelId: ch, authorId: p, text, scheduledAt: when });
+      }
+      setDraft("");
+      clearDraftState();
+      resetScheduleForm();
+      refreshScheduled();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  function editScheduled(row: ScheduledMessage) {
+    setDraft(row.text);
+    setScheduleAt(epochToLocalInput(row.scheduled_at));
+    setScheduleEditId(row.id);
+    setScheduleOpen(true);
+  }
+
+  async function cancelScheduled(row: ScheduledMessage) {
+    const p = actingProfileId();
+    if (!p) return;
+    try {
+      await chatApi.cancelScheduledMessage(row.id, p);
+      if (scheduleEditId() === row.id) resetScheduleForm();
+      refreshScheduled();
+    } catch (e) {
+      fail(e);
+    }
   }
 
   const [typingUsers, setTypingUsers] = createSignal<string[]>([]);
@@ -850,6 +934,34 @@ export default function Chat() {
           <Show when={typingLabel()}>
             <div class="typing-indicator" aria-live="polite">{typingLabel()}</div>
           </Show>
+          <Show when={scheduled().length}>
+            <div class="scheduled-panel">
+              <span class="hint">Scheduled ({scheduled().length})</span>
+              <For each={scheduled()}>{(row) => (
+                <div class="scheduled-row">
+                  <span class="scheduled-when">{scheduledLabel(row)}</span>
+                  <span class="scheduled-text">{row.text}</span>
+                  <Show when={row.error}><span class="scheduled-error" title={row.error ?? ""}>⚠</span></Show>
+                  <button type="button" onClick={() => editScheduled(row)}>Edit</button>
+                  <button type="button" onClick={() => cancelScheduled(row)}>Cancel</button>
+                </div>
+              )}</For>
+            </div>
+          </Show>
+          <Show when={scheduleOpen()}>
+            <div class="schedule-form">
+              <input
+                type="datetime-local"
+                aria-label="Send at"
+                value={scheduleAt()}
+                onInput={(e) => setScheduleAt(e.currentTarget.value)}
+              />
+              <button type="button" class="primary" onClick={submitSchedule} disabled={!scheduleAt()}>
+                {scheduleEditId() ? "Reschedule" : "Schedule"}
+              </button>
+              <button type="button" onClick={resetScheduleForm}>Dismiss</button>
+            </div>
+          </Show>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"
@@ -864,6 +976,7 @@ export default function Chat() {
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
+            <button type="button" class="schedule-button" title="Send later" onClick={() => setScheduleOpen((v) => !v)}>🕒</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">

@@ -45,6 +45,22 @@ export type TypingParticipant = {
   updated_at: number;
 };
 
+// A scheduled message is an unsent intent: it lives outside the message list until its
+// delivery run posts it. `scheduled_at` is UTC epoch seconds, never a local wall clock.
+export type ScheduledStatus = "pending" | "sent" | "cancelled";
+export type ScheduledMessage = {
+  id: string;
+  channel_id: string;
+  author_id: string;
+  text: string;
+  thread_of: string | null;
+  scheduled_at: number;
+  status: ScheduledStatus;
+  sent_message_id: string | null;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
 export type Message = {
   id: string;
   channel_id: string;
@@ -128,6 +144,27 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<void>("set_channel_typing", { channelId, profileId, typing }),
   listChannelTyping: (channelId: string, actingProfileId?: string | null, ttlSecs?: number | null) =>
     invoke<TypingParticipant[]>("list_channel_typing", { channelId, actingProfileId: actingProfileId ?? null, ttlSecs: ttlSecs ?? null }),
+  // scheduled messages: create/list/edit/cancel are author-scoped; delivery is the server's
+  scheduleMessage: (
+    input: { id: string; channelId: string; authorId: string; text: string; scheduledAt: number; threadOf?: string | null },
+  ) =>
+    invoke<ScheduledMessage>("schedule_message", {
+      id: input.id,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      text: input.text,
+      threadOf: input.threadOf ?? null,
+      scheduledAt: input.scheduledAt,
+    }),
+  listScheduledMessages: (authorId: string, channelId?: string | null, status?: ScheduledStatus | null) =>
+    invoke<ScheduledMessage[]>("list_scheduled_messages", { authorId, channelId: channelId ?? null, status: status ?? null }),
+  getScheduledMessage: (id: string, authorId: string) =>
+    invoke<ScheduledMessage>("get_scheduled_message", { id, authorId }),
+  // `null` on a field means "leave it alone" — text and time move independently.
+  updateScheduledMessage: (id: string, authorId: string, text?: string | null, scheduledAt?: number | null) =>
+    invoke<ScheduledMessage>("update_scheduled_message", { id, authorId, text: text ?? null, scheduledAt: scheduledAt ?? null }),
+  cancelScheduledMessage: (id: string, authorId: string) =>
+    invoke<ScheduledMessage>("cancel_scheduled_message", { id, authorId }),
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),

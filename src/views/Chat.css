@@ -353,6 +353,13 @@
 
 .composer-wrap { flex-wrap: wrap; position: relative; }
 /* Sits directly above the composer so it reads as "about to arrive", not as history. */
+.scheduled-panel { display: flex; flex-direction: column; gap: .2em; padding: 4px 12px; }
+.scheduled-row { display: flex; align-items: center; gap: .5em; font-size: .8em; color: var(--text-muted); }
+.scheduled-when { white-space: nowrap; }
+.scheduled-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-error { color: #e6a15f; }
+.schedule-form { display: flex; align-items: center; gap: .4em; padding: 4px 12px; }
+.schedule-button { background: none; border: none; cursor: pointer; font-size: 1.05em; }
 .typing-indicator { padding: 2px 12px; font-size: 12px; font-style: italic; opacity: 0.7; }
 .attachment-button { display: grid; place-items: center; cursor: pointer; color: var(--text-muted); padding: .35em; }
 .attachment-button:hover { color: #5fe6d4; }
