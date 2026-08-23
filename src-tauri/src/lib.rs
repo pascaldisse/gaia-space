@@ -296,6 +296,8 @@ pub fn run() {
             chat::list_thread_replies,
             chat::create_message,
             chat::add_message_attachment,
+            chat::set_message_attachment_state,
+            chat::remove_message_attachment,
             chat::update_message,
             chat::delete_message,
             chat::add_reaction,

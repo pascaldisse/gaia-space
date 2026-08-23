@@ -1769,6 +1769,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_deploy_target"
         | "delete_issue_status"
         | "delete_message" => CommandPolicy::Session,
+        // Attachment lifecycle rides the message it belongs to. Per-message authorship
+        // checks are TODO (P1, tracked with the reader-race + atomic-batch work); today
+        // these require a session exactly like `create_message`/`delete_message`.
+        "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
+            CommandPolicy::Session
+        }
         "delete_planning_tag"
         | "delete_quality_gate_rule"
         | "delete_role_assignment"
@@ -4013,6 +4019,9 @@ async fn cmd(
     "delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
+    "add_message_attachment" => chat::add_message_attachment(message_id: String, attachment: chat::NewMessageAttachment),
+    "set_message_attachment_state" => chat::set_message_attachment_state(id: String, state: String, error: Option<String>),
+    "remove_message_attachment" => chat::remove_message_attachment(id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),
     "add_review_participant" => review::add_review_participant(participant: review::ReviewParticipant),
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),

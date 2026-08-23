@@ -49,6 +49,69 @@ pub struct Message {
     #[serde(default)]
     pub mention_ids: Vec<String>,
 }
+/// Upload lifecycle of an attachment row (KB §04: LoadingAttachment /
+/// AttachmentIsUploading / AttachmentUploadCompleted / AttachmentUploadFailed).
+/// Stored as text so a reload can tell a finished attachment from a stalled one.
+pub const ATTACHMENT_STATES: [&str; 4] = ["loading", "uploading", "completed", "failed"];
+pub const MAX_ATTACHMENT_BYTES: i64 = 10 * 1024 * 1024;
+
+fn validate_attachment_state(state: &str) -> Result<()> {
+    if ATTACHMENT_STATES.contains(&state) {
+        Ok(())
+    } else {
+        Err(format!("invalid attachment state: {state}"))
+    }
+}
+
+/// The declared `byte_length` is a client claim; the payload is the fact. Decode the
+/// data URL and measure it, so `{byte_length: 0, data_url: <10MB>}` cannot slip past
+/// the size gate. Returns the measured length.
+pub fn measure_data_url(data_url: &str, declared: i64) -> Result<i64> {
+    let rest = data_url
+        .strip_prefix("data:")
+        .ok_or_else(|| "invalid attachment: not a data URL".to_string())?;
+    let comma = rest
+        .find(',')
+        .ok_or_else(|| "invalid attachment: data URL has no payload".to_string())?;
+    let (meta, payload) = rest.split_at(comma);
+    let payload = &payload[1..];
+    let measured: i64 = if meta.ends_with(";base64") {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .map_err(|_| "invalid attachment: bad base64 payload".to_string())?
+            .len() as i64
+    } else {
+        // percent-encoded text payload: octets after decoding %XX escapes.
+        let bytes = payload.as_bytes();
+        let mut n = 0i64;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'%' {
+                if i + 2 >= bytes.len() || !bytes[i + 1..i + 3].iter().all(u8::is_ascii_hexdigit) {
+                    return Err("invalid attachment: bad percent escape".into());
+                }
+                i += 3;
+            } else {
+                i += 1;
+            }
+            n += 1;
+        }
+        n
+    };
+    if measured > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "attachment too large: {measured} bytes exceeds {MAX_ATTACHMENT_BYTES}"
+        ));
+    }
+    if measured != declared {
+        return Err(format!(
+            "attachment size mismatch: declared {declared}, measured {measured}"
+        ));
+    }
+    Ok(measured)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageAttachment {
     pub id: String,
@@ -57,6 +120,8 @@ pub struct MessageAttachment {
     pub mime_type: String,
     pub byte_length: i64,
     pub data_url: String,
+    pub upload_state: String,
+    pub error: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NewMessageAttachment {
@@ -65,6 +130,8 @@ pub struct NewMessageAttachment {
     pub mime_type: String,
     pub byte_length: i64,
     pub data_url: String,
+    #[serde(default)]
+    pub upload_state: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReactionSummary {
@@ -317,7 +384,7 @@ fn reactions_for_impl(
     rows
 }
 fn attachments_for_impl(c: &Connection, message_id: &str) -> Result<Vec<MessageAttachment>> {
-    let mut statement = c.prepare("SELECT id,message_id,file_name,mime_type,byte_length,data_url FROM message_attachments WHERE message_id=?1 ORDER BY created_at,id").map_err(|e| e.to_string())?;
+    let mut statement = c.prepare("SELECT id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error FROM message_attachments WHERE message_id=?1 ORDER BY created_at,id").map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([message_id], |r| {
             Ok(MessageAttachment {
@@ -327,6 +394,8 @@ fn attachments_for_impl(c: &Connection, message_id: &str) -> Result<Vec<MessageA
                 mime_type: r.get(3)?,
                 byte_length: r.get(4)?,
                 data_url: r.get(5)?,
+                upload_state: r.get(6)?,
+                error: r.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -597,22 +666,86 @@ pub fn create_message(message: Message) -> Result<MessageView> {
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
+fn add_message_attachment_impl(
+    c: &Connection,
+    message_id: &str,
+    attachment: NewMessageAttachment,
+) -> Result<MessageAttachment> {
+    if attachment.byte_length < 0 {
+        return Err("invalid attachment: negative length".into());
+    }
+    measure_data_url(&attachment.data_url, attachment.byte_length)?;
+    let state = attachment.upload_state.as_deref().unwrap_or("completed");
+    validate_attachment_state(state)?;
+    c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url, state]).map_err(|e| e.to_string())?;
+    attachments_for_impl(c, message_id)?
+        .into_iter()
+        .find(|item| item.id == attachment.id)
+        .ok_or_else(|| "attachment missing".into())
+}
+
+fn set_message_attachment_state_impl(
+    c: &Connection,
+    id: &str,
+    state: &str,
+    error: Option<&str>,
+) -> Result<MessageAttachment> {
+    validate_attachment_state(state)?;
+    // An error string only carries meaning on a failed upload; clearing it on any other
+    // transition keeps a retried attachment from displaying its previous failure.
+    let error = if state == "failed" { error } else { None };
+    let changed = c
+        .execute(
+            "UPDATE message_attachments SET upload_state=?2, error=?3 WHERE id=?1",
+            rusqlite::params![id, state, error],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("attachment not found".into());
+    }
+    let message_id: String = c
+        .query_row(
+            "SELECT message_id FROM message_attachments WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    attachments_for_impl(c, &message_id)?
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| "attachment missing".into())
+}
+
+fn remove_message_attachment_impl(c: &Connection, id: &str) -> Result<()> {
+    let changed = c
+        .execute("DELETE FROM message_attachments WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("attachment not found".into());
+    }
+    Ok(())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_message_attachment(
     message_id: String,
     attachment: NewMessageAttachment,
 ) -> Result<MessageAttachment> {
-    if !attachment.data_url.starts_with("data:")
-        || !(0..=10 * 1024 * 1024).contains(&attachment.byte_length)
-    {
-        return Err("invalid attachment".into());
-    }
-    let c = db::conn()?;
-    c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url]).map_err(|e| e.to_string())?;
-    attachments_for_impl(&c, &message_id)?
-        .into_iter()
-        .find(|item| item.id == attachment.id)
-        .ok_or_else(|| "attachment missing".into())
+    add_message_attachment_impl(&db::conn()?, &message_id, attachment)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_message_attachment_state(
+    id: String,
+    state: String,
+    error: Option<String>,
+) -> Result<MessageAttachment> {
+    set_message_attachment_state_impl(&db::conn()?, &id, &state, error.as_deref())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_message_attachment(id: String) -> Result<()> {
+    remove_message_attachment_impl(&db::conn()?, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_message(id: String, text: String) -> Result<MessageView> {
@@ -682,6 +815,126 @@ mod tests {
             &["default-org".to_string()],
         )
         .unwrap();
+    }
+
+    fn seed_message(c: &Connection, channel: &str, id: &str) {
+        seed_channel(c, channel);
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some("default-org".into()),
+                text: "with files".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                mention_ids: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn new_attachment(id: &str, data_url: &str, byte_length: i64, state: Option<&str>) -> NewMessageAttachment {
+        NewMessageAttachment {
+            id: id.into(),
+            file_name: "f.txt".into(),
+            mime_type: "text/plain".into(),
+            byte_length,
+            data_url: data_url.into(),
+            upload_state: state.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn attachment_lifecycle_states_roundtrip() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att", "msg-att");
+        let stored = add_message_attachment_impl(
+            &c,
+            "msg-att",
+            new_attachment("att-1", "data:text/plain;base64,aGk=", 2, Some("uploading")),
+        )
+        .unwrap();
+        assert_eq!(stored.upload_state, "uploading");
+        assert!(stored.error.is_none());
+
+        let failed =
+            set_message_attachment_state_impl(&c, "att-1", "failed", Some("network down")).unwrap();
+        assert_eq!(failed.upload_state, "failed");
+        assert_eq!(failed.error.as_deref(), Some("network down"));
+
+        // a retry clears the stale failure text, so the UI cannot show a cured error
+        let retried = set_message_attachment_state_impl(&c, "att-1", "completed", None).unwrap();
+        assert_eq!(retried.upload_state, "completed");
+        assert!(retried.error.is_none());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_defaults_to_completed_and_rejects_unknown_state() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att2", "msg-att2");
+        let stored =
+            add_message_attachment_impl(&c, "msg-att2", new_attachment("att-2", "data:,hi", 2, None))
+                .unwrap();
+        assert_eq!(stored.upload_state, "completed");
+        assert!(add_message_attachment_impl(
+            &c,
+            "msg-att2",
+            new_attachment("att-3", "data:,hi", 2, Some("teleporting"))
+        )
+        .is_err());
+        assert!(set_message_attachment_state_impl(&c, "att-2", "teleporting", None).is_err());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_size_is_measured_not_trusted() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att3", "msg-att3");
+        use base64::Engine as _;
+        let big = base64::engine::general_purpose::STANDARD.encode(vec![0u8; 11 * 1024 * 1024]);
+        let url = format!("data:application/octet-stream;base64,{big}");
+        // the historic hole: a zero declared length carrying an oversized payload
+        let err = add_message_attachment_impl(&c, "msg-att3", new_attachment("att-big", &url, 0, None))
+            .unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+        // an honest-looking but wrong declaration is refused too
+        let err = add_message_attachment_impl(
+            &c,
+            "msg-att3",
+            new_attachment("att-lie", "data:text/plain;base64,aGk=", 999, None),
+        )
+        .unwrap_err();
+        assert!(err.contains("mismatch"), "{err}");
+        assert!(
+            add_message_attachment_impl(&c, "msg-att3", new_attachment("att-nourl", "hi", 2, None))
+                .is_err()
+        );
+        assert!(attachments_for_impl(&c, "msg-att3").unwrap().is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_removal_is_scoped_and_reported() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att4", "msg-att4");
+        add_message_attachment_impl(&c, "msg-att4", new_attachment("att-4", "data:,hi", 2, None))
+            .unwrap();
+        add_message_attachment_impl(&c, "msg-att4", new_attachment("att-5", "data:,hi", 2, None))
+            .unwrap();
+        remove_message_attachment_impl(&c, "att-4").unwrap();
+        let left = attachments_for_impl(&c, "msg-att4").unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "att-5");
+        assert!(remove_message_attachment_impl(&c, "att-4").is_err());
+        drop(c);
+        drop(path);
     }
 
     #[test]
