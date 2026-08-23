@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 86;
+pub const SCHEMA_VERSION: i64 = 87;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -587,6 +587,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 86 && table_exists(&tx, "meetings")? {
         tx.execute_batch(SCHEMA_V86)?;
         add_column_if_missing(&tx, "meetings", "video_status", "TEXT NOT NULL DEFAULT 'scheduled' CHECK(video_status IN ('scheduled','live','ended','cancelled'))")?;
+    }
+    // V87: selected video provider is distinct from lifecycle and defaults to native LiveKit.
+    if version < 87 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "video_provider", "TEXT NOT NULL DEFAULT 'native' CHECK(video_provider IN ('native','meet'))")?;
     }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
@@ -2232,5 +2236,20 @@ mod v86_video_status_migration_tests {
         let status: String = c.query_row("SELECT video_status FROM meetings WHERE id='video-status'", [], |row| row.get(0)).unwrap();
         assert_eq!(status, "scheduled");
         assert!(c.execute("UPDATE meetings SET video_status='paused' WHERE id='video-status'", []).is_err());
+    }
+}
+
+#[cfg(test)]
+mod v87_video_provider_migration_tests {
+    use super::*;
+
+    #[test]
+    fn latest_schema_defaults_existing_meetings_to_native_provider() {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('video-provider','Provider',1,2)", []).unwrap();
+        let provider: String = c.query_row("SELECT video_provider FROM meetings WHERE id='video-provider'", [], |row| row.get(0)).unwrap();
+        assert_eq!(provider, "native");
+        assert!(c.execute("UPDATE meetings SET video_provider='zoom' WHERE id='video-provider'", []).is_err());
     }
 }
