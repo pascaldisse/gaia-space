@@ -28,6 +28,8 @@ pub const REVIEW_UPDATED: &str = "review.updated";
 /// Review merged (`review::attempt_merge`, on a successful merge).
 pub const REVIEW_MERGED: &str = "review.merged";
 
+/// Deployment status changed (`pipelines::transition_deployment`).
+pub const DEPLOYMENT_STATUS_CHANGED: &str = "deployment.status_changed";
 /// Legacy document event name kept for subscriptions stored before the taxonomy
 /// existed. Emitted alongside [`DOCUMENT_UPDATED`] so those rows keep firing.
 pub const LEGACY_DOCUMENT_EVENT: &str = "DocumentWebhookEvent";
@@ -42,6 +44,7 @@ pub const EVENT_TAXONOMY: &[&str] = &[
     REVIEW_CREATED,
     REVIEW_UPDATED,
     REVIEW_MERGED,
+    DEPLOYMENT_STATUS_CHANGED,
 ];
 
 /// `true` when `name` is part of the taxonomy. The legacy alias is deliberately
@@ -74,6 +77,7 @@ mod tests {
     #[test]
     fn membership_is_closed() {
         assert!(is_known_event(ISSUE_CREATED));
+        assert!(is_known_event(DEPLOYMENT_STATUS_CHANGED));
         assert!(!is_known_event(LEGACY_DOCUMENT_EVENT));
         assert!(!is_known_event("issue.invented"));
     }

@@ -21,7 +21,7 @@
 //! `sh -c` child processes, stdout+stderr captured and appended to the run's `log` column as
 //! they complete so the UI can poll for live progress.
 use crate::db;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -1149,6 +1149,21 @@ pub fn trigger_pipeline_on_push(
 }
 
 // ---------- deploy targets + deployments ----------
+/// Durable webhook notification for one completed deployment status transition.
+///
+/// Fan-out is deliberately best effort and happens after the state write. A broken
+/// subscriber must not roll back a deployment status that a CI/CD tool has reported.
+fn deployment_status_event(previous_status: Option<&str>, deployment: &Deployment) {
+    let event_type = crate::events::DEPLOYMENT_STATUS_CHANGED;
+    let payload = json!({
+        "event": event_type,
+        "previous_status": previous_status,
+        "deployment": deployment,
+    });
+    if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
+        eprintln!("webhook fan-out for {event_type} failed: {e}");
+    }
+}
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_deploy_targets() -> Result<Vec<DeployTarget>> {
@@ -1256,7 +1271,10 @@ fn schedule_deployment_tx(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn schedule_deployment(req: ScheduleDeploymentRequest) -> Result<Deployment> {
     let c = db::conn()?;
-    schedule_deployment_tx(&c, &req)
+    let deployment = schedule_deployment_tx(&c, &req)?;
+    drop(c);
+    deployment_status_event(None, &deployment);
+    Ok(deployment)
 }
 
 /// Space's real `DeploymentStatus` state machine (KB §2.4): SCHEDULED -> DEPLOYING ->
@@ -1328,7 +1346,42 @@ fn transition_deployment_tx(conn: &Connection, id: &str, to: &str) -> Result<Dep
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn transition_deployment(id: String, status: String) -> Result<Deployment> {
     let c = db::conn()?;
-    transition_deployment_tx(&c, &id, &status)
+    let (target_id, previous_status): (String, String) = c
+        .query_row(
+            "SELECT target_id,status FROM deployments WHERE id=?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    // Promotion can implicitly change the prior CURRENT deployment to OBSOLETE.
+    let superseded_id: Option<String> = if status == "CURRENT" {
+        c.query_row(
+            "SELECT id FROM deployments WHERE target_id=?1 AND status='CURRENT'",
+            params![target_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    } else {
+        None
+    };
+    let deployment = transition_deployment_tx(&c, &id, &status)?;
+    let superseded = superseded_id
+        .map(|superseded_id| {
+            c.query_row(
+                &format!("SELECT {DEPLOYMENT_COLUMNS} FROM deployments WHERE id=?1"),
+                params![superseded_id],
+                deployment_from_row,
+            )
+            .map_err(|e| e.to_string())
+        })
+        .transpose()?;
+    drop(c);
+    if let Some(superseded) = superseded.as_ref() {
+        deployment_status_event(Some("CURRENT"), superseded);
+    }
+    deployment_status_event(Some(&previous_status), &deployment);
+    Ok(deployment)
 }
 
 // ---------- package repositories + versions ----------
@@ -2887,6 +2940,82 @@ mod tests {
 
         // sanity: a script within limits validates fine.
         assert!(parse_and_validate_script(&script_source(&[("build", &["echo ok"])])).is_ok());
+    }
+
+    #[test]
+    fn deployment_status_changes_enqueue_scheduled_and_all_transition_events() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("deployment-webhook");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let c = db::conn().expect("connection");
+        c.execute(
+            "INSERT INTO projects(id,name,key,created_at) VALUES('project-1','Project','P',0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('app-1','App','Application','client-1')", []).unwrap();
+        c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('hook-1','app-1','deployment.status_changed','https://example.test/hook')", []).unwrap();
+        c.execute("INSERT INTO deploy_targets(id,project_id,name,target_key) VALUES('target-1','project-1','Staging','staging')", []).unwrap();
+        drop(c);
+        schedule_deployment(ScheduleDeploymentRequest {
+            id: "deploy-1".into(),
+            target_id: "target-1".into(),
+            version: "1.0.0".into(),
+            description: None,
+        })
+        .unwrap();
+        transition_deployment("deploy-1".into(), "DEPLOYING".into()).unwrap();
+        transition_deployment("deploy-1".into(), "CURRENT".into()).unwrap();
+        for (id, terminal) in [("deploy-2", "FAILED"), ("deploy-3", "HANGING")] {
+            schedule_deployment(ScheduleDeploymentRequest {
+                id: id.into(),
+                target_id: "target-1".into(),
+                version: "1.0.1".into(),
+                description: None,
+            })
+            .unwrap();
+            transition_deployment(id.into(), "DEPLOYING".into()).unwrap();
+            transition_deployment(id.into(), terminal.into()).unwrap();
+        }
+        schedule_deployment(ScheduleDeploymentRequest {
+            id: "deploy-4".into(),
+            target_id: "target-1".into(),
+            version: "1.0.2".into(),
+            description: None,
+        })
+        .unwrap();
+        transition_deployment("deploy-4".into(), "DEPLOYING".into()).unwrap();
+        transition_deployment("deploy-4".into(), "CURRENT".into()).unwrap();
+        let c = db::conn().unwrap();
+        let payloads: Vec<String> = c
+            .prepare("SELECT payload_json FROM webhook_deliveries ORDER BY created_at,id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(payloads.len(), 13);
+        let events: Vec<Value> = payloads
+            .into_iter()
+            .map(|p| serde_json::from_str(&p).unwrap())
+            .collect();
+        assert!(events[0]["previous_status"].is_null());
+        for status in [
+            "SCHEDULED",
+            "DEPLOYING",
+            "CURRENT",
+            "FAILED",
+            "HANGING",
+            "OBSOLETE",
+        ] {
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event["deployment"]["status"] == status),
+                "missing {status}"
+            );
+        }
     }
 
     /// Deployment state machine: SCHEDULED -> DEPLOYING -> CURRENT is legal and promoting a
