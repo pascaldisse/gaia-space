@@ -34,11 +34,11 @@ Current Tauri/React tree audited; KB §8 Gap Analysis deliberately excluded. `do
 |Reporting-line org chart (teams, positions, managers)|KB §3.3 reporting-line chart|partial|`src-tauri/src/platform.rs:106-115` `src/api/platform.ts:36-48` `src/views/Members.tsx:340-490`|Teams and memberships surface; hierarchy/manager fields are model/API-capable but Members UI does not expose parent/team-manager editing or an org-chart tree.|
 |Profile core identity / avatar / languages|KB §4.2 `TD_MemberProfile`|partial|`src-tauri/src/platform.rs:43-99` `src/api/platform.ts:3,31-33` `src/views/Members.tsx:73-143,239-269`|CRUD for username/display name/email/archive only; no name components, avatars, languages, joins/leaves, or suspension.|
 |Profile personal-data custom fields|KB §4.2/§4.3 personal data as CF|partial|`src-tauri/src/platform.rs:13-15` `src/api/platform.ts:97-108` `src/views/Members.tsx:239-269`|Generic CF commands/API exist, but profile values are not surfaced in the profile form.|
-|Email verification/status|KB §4.2 `ProfileEmailStatus`|missing|`src-tauri/src/platform.rs:43-99` `src/views/Members.tsx:259-263`|Email string only; no verification/status model or UI.|
-|Messenger contacts and deep links|KB §4.2/§4.3 ContactMessenger|missing|`src-tauri/src/platform.rs:43-99` `src/views/Members.tsx:239-269`|No contact type/login/deep-link storage, command/API, or view.|
+|Email verification/status|KB §4.2 `ProfileEmailStatus`|done|`src-tauri/src/platform.rs` `src/api/platform.ts` `src/views/Members.tsx`|Verification state persists, has desktop/HTTP command paths, and renders in the profile editor/viewer.|
+|Messenger contacts and deep links|KB §4.2/§4.3 ContactMessenger|done|`src-tauri/src/platform.rs` `src/api/platform.ts` `src/views/Members.tsx`|Contacts and optional deep links persist and render in profile editor/viewer; HTTP command dispatch is wired.|
 |Own-profile editor versus read-only tabbed profile|KB §4.2/§4.3 separate screens|done|`src/views/Members.tsx` `src/session.ts`|Directory links open a read-only Profile/Contact/Calendar tabbed viewer; only the session profile exposes Edit my profile.|
 |Shared paged member search/picker|KB §4.2/§4.3 batch provider|partial|`src-tauri/src/platform.rs:53-74` `src/api/platform.ts:31` `src/components/Pickers.tsx:1-120`|Shared list is reused by pickers, but unpaged and no search/ranking endpoint.|
-|Principal abstraction for members/apps/external actors|KB §4.2/§4.3 Principal|missing|`src-tauri/src/platform.rs:43-50` `src/api/platform.ts:3`|Profile is direct assignment identity; no principal record/kind API or UI.|
+|Principal abstraction for members/apps/external actors|KB §4.2/§4.3 Principal|done|`src-tauri/src/platform.rs` `src/api/platform.ts` `src-tauri/src/bin/space-server.rs`|Profile/application/external principals are listed through desktop and HTTP command paths; profile rename keeps the principal label synchronized.|
 |Distinct suspended/not-member/external/archived states|KB §4.2/§4.3 states|partial|`src-tauri/src/db.rs:188` `src-tauri/src/platform.rs:43-50` `src/views/Members.tsx:49-51,329-331`|`external` and `archived` storage exists, but API/view only exposes archived; suspended/not-member absent.|
 |Separate Blog article record and namespace|KB §5.2/§5.3 ArticleRecord|done|`src-tauri/src/blogs.rs` `src-tauri/src/db.rs` `src/api/blogs.ts` `src/views/Blogs.tsx`|Dedicated article + alias tables, API, route, list and detail are wired.|
 |Draft → targeted blog publish|KB §5.2/§5.3 publish|done|`src-tauri/src/blogs.rs` `src/views/Blogs.tsx`|My Documents draft is promoted once; team, project and location targets are captured at publication.|
@@ -60,4 +60,4 @@ Current Tauri/React tree audited; KB §8 Gap Analysis deliberately excluded. `do
 |Follow teams/people and dashboard personalization signals|KB §7.1/§7.2/§7.3 follows|missing|`src-tauri/src/personal.rs:464-474` `src/views/Dashboard.tsx:5`|No follow relationship, location signal, or membership/location/follow-derived dashboard feed.|
 
 ## Counts
-`done=11` · `partial=26` · `stub=2` · `missing=15`
+`done=14` · `partial=26` · `stub=2` · `missing=12`
