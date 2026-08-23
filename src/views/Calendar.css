@@ -80,3 +80,5 @@
 .cal-schedule-day h3{margin:0 0 var(--cal-space-xs);font-size:.82rem;color:var(--text-faint)}
 
 .calendar-filters{display:flex;flex-wrap:wrap;align-items:end;gap:var(--cal-space-xl);margin:0 0 var(--cal-space-2xl)}.calendar-filters .picker,.calendar-filters .calendar-filter{margin:0}
+
+.calendar-options{display:flex;gap:var(--cal-space-lg);border:0;padding:0;margin:0;color:var(--text-faint);font-size:var(--cal-fs-sm)}.calendar-options label{display:flex;gap:var(--cal-space-3xs);align-items:center}

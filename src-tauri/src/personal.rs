@@ -904,6 +904,36 @@ pub fn set_dashboard_preferences(
     let c = db::conn()?;
     save_dashboard_preferences_for_actor_on(&c, preferences)
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CalendarOptions {
+pub profile_id: String,
+pub show_weekends: bool,
+pub show_todos: bool,
+pub working_hours_only: bool,
+pub working_hours_start: i64,
+pub working_hours_end: i64,
+pub show_declined: bool,
+}
+pub fn get_calendar_options(profile_id: String) -> Result<CalendarOptions> {
+let c=db::conn()?;
+let (actor_id,_)=actor::resolve(&c)?;
+if actor_id != profile_id { return Err("Calendar options belong to the active profile".into()); }
+calendar_options_on(&c, &profile_id)
+}
+pub fn calendar_options_on(c:&Connection, profile_id:&str) -> Result<CalendarOptions> {
+let values=err(c.query_row("SELECT calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined FROM user_preferences WHERE profile_id=?1",[profile_id],|r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?))).optional())?;
+let (show_weekends,show_todos,working_hours_only,working_hours_start,working_hours_end,show_declined)=values.unwrap_or((1,1,0,9,18,0));
+Ok(CalendarOptions { profile_id:profile_id.into(), show_weekends:show_weekends!=0, show_todos:show_todos!=0, working_hours_only:working_hours_only!=0, working_hours_start, working_hours_end, show_declined:show_declined!=0 })
+}
+#[cfg_attr(feature="desktop", tauri::command)]
+pub fn set_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+if options.working_hours_start < 0 || options.working_hours_end > 24 || options.working_hours_start >= options.working_hours_end { return Err("Working hours must be within 0..24 and increasing".into()); }
+let c=db::conn()?; let (actor_id,_)=actor::resolve(&c)?;
+if actor_id != options.profile_id { return Err("Calendar options belong to the active profile".into()); }
+err(c.execute("INSERT INTO user_preferences(profile_id,calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(profile_id) DO UPDATE SET calendar_show_weekends=excluded.calendar_show_weekends,calendar_show_todos=excluded.calendar_show_todos,calendar_working_hours_only=excluded.calendar_working_hours_only,calendar_working_hours_start=excluded.calendar_working_hours_start,calendar_working_hours_end=excluded.calendar_working_hours_end,calendar_show_declined=excluded.calendar_show_declined",params![options.profile_id,options.show_weekends as i64,options.show_todos as i64,options.working_hours_only as i64,options.working_hours_start,options.working_hours_end,options.show_declined as i64]))?;
+calendar_options_on(&c,&options.profile_id)
+}
+
 /// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
 pub fn get_dashboard_preferences_http(profile_id: String) -> Result<DashboardPreferences> {
     dashboard_preferences_on(&db::conn()?, &profile_id)
