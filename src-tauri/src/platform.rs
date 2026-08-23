@@ -292,6 +292,72 @@ pub fn remove_member_location(id: String) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeskAssignment {
+    pub id: Option<String>,
+    pub profile_id: String,
+    pub location_id: String,
+    pub seat_label: Option<String>,
+    pub map_x: f64,
+    pub map_y: f64,
+    pub since_date: String,
+    pub till_date: Option<String>,
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_desk_assignments(
+    profile_id: Option<String>,
+    location_id: Option<String>,
+) -> Result<Vec<DeskAssignment>> {
+    let c = db::conn()?;
+    let mut q = c.prepare("SELECT id,profile_id,location_id,seat_label,map_x,map_y,since_date,till_date FROM desk_assignments WHERE (?1 IS NULL OR profile_id=?1) AND (?2 IS NULL OR location_id=?2) ORDER BY since_date DESC").map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map(params![profile_id, location_id], |r| {
+            Ok(DeskAssignment {
+                id: Some(r.get(0)?),
+                profile_id: r.get(1)?,
+                location_id: r.get(2)?,
+                seat_label: r.get(3)?,
+                map_x: r.get(4)?,
+                map_y: r.get(5)?,
+                since_date: r.get(6)?,
+                till_date: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_desk_assignment(mut value: DeskAssignment) -> Result<DeskAssignment> {
+    if value.profile_id.trim().is_empty()
+        || value.location_id.trim().is_empty()
+        || value.since_date.trim().is_empty()
+        || !(0.0..=1.0).contains(&value.map_x)
+        || !(0.0..=1.0).contains(&value.map_y)
+    {
+        return Err("Profile, location, date, and map coordinates (0–1) are required".into());
+    }
+    if value
+        .till_date
+        .as_deref()
+        .is_some_and(|end| end < value.since_date.as_str())
+    {
+        return Err("Desk assignment end date must not precede its start date".into());
+    }
+    let id = value.id.clone().unwrap_or_else(|| new_id("desk"));
+    let c = db::conn()?;
+    c.execute("INSERT INTO desk_assignments(id,profile_id,location_id,seat_label,map_x,map_y,since_date,till_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET profile_id=excluded.profile_id,location_id=excluded.location_id,seat_label=excluded.seat_label,map_x=excluded.map_x,map_y=excluded.map_y,since_date=excluded.since_date,till_date=excluded.till_date",params![id,value.profile_id,value.location_id,value.seat_label,value.map_x,value.map_y,value.since_date,value.till_date]).map_err(|e|e.to_string())?;
+    value.id = Some(id);
+    Ok(value)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_desk_assignment(id: String) -> Result<()> {
+    db::conn()?
+        .execute("DELETE FROM desk_assignments WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Organization locations
 // ---------------------------------------------------------------------------

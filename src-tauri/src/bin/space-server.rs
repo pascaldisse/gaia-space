@@ -2360,7 +2360,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "search_book_documents" | "list_book_access" | "update_book_access" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "search_book_documents" | "list_book_access" | "update_book_access" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -4901,6 +4901,9 @@ async fn cmd(
     "list_locations" => platform::list_locations(),
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
+    "list_desk_assignments" => platform::list_desk_assignments(profile_id: Option<String>, location_id: Option<String>),
+    "save_desk_assignment" => platform::save_desk_assignment(value: platform::DeskAssignment),
+    "remove_desk_assignment" => platform::remove_desk_assignment(id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_pinned_messages" => chat::list_pinned_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_messages_page" => chat::list_messages_page(channel_id: String, thread_of: Option<String>, cursor: Option<String>, limit: Option<i64>, acting_profile_id: Option<String>),
@@ -5505,7 +5508,8 @@ mod tests {
         }
         // A client naming another voter/author is rewritten to the session identity, so
         // no ballot can be cast — and no poll closed — on somebody else's behalf.
-        let mut body = json!({"poll_id": "p-1", "voter_id": "someone-else", "option_ids": ["p-1-o0"]});
+        let mut body =
+            json!({"poll_id": "p-1", "voter_id": "someone-else", "option_ids": ["p-1-o0"]});
         bind_session_identity(&mut body, "me");
         assert_eq!(body["voter_id"], json!("me"));
         let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
@@ -5523,7 +5527,8 @@ mod tests {
         }
         // The reader is always the session: a client cannot page or unfurl "as" someone
         // whose channel membership it does not have.
-        let mut body = json!({"channel_id": "c-1", "cursor": "abc", "acting_profile_id": "someone-else"});
+        let mut body =
+            json!({"channel_id": "c-1", "cursor": "abc", "acting_profile_id": "someone-else"});
         bind_session_identity(&mut body, "me");
         assert_eq!(body["acting_profile_id"], json!("me"));
         // The cursor is untouched data, never an identity.
