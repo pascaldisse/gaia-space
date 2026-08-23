@@ -2391,9 +2391,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_planning_tags"
         | "list_messenger_contacts"
         | "list_principals"
-        | "list_profiles"
-        | "list_directory_feed"
-        | "list_directory_calendar" => CommandPolicy::Session,
+        | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
         | "list_dev_environments"
@@ -2453,7 +2451,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "dispatch_application_payload"
         | "parse_application_payload"
         | "application_payload_classes"
-        | "list_redirect_uris" => CommandPolicy::AppAdmin,
+        | "list_redirect_uris"
+        // Advanced Team Directory is an optional organization feature; its company
+        // activity and absence overview are administrator-only, never a member feed.
+        | "list_directory_feed"
+        | "list_directory_calendar" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -5524,6 +5526,13 @@ mod tests {
         let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
         bind_session_identity(&mut close, "me");
         assert_eq!(close["author_id"], json!("me"));
+    }
+
+    #[test]
+    fn advanced_directory_commands_are_admin_gated() {
+        for name in ["list_directory_feed", "list_directory_calendar"] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::AppAdmin)), "{name}");
+        }
     }
 
     #[test]
