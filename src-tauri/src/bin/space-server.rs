@@ -2345,7 +2345,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "emit_notification"
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
-        "get_channel" | "get_channel_by_entity" | "get_profile_email_status" => CommandPolicy::Session,
+        "get_channel" | "get_channel_by_entity" | "ensure_thread_channel" | "get_profile_email_status" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
@@ -3746,6 +3746,12 @@ fn authorize_command(
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
                 }
             }
+            if name == "ensure_thread_channel" {
+                let root_message_id: String = arg(body, "root_message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_message_channel(&root_message_id).is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id)) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
             if matches!(name, "add_reaction" | "remove_reaction") {
                 let message_id: String =
                     arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -4771,6 +4777,7 @@ async fn cmd(
     "create_document" => documents::create_document(document: documents::Document),
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
+    "ensure_thread_channel" => chat::ensure_thread_channel(root_message_id: String, title: Option<String>, acting_profile_id: Option<String>),
     "create_issue" => issues::create_issue(input: issues::IssueInput),
     "clone_issue" => issues::clone_issue(input: issues::IssueTransferInput),
     "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),

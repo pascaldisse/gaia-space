@@ -2,9 +2,10 @@
 //! Native chat: channels, members, messages, reactions, threads and read state.
 //!
 //! Model reference: docs/space-knowledge-base/04-collaboration.md §1 (decompiled M2).
-//! Threads are not a separate entity — a reply is just a `Message` with `thread_of`
-//! set to its root message id (mirrors `M2ChannelContentThread`). Entity-bound
-//! channels are addressed by a deterministic id `entity:{entity_type}:{entity_id}`
+//! Threads are channels linked to their root item (`M2ChannelContentThread`): the root
+//! remains in its parent, `skip_first_message=true`, and replies live in the linked channel.
+//! Legacy `thread_of` rows remain readable during migration. Entity-bound channels are
+//! addressed by a deterministic id `entity:{entity_type}:{entity_id}`
 //! so any other domain module can attach a discussion channel without a schema
 //! change (generic `entity_type` + `entity_id`, per M2's per-entity channel refs
 //! e.g. `DTO_Meeting.channelRef`, `Review.channel_id`).
@@ -31,6 +32,18 @@ pub struct ChannelSummary {
     pub member_count: i64,
     pub unread_count: i64,
     pub last_message_at: Option<i64>,
+}
+/// A content thread is a channel linked to one root item in its parent channel.
+/// `skip_first_message` keeps that root in the parent pane rather than duplicating it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ThreadChannel {
+    #[serde(flatten)]
+    pub channel: Channel,
+    pub root_message_id: String,
+    pub parent_channel_id: String,
+    pub skip_first_message: bool,
+    pub title: Option<String>,
+    pub always_show: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChannelMember {
@@ -387,6 +400,11 @@ pub(crate) fn channel_allows_profile(
     channel_id: &str,
     profile_id: &str,
 ) -> Result<bool> {
+    // Thread channels inherit their parent boundary; their entity-bound storage class
+    // must never turn a private parent discussion public.
+    if let Some(parent_id) = thread_parent_channel_id_on(c, channel_id)? {
+        return channel_allows_profile(c, &parent_id, profile_id);
+    }
     // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
     // channels stay generic/public as before; this avoids exposing a private agenda
     // merely because its discussion is implemented by the shared channel primitive.
@@ -417,6 +435,14 @@ fn channel_allows_actor(
     channel_id: &str,
     profile_id: Option<&str>,
 ) -> Result<bool> {
+    // Thread channels inherit their parent boundary; their entity-bound storage class
+    // must never turn a private parent discussion public.
+    if let Some(parent_id) = thread_parent_channel_id_on(c, channel_id)? {
+        return profile_id
+            .map(|profile_id| channel_allows_profile(c, &parent_id, profile_id))
+            .transpose()
+            .map(|allowed| allowed.unwrap_or(false));
+    }
     // Meeting discussions retain their meeting visibility boundary even though
     // generic entity-bound channels are otherwise public.
     if channel_id.strip_prefix("entity:meeting:").is_some() {
@@ -441,7 +467,17 @@ fn channel_allows_actor(
     }
 }
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
-    let channels = list_channels_impl(c)?;
+    // Thread channels are opened from their root item, never shown as peer channels.
+    let channels: Vec<Channel> = list_channels_impl(c)?
+        .into_iter()
+        .map(|channel| {
+            let is_top_level = thread_parent_channel_id_on(c, &channel.id)?.is_none();
+            Ok((channel, is_top_level))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .filter_map(|(channel, is_top_level)| is_top_level.then_some(channel))
+        .collect();
     let visible: Result<Vec<Option<ChannelSummary>>> = channels
         .into_iter()
         .filter(|ch| !ch.archived)
@@ -586,6 +622,42 @@ pub(crate) fn create_entity_channel_impl(
     get_channel_impl(c, &id)?.ok_or_else(|| "entity channel missing after insert".to_string())
 }
 
+fn thread_parent_channel_id_on(c: &Connection, channel_id: &str) -> Result<Option<String>> {
+    c.query_row(
+        "SELECT parent_channel_id FROM thread_channels WHERE channel_id=?1",
+        [channel_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+fn thread_channel_for_root_impl(c: &Connection, root_message_id: &str) -> Result<Option<ThreadChannel>> {
+    c.query_row(
+        "SELECT ch.id,ch.content_type,ch.name,ch.description,ch.project_id,ch.archived,tc.root_message_id,tc.parent_channel_id,tc.title,tc.always_show \
+         FROM thread_channels tc JOIN channels ch ON ch.id=tc.channel_id \
+         WHERE tc.root_message_id=?1 AND ch.archived=0",
+        [root_message_id],
+        |r| Ok(ThreadChannel {
+            channel: Channel { id:r.get(0)?, content_type:r.get(1)?, name:r.get(2)?, description:r.get(3)?, project_id:r.get(4)?, archived:r.get(5)?, read_only:false },
+            root_message_id:r.get(6)?, parent_channel_id:r.get(7)?, title:r.get(8)?, always_show:r.get(9)?, skip_first_message:true,
+        }),
+    ).optional().map_err(|e| e.to_string())
+}
+fn ensure_thread_channel_impl(c: &Connection, root_message_id: &str, title: Option<String>, acting_profile_id: Option<&str>) -> Result<ThreadChannel> {
+    let parent_channel_id: String = c.query_row(
+        "SELECT channel_id FROM messages WHERE id=?1 AND archived=0 AND thread_of IS NULL",
+        [root_message_id], |r| r.get(0),
+    ).optional().map_err(|e| e.to_string())?.ok_or_else(|| "thread root not found".to_string())?;
+    if !channel_allows_actor(c, &parent_channel_id, acting_profile_id)? { return Err("channel access denied".into()); }
+    if let Some(thread) = thread_channel_for_root_impl(c, root_message_id)? { return Ok(thread); }
+    let channel = Channel { id: format!("thread:{root_message_id}"), content_type:"entity-bound".into(), name:title.clone().or(Some("Thread".into())), description:Some(format!("thread:{root_message_id}")), project_id:None, archived:false, read_only:false };
+    c.execute("INSERT OR IGNORE INTO channels(id,content_type,name,description,project_id,archived) VALUES(?1,?2,?3,?4,?5,0)", rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id]).map_err(|e| e.to_string())?;
+    c.execute("INSERT OR IGNORE INTO thread_channels(root_message_id,channel_id,parent_channel_id,title,always_show) VALUES(?1,?2,?3,?4,0)", rusqlite::params![root_message_id,channel.id,parent_channel_id,title]).map_err(|e| e.to_string())?;
+    // Earlier clients stored replies in the parent with `thread_of`. Once a root is
+    // opened as a channel, move that history intact so the panel has one source of truth.
+    c.execute("UPDATE messages SET channel_id=?1, thread_of=NULL WHERE thread_of=?2", rusqlite::params![channel.id, root_message_id]).map_err(|e| e.to_string())?;
+    thread_channel_for_root_impl(c, root_message_id)?.ok_or_else(|| "thread channel missing after insert".into())
+}
 fn default_message_content_kind() -> String {
     "text".into()
 }
@@ -633,11 +705,10 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
 }
 fn reply_count_impl(c: &Connection, message_id: &str) -> Result<i64> {
     c.query_row(
-        "SELECT COUNT(*) FROM messages WHERE thread_of=?1 AND archived=0",
+        "SELECT COUNT(*) FROM messages WHERE (thread_of=?1 OR channel_id=(SELECT channel_id FROM thread_channels WHERE root_message_id=?1)) AND archived=0",
         [message_id],
         |r| r.get(0),
-    )
-    .map_err(|e| e.to_string())
+    ).map_err(|e| e.to_string())
 }
 fn reactions_for_impl(
     c: &Connection,
@@ -2396,6 +2467,11 @@ pub fn create_entity_channel(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel_by_entity(entity_type: String, entity_id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &entity_channel_id(&entity_type, &entity_id))
+}
+/// Creates (idempotently) the channel that backs one root message's content thread.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn ensure_thread_channel(root_message_id: String, title: Option<String>, acting_profile_id: Option<String>) -> Result<ThreadChannel> {
+    ensure_thread_channel_impl(&db::conn()?, &root_message_id, title, acting_profile_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_messages(
@@ -4292,6 +4368,23 @@ mod tests {
         assert_eq!(replies[0].message.thread_of.as_deref(), Some("msg-root"));
         drop(c);
         drop(path);
+    }
+
+    #[test]
+    fn a_thread_is_a_hidden_channel_that_inherits_private_parent_access() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["thread-owner", "thread-outsider"]);
+        create_channel_impl(&c, &Channel { id:"private-parent".into(), content_type:"private".into(), name:Some("Private".into()), description:None, project_id:None, archived:false, read_only:false }, &["thread-owner".into()]).unwrap();
+        create_message_impl(&c, &Message { id:"thread-root-channel".into(), channel_id:"private-parent".into(), author_id:Some("thread-owner".into()), text:"root".into(), created_at:1, edited_at:None, thread_of:None, archived:false, pinned:false, content_kind:"text".into(), mention_ids:Vec::new(), mention_team_ids:Vec::new(), mention_targets:Vec::new() }).unwrap();
+        let thread = ensure_thread_channel_impl(&c, "thread-root-channel", Some("Discuss".into()), Some("thread-owner")).unwrap();
+        assert_eq!(thread.channel.id, "thread:thread-root-channel");
+        assert!(thread.skip_first_message);
+        assert!(!channel_allows_profile(&c, &thread.channel.id, "thread-outsider").unwrap());
+        create_message_impl(&c, &Message { id:"thread-channel-reply".into(), channel_id:thread.channel.id.clone(), author_id:Some("thread-owner".into()), text:"reply".into(), created_at:2, edited_at:None, thread_of:None, archived:false, pinned:false, content_kind:"text".into(), mention_ids:Vec::new(), mention_team_ids:Vec::new(), mention_targets:Vec::new() }).unwrap();
+        assert_eq!(to_view(&c, get_message_impl(&c, "thread-root-channel").unwrap().unwrap(), Some("thread-owner")).unwrap().reply_count, 1);
+        assert!(list_channels_with_meta_impl(&c, "thread-owner").unwrap().iter().all(|row| row.channel.id != thread.channel.id));
+        assert_eq!(list_messages_impl(&c, &thread.channel.id, Some("thread-owner")).unwrap().len(), 1);
+        drop(c); drop(path);
     }
 
     #[test]

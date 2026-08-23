@@ -176,6 +176,11 @@ pub fn connection(app: &AppHandle) -> Result<Connection, String> {
 pub fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version >= SCHEMA_VERSION {
+        // V126 is intentionally extensible within this worktree. Replay its idempotent
+        // DDL so a database already stamped 126 receives newly added V126 tables too.
+        if version == 126 && table_exists(conn, "messages")? {
+            conn.execute_batch(SCHEMA_V126)?;
+        }
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
@@ -1668,6 +1673,16 @@ CREATE TABLE IF NOT EXISTS message_entity_mentions (
     PRIMARY KEY(message_id, entity_type, entity_id)
 );
 CREATE INDEX IF NOT EXISTS message_entity_mentions_entity ON message_entity_mentions(entity_type, entity_id);
+-- A content thread is a first-class channel. The root remains in its parent channel;
+-- the thread channel holds only replies and inherits its parent's access boundary.
+CREATE TABLE IF NOT EXISTS thread_channels (
+    root_message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+    parent_channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    title TEXT,
+    always_show INTEGER NOT NULL DEFAULT 0 CHECK(always_show IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS thread_channels_parent ON thread_channels(parent_channel_id);
 "#;
 pub(crate) const SCHEMA_V123: &str = "SELECT 1;";
 
@@ -2372,6 +2387,17 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v126_extension_repairs_an_already_stamped_database() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        conn.execute("DROP TABLE thread_channels", []).expect("simulate pre-extension V126");
+        conn.pragma_update(None, "user_version", 126).expect("V126 stamp");
+        migrate(&conn).expect("replay idempotent V126 extension");
+        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='thread_channels'", [], |row| row.get(0)).unwrap();
+        assert_eq!(exists, 1);
     }
 
     #[test]
