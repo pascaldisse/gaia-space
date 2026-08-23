@@ -26,6 +26,11 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V54 → feat/w7-keys (application SSH/GPG public-key records + revocation) ☀Kali
 - V56 → feat/w7-chatbot (two-stage application rights: developer-declared required rights vs. admin-approved authorized rights per context) ☀Vishnu-II
 - V57 → feat/w8-auth (predefined role policy; UNSTARTED — reservation only) ☀Kali-VIII
+- V58 → feat/w9-rights (Right taxonomy + enforcement) ☀wave9
+- V59 → feat/w9-registry (per-format typed detail models; OCI blob store) ☀wave9
+- V60 → feat/w9-caldav (CalDAV write-back + multi-calendar) ☀wave9
+- V61 → feat/w9-cicd (quality-gate application principals · workers · artifacts) ☀wave9
+- V62 → feat/w9-auth (SSO/OAuth remainder · 2FA · permanent tokens; supersedes stale V57 reservation) ☀wave9
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 356 rows): done 53 · partial 177 · stub 4 · missing 122. Matrix NOT green — steering loop active.
