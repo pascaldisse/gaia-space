@@ -471,16 +471,19 @@ fn attach_document_discussion_on(
             |r| r.get(0),
         )
         .map_err(|_| "document not found".to_string())?;
+    let channel_id = format!("entity:document:{document_id}");
     if let Some(meeting_id) = meeting_id {
-        let exists: bool = c
+        let bound_channel: Option<String> = c
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM meetings WHERE id=?1 AND archived=0)",
+                "SELECT channel_id FROM meetings WHERE id=?1 AND archived=0",
                 [meeting_id],
                 |r| r.get(0),
             )
-            .map_err(|e| e.to_string())?;
-        if !exists {
-            return Err("meeting not found".into());
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "meeting not found".to_string())?;
+        if bound_channel.as_deref().is_some_and(|id| id != channel_id) {
+            return Err("meeting already has a different discussion channel".into());
         }
     }
     let channel = crate::chat::create_entity_channel_impl(
@@ -489,7 +492,24 @@ fn attach_document_discussion_on(
         document_id,
         Some(format!("{title} discussion")),
     )?;
+    let previous = document_discussion_on(c, document_id)?;
     c.execute("INSERT INTO document_discussions(document_id,channel_id,meeting_id) VALUES(?1,?2,?3) ON CONFLICT(document_id) DO UPDATE SET meeting_id=excluded.meeting_id", rusqlite::params![document_id, channel.id, meeting_id]).map_err(|e| e.to_string())?;
+    if let Some(previous_meeting_id) = previous.and_then(|item| item.meeting_id) {
+        if Some(previous_meeting_id.as_str()) != meeting_id {
+            c.execute(
+                "UPDATE meetings SET channel_id=NULL WHERE id=?1 AND channel_id=?2",
+                rusqlite::params![previous_meeting_id, channel.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    if let Some(meeting_id) = meeting_id {
+        c.execute(
+            "UPDATE meetings SET channel_id=?2 WHERE id=?1",
+            rusqlite::params![meeting_id, channel.id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     document_discussion_on(c, document_id)?.ok_or_else(|| "discussion missing after attach".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1518,6 +1538,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn document_discussion_binds_and_rebinds_the_meeting_channel() {
+        let c = test_conn();
+        c.execute("INSERT INTO documents(id,container_type,doc_type,title) VALUES('d1','my-docs','text','Article')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,doc_type,title) VALUES('d2','my-docs','text','Other')", []).unwrap();
+        for id in ["m1", "m2"] {
+            c.execute(
+                "INSERT INTO meetings(id,title,starts_at,ends_at) VALUES(?1,'Meeting',1,2)",
+                [id],
+            )
+            .unwrap();
+        }
+
+        let first = attach_document_discussion_on(&c, "d1", Some("m1")).unwrap();
+        assert_eq!(first.channel_id, "entity:document:d1");
+        let m1: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(m1.as_deref(), Some("entity:document:d1"));
+
+        let rebound = attach_document_discussion_on(&c, "d1", Some("m2")).unwrap();
+        assert_eq!(rebound.meeting_id.as_deref(), Some("m2"));
+        let m1: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let m2: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m2'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(m1, None);
+        assert_eq!(m2.as_deref(), Some("entity:document:d1"));
+        assert!(attach_document_discussion_on(&c, "d2", Some("m2")).is_err());
+        let channels: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM channels WHERE id='entity:document:d2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(channels, 0, "a rejected binding must not create a channel");
     }
 
     #[test]
