@@ -616,9 +616,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
     }
     // V98: profile email status and messenger contacts.
-    if version < 98 { tx.execute_batch(SCHEMA_V98)?; }
+    if version < 98 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V98)?; }
     // V99: principals unify people, applications, and external identities.
-    if version < 99 { tx.execute_batch(SCHEMA_V99)?; }
+    if version < 99 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V99)?; }
     // V107: KB book grants. Guarded: hand-built legacy fixtures can lack documents.
     if version < 107 && table_exists(&tx, "document_folders")? {
         tx.execute_batch(SCHEMA_V107)?;
@@ -690,11 +690,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     // V108: opt-in per-channel Spacebox delivery. Kept separate from generic
     // notification preferences: membership grants read access, subscription grants feed delivery.
-    if version < 108 {
+    if version < 108 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V108)?;
     }
     // V109: a document/article owns one entity discussion and may bind one meeting.
-    if version < 109 {
+    if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
         tx.execute_batch(SCHEMA_V109)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
