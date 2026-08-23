@@ -77,7 +77,9 @@ const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
 const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false};
 await meetingsApi.create(meeting);
-setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
+const channel_id = await meetingsApi.attachChannel(meeting.id);
+const created = { ...meeting, channel_id };
+setComposerDay(undefined); setDraft(created); setSelected({id:created.id,source_id:created.id,kind:"meeting",title:created.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
 } catch (reason) { setError(humanError(reason)); }
 };

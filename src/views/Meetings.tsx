@@ -90,7 +90,8 @@ export default function Meetings() {
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);
       await meetingsApi.create(meeting);
-      setSelected(meeting);
+      const channel_id = await meetingsApi.attachChannel(meeting.id);
+      setSelected({ ...meeting, channel_id });
       setForm(newForm());
       setNotice("Meeting created. Add participants or open it on the calendar.");
       await refetch();

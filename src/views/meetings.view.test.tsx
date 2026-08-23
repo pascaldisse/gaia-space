@@ -43,7 +43,9 @@ describe("meetings view", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await settle();
     const create = calls.find(call => call.cmd === "create_meeting");
     expect(create).toBeTruthy();
-    expect(create!.args.meeting).toMatchObject({ title: "Planning", description: "Priorities", rrule: "FREQ=WEEKLY;COUNT=4", organizer_id: "pa", archived: false });
+    const createdMeeting = create!.args.meeting as { id: string };
+    expect(createdMeeting).toMatchObject({ title: "Planning", description: "Priorities", rrule: "FREQ=WEEKLY;COUNT=4", organizer_id: "pa", visibility: "participants", modification_preference: "organizer-only", archived: false });
+    expect(calls.some(call => call.cmd === "attach_meeting_channel" && call.args.id === createdMeeting.id)).toBe(true);
     expect(host.querySelector(".meeting-permalink")?.textContent).toContain("calendar");
   });
 });
