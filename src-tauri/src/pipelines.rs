@@ -4390,4 +4390,101 @@ mod tests {
         );
         assert!(names(TriggerEvent::Manual).is_empty());
     }
+
+    /// Wire-format lock: the exact JSON the frontend has to mirror. Serde emits the *variant*
+    /// names (no `rename_all` on the public enums), so any snake_case assumption on the TS side
+    /// is wrong. Deserialization additionally accepts the legacy aliases — asserted here too so
+    /// the two directions cannot drift apart silently.
+    #[test]
+    fn serialized_dsl_tags_are_variant_names() {
+        let cases: Vec<(TriggerDef, &str)> = vec![
+            (TriggerDef::Manual, r#"{"type":"Manual"}"#),
+            (
+                TriggerDef::GitPush {
+                    branches: vec!["main".into()],
+                    repository: Some("repo".into()),
+                },
+                r#"{"type":"GitPush","branches":["main"],"repository":"repo"}"#,
+            ),
+            (
+                TriggerDef::Schedule {
+                    cron: "0 0 * * *".into(),
+                },
+                r#"{"type":"Schedule","cron":"0 0 * * *"}"#,
+            ),
+            (
+                TriggerDef::GitBranchDeleted {
+                    branches: vec![],
+                },
+                r#"{"type":"GitBranchDeleted","branches":[]}"#,
+            ),
+            (TriggerDef::CodeReviewOpened, r#"{"type":"CodeReviewOpened"}"#),
+            (TriggerDef::CodeReviewClosed, r#"{"type":"CodeReviewClosed"}"#),
+            (TriggerDef::SafeMerge, r#"{"type":"SafeMerge"}"#),
+        ];
+        for (trigger, wire) in cases {
+            assert_eq!(serde_json::to_string(&trigger).unwrap(), wire);
+            let back: TriggerDef = serde_json::from_str(wire).unwrap();
+            assert_eq!(back, trigger, "round trip for {wire}");
+        }
+        assert_eq!(
+            serde_json::to_string(&StepDef::shell("echo hi")).unwrap(),
+            r#"{"type":"Shell","script":"echo hi","env":{}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&StepDef::Container {
+                image: "ubuntu".into(),
+                script: "echo hi".into(),
+                env: BTreeMap::new(),
+            })
+            .unwrap(),
+            r#"{"type":"Container","image":"ubuntu","script":"echo hi","env":{}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&TriggerEvent::Push {
+                repository: "r".into(),
+                branch: "main".into(),
+            })
+            .unwrap(),
+            r#"{"type":"Push","repository":"r","branch":"main"}"#
+        );
+        // snake_case aliases are accepted on the way in (frontend-written scripts).
+        let snake: TriggerDef =
+            serde_json::from_str(r#"{"type":"git_push","branches":["main"]}"#).unwrap();
+        assert_eq!(
+            snake,
+            TriggerDef::GitPush {
+                branches: vec!["main".into()],
+                repository: None
+            }
+        );
+        let host: StepDef = serde_json::from_str(r#"{"type":"host","script":"echo"}"#).unwrap();
+        assert_eq!(host, StepDef::shell("echo"));
+        // ...but a `scripts` array (plural) is NOT a step shape this server knows.
+        assert!(serde_json::from_str::<StepDef>(r#"{"type":"host","scripts":["echo"]}"#).is_err());
+    }
+
+    /// Adversarial inputs for the hand-written glob/cron: no panic, no unbounded loop.
+    #[test]
+    fn glob_and_cron_edge_cases_are_bounded() {
+        assert!(glob_match("release/*", "release/1.0"));
+        // `*` deliberately crosses `/` (documented on glob_match) — pin the behaviour.
+        assert!(glob_match("release/*", "release/a/b"));
+        assert!(glob_match("**", "anything/at/all"));
+        assert!(!glob_match("", "main"));
+        assert!(glob_match("", ""));
+        assert!(!glob_match("release/*", "release"));
+        // step 0 and malformed field counts are rejected, never looped over.
+        assert!(CronSpec::parse("*/0 * * * *").is_err());
+        assert!(CronSpec::parse("31 2 *").is_err());
+        assert!(CronSpec::parse("0 0 30 2 *").is_ok());
+        // 30 February never occurs: bounded search returns None instead of hanging.
+        assert_eq!(CronSpec::parse("0 0 30 2 *").unwrap().next_after(0), None);
+        // both day fields unrestricted => plain AND, fires every day.
+        let every = CronSpec::parse("0 0 * * *").unwrap();
+        assert_eq!(every.next_after(0), Some(86_400));
+        // strictly-after contract: calling twice inside the same minute cannot re-fire.
+        let fired = every.next_after(0).unwrap();
+        assert!(every.next_after(fired).unwrap() > fired);
+    }
 }
