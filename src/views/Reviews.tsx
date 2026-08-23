@@ -2,6 +2,7 @@ import {
   createResource,
   createSignal,
   createEffect,
+  createMemo,
   For,
   Show,
 } from "solid-js";
@@ -12,6 +13,7 @@ import {
   type Review,
   type ReviewDiscussion,
   type ExternalCheckStatus,
+  type ProtectedBranchRule,
   type RestackStep,
 } from "../api/review";
 import { Diff } from "../Diff";
@@ -57,6 +59,28 @@ export default function Reviews() {
   const [reviews, { refetch: refetchReviews }] = createResource(() =>
     reviewApi.list(),
   );
+  const [quickFilter, setQuickFilter] = createSignal<"all" | "open" | "mine" | "waiting">("all");
+  const [reviewSort, setReviewSort] = createSignal<"number" | "title">("number");
+  const [aggregatedStatuses] = createResource(
+    () => ({ reviews: reviews() ?? [], profileId: actingProfileId() }),
+    async ({ reviews, profileId }) => {
+      if (!profileId) return {} as Record<string, string>;
+      const entries = await Promise.all(reviews.map(async (review) => [review.id, await reviewApi.aggregatedStatus(review.id, profileId)] as const));
+      return Object.fromEntries(entries);
+    },
+  );
+  const visibleReviews = createMemo(() => {
+    const statuses = aggregatedStatuses() ?? {};
+    return (reviews() ?? []).filter((review) => {
+      const status = statuses[review.id];
+      return quickFilter() === "all" ||
+        (quickFilter() === "open" && review.state === "Opened") ||
+        (quickFilter() === "mine" && (status === "NEEDS_MY_REVIEW" || status === "NEEDS_MY_ATTENTION")) ||
+        (quickFilter() === "waiting" && (status === "WAITING_FOR_REVIEW" || status === "WAITING_FOR_UPDATES"));
+    }).sort((left, right) => reviewSort() === "title"
+      ? left.title.localeCompare(right.title)
+      : right.number - left.number);
+  });
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   // Default to the first review once, on load only. After that the URL is the source of
   // truth for the selection, so back-navigating to the view-only URL (which clears the
@@ -139,9 +163,17 @@ export default function Reviews() {
     selectedId,
     (id) => (id ? reviewApi.evaluateGate(id) : Promise.resolve(null)),
   );
+  const [protectedRules, { refetch: refetchProtectedRules }] = createResource(
+    () => selected()?.project_id,
+    (id) => (id ? reviewApi.listProtectedBranchRules(id) : Promise.resolve([])),
+  );
   const [mergeRuns, { refetch: refetchMergeRuns }] = createResource(
     selectedId,
     (id) => (id ? reviewApi.listMergeRuns(id) : Promise.resolve([])),
+  );
+  const [externalIssueLinks, { refetch: refetchExternalIssueLinks }] = createResource(
+    selectedId,
+    (id) => (id ? reviewApi.listExternalIssueLinks(id) : Promise.resolve([])),
   );
   const [externalChecks, { refetch: refetchExternalChecks }] = createResource(
     selectedId,
@@ -155,6 +187,40 @@ export default function Reviews() {
       : null;
   };
   const [diff] = createResource(diffKey, (k) => reviewApi.diff(k.p, k.s, k.t));
+  const [ownedOnly, setOwnedOnly] = createSignal(false);
+  const [ownedFiles] = createResource(
+    () => ({ reviewId: selectedId(), profileId: actingProfileId() }),
+    ({ reviewId, profileId }) => reviewId && profileId
+      ? reviewApi.listOwnedFiles(reviewId, profileId)
+      : Promise.resolve([]),
+  );
+  const [navigationFile, setNavigationFile] = createSignal<string | null>(null);
+  const [navigationNotice, setNavigationNotice] = createSignal("");
+  let unresolvedCursor = -1;
+  let fileCursor = -1;
+  function changedFiles() {
+    return [...new Set((diff() ?? "").split("\n").flatMap((line) => {
+      const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      return match ? [match[2]] : [];
+    }))];
+  }
+  function jumpToNextUnresolved() {
+    const open = (discussions() ?? []).filter((item) => !item.resolved);
+    if (!open.length) { setNavigationNotice("No unresolved discussions."); return; }
+    unresolvedCursor = (unresolvedCursor + 1) % open.length;
+    const item = open[unresolvedCursor];
+    setNavigationNotice(`Unresolved ${unresolvedCursor + 1}/${open.length}: ${item.file_path}${item.line_start ? `:${item.line_start}` : ""}`);
+    requestAnimationFrame(() => document.getElementById(`discussion-${item.id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  }
+  function jumpToNextFile() {
+    const files = changedFiles();
+    if (!files.length) { setNavigationNotice("No changed files in this diff."); return; }
+    fileCursor = (fileCursor + 1) % files.length;
+    const file = files[fileCursor];
+    setNavigationFile(null);
+    requestAnimationFrame(() => setNavigationFile(file));
+    setNavigationNotice(`File ${fileCursor + 1}/${files.length}: ${file}`);
+  }
 
   async function setParticipantState(profileId: string, state: string | null) {
     const id = selectedId();
@@ -172,6 +238,7 @@ export default function Reviews() {
   const [discFile, setDiscFile] = createSignal("");
   const [discLine, setDiscLine] = createSignal("");
   const [discMessage, setDiscMessage] = createSignal("");
+  const [suggestionContent, setSuggestionContent] = createSignal("");
   async function addDiscussion(e: SubmitEvent) {
     e.preventDefault();
     const id = selectedId();
@@ -187,10 +254,24 @@ export default function Reviews() {
         revision: selected()?.source_branch ?? null,
         author_id: actingProfileId(),
         message: discMessage(),
+        suggestion_commit_id: selected()?.source_branch ?? null,
+        suggestion_content: suggestionContent().trim() || null,
+        suggestion_has_conflicts: false,
+        suggestion_identical_contents: null,
       });
       setDiscFile("");
       setDiscLine("");
       setDiscMessage("");
+      setSuggestionContent("");
+      refetchDiscussions();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function setSuggestionStatus(d: ReviewDiscussion, status: "OPEN" | "ACCEPTED" | "REJECTED") {
+    if (!actingProfileId()) return;
+    try {
+      await reviewApi.setSuggestedEditStatus(d.id, status, actingProfileId());
       refetchDiscussions();
     } catch (err) {
       setError(String(err));
@@ -257,6 +338,39 @@ export default function Reviews() {
       setError(String(err));
     }
   }
+  // ---------- protected branches ----------
+  const [protectionPattern, setProtectionPattern] = createSignal("main");
+  const [protectionRegex, setProtectionRegex] = createSignal(false);
+  const [protectionCreate, setProtectionCreate] = createSignal("");
+  const [protectionPush, setProtectionPush] = createSignal("");
+  const [protectionDelete, setProtectionDelete] = createSignal("");
+  const [protectionForcePush, setProtectionForcePush] = createSignal("");
+  const [protectionMerge, setProtectionMerge] = createSignal("");
+  const [protectionBypass, setProtectionBypass] = createSignal("");
+  const [protectionLinear, setProtectionLinear] = createSignal(false);
+  async function saveProtection(e: SubmitEvent) {
+    e.preventDefault();
+    const projectId = selected()?.project_id;
+    if (!projectId) return;
+    const rule: ProtectedBranchRule = {
+      id: newId("protection"), project_id: projectId,
+      branch_pattern: protectionPattern().trim() || "*", regex: protectionRegex(),
+      allow_create_json: jsonList(protectionCreate()), allow_push_json: jsonList(protectionPush()),
+      allow_delete_json: jsonList(protectionDelete()), allow_force_push_json: jsonList(protectionForcePush()),
+      allow_merge_json: jsonList(protectionMerge()), linear_history: protectionLinear(),
+      bypass_quality_gate_json: jsonList(protectionBypass()),
+    };
+    try {
+      await reviewApi.saveProtectedBranchRule(rule);
+      setProtectionCreate(""); setProtectionPush(""); setProtectionDelete("");
+      setProtectionForcePush(""); setProtectionMerge(""); setProtectionBypass("");
+      refetchProtectedRules();
+    } catch (err) { setError(String(err)); }
+  }
+  async function deleteProtection(id: string) {
+    try { await reviewApi.deleteProtectedBranchRule(id); refetchProtectedRules(); }
+    catch (err) { setError(String(err)); }
+  }
 
   // ---------- stacked merge requests (cherry-pick / restack) ----------
   const [stacks, { refetch: refetchStacks }] = createResource(
@@ -296,7 +410,27 @@ export default function Reviews() {
     }
   }
 
-  // ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
+  // ---------- external issue links (canonical URLs stay in their tracker) ----------
+const [externalIssueUrl, setExternalIssueUrl] = createSignal("");
+const [externalIssueTitle, setExternalIssueTitle] = createSignal("");
+async function addExternalIssueLink(e: SubmitEvent) {
+  e.preventDefault();
+  const reviewId = selectedId();
+  if (!reviewId || !externalIssueUrl().trim()) return;
+  try {
+    await reviewApi.createExternalIssueLink({
+      id: newId("external-issue"), review_id: reviewId,
+      external_url: externalIssueUrl().trim(), title: externalIssueTitle().trim() || null,
+    });
+    setExternalIssueUrl(""); setExternalIssueTitle("");
+    refetchExternalIssueLinks();
+  } catch (err) { setError(String(err)); }
+}
+async function removeExternalIssueLink(id: string) {
+  try { await reviewApi.deleteExternalIssueLink(id); refetchExternalIssueLinks(); }
+  catch (err) { setError(String(err)); }
+}
+// ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
   const [checkName, setCheckName] = createSignal("");
   const [checkStatus, setCheckStatus] =
     createSignal<ExternalCheckStatus>("PENDING");
@@ -485,12 +619,20 @@ export default function Reviews() {
 
       <div class="reviews-body">
         <aside class="reviews-list">
+          <div class="review-list-controls">
+            <div class="quick-filters" aria-label="Review quick filters">
+              <For each={["all", "open", "mine", "waiting"] as const}>
+                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{filter === "mine" ? "Needs me" : filter}</button>}
+              </For>
+            </div>
+            <label>Sort <select value={reviewSort()} onChange={(event) => setReviewSort(event.currentTarget.value as "number" | "title")}><option value="number">Newest</option><option value="title">Title</option></select></label>
+          </div>
           <Show
-            when={reviews()?.length}
-            fallback={<p class="hint pad">No reviews yet — open one above.</p>}
+            when={visibleReviews().length}
+            fallback={<p class="hint pad">No reviews match this filter.</p>}
           >
             <ul>
-              <For each={reviews()}>
+              <For each={visibleReviews()}>
                 {(r) => (
                   <li classList={{ active: r.id === selectedId() }}>
                     <a
@@ -728,7 +870,52 @@ export default function Reviews() {
                   </form>
                 </details>
 
-                <details class="gate-rules external-checks" open>
+                <details class="gate-rules protected-branches">
+                  <summary>Protected branches ({protectedRules()?.length ?? 0})</summary>
+                  <p class="hint">Matching rules compose restrictively; empty lists deny. Merge permission is enforced now; direct branch mutation UI is not available.</p>
+                  <ul>
+                    <For each={protectedRules()}>
+                      {(rule) => (
+                        <li>
+                          <code>{rule.branch_pattern}</code>
+                          {rule.regex ? " · regex" : " · glob"}
+                          {rule.linear_history ? " · linear history" : ""}
+                          {rule.allow_merge_json
+                            ? ` · merge: ${(JSON.parse(rule.allow_merge_json) as string[]).join(", ")}`
+                            : " · merge: nobody"}
+                          <button class="ghost small" onClick={() => deleteProtection(rule.id)}>×</button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <form class="new-rule-form" onSubmit={saveProtection}>
+                    <input placeholder="branch pattern" value={protectionPattern()} onInput={(e) => setProtectionPattern(e.currentTarget.value)} />
+                    <label><input type="checkbox" checked={protectionRegex()} onChange={(e) => setProtectionRegex(e.currentTarget.checked)} /> regex</label>
+                    <label><input type="checkbox" checked={protectionLinear()} onChange={(e) => setProtectionLinear(e.currentTarget.checked)} /> linear history</label>
+                    <input placeholder="create principals" value={protectionCreate()} onInput={(e) => setProtectionCreate(e.currentTarget.value)} />
+                    <input placeholder="push principals" value={protectionPush()} onInput={(e) => setProtectionPush(e.currentTarget.value)} />
+                    <input placeholder="delete principals" value={protectionDelete()} onInput={(e) => setProtectionDelete(e.currentTarget.value)} />
+                    <input placeholder="force-push principals" value={protectionForcePush()} onInput={(e) => setProtectionForcePush(e.currentTarget.value)} />
+                    <input placeholder="merge principals" value={protectionMerge()} onInput={(e) => setProtectionMerge(e.currentTarget.value)} />
+                    <input placeholder="gate-bypass principals" value={protectionBypass()} onInput={(e) => setProtectionBypass(e.currentTarget.value)} />
+                    <button class="ghost">Protect branch</button>
+                  </form>
+                </details>
+
+                <section class="external-issue-links">
+<h3>External issues ({externalIssueLinks()?.length ?? 0})</h3>
+<ul>
+<For each={externalIssueLinks()} fallback={<li class="hint">No external issues linked.</li>}>
+{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external issue ${link.title || link.external_url}`} onClick={() => removeExternalIssueLink(link.id)}>×</button></li>}
+</For>
+</ul>
+<form class="new-rule-form" onSubmit={addExternalIssueLink}>
+<input class="grow" type="url" placeholder="https://tracker.example/PROJ-42" value={externalIssueUrl()} onInput={(e) => setExternalIssueUrl(e.currentTarget.value)} />
+<input placeholder="Issue title (optional)" value={externalIssueTitle()} onInput={(e) => setExternalIssueTitle(e.currentTarget.value)} />
+<button class="ghost">Link issue</button>
+</form>
+</section>
+<details class="gate-rules external-checks" open>
                   <summary>
                     External checks ({externalChecks()?.length ?? 0})
                   </summary>
@@ -899,7 +1086,14 @@ export default function Reviews() {
                 <h3>
                   Diff ({review().source_branch} → {review().target_branch})
                 </h3>
-                <Diff text={diff() ?? ""} loading={diff.loading} />
+                <div class="review-navigation">
+                  <button class="ghost small" type="button" onClick={jumpToNextUnresolved}>Next unresolved</button>
+                  <button class="ghost small" type="button" onClick={jumpToNextFile}>Next file</button>
+                  <label class="owned-files-filter"><input type="checkbox" checked={ownedOnly()} disabled={!ownedFiles()?.length} onChange={(event) => setOwnedOnly(event.currentTarget.checked)} /> My owned files ({ownedFiles()?.length ?? 0})</label>
+                  <span class="hint" aria-live="polite">{navigationNotice()}</span>
+                </div>
+                <Show when={ownedOnly() && !ownedFiles()?.length}><p class="hint">No changed files are assigned to you by source-branch CODEOWNERS.</p></Show>
+                <Diff text={diff() ?? ""} loading={diff.loading} focusFile={navigationFile()} ownedFiles={ownedFiles()} ownedOnly={ownedOnly()} />
               </section>
 
               <section class="discussions">
@@ -907,7 +1101,7 @@ export default function Reviews() {
                 <ul>
                   <For each={discussions()}>
                     {(d) => (
-                      <li classList={{ resolved: d.resolved }}>
+                      <li id={`discussion-${d.id}`} classList={{ resolved: d.resolved }}>
                         <code>
                           {d.file_path}
                           {d.line_start ? `:${d.line_start}` : ""}
@@ -915,10 +1109,17 @@ export default function Reviews() {
                         <span class="resolved-tag">
                           {d.resolved ? "resolved" : "open"}
                         </span>
-                        <button
-                          class="ghost small"
-                          onClick={() => toggleResolved(d)}
-                        >
+                        <Show when={d.suggestion_status}>
+                          <span class="hint">suggestion: {d.suggestion_status}</span>
+                          <Show when={d.suggestion_status === "OPEN"}>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "ACCEPTED")}>Accept edit</button>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "REJECTED")}>Reject edit</button>
+                          </Show>
+                          <Show when={d.suggestion_status !== "OPEN"}>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "OPEN")}>Reopen edit</button>
+                          </Show>
+                        </Show>
+                        <button class="ghost small" onClick={() => toggleResolved(d)}>
                           {d.resolved ? "Reopen" : "Resolve"}
                         </button>
                       </li>
@@ -942,6 +1143,12 @@ export default function Reviews() {
                     placeholder="comment"
                     value={discMessage()}
                     onInput={(e) => setDiscMessage(e.currentTarget.value)}
+                  />
+                  <input
+                    class="grow"
+                    placeholder="suggested replacement (optional)"
+                    value={suggestionContent()}
+                    onInput={(e) => setSuggestionContent(e.currentTarget.value)}
                   />
                   <button class="ghost">Add discussion</button>
                 </form>

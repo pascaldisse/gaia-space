@@ -21,7 +21,6 @@ class FakeRoom {
     setMicrophoneEnabled: async (enabled: boolean) => { calls.push(`microphone:${enabled}`); },
     setCameraEnabled: async (enabled: boolean) => { calls.push(`camera:${enabled}`); },
     setScreenShareEnabled: async (enabled: boolean) => { calls.push(`screen:${enabled}`); },
-    publishData: async (payload: Uint8Array) => { calls.push(`chat:${new TextDecoder().decode(payload)}`); },
   };
   remoteParticipants = new Map([["them", remoteParticipant]]);
   listeners = new Map<string, ((...args: any[]) => void)[]>();
@@ -32,14 +31,14 @@ class FakeRoom {
 }
 mock.module("livekit-client", () => ({
   Room: FakeRoom,
-  RoomEvent: { ConnectionStateChanged: "connection", ParticipantConnected: "participant-connected", ParticipantDisconnected: "participant-disconnected", TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", LocalTrackPublished: "track-published", LocalTrackUnpublished: "track-unpublished", DataReceived: "data-received" },
+  RoomEvent: { ConnectionStateChanged: "connection", ParticipantConnected: "participant-connected", ParticipantDisconnected: "participant-disconnected", TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", LocalTrackPublished: "track-published", LocalTrackUnpublished: "track-unpublished" },
   Track: { Source: { Camera: "camera", Microphone: "microphone", ScreenShare: "screen" } },
 }));
 const { default: CallPanel } = await import("./CallPanel");
 
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
-const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, video_provider: "native", video_status: "scheduled", access_level: "PRIVATE", archived: false };
+const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled" };
 afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; ipcCommands.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
 
 test("joining exposes native media controls, device selectors, and a clean leave", async () => {
@@ -50,7 +49,6 @@ test("joining exposes native media controls, device selectors, and a clean leave
     if (command === "stop_meeting_recording") return { egress_id: "EG_1", status: "stopped" };
     if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
     if (command === "list_meeting_recordings") return [];
-if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", meeting_id: "meeting-1", speaker_id: "them", text: "Caption proof", started_at: 1, ended_at: 2, source: "external", created_at: 1 }];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
@@ -62,19 +60,11 @@ if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", m
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
   expect(host.querySelectorAll("select")).toHaveLength(3);
-  const chat = host.querySelector('input[aria-label="Chat message"]') as HTMLInputElement;
-  chat.value = "Ship it"; chat.dispatchEvent(new Event("input", { bubbles: true }));
-  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement).click();
-  await settle();
-  expect(calls.some(call => call.includes('chat:') && call.includes("Ship it"))).toBe(true);
-  expect(host.textContent).toContain("Ship it");
-expect(host.textContent).toContain("Caption proof");
-expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();
   await settle();
-  expect(calls).toEqual(["microphone:true", "camera:true", expect.stringContaining("chat:"), "microphone:false", "camera:false", "screen:true"]);
+  expect(calls).toEqual(["microphone:true", "camera:true", "microphone:false", "camera:false", "screen:true"]);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("start_meeting_recording");
@@ -132,6 +122,46 @@ test("an unresolvable native actor disables recording and explains why", async (
   record.click();
   await settle();
   expect(ipcCommands).not.toContain("start_meeting_recording");
+});
+
+test("only the organizer can end the call, and a non-organizer sees leave alone", async () => {
+  const invoke = async (command: string) => {
+    ipcCommands.push(command);
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings") return [];
+    if (command === "list_meeting_participants") return [{ meeting_id: "meeting-1", profile_id: "me", status: "accepted" }];
+    if (command === "end_meeting_call") return true;
+    throw new Error(`unexpected command: ${command}`);
+  };
+  (window as any).__TAURI_INTERNALS__ = { invoke };
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
+  await settle();
+  const end = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "End call") as HTMLButtonElement;
+  expect(end).toBeDefined();
+  end.click();
+  await settle();
+  expect(ipcCommands).toContain("end_meeting_call");
+  expect(calls).toContain("leave");
+  dispose?.(); dispose = undefined; host.remove();
+
+  // A guest may leave their own client but never end the meeting for everyone.
+  const guestHost = document.createElement("div"); document.body.append(guestHost);
+  dispose = render(() => <CallPanel meeting={{ ...meeting, organizer_id: "host" }} identity="me" displayName="Me" />, guestHost);
+  (guestHost.querySelector("button") as HTMLButtonElement).click();
+  await settle();
+  expect(Array.from(guestHost.querySelectorAll("button")).some(button => button.textContent === "End call")).toBe(false);
+  expect(Array.from(guestHost.querySelectorAll("button")).some(button => button.textContent === "Leave call")).toBe(true);
+});
+
+test("a meeting that already has a bound room shows it before anyone joins", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={{ ...meeting, video_provider: "livekit", video_room_id: "meeting-meeting-1", join_url: "ws://livekit.test", video_status: "live" }} identity="me" displayName="Me" />, host);
+  await settle();
+  expect(host.textContent).toContain("meeting-meeting-1");
+  expect(host.textContent).toContain("live");
 });
 
 test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {

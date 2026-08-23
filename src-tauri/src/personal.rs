@@ -1,5 +1,5 @@
 //! Personal productivity, organization availability, notifications, and Goto search.
-use crate::{actor, calendar_feeds, db, meetings};
+use crate::{actor, calendar_feeds, chat, db, meetings};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -551,6 +551,15 @@ pub fn list_absences(profile_id: Option<String>) -> Result<Vec<Absence>> {
         .map_err(|error| error.to_string())?;
     Ok(absences)
 }
+fn emit_absence_lifecycle_on(c: &Connection, absence: &Absence, event_type: &str) -> Result<()> {
+    let mut statement = err(c.prepare("SELECT id FROM profiles WHERE archived=0 AND id<>?1"))?;
+    let rows = statement.query_map([&absence.profile_id], |row| row.get(0)).map_err(|error| error.to_string())?;
+    let recipients = rows.collect::<std::result::Result<Vec<String>, _>>().map_err(|error| error.to_string())?;
+    let title = match event_type { "absence.created" => "New time off", "absence.approved" => "Time off approved", "absence.deleted" => "Time off removed", _ => "Time off updated" };
+    let body = format!("{} to {} · {}", absence.date_from, absence.date_to, absence.availability);
+    fan_out_notification_on(c, NotificationFanout { recipients, event_type, title, body: Some(&body), entity_type: "absence", entity_id: &absence.id, target_type: Some("profile"), target_id: Some(&absence.profile_id) })?;
+    chat::post_absence_card_on(c, &absence.id, &absence.profile_id, &absence.date_from, &absence.date_to, &absence.availability, event_type)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_absence(input: AbsenceInput) -> Result<Absence> {
     let absence = Absence {
@@ -567,14 +576,19 @@ pub fn create_absence(input: AbsenceInput) -> Result<Absence> {
     let c = db::conn()?;
     // `RETURNING` answers with the row this statement wrote; a separate `SELECT id=?` could
     // pick up somebody else's row if the id changed hands in between.
-    err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, absence.availability], read_absence))
+    let created = err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, absence.availability], read_absence))?;
+    emit_absence_lifecycle_on(&c, &created, if created.approved { "absence.approved" } else { "absence.created" })?;
+    Ok(created)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_absence(absence: Absence) -> Result<Absence> {
     validate_absence(&absence)?;
     let c = db::conn()?;
+    let before = absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".to_string())?;
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6,reason_confidential=?7,availability=?8 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, normalized_availability(&absence.availability)?]))? == 0 { return Err("Absence not found".into()); }
-    absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
+    let updated = absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".to_string())?;
+    emit_absence_lifecycle_on(&c, &updated, if !before.approved && updated.approved { "absence.approved" } else { "absence.updated" })?;
+    Ok(updated)
 }
 /// Member update. Check, write, and readback are one statement, so the row cannot change
 /// identity between them: ownership lives in the `WHERE` clause, neither `approved` nor
@@ -586,29 +600,30 @@ pub fn update_absence(absence: Absence) -> Result<Absence> {
 pub fn update_absence_details(absence: Absence, owner: &str) -> Result<Option<Absence>> {
     validate_absence(&absence)?;
     let c = db::conn()?;
-    err(c.query_row(
+    let updated = err(c.query_row(
         "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5,reason_confidential=?6,availability=?7 WHERE id=?1 AND profile_id=?2 \
          RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability",
         params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to, absence.reason_confidential, normalized_availability(&absence.availability)?],
         read_absence,
-    ).optional())
+    ).optional())?;
+    if let Some(ref value) = updated { emit_absence_lifecycle_on(&c, value, "absence.updated")?; }
+    Ok(updated)
 }
 /// Member delete, conditional for the same reason: an id authorized a moment ago may have
 /// been deleted and recreated for another profile since. `Ok(false)` means nothing matched.
 pub fn delete_absence_owned(id: &str, owner: &str) -> Result<bool> {
     let c = db::conn()?;
-    Ok(err(c.execute(
-        "DELETE FROM absences WHERE id=?1 AND profile_id=?2",
-        params![id, owner],
-    ))? > 0)
+    let absence = absence_on(&c, id)?;
+    let deleted = err(c.execute("DELETE FROM absences WHERE id=?1 AND profile_id=?2", params![id, owner]))? > 0;
+    if deleted { if let Some(value) = absence { emit_absence_lifecycle_on(&c, &value, "absence.deleted")?; } }
+    Ok(deleted)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_absence(id: String) -> Result<()> {
     let c = db::conn()?;
-    if err(c.execute("DELETE FROM absences WHERE id=?1", [id]))? == 0 {
-        return Err("Absence not found".into());
-    }
-    Ok(())
+    let absence = absence_on(&c, &id)?.ok_or_else(|| "Absence not found".to_string())?;
+    if err(c.execute("DELETE FROM absences WHERE id=?1", [id]))? == 0 { return Err("Absence not found".into()); }
+    emit_absence_lifecycle_on(&c, &absence, "absence.deleted")
 }
 fn current_absences_on(c: &Connection, date: &str) -> Result<Vec<Absence>> {
     let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability FROM absences WHERE approved=1 AND date_from<=?1 AND date_to>=?1 ORDER BY date_from,profile_id"))?;
@@ -674,7 +689,7 @@ fn read_notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> 
         read_at: row.get(8)?,
     })
 }
-fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Option<Notification>> {
+pub(crate) fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Option<Notification>> {
     if input.recipient_id.trim().is_empty()
         || input.event_type.trim().is_empty()
         || input.title.trim().is_empty()
@@ -695,6 +710,14 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
     let id = input.id.clone().unwrap_or_else(|| new_id("notification"));
     err(c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.recipient_id, input.event_type, input.title.trim(), input.body, input.entity_type, input.entity_id]))?;
     let notification = err(c.query_row("SELECT id,recipient_id,event_type,title,body,entity_type,entity_id,created_at,read_at FROM notifications WHERE id=?1", [id], read_notification))?;
+    // Feed is a channel projection of this canonical notification record.
+    let feed = crate::chat::private_feed_for_on(c, &notification.recipient_id)?;
+    err(c.execute("INSERT OR IGNORE INTO messages(id,channel_id,author_id,text,created_at,archived) VALUES(?1,?2,NULL,?3,?4,0)", params![format!("notification:{}", notification.id), feed.id, notification.body.as_ref().map(|body| format!("{}\n{}", notification.title, body)).unwrap_or_else(|| notification.title.clone()), notification.created_at]))?;
+    for delivery in subscription_deliveries_on(c, &notification.recipient_id, &notification.event_type)? {
+        if !delivery.enabled || delivery.target_kind == "feed" { continue; }
+        if delivery.target_kind == "channel" { err(c.execute("INSERT OR IGNORE INTO messages(id,channel_id,author_id,text,created_at,archived) VALUES(?1,?2,NULL,?3,?4,0)", params![format!("subscription:{}:{}", notification.id, delivery.target_id), delivery.target_id, notification.title, notification.created_at]))?; }
+        else { crate::applications::enqueue_webhook_delivery(&delivery.target_id, &serde_json::json!({"event_type":notification.event_type,"notification":notification}))?; }
+    }
     Ok(Some(notification))
 }
 /// A domain supplies only recipients it has already authorized to read its entity.
@@ -915,6 +938,127 @@ pub fn set_dashboard_preferences_http(
     save_dashboard_preferences_on(&db::conn()?, preferences)
 }
 
+/// Per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`): the
+/// hide/show weekends / working-hours / to-dos / declined toggles. Persisted on
+/// the member's preference row so every device sees the same calendar.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct CalendarOptions {
+    pub profile_id: String,
+    pub show_weekends: bool,
+    pub show_todos: bool,
+    pub working_hours_only: bool,
+    pub working_hours_start: i64,
+    pub working_hours_end: i64,
+    pub show_declined: bool,
+}
+fn default_calendar_options(profile_id: &str) -> CalendarOptions {
+    CalendarOptions {
+        profile_id: profile_id.to_string(),
+        show_weekends: true,
+        show_todos: true,
+        working_hours_only: false,
+        working_hours_start: 9,
+        working_hours_end: 18,
+        show_declined: false,
+    }
+}
+/// A window is a half-open hour range inside one day, so an empty or inverted
+/// range can never be stored and silently blank the grid.
+fn clean_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    if options.profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    if !(0..=24).contains(&options.working_hours_start)
+        || !(0..=24).contains(&options.working_hours_end)
+    {
+        return Err("Calendar working hours must be between 0 and 24".into());
+    }
+    if options.working_hours_end <= options.working_hours_start {
+        return Err("Calendar working hours must end after they start".into());
+    }
+    Ok(options)
+}
+pub(crate) fn calendar_options_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    if profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    let stored = err(c
+        .query_row(
+            "SELECT calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined FROM user_preferences WHERE profile_id=?1",
+            [profile_id],
+            |row| {
+                Ok(CalendarOptions {
+                    profile_id: profile_id.to_string(),
+                    show_weekends: row.get(0)?,
+                    show_todos: row.get(1)?,
+                    working_hours_only: row.get(2)?,
+                    working_hours_start: row.get(3)?,
+                    working_hours_end: row.get(4)?,
+                    show_declined: row.get(5)?,
+                })
+            },
+        )
+        .optional())?;
+    // An absent preference row is not an error: it is the documented default view.
+    Ok(stored.unwrap_or_else(|| default_calendar_options(profile_id)))
+}
+pub(crate) fn save_calendar_options_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let options = clean_calendar_options(options)?;
+    // The preference row is shared with the dashboard, so an insert must seed the
+    // dashboard column while an update must leave whatever it already holds.
+    err(c.execute(
+        "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets,calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined) VALUES(?1,'[]',?2,?3,?4,?5,?6,?7) ON CONFLICT(profile_id) DO UPDATE SET calendar_show_weekends=excluded.calendar_show_weekends,calendar_show_todos=excluded.calendar_show_todos,calendar_working_hours_only=excluded.calendar_working_hours_only,calendar_working_hours_start=excluded.calendar_working_hours_start,calendar_working_hours_end=excluded.calendar_working_hours_end,calendar_show_declined=excluded.calendar_show_declined",
+        params![
+            options.profile_id,
+            options.show_weekends,
+            options.show_todos,
+            options.working_hours_only,
+            options.working_hours_start,
+            options.working_hours_end,
+            options.show_declined
+        ],
+    ))?;
+    calendar_options_on(c, &options.profile_id)
+}
+fn calendar_options_for_actor_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    calendar_options_on(c, profile_id)
+}
+fn save_calendar_options_for_actor_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if options.profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    save_calendar_options_on(c, options)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_calendar_options(profile_id: String) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    calendar_options_for_actor_on(&c, &profile_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    save_calendar_options_for_actor_on(&c, options)
+}
+/// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
+pub fn get_calendar_options_http(profile_id: String) -> Result<CalendarOptions> {
+    calendar_options_on(&db::conn()?, &profile_id)
+}
+/// HTTP has already replaced the payload owner at its policy gate.
+pub fn set_calendar_options_http(options: CalendarOptions) -> Result<CalendarOptions> {
+    save_calendar_options_on(&db::conn()?, options)
+}
+
 fn read_scope(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubscriptionScope> {
     Ok(SubscriptionScope {
         profile_id: row.get(0)?,
@@ -1014,6 +1158,26 @@ pub fn delete_subscription_setting(profile_id: String, event_type: String) -> Re
     Ok(())
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SubscriptionDeliveryTarget { pub profile_id:String, pub event_type:String, pub target_kind:String, pub target_id:String, pub application_id:Option<String>, pub enabled:bool }
+fn read_subscription_delivery(r:&rusqlite::Row<'_>)->rusqlite::Result<SubscriptionDeliveryTarget>{Ok(SubscriptionDeliveryTarget{profile_id:r.get(0)?,event_type:r.get(1)?,target_kind:r.get(2)?,target_id:r.get(3)?,application_id:r.get(4)?,enabled:r.get(5)?})}
+fn subscription_deliveries_on(c: &Connection, profile_id: &str, event_type: &str) -> Result<Vec<SubscriptionDeliveryTarget>> { let mut statement=err(c.prepare("SELECT profile_id,event_type,target_kind,target_id,application_id,enabled FROM subscription_deliveries WHERE profile_id=?1 AND event_type IN (?2,'*') ORDER BY event_type='*'"))?; let rows=err(statement.query_map(params![profile_id,event_type],read_subscription_delivery))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn list_subscription_deliveries(profile_id:String)->Result<Vec<SubscriptionDeliveryTarget>> { let c=db::conn()?; let mut statement=err(c.prepare("SELECT profile_id,event_type,target_kind,target_id,application_id,enabled FROM subscription_deliveries WHERE profile_id=?1 ORDER BY event_type,target_kind,target_id"))?; let rows=err(statement.query_map([profile_id],read_subscription_delivery))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn save_subscription_delivery(d:SubscriptionDeliveryTarget)->Result<SubscriptionDeliveryTarget>{if d.profile_id.trim().is_empty()||d.event_type.trim().is_empty()||d.target_id.trim().is_empty()||!matches!(d.target_kind.as_str(),"feed"|"channel"|"webhook"){return Err("Invalid subscription delivery target".into())}let c=db::conn()?;if d.target_kind=="feed"&&d.target_id!=d.profile_id{return Err("Feed target must be the recipient profile".into())}
+if d.target_kind=="channel"&&!crate::chat::channel_readable_by(&d.target_id,&d.profile_id)?{return Err("Subscription channel access denied".into())}
+if d.target_kind=="webhook"{let app=d.application_id.as_deref().ok_or("Webhook delivery needs an application")?;let exists:bool=err(c.query_row("SELECT EXISTS(SELECT 1 FROM webhook_subscriptions WHERE id=?1 AND application_id=?2)",params![d.target_id,app],|r|r.get(0)))?;if !exists{return Err("Webhook is not owned by application".into())}}err(c.execute("INSERT INTO subscription_deliveries(profile_id,event_type,target_kind,target_id,application_id,enabled) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(profile_id,event_type,target_kind,target_id) DO UPDATE SET application_id=excluded.application_id,enabled=excluded.enabled",params![d.profile_id,d.event_type,d.target_kind,d.target_id,d.application_id,d.enabled]))?;Ok(d)}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn delete_subscription_delivery(profile_id:String,event_type:String,target_kind:String,target_id:String)->Result<()>{let c=db::conn()?;err(c.execute("DELETE FROM subscription_deliveries WHERE profile_id=?1 AND event_type=?2 AND target_kind=?3 AND target_id=?4",params![profile_id,event_type,target_kind,target_id]))?;Ok(())}
+#[derive(Clone,Debug,Deserialize,Serialize)] pub struct Follow{pub profile_id:String,pub subject_type:String,pub subject_id:String}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn list_follows(profile_id:String)->Result<Vec<Follow>> { let c=db::conn()?; let mut statement=err(c.prepare("SELECT profile_id,subject_type,subject_id FROM follows WHERE profile_id=?1 ORDER BY subject_type,subject_id"))?; let rows=err(statement.query_map([profile_id],|r|Ok(Follow{profile_id:r.get(0)?,subject_type:r.get(1)?,subject_id:r.get(2)?})))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn save_follow(f:Follow)->Result<Follow>{if f.profile_id.trim().is_empty()||f.subject_id.trim().is_empty()||!matches!(f.subject_type.as_str(),"profile"|"team"){return Err("Follow needs a profile or team subject".into())}let c=db::conn()?;let table=if f.subject_type=="profile"{"profiles"}else{"teams"};let exists:bool=err(c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1 AND archived=0)"),[&f.subject_id],|r|r.get(0)))?;if !exists{return Err("Follow subject not found".into())}err(c.execute("INSERT OR IGNORE INTO follows(profile_id,subject_type,subject_id) VALUES(?1,?2,?3)",params![f.profile_id,f.subject_type,f.subject_id]))?;Ok(f)}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn delete_follow(f:Follow)->Result<()>{err(db::conn()?.execute("DELETE FROM follows WHERE profile_id=?1 AND subject_type=?2 AND subject_id=?3",params![f.profile_id,f.subject_type,f.subject_id]))?;Ok(())}
+#[derive(Clone,Debug,Serialize)] pub struct ProjectDashboard{pub project_id:String,pub open_issues:i64,pub open_todos:i64,pub member_count:i64,pub deadline:Option<String>}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn project_dashboard_aggregate(project_id:String)->Result<ProjectDashboard>{let c=db::conn()?;let open_issues:i64=err(c.query_row("SELECT count(*) FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.project_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0",[&project_id],|r|r.get(0)))?;let open_todos:i64=err(c.query_row("SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",[&project_id],|r|r.get(0)))?;let member_count:i64=err(c.query_row("SELECT count(*) FROM (SELECT created_by FROM projects WHERE id=?1 UNION SELECT profile_id FROM project_members WHERE project_id=?1)",[&project_id],|r|r.get(0)))?;let deadline:Option<String>=err(c.query_row("SELECT deadline FROM projects WHERE id=?1",[&project_id],|r|r.get(0)))?;Ok(ProjectDashboard{project_id,open_issues,open_todos,member_count,deadline})}
+/// Provider seam: domains register one source instead of extending one monolithic union.
+pub trait GotoSource: Send + Sync { fn key(&self) -> &'static str; fn sql(&self) -> &'static str; }
+pub struct SqlGotoSource { pub source_key:&'static str, pub source_sql:&'static str }
+impl GotoSource for SqlGotoSource { fn key(&self)->&'static str{self.source_key} fn sql(&self)->&'static str{self.source_sql} }
+pub fn goto_source_registry() -> Vec<Box<dyn GotoSource>> { vec![Box::new(SqlGotoSource{source_key:"profiles",source_sql:"SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1"}),Box::new(SqlGotoSource{source_key:"projects",source_sql:"SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)"})] }
 #[derive(Clone, Debug, Serialize)]
 pub struct GotoResult {
     pub id: String,
@@ -1075,11 +1239,11 @@ pub fn goto_search_scoped(
 SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
 UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1) AND (?4 OR created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=projects.id AND pm.profile_id=?3))
 UNION ALL SELECT i.id,'issue',i.title,i.project_id || ' #' || i.number,CASE WHEN lower(i.title)=?2 THEN 100 ELSE 45 END FROM issues i WHERE i.archived=0 AND (lower(i.title) LIKE ?1 OR lower(coalesce(i.description,'')) LIKE ?1) AND EXISTS(SELECT 1 FROM projects p WHERE p.id=i.project_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))
-UNION ALL SELECT id,'channel',coalesce(name,''),description,CASE WHEN lower(coalesce(name,''))=?2 THEN 100 ELSE 40 END FROM channels WHERE archived=0 AND (lower(coalesce(name,'')) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+UNION ALL SELECT ch.id,'channel',coalesce(ch.name,''),ch.description,CASE WHEN lower(coalesce(ch.name,''))=?2 THEN 100 ELSE 40 END FROM channels ch WHERE ch.archived=0 AND (lower(coalesce(ch.name,'')) LIKE ?1 OR lower(coalesce(ch.description,'')) LIKE ?1) AND (ch.id NOT LIKE 'entity:meeting:%' OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.visibility='public') OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.organizer_id=?3) OR EXISTS(SELECT 1 FROM meetings m JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.id=substr(ch.id,16) AND m.visibility='participants' AND mp.profile_id=?3))
 UNION ALL SELECT d.id,'document',d.title,d.container_type,CASE WHEN lower(d.title)=?2 THEN 100 ELSE 45 END FROM documents d WHERE d.archived=0 AND (lower(d.title) LIKE ?1 OR lower(coalesce(d.body,'')) LIKE ?1) AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 UNION ALL SELECT id,'blog',title,'Blog',CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM blog_posts WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1)
 UNION ALL SELECT id,'review',title,project_id || ' #' || number,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM reviews WHERE lower(title) LIKE ?1
-UNION ALL SELECT m.id,'meeting',m.title,m.location,CASE WHEN lower(m.title)=?2 THEN 100 ELSE 45 END FROM meetings m WHERE m.archived=0 AND (lower(m.title) LIKE ?1 OR lower(coalesce(m.description,'')) LIKE ?1) AND (m.organizer_id=?3 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?3) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))
+UNION ALL SELECT m.id,'meeting',m.title,m.location,CASE WHEN lower(m.title)=?2 THEN 100 ELSE 45 END FROM meetings m WHERE m.archived=0 AND (lower(m.title) LIKE ?1 OR lower(coalesce(m.description,'')) LIKE ?1) AND (m.visibility='public' OR m.organizer_id=?3 OR (m.visibility='participants' AND EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?3)) OR (m.visibility='participants' AND EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 ) ORDER BY score DESC,title COLLATE NOCASE LIMIT ?5"))?;
     let rows = err(s.query_map(
         params![
@@ -1131,16 +1295,39 @@ pub fn calendar_aggregate(
     range_end: i64,
     range_start_date: Option<String>,
     range_end_date: Option<String>,
+    target_profile_id: Option<String>,
+    target_location: Option<String>,
 ) -> Result<Vec<CalendarItem>> {
     let c = db::conn()?;
-    calendar_aggregate_on(
+    let target_profile_id = target_profile_id.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or(&profile_id);
+    let mut items = calendar_aggregate_on(
         &c,
-        &profile_id,
+        target_profile_id,
         range_start,
         range_end,
         range_start_date.as_deref(),
         range_end_date.as_deref(),
-    )
+    )?;
+    if let Some(location) = target_location.as_deref().filter(|value| !value.trim().is_empty()) {
+        let mut statement = err(c.prepare("SELECT id FROM meetings WHERE archived=0 AND location=?1"))?;
+        let meeting_ids = err(statement.query_map([location], |row| row.get::<_, String>(0)))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        items.retain(|item| item.kind == "meeting" && meeting_ids.contains(&item.source_id));
+    }
+    // A calendar owner sees their details. Other profiles receive availability only:
+    // the aggregate still uses each source's existing read scope before redaction.
+    if target_profile_id != profile_id {
+        for item in &mut items {
+            // IDs can be deep links; never return a target-owned identifier to a viewer.
+            item.id = format!("busy-{}", item.starts_at);
+            item.source_id.clear();
+            item.title = "Busy".into();
+            item.project_id = None;
+            item.calendar_id = None;
+        }
+    }
+    Ok(items)
 }
 /// Date-only calendar values (`todos.due_date`, `projects.deadline`) are calendar dates,
 /// not instants: they are compared as `YYYY-MM-DD` strings against the day window the
@@ -1384,6 +1571,72 @@ mod tests {
         c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO project_members(project_id,profile_id) VALUES('project','q'),('project','r');").unwrap();
         c
     }
+    #[test]
+    fn calendar_options_default_then_persist_and_keep_dashboard_widgets() {
+        let c = conn();
+        assert_eq!(
+            calendar_options_on(&c, "p").unwrap(),
+            default_calendar_options("p"),
+            "an absent row reads as the documented default view"
+        );
+        save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "p".into(),
+                hidden_widgets: vec!["inbox".into()],
+                initialized: true,
+            },
+        )
+        .unwrap();
+        let saved = save_calendar_options_on(
+            &c,
+            CalendarOptions {
+                profile_id: "p".into(),
+                show_weekends: false,
+                show_todos: false,
+                working_hours_only: true,
+                working_hours_start: 8,
+                working_hours_end: 16,
+                show_declined: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.working_hours_start, 8);
+        assert!(!saved.show_weekends && saved.show_declined);
+        assert_eq!(calendar_options_on(&c, "p").unwrap(), saved, "read back");
+        assert_eq!(
+            dashboard_preferences_on(&c, "p").unwrap().hidden_widgets,
+            vec!["inbox".to_string()],
+            "the shared preference row keeps its dashboard column"
+        );
+        // A member with no preference row yet must still get an insert, which
+        // means seeding the NOT NULL dashboard column.
+        let fresh = save_calendar_options_on(&c, default_calendar_options("q")).unwrap();
+        assert_eq!(fresh, default_calendar_options("q"));
+    }
+
+    #[test]
+    fn calendar_options_reject_empty_or_inverted_working_hours() {
+        let c = conn();
+        let inverted = CalendarOptions {
+            working_hours_start: 18,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, inverted).is_err());
+        let out_of_day = CalendarOptions {
+            working_hours_end: 25,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, out_of_day).is_err());
+        let empty = CalendarOptions {
+            working_hours_start: 9,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, empty).is_err());
+    }
+
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
         let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();

@@ -26,6 +26,7 @@ const CATEGORIES: Record<string, Category> = {
   message: { key: "message", label: "Messages", icon: "chat", tone: "mention" },
   chat: { key: "chat", label: "Messages", icon: "chat", tone: "mention" },
   comment: { key: "comment", label: "Comments", icon: "chat", tone: "mention" },
+spacebox: { key: "spacebox", label: "#Spacebox", icon: "inbox", tone: "updates" },
   issue: { key: "issue", label: "Issues", icon: "check", tone: "issue" },
   task: { key: "task", label: "Tasks", icon: "check", tone: "issue" },
   todo: { key: "todo", label: "Tasks", icon: "check", tone: "issue" },
@@ -102,7 +103,8 @@ export default function Inbox() {
         (category() === "all" || categoryOf(item).key === category()),
     ),
   );
-  const unread = createMemo(() => visible().filter((item) => !item.read_at));
+  const spacebox = createMemo(() => everything().filter((item) => item.event_type === "spacebox.message"));
+const unread = createMemo(() => visible().filter((item) => !item.read_at));
   const earlier = createMemo(() => visible().filter((item) => item.read_at));
 
   const markRead = async (id: string) => {
@@ -377,7 +379,10 @@ export default function Inbox() {
           <Show when={everything().length}>
             <div class="view-cols inbox-cols">
               <div class="view-main">
-                <div class="inbox-filters">
+                <Show when={spacebox().length}>
+<section class="inbox-spacebox" aria-label="#Spacebox feed"><h2>#Spacebox</h2><p class="inbox-muted">Subscribed channel activity</p><ul class="inbox-list"><For each={spacebox()}>{row}</For></ul></section>
+</Show>
+<div class="inbox-filters">
                   <div class="inbox-scope">
                     <button
                       classList={{ on: scope() === "all" }}

@@ -4,8 +4,8 @@
 //!
 //! Simplifications vs. docs/space-knowledge-base/05-platform-auth-permissions.md
 //! (documented, not silently dropped):
-//! - `TD_Membership` (§2.5) is reduced to `profile x team x role` (+ lead/manager/
-//!   since/till/requires_approval/archived) — no pending-edit/approver workflow.
+//! - Membership edits are durable review requests; approval atomically applies the
+//!   serialized membership patch, while rejection preserves its ledger record.
 //! - `role_assignments.scope_type` supports global/project/team/channel/document
 //!   (matches the `roles.scope_type` CHECK in db.rs); Space's `Profile` RightType
 //!   scope is not a separate assignment scope here — profile-scoped rights are
@@ -49,6 +49,108 @@ pub struct Profile {
     pub archived: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProfileEmailStatus {
+    pub profile_id: String,
+    pub status: String,
+    pub verified_at: Option<i64>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MessengerContact {
+    pub id: Option<String>,
+    pub profile_id: String,
+    pub contact_type: String,
+    pub login: String,
+    pub deep_link: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Principal {
+    pub id: String,
+    pub kind: String,
+    pub profile_id: Option<String>,
+    pub label: String,
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_profile_email_status(profile_id: String) -> Result<ProfileEmailStatus> {
+    let c = db::conn()?;
+    Ok(c.query_row(
+        "SELECT profile_id,status,verified_at FROM profile_email_statuses WHERE profile_id=?1",
+        [&profile_id],
+        |r| {
+            Ok(ProfileEmailStatus {
+                profile_id: r.get(0)?,
+                status: r.get(1)?,
+                verified_at: r.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .unwrap_or(ProfileEmailStatus {
+        profile_id,
+        status: "unverified".into(),
+        verified_at: None,
+    }))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_profile_email_status(value: ProfileEmailStatus) -> Result<()> {
+    if !["unverified", "verified", "bounced"].contains(&value.status.as_str()) {
+        return Err("Invalid email status".into());
+    };
+    let c = db::conn()?;
+    c.execute("INSERT INTO profile_email_statuses(profile_id,status,verified_at) VALUES(?1,?2,?3) ON CONFLICT(profile_id) DO UPDATE SET status=excluded.status,verified_at=excluded.verified_at",params![value.profile_id,value.status,value.verified_at]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_messenger_contacts(profile_id: String) -> Result<Vec<MessengerContact>> {
+    let c = db::conn()?;
+    let mut q=c.prepare("SELECT id,profile_id,contact_type,login,deep_link FROM profile_messenger_contacts WHERE profile_id=?1 ORDER BY contact_type,login").map_err(|e|e.to_string())?;
+    let result = q
+        .query_map([profile_id], |r| {
+            Ok(MessengerContact {
+                id: Some(r.get(0)?),
+                profile_id: r.get(1)?,
+                contact_type: r.get(2)?,
+                login: r.get(3)?,
+                deep_link: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerContact> {
+    if value.contact_type.trim().is_empty() || value.login.trim().is_empty() {
+        return Err("Contact type and login are required".into());
+    };
+    let id = value.id.clone().unwrap_or_else(|| new_id("contact"));
+    let c = db::conn()?;
+    c.execute("INSERT INTO profile_messenger_contacts(id,profile_id,contact_type,login,deep_link) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,contact_type,login) DO UPDATE SET deep_link=excluded.deep_link",params![id,value.profile_id,value.contact_type.trim(),value.login.trim(),value.deep_link]).map_err(|e|e.to_string())?;
+    value.id = Some(id);
+    Ok(value)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_principals() -> Result<Vec<Principal>> {
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id,kind,profile_id,label FROM principals ORDER BY label")
+        .map_err(|e| e.to_string())?;
+    let result = q
+        .query_map([], |r| {
+            Ok(Principal {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                profile_id: r.get(2)?,
+                label: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_profiles() -> Result<Vec<Profile>> {
     let c = db::conn()?;
@@ -80,6 +182,15 @@ pub fn get_profile(id: String) -> Result<Option<Profile>> {
 pub fn create_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
+    c.execute(
+        "INSERT OR IGNORE INTO principals(id,kind,profile_id,label) VALUES(?1,'profile',?2,?3)",
+        params![
+            format!("profile:{}", profile.id),
+            profile.id,
+            profile.display_name
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -94,6 +205,11 @@ pub fn update_profile(profile: Profile) -> Result<()> {
             profile.email,
             profile.archived
         ],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE principals SET label=?2 WHERE kind='profile' AND profile_id=?1",
+        params![profile.id, profile.display_name],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -176,6 +292,61 @@ pub fn remove_member_location(id: String) -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Organization locations
+// ---------------------------------------------------------------------------
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Location {
+    pub id: String,
+    pub name: String,
+    pub location_type: String,
+    pub parent_id: Option<String>,
+    pub timezone: String,
+    pub work_schedule_json: String,
+    pub channel_id: Option<String>,
+    pub archived: bool,
+    #[serde(default)]
+    pub equipment: Vec<String>,
+}
+fn location_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Location> {
+    Ok(Location { id: row.get(0)?, name: row.get(1)?, location_type: row.get(2)?, parent_id: row.get(3)?, timezone: row.get(4)?, work_schedule_json: row.get(5)?, channel_id: row.get(6)?, archived: row.get(7)?, equipment: Vec::new() })
+}
+fn hydrate_location_equipment(c: &Connection, location: &mut Location) -> Result<()> {
+    let mut statement = err(c.prepare("SELECT equipment FROM location_equipment WHERE location_id=?1 ORDER BY equipment"))?;
+    let rows = statement.query_map([&location.id], |row| row.get(0)).map_err(|error| error.to_string())?;
+    location.equipment = rows.collect::<std::result::Result<Vec<String>, _>>().map_err(|error| error.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_locations() -> Result<Vec<Location>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare("SELECT id,name,location_type,parent_id,timezone,work_schedule_json,channel_id,archived FROM locations WHERE archived=0 ORDER BY name"))?;
+    let rows = statement.query_map([], location_row).map_err(|error| error.to_string())?;
+    let mut locations = rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for location in &mut locations { hydrate_location_equipment(&c, location)?; }
+    Ok(locations)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_location(mut location: Location) -> Result<Location> {
+    if location.id.trim().is_empty() { location.id = new_id("location"); }
+    if location.name.trim().is_empty() || location.timezone.trim().is_empty() { return Err("Location name and timezone are required".into()); }
+    let _: serde_json::Value = serde_json::from_str(&location.work_schedule_json).map_err(|_| "Location work schedule must be JSON")?;
+    let channel_id = format!("entity:location:{}", location.id);
+    let mut c = db::conn()?;
+    let tx = err(c.transaction())?;
+    err(tx.execute("INSERT OR IGNORE INTO channels(id,content_type,name,description,archived) VALUES(?1,'entity-bound',?2,?3,0)", params![channel_id, format!("{} chat", location.name.trim()), format!("location:{}", location.id)]))?;
+    err(tx.execute("INSERT INTO locations(id,name,location_type,parent_id,timezone,work_schedule_json,channel_id,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET name=excluded.name,location_type=excluded.location_type,parent_id=excluded.parent_id,timezone=excluded.timezone,work_schedule_json=excluded.work_schedule_json,channel_id=excluded.channel_id,archived=excluded.archived", params![location.id, location.name.trim(), location.location_type.trim(), location.parent_id, location.timezone.trim(), location.work_schedule_json, channel_id, location.archived]))?;
+    err(tx.execute("DELETE FROM location_equipment WHERE location_id=?1", [&location.id]))?;
+    for equipment in &location.equipment { let equipment = equipment.trim(); if !equipment.is_empty() { err(tx.execute("INSERT INTO location_equipment(location_id,equipment) VALUES(?1,?2)", params![location.id, equipment]))?; } }
+    err(tx.commit())?;
+    location.channel_id = Some(channel_id);
+    Ok(location)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn location_channel(location_id: String) -> Result<Option<String>> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT channel_id FROM locations WHERE id=?1 AND archived=0", [location_id], |row| row.get(0)).optional())
+}
 // ---------------------------------------------------------------------------
 // Teams + memberships
 // ---------------------------------------------------------------------------
@@ -336,6 +507,86 @@ pub fn remove_team_membership(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM team_memberships WHERE id=?1", [id]))?;
     Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MembershipEditRequest {
+    pub id: String,
+    pub membership_id: String,
+    pub requested_by: String,
+    pub patch_json: String,
+    pub status: String,
+    pub approver_id: Option<String>,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+}
+fn read_membership_edit_request(r: &rusqlite::Row<'_>) -> rusqlite::Result<MembershipEditRequest> {
+    Ok(MembershipEditRequest {
+        id: r.get(0)?,
+        membership_id: r.get(1)?,
+        requested_by: r.get(2)?,
+        patch_json: r.get(3)?,
+        status: r.get(4)?,
+        approver_id: r.get(5)?,
+        created_at: r.get(6)?,
+        decided_at: r.get(7)?,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_membership_edit_requests(
+    membership_id: Option<String>,
+) -> Result<Vec<MembershipEditRequest>> {
+    let c = db::conn()?;
+    let mut s=err(c.prepare("SELECT id,membership_id,requested_by,patch_json,status,approver_id,created_at,decided_at FROM membership_edit_requests WHERE (?1 IS NULL OR membership_id=?1) ORDER BY created_at DESC"))?;
+    let rows = err(s.query_map([membership_id], read_membership_edit_request))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn request_membership_edit(
+    membership: TeamMembership,
+    requested_by: String,
+) -> Result<MembershipEditRequest> {
+    let c = db::conn()?;
+    let exists: bool = err(c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM team_memberships WHERE id=?1)",
+        [&membership.id],
+        |r| r.get(0),
+    ))?;
+    if !exists {
+        return Err("Membership not found".into());
+    }
+    let patch_json = serde_json::to_string(&membership).map_err(|e| e.to_string())?;
+    let id = new_id("membership-edit");
+    err(c.execute("INSERT INTO membership_edit_requests(id,membership_id,requested_by,patch_json) VALUES(?1,?2,?3,?4)",params![id,membership.id,requested_by,patch_json]))?;
+    err(c.query_row("SELECT id,membership_id,requested_by,patch_json,status,approver_id,created_at,decided_at FROM membership_edit_requests WHERE id=?1",[id],read_membership_edit_request))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn decide_membership_edit(
+    id: String,
+    approver_id: String,
+    approve: bool,
+) -> Result<MembershipEditRequest> {
+    let c = db::conn()?;
+    let request: MembershipEditRequest=err(c.query_row("SELECT id,membership_id,requested_by,patch_json,status,approver_id,created_at,decided_at FROM membership_edit_requests WHERE id=?1",[&id],read_membership_edit_request))?;
+    if request.status != "PENDING" {
+        return Err("Membership edit was already decided".into());
+    }
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    if approve {
+        let membership: TeamMembership = serde_json::from_str(&request.patch_json)
+            .map_err(|_| "Invalid membership edit patch".to_string())?;
+        let changed=tx.execute("UPDATE team_memberships SET role_id=?2,lead=?3,manager_id=?4,since_date=?5,till_date=?6,requires_approval=?7,archived=?8 WHERE id=?1",params![membership.id,membership.role_id,membership.lead,membership.manager_id,membership.since_date,membership.till_date,membership.requires_approval,membership.archived]).map_err(|e|e.to_string())?;
+        if changed != 1 {
+            return Err("Membership not found".into());
+        }
+    }
+    let status = if approve { "APPROVED" } else { "REJECTED" };
+    tx.execute("UPDATE membership_edit_requests SET status=?2,approver_id=?3,decided_at=unixepoch() WHERE id=?1",params![id,status,approver_id]).map_err(|e|e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    let c = db::conn()?;
+    err(c.query_row("SELECT id,membership_id,requested_by,patch_json,status,approver_id,created_at,decided_at FROM membership_edit_requests WHERE id=?1",[id],read_membership_edit_request))
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1385,277 @@ pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     .optional()
     .map_err(|e| e.to_string())
 }
+// ---------------------------------------------------------------------------
+// Project role templates + project roles + project↔team role bindings (V92)
+// ---------------------------------------------------------------------------
+// The V92 tables existed with no code path reaching them. This section is the
+// minimum wiring: an organization-wide *template* catalog, per-project roles
+// (optionally minted from a template), and the team bindings that give a whole
+// team a project role. Kind vocabulary is the CHECK in `db.rs` SCHEMA_V92 —
+// validated here too, so a bad kind fails as a message instead of a SQLite error.
+
+pub const PROJECT_ROLE_KINDS: &[&str] = &["ADMIN", "MEMBER", "CUSTOM", "EXTERNAL"];
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectRoleTemplate {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub role_kind: String,
+    pub archived: bool,
+}
+#[derive(Debug, Deserialize)]
+pub struct ProjectRoleTemplateInput {
+    pub id: Option<String>,
+    pub code: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub role_kind: String,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectRole {
+    pub id: String,
+    pub project_id: String,
+    pub template_id: Option<String>,
+    pub name: String,
+    pub role_kind: String,
+    pub archived: bool,
+}
+/// `name`/`role_kind` are optional *only* when a template supplies them: a role
+/// minted from a template inherits its wording, an ad-hoc role must name itself.
+#[derive(Debug, Deserialize)]
+pub struct ProjectRoleInput {
+    pub id: Option<String>,
+    pub project_id: String,
+    pub template_id: Option<String>,
+    pub name: Option<String>,
+    pub role_kind: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectTeamRole {
+    pub project_id: String,
+    pub team_id: String,
+    pub project_role_id: String,
+}
+
+fn check_role_kind(kind: &str) -> Result<String> {
+    if PROJECT_ROLE_KINDS.contains(&kind) {
+        Ok(kind.to_string())
+    } else {
+        Err(format!(
+            "role_kind must be one of {}",
+            PROJECT_ROLE_KINDS.join(", ")
+        ))
+    }
+}
+fn read_template(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRoleTemplate> {
+    Ok(ProjectRoleTemplate {
+        id: r.get(0)?,
+        code: r.get(1)?,
+        name: r.get(2)?,
+        description: r.get(3)?,
+        role_kind: r.get(4)?,
+        archived: r.get(5)?,
+    })
+}
+const TEMPLATE_COLUMNS: &str = "id,code,name,description,role_kind,archived";
+
+pub fn list_project_role_templates_on(c: &Connection) -> Result<Vec<ProjectRoleTemplate>> {
+    let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM project_role_templates ORDER BY name");
+    let mut s = err(c.prepare(&sql))?;
+    let rows = err(s.query_map([], read_template))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_project_role_templates() -> Result<Vec<ProjectRoleTemplate>> {
+    list_project_role_templates_on(&db::conn()?)
+}
+pub fn create_project_role_template_on(
+    c: &Connection,
+    input: ProjectRoleTemplateInput,
+) -> Result<ProjectRoleTemplate> {
+    let kind = check_role_kind(input.role_kind.trim())?;
+    let code = input.code.trim().to_string();
+    let name = input.name.trim().to_string();
+    if code.is_empty() || name.is_empty() {
+        return Err("Template code and name are required".into());
+    }
+    let id = input.id.unwrap_or_else(|| new_id("role-template"));
+    err(c.execute(
+        "INSERT INTO project_role_templates(id,code,name,description,role_kind) VALUES(?1,?2,?3,?4,?5)",
+        params![id, code, name, input.description, kind],
+    ))?;
+    let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM project_role_templates WHERE id=?1");
+    err(c.query_row(&sql, [&id], read_template))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_project_role_template(
+    input: ProjectRoleTemplateInput,
+) -> Result<ProjectRoleTemplate> {
+    create_project_role_template_on(&db::conn()?, input)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_project_role_template(id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
+    err(c.execute(
+        "UPDATE project_role_templates SET archived=?2 WHERE id=?1",
+        params![id, archived],
+    ))?;
+    Ok(())
+}
+
+fn read_project_role(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRole> {
+    Ok(ProjectRole {
+        id: r.get(0)?,
+        project_id: r.get(1)?,
+        template_id: r.get(2)?,
+        name: r.get(3)?,
+        role_kind: r.get(4)?,
+        archived: r.get(5)?,
+    })
+}
+const PROJECT_ROLE_COLUMNS: &str = "id,project_id,template_id,name,role_kind,archived";
+
+pub fn list_project_roles_on(
+    c: &Connection,
+    project_id: Option<String>,
+) -> Result<Vec<ProjectRole>> {
+    let sql = format!("SELECT {PROJECT_ROLE_COLUMNS} FROM project_roles WHERE (?1 IS NULL OR project_id=?1) ORDER BY project_id, name");
+    let mut s = err(c.prepare(&sql))?;
+    let rows = err(s.query_map(params![project_id], read_project_role))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_project_roles(project_id: Option<String>) -> Result<Vec<ProjectRole>> {
+    list_project_roles_on(&db::conn()?, project_id)
+}
+pub fn create_project_role_on(c: &Connection, input: ProjectRoleInput) -> Result<ProjectRole> {
+    let template = match input.template_id.as_deref() {
+        None => None,
+        Some(template_id) => {
+            let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM project_role_templates WHERE id=?1");
+            let found = err(c.query_row(&sql, [template_id], read_template).optional())?;
+            Some(found.ok_or_else(|| "Role template not found".to_string())?)
+        }
+    };
+    if template.as_ref().is_some_and(|t| t.archived) {
+        return Err("Role template is archived".into());
+    }
+    let name = input
+        .name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| template.as_ref().map(|t| t.name.clone()))
+        .ok_or_else(|| "Project role name is required".to_string())?;
+    let kind = match input.role_kind {
+        Some(value) => check_role_kind(value.trim())?,
+        None => template
+            .as_ref()
+            .map(|t| t.role_kind.clone())
+            .ok_or_else(|| "Project role kind is required".to_string())?,
+    };
+    let id = input.id.unwrap_or_else(|| new_id("project-role"));
+    err(c.execute(
+        "INSERT INTO project_roles(id,project_id,template_id,name,role_kind) VALUES(?1,?2,?3,?4,?5)",
+        params![id, input.project_id, input.template_id, name, kind],
+    ))?;
+    let sql = format!("SELECT {PROJECT_ROLE_COLUMNS} FROM project_roles WHERE id=?1");
+    err(c.query_row(&sql, [&id], read_project_role))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_project_role(input: ProjectRoleInput) -> Result<ProjectRole> {
+    create_project_role_on(&db::conn()?, input)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_project_role(id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
+    err(c.execute(
+        "UPDATE project_roles SET archived=?2 WHERE id=?1",
+        params![id, archived],
+    ))?;
+    Ok(())
+}
+
+pub fn list_project_team_roles_on(
+    c: &Connection,
+    project_id: Option<String>,
+) -> Result<Vec<ProjectTeamRole>> {
+    let mut s = err(c.prepare("SELECT project_id,team_id,project_role_id FROM project_team_roles WHERE (?1 IS NULL OR project_id=?1) ORDER BY project_id, team_id"))?;
+    let rows = err(s.query_map(params![project_id], |r| {
+        Ok(ProjectTeamRole {
+            project_id: r.get(0)?,
+            team_id: r.get(1)?,
+            project_role_id: r.get(2)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_project_team_roles(project_id: Option<String>) -> Result<Vec<ProjectTeamRole>> {
+    list_project_team_roles_on(&db::conn()?, project_id)
+}
+/// The composite primary key allows any (project, team, role) triple, including one
+/// whose role belongs to a *different* project. That would be a cross-project grant,
+/// so the pairing is checked here rather than trusted from the caller.
+pub fn assign_project_team_role_on(
+    c: &Connection,
+    project_id: &str,
+    team_id: &str,
+    project_role_id: &str,
+) -> Result<ProjectTeamRole> {
+    let role: Option<(String, bool)> = err(c
+        .query_row(
+            "SELECT project_id,archived FROM project_roles WHERE id=?1",
+            [project_role_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional())?;
+    let (owner, archived) = role.ok_or_else(|| "Project role not found".to_string())?;
+    if owner != project_id {
+        return Err("Project role belongs to another project".into());
+    }
+    if archived {
+        return Err("Project role is archived".into());
+    }
+    err(c.execute(
+        "INSERT OR IGNORE INTO project_team_roles(project_id,team_id,project_role_id) VALUES(?1,?2,?3)",
+        params![project_id, team_id, project_role_id],
+    ))?;
+    Ok(ProjectTeamRole {
+        project_id: project_id.to_string(),
+        team_id: team_id.to_string(),
+        project_role_id: project_role_id.to_string(),
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn assign_project_team_role(
+    project_id: String,
+    team_id: String,
+    project_role_id: String,
+) -> Result<ProjectTeamRole> {
+    assign_project_team_role_on(&db::conn()?, &project_id, &team_id, &project_role_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_project_team_role(
+    project_id: String,
+    team_id: String,
+    project_role_id: String,
+) -> Result<()> {
+    let c = db::conn()?;
+    err(c.execute(
+        "DELETE FROM project_team_roles WHERE project_id=?1 AND team_id=?2 AND project_role_id=?3",
+        params![project_id, team_id, project_role_id],
+    ))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Custom Fields engine (generic across entity_type: issue/profile/team/membership/...)
 // ---------------------------------------------------------------------------
@@ -2160,5 +2682,110 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, ("Project".to_string(), None));
+    }
+    #[test]
+    fn project_role_inherits_its_template_and_bindings_stay_inside_the_project() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('owner','owner','Owner',1)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','owner',0,1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('other','Other','OT','owner',0,1)", []).unwrap();
+        c.execute("INSERT INTO teams(id,name) VALUES('team-a','Team A')", [])
+            .unwrap();
+
+        let template = create_project_role_template_on(
+            &c,
+            ProjectRoleTemplateInput {
+                id: None,
+                code: "reviewer".into(),
+                name: "Reviewer".into(),
+                description: None,
+                role_kind: "MEMBER".into(),
+            },
+        )
+        .expect("template");
+
+        // An unknown kind never reaches the CHECK constraint as a SQLite error.
+        assert!(create_project_role_template_on(
+            &c,
+            ProjectRoleTemplateInput {
+                id: None,
+                code: "bad".into(),
+                name: "Bad".into(),
+                description: None,
+                role_kind: "OWNER".into(),
+            },
+        )
+        .is_err());
+
+        // Name and kind are inherited when the caller supplies neither.
+        let role = create_project_role_on(
+            &c,
+            ProjectRoleInput {
+                id: None,
+                project_id: "pr".into(),
+                template_id: Some(template.id.clone()),
+                name: None,
+                role_kind: None,
+            },
+        )
+        .expect("role");
+        assert_eq!(
+            (role.name.as_str(), role.role_kind.as_str()),
+            ("Reviewer", "MEMBER")
+        );
+
+        // A template-less role must name itself.
+        assert!(create_project_role_on(
+            &c,
+            ProjectRoleInput {
+                id: None,
+                project_id: "pr".into(),
+                template_id: None,
+                name: None,
+                role_kind: Some("CUSTOM".into()),
+            },
+        )
+        .is_err());
+
+        assert_eq!(
+            list_project_roles_on(&c, Some("pr".into())).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            list_project_roles_on(&c, Some("other".into()))
+                .unwrap()
+                .len(),
+            0
+        );
+
+        // The composite key would accept a foreign project's role; the guard does not.
+        assert_eq!(
+            assign_project_team_role_on(&c, "other", "team-a", &role.id).unwrap_err(),
+            "Project role belongs to another project"
+        );
+        assign_project_team_role_on(&c, "pr", "team-a", &role.id).expect("bind");
+        // Re-binding is idempotent rather than a primary-key error.
+        assign_project_team_role_on(&c, "pr", "team-a", &role.id).expect("rebind");
+        assert_eq!(
+            list_project_team_roles_on(&c, Some("pr".into()))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // An archived role stops being bindable, existing bindings untouched.
+        c.execute(
+            "UPDATE project_roles SET archived=1 WHERE id=?1",
+            [&role.id],
+        )
+        .unwrap();
+        assert_eq!(
+            assign_project_team_role_on(&c, "pr", "team-b", &role.id).unwrap_err(),
+            "Project role is archived"
+        );
     }
 }

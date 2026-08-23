@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 88;
+pub const SCHEMA_VERSION: i64 = 109;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -574,28 +574,65 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 67 {
         tx.execute_batch(SCHEMA_V67)?;
     }
+    // V77: first-class issue attachments, including image previews.
+    if version < 77 {
+        tx.execute_batch(SCHEMA_V77)?;
+    }
+    // V78: issue discussion and a durable, queryable activity trail.
+    if version < 78 {
+        tx.execute_batch(SCHEMA_V78)?;
+    }
+    // V79: tracker links connect issues to issues, merge requests, and external systems.
+    if version < 79 {
+        tx.execute_batch(SCHEMA_V79)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
-    // V85: transcript segments are durable, source-attributed call facts. The
-    // transcriber remains external; this boundary deliberately stores no audio.
-    if version < 85 {
-        tx.execute_batch(SCHEMA_V85)?;
+    // V90: account-global roles are distinct from scoped platform roles. The legacy
+    // `role` column remains readable for old servers; `global_role` is authoritative.
+    if version < 90 && table_exists(&tx, "users")? {
+        add_column_if_missing(&tx, "users", "global_role", "TEXT NOT NULL DEFAULT 'GlobalMember' CHECK(global_role IN ('GlobalAdmin','GlobalMember','Guest','LightGuest'))")?;
+        // Backfill: a legacy 'admin' account IS a GlobalAdmin; without this, upgrading
+        // strips every existing administrator.
+        tx.execute("UPDATE users SET global_role='GlobalAdmin' WHERE role='admin' AND global_role='GlobalMember'", [])?;
+        tx.execute_batch(SCHEMA_V90)?;
     }
-    // V86: lifecycle is persisted independently from generic meeting archival.
-    if version < 86 && table_exists(&tx, "meetings")? {
-        tx.execute_batch(SCHEMA_V86)?;
-        add_column_if_missing(&tx, "meetings", "video_status", "TEXT NOT NULL DEFAULT 'scheduled' CHECK(video_status IN ('scheduled','live','ended','cancelled'))")?;
+    // V91: verified domains are an organization registration policy, never an
+    // untrusted client-side email suffix check.
+    if version < 91 {
+        tx.execute_batch(SCHEMA_V91)?;
     }
-    // V87: selected video provider is distinct from lifecycle and defaults to native LiveKit.
-    if version < 87 && table_exists(&tx, "meetings")? {
-        add_column_if_missing(&tx, "meetings", "video_provider", "TEXT NOT NULL DEFAULT 'native' CHECK(video_provider IN ('native','meet'))")?;
+    // V92: project role templates/team bindings and reviewable membership edits.
+    if version < 92 {
+        tx.execute_batch(SCHEMA_V92)?;
     }
-    // V88: persisted public access remains inert unless the native
-    // ALLOW_UNREGISTERED_ROOMS setting also explicitly enables it.
-    if version < 88 && table_exists(&tx, "meetings")? {
-        add_column_if_missing(&tx, "meetings", "access_level", "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))")?;
+    // V93: short-lived, single-use mobile pairing grants store only a hash.
+    if version < 93 {
+        tx.execute_batch(SCHEMA_V93)?;
+    }
+    // V94: personal feeds and per-channel transport preferences.
+    if version < 94 {
+        tx.execute_batch(SCHEMA_V94)?;
+    }
+    // V95: follows and delivery targets are durable dashboard/subscription facts.
+    if version < 95 {
+        tx.execute_batch(SCHEMA_V95)?;
+    }
+    // V96: organization locations, schedules, equipment catalog, and rooms.
+    if version < 96 { tx.execute_batch(SCHEMA_V96)?; }
+    // V97: typed absence cards in chat.
+    if version < 97 && table_exists(&tx, "messages")? {
+        add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+    }
+    // V98: profile email status and messenger contacts.
+    if version < 98 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V98)?; }
+    // V99: principals unify people, applications, and external identities.
+    if version < 99 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V99)?; }
+    // V107: KB book grants. Guarded: hand-built legacy fixtures can lack documents.
+    if version < 107 && table_exists(&tx, "document_folders")? {
+        tx.execute_batch(SCHEMA_V107)?;
     }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
@@ -604,10 +641,122 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
+    // V83: repository-level merge governance. Strategy allow-lists and message modes are
+    // durable project facts so a merge request cannot bypass an owner policy in UI state.
+    if version < 83 && table_exists(&tx, "projects")? {
+        tx.execute_batch(SCHEMA_V83)?;
+    }
+    // V84: a review may reference multiple externally hosted issues without copying
+    // tracker data into the local issue model. Removing the review removes its links.
+    if version < 84 && table_exists(&tx, "reviews")? {
+        tx.execute_batch(SCHEMA_V84)?;
+    }
+    // V82: view/collapse is per reviewer and per file, never a shared review mutation.
+    if version < 82 && table_exists(&tx, "reviews")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
+    }
+    // V81: merge action preferences are per-review facts. They keep source deletion and
+    // linked-issue transitions coupled to the successful merge, never a later UI chore.
+    if version < 81 && table_exists(&tx, "reviews")? {
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS review_merge_preferences (review_id TEXT PRIMARY KEY REFERENCES reviews(id) ON DELETE CASCADE, delete_source_branch INTEGER NOT NULL DEFAULT 0, linked_issue_statuses_json TEXT NOT NULL DEFAULT '[]');")?;
+    }
+    // V80: inline suggested-edit lifecycle. A suggestion remains an immutable proposal;
+    // accepting it records review intent only and never writes to a registered repository.
+    if version < 80 && table_exists(&tx, "review_discussions")? {
+        add_column_if_missing(&tx, "review_discussions", "suggestion_commit_id", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_status",
+            "TEXT CHECK(suggestion_status IN ('OPEN','ACCEPTED','REJECTED'))",
+        )?;
+        add_column_if_missing(&tx, "review_discussions", "suggestion_content", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_has_conflicts",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_identical_contents",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_resolved_by",
+            "TEXT REFERENCES profiles(id)",
+        )?;
+        tx.execute_batch("CREATE INDEX IF NOT EXISTS review_discussions_suggestion_status ON review_discussions(review_id, suggestion_status);")?;
+    }
+    // V75: the video call is a durable fact of the meeting, not something invented
+    // per join. `video_provider` names who serves the media, `video_room_id`/`join_url`
+    // are the addressable room (so a second client, a deep link, or a restarted app
+    // reaches the SAME room), and `video_status` carries the call lifecycle that
+    // `archived` could never express (scheduled/live/ended/cancelled).
+    if version < 75 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "video_provider", "TEXT")?;
+        add_column_if_missing(&tx, "meetings", "video_room_id", "TEXT")?;
+        add_column_if_missing(&tx, "meetings", "join_url", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "meetings",
+            "video_status",
+            "TEXT NOT NULL DEFAULT 'scheduled'",
+        )?;
+    }
+    // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
+    // Additive columns on the existing preference row, table-guarded because
+    // fixtures pinned before V46 have no `user_preferences` table yet.
+    if version < 103 && table_exists(&tx, "user_preferences")? {
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_weekends", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_issues", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_todos", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_declined", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_only", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_start", "INTEGER NOT NULL DEFAULT 9")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_end", "INTEGER NOT NULL DEFAULT 18")?;
+    }
     // V71: importer runs are durable audit facts. The stored source is the operator-selected
     // path (never its contents); counts make partial imports visible after the toast is gone.
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
+    }
+    // V100: availability reads are derived from existing room, booking, meeting,
+    // participant, and absence rows. Guard each additive index so partially
+    // migrated installations do not fail when an older optional table is absent.
+    if version < 100 {
+        if table_exists(&tx, "meeting_room_bookings")? {
+            tx.execute_batch(SCHEMA_V100_ROOM_BOOKINGS)?;
+        }
+        if table_exists(&tx, "meeting_participants")? {
+            tx.execute_batch(SCHEMA_V100_PARTICIPANTS)?;
+        }
+        if table_exists(&tx, "absences")? {
+            tx.execute_batch(SCHEMA_V100_ABSENCES)?;
+        }
+    }
+    // V101: meeting privacy and edit policy. Guard the legacy table so partially-built
+    // fixtures remain migratable; each column is independently idempotent.
+    if version < 101 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "visibility", "TEXT NOT NULL DEFAULT 'participants' CHECK(visibility IN ('public','private','participants'))")?;
+        add_column_if_missing(&tx, "meetings", "modification_preference", "TEXT NOT NULL DEFAULT 'organizer-only' CHECK(modification_preference IN ('organizer-only','participants'))")?;
+    }
+    // V102: participant lookup drives both the edit-policy predicate and meeting event
+    // delivery. It is additive and table-guarded for partial legacy databases.
+    if version < 102 && table_exists(&tx, "meeting_participants")? {
+        tx.execute_batch(SCHEMA_V102)?;
+    }
+    // V108: opt-in per-channel Spacebox delivery. Kept separate from generic
+    // notification preferences: membership grants read access, subscription grants feed delivery.
+    if version < 108 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V108)?;
+    }
+    // V109: a document/article owns one entity discussion and may bind one meeting.
+    if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
+        tx.execute_batch(SCHEMA_V109)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -627,8 +776,176 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+/// V84: external issue references belong to a review; the URL remains the external
+/// system's canonical navigation target and title is only a local display label.
+pub(crate) const SCHEMA_V84: &str = r#"
+CREATE TABLE IF NOT EXISTS review_external_issue_links (
+    id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+    external_url TEXT NOT NULL,
+    title TEXT,
+    UNIQUE(review_id, external_url)
+);
+CREATE INDEX IF NOT EXISTS review_external_issue_links_review ON review_external_issue_links(review_id);
+"#;
+
+pub(crate) const SCHEMA_V83: &str = r#"
+CREATE TABLE IF NOT EXISTS review_merge_policies (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    allow_merge INTEGER NOT NULL DEFAULT 1,
+    allow_rebase INTEGER NOT NULL DEFAULT 1,
+    allow_squash INTEGER NOT NULL DEFAULT 1,
+    merge_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(merge_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION')),
+    squash_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(squash_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION','TITLE_AND_COMMITS'))
+);
+"#;
+/// V79: target is an issue, a code review, or a validated external URL.
+pub(crate) const SCHEMA_V79: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_tracker_links (
+ id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('ISSUE','REVIEW','EXTERNAL')),
+ target_id TEXT, url TEXT, title TEXT,
+ CHECK((target_kind='EXTERNAL' AND url IS NOT NULL AND target_id IS NULL) OR (target_kind IN ('ISSUE','REVIEW') AND target_id IS NOT NULL AND url IS NULL)),
+ UNIQUE(issue_id, target_kind, target_id), UNIQUE(issue_id, url)
+);
+CREATE INDEX IF NOT EXISTS issue_tracker_links_issue ON issue_tracker_links(issue_id);
+"#;
+/// V78: comments are authored discussion; activity is an immutable record of issue lifecycle actions.
+pub(crate) const SCHEMA_V78: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_comments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    author_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    body TEXT NOT NULL CHECK(length(trim(body)) > 0),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    edited_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS issue_comments_issue_created ON issue_comments(issue_id, created_at, id);
+CREATE TABLE IF NOT EXISTS issue_activities (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    activity_type TEXT NOT NULL,
+    actor_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    detail TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_activities_issue_created ON issue_activities(issue_id, created_at, id);
+"#;
+
+pub(crate) const SCHEMA_V77: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_attachments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_length INTEGER NOT NULL CHECK(byte_length >= 0 AND byte_length <= 10485760),
+    data_url TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_attachments_issue ON issue_attachments(issue_id, created_at, id);
+"#;
+/// V94: notification transport policy and the 1:1 notification-feed channel.
+pub(crate) const SCHEMA_V94: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_notification_preferences (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+ email_enabled INTEGER NOT NULL DEFAULT 1,
+ push_enabled INTEGER NOT NULL DEFAULT 1,
+ thread_scope TEXT NOT NULL DEFAULT 'all' CHECK(thread_scope IN ('all','followed','none')),
+ PRIMARY KEY(profile_id,channel_id)
+);
+CREATE TABLE IF NOT EXISTS private_feeds (
+ profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+ channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE
+);
+"#;
+/// V95: explicit follows power personalization; delivery targets represent feed/channel/app webhook destinations.
+pub(crate) const SCHEMA_V95: &str = r#"
+CREATE TABLE IF NOT EXISTS follows (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ subject_type TEXT NOT NULL CHECK(subject_type IN ('profile','team')),
+ subject_id TEXT NOT NULL,
+ PRIMARY KEY(profile_id,subject_type,subject_id)
+);
+CREATE INDEX IF NOT EXISTS follows_subject ON follows(subject_type,subject_id);
+CREATE TABLE IF NOT EXISTS subscription_deliveries (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ event_type TEXT NOT NULL,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('feed','channel','webhook')),
+ target_id TEXT NOT NULL,
+ application_id TEXT REFERENCES applications(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL DEFAULT 1,
+ PRIMARY KEY(profile_id,event_type,target_kind,target_id),
+ CHECK((target_kind='webhook') = (application_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS subscription_deliveries_profile ON subscription_deliveries(profile_id,event_type);
+"#;
+
+/// V98: profile communication metadata.
+pub(crate) const SCHEMA_V98: &str = r#"
+CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','verified','bounced')), verified_at INTEGER);
+CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
+"#;
+/// V99: durable principal identity abstraction.
+pub(crate) const SCHEMA_V99: &str = r#"
+CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
+INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
+"#;
+
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
+pub(crate) const SCHEMA_V92: &str = r#"
+CREATE TABLE IF NOT EXISTS project_role_templates (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT, role_kind TEXT NOT NULL CHECK(role_kind IN ('ADMIN','MEMBER','CUSTOM','EXTERNAL')), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS project_roles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, template_id TEXT REFERENCES project_role_templates(id), name TEXT NOT NULL, role_kind TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, UNIQUE(project_id,name));
+CREATE TABLE IF NOT EXISTS project_team_roles (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE, project_role_id TEXT NOT NULL REFERENCES project_roles(id) ON DELETE CASCADE, PRIMARY KEY(project_id,team_id,project_role_id));
+CREATE TABLE IF NOT EXISTS membership_edit_requests (id TEXT PRIMARY KEY, membership_id TEXT NOT NULL REFERENCES team_memberships(id) ON DELETE CASCADE, requested_by TEXT NOT NULL REFERENCES profiles(id), patch_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','APPROVED','REJECTED')) DEFAULT 'PENDING', approver_id TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), decided_at INTEGER);
+CREATE INDEX IF NOT EXISTS membership_edit_requests_membership ON membership_edit_requests(membership_id,status);
+"#;
+pub(crate) const SCHEMA_V93: &str = r#"
+CREATE TABLE IF NOT EXISTS mobile_pairings (code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS mobile_pairings_expiry ON mobile_pairings(expires_at);
+"#;
+
+/// V96: organization locations are separate from a person's historical location assignment.
+pub(crate) const SCHEMA_V96: &str = r#"
+CREATE TABLE IF NOT EXISTS locations (
+id TEXT PRIMARY KEY,
+name TEXT NOT NULL,
+location_type TEXT NOT NULL DEFAULT 'Office',
+parent_id TEXT REFERENCES locations(id) ON DELETE SET NULL,
+timezone TEXT NOT NULL DEFAULT 'UTC',
+work_schedule_json TEXT NOT NULL DEFAULT '{\"workdays\":[1,2,3,4,5]}',
+channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+archived INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS locations_parent ON locations(parent_id);
+CREATE TABLE IF NOT EXISTS location_equipment (
+location_id TEXT NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+equipment TEXT NOT NULL,
+PRIMARY KEY(location_id,equipment)
+);
+CREATE INDEX IF NOT EXISTS location_equipment_name ON location_equipment(equipment);
+"#;
+/// V97: `messages.content_kind` is added through add_column_if_missing above.
+pub(crate) const SCHEMA_V108: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_subscriptions (
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  PRIMARY KEY(channel_id, profile_id)
+);
+CREATE INDEX IF NOT EXISTS channel_subscriptions_profile ON channel_subscriptions(profile_id, enabled);
+"#;
+pub(crate) const SCHEMA_V109: &str = r#"
+CREATE TABLE IF NOT EXISTS document_discussions (
+  document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+  meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS document_discussions_meeting ON document_discussions(meeting_id);
+"#;
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,
@@ -646,6 +963,18 @@ CREATE INDEX IF NOT EXISTS document_imports_container ON document_imports(contai
 "#;
 
 /// V66: durable room inventory, equipment capabilities and a meeting reservation.
+/// V100: indexes for room and attendee availability checks. Each statement is
+/// called only after its table guard in `migrate`.
+pub(crate) const SCHEMA_V100_ROOM_BOOKINGS: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_room_bookings_room_meeting ON meeting_room_bookings(room_id, meeting_id);
+"#;
+pub(crate) const SCHEMA_V100_PARTICIPANTS: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_participants(profile_id, meeting_id);
+"#;
+pub(crate) const SCHEMA_V100_ABSENCES: &str = r#"
+CREATE INDEX IF NOT EXISTS absences_approved_dates_profile ON absences(approved, date_from, date_to, profile_id);
+"#;
+
 pub(crate) const SCHEMA_V66: &str = r#"
 CREATE TABLE IF NOT EXISTS meeting_rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, location TEXT, capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity > 0), archived INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS meeting_room_equipment (room_id TEXT NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE, equipment TEXT NOT NULL, PRIMARY KEY(room_id, equipment));
@@ -710,7 +1039,7 @@ CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT N
 CREATE TABLE IF NOT EXISTS doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
 CREATE TABLE IF NOT EXISTS document_permissions (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(document_id, recipient_type, recipient_id));
 CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
-CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), video_provider TEXT, video_room_id TEXT, join_url TEXT, video_status TEXT NOT NULL DEFAULT 'scheduled');
 CREATE TABLE IF NOT EXISTS meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
 CREATE TABLE IF NOT EXISTS pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, script_id TEXT NOT NULL REFERENCES pipeline_scripts(id), name TEXT NOT NULL, trigger_type TEXT NOT NULL DEFAULT 'MANUAL', archived INTEGER NOT NULL DEFAULT 0);
@@ -796,6 +1125,11 @@ CREATE INDEX IF NOT EXISTS oauth_access_tokens_user_active ON oauth_access_token
 /// Document publication (public link) and KB book grants. A book is the top-level
 /// 'kb' folder and a KB document carries its book id in `container_id`, so a grant on
 /// the book row is the whole enforcement surface.
+pub(crate) const SCHEMA_V107: &str = r#"
+CREATE TABLE IF NOT EXISTS document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
+CREATE INDEX IF NOT EXISTS document_folder_permissions_folder ON document_folder_permissions(folder_id);
+"#;
+/// Legacy V34 also created this table for fresh pre-V107 databases.
 pub(crate) const SCHEMA_V34: &str = r#"
 CREATE UNIQUE INDEX IF NOT EXISTS documents_public_slug ON documents(public_slug) WHERE public_slug IS NOT NULL;
 CREATE TABLE IF NOT EXISTS document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
@@ -1037,31 +1371,28 @@ CREATE TABLE IF NOT EXISTS app_authorized_rights (
 CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_rights(application_id, context_identifier);
 "#;
 
+/// V102: efficient participant fan-out for meeting notifications and edit checks.
+pub(crate) const SCHEMA_V102: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_participants(profile_id, meeting_id);
+"#;
+
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
-/// V86: lifecycle state for the provider-backed video room. The selected provider
-/// itself arrives in V87; splitting the facts keeps existing meetings safely native.
-pub(crate) const SCHEMA_V86: &str = r#"
--- column-only migration; see migrate() for table/column guards.
+pub(crate) const SCHEMA_V90: &str = r#"
+UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
+WHERE global_role='GlobalMember';
 "#;
-
-/// V85: durable transcription substrate; captions and summaries derive from these segments.
-pub(crate) const SCHEMA_V85: &str = r#"
-CREATE TABLE IF NOT EXISTS call_transcript_segments (
-    id TEXT PRIMARY KEY,
-    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-    speaker_id TEXT REFERENCES profiles(id),
-    text TEXT NOT NULL,
-    started_at INTEGER NOT NULL,
-    ended_at INTEGER NOT NULL,
-    source TEXT NOT NULL DEFAULT 'external' CHECK(source IN ('external','manual')),
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    CHECK(length(trim(text)) > 0),
-    CHECK(ended_at >= started_at)
+pub(crate) const SCHEMA_V91: &str = r#"
+CREATE TABLE IF NOT EXISTS verified_domains (
+    domain TEXT PRIMARY KEY COLLATE NOCASE,
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    auto_join INTEGER NOT NULL DEFAULT 0,
+    self_registration INTEGER NOT NULL DEFAULT 0,
+    verified_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
-CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
+CREATE INDEX IF NOT EXISTS verified_domains_org ON verified_domains(org_id);
 "#;
-
+/// V74: one target per project + IDE + instance type. The pool contains durable
 pub(crate) const SCHEMA_V74: &str = r#"
 CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1457,7 +1788,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 88);
+        assert_eq!(SCHEMA_VERSION, 109);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1596,7 +1927,7 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 73] {
+        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");
@@ -2221,55 +2552,36 @@ mod v39_webhook_migration_tests {
             .expect("calendar owner");
         assert_eq!(profile, "default-org");
     }
-}
-
-#[cfg(test)]
-mod v86_video_status_migration_tests {
-    use super::*;
 
     #[test]
-    fn latest_schema_persists_only_the_documented_video_lifecycle_default() {
-        let c = open_in_memory().unwrap();
-        migrate(&c).unwrap();
-        let columns: Vec<String> = c
-            .prepare("PRAGMA table_info(meetings)").unwrap()
-            .query_map([], |row| row.get(1)).unwrap()
-            .map(|row| row.unwrap()).collect();
-        assert!(columns.contains(&"video_status".to_string()));
-        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('video-status','Status',1,2)", []).unwrap();
-        let status: String = c.query_row("SELECT video_status FROM meetings WHERE id='video-status'", [], |row| row.get(0)).unwrap();
-        assert_eq!(status, "scheduled");
-        assert!(c.execute("UPDATE meetings SET video_status='paused' WHERE id='video-status'", []).is_err());
-    }
-}
-
-#[cfg(test)]
-mod v87_video_provider_migration_tests {
-    use super::*;
-
-    #[test]
-    fn latest_schema_defaults_existing_meetings_to_native_provider() {
-        let c = open_in_memory().unwrap();
-        migrate(&c).unwrap();
-        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('video-provider','Provider',1,2)", []).unwrap();
-        let provider: String = c.query_row("SELECT video_provider FROM meetings WHERE id='video-provider'", [], |row| row.get(0)).unwrap();
-        assert_eq!(provider, "native");
-        assert!(c.execute("UPDATE meetings SET video_provider='zoom' WHERE id='video-provider'", []).is_err());
-    }
-}
-
-#[cfg(test)]
-mod v88_public_meeting_migration_tests {
-    use super::*;
-
-    #[test]
-    fn latest_schema_defaults_meetings_private_and_rejects_invalid_public_access() {
-        let c = open_in_memory().unwrap();
-        migrate(&c).unwrap();
-        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('public-access','Access',1,2)", []).unwrap();
-        let access: String = c.query_row("SELECT access_level FROM meetings WHERE id='public-access'", [], |row| row.get(0)).unwrap();
-        assert_eq!(access, "PRIVATE");
-        assert!(c.execute("UPDATE meetings SET access_level='PROJECT' WHERE id='public-access'", []).is_err());
-        c.execute("UPDATE meetings SET access_level='PUBLIC' WHERE id='public-access'", []).unwrap();
+    fn v103_adds_calendar_option_columns_and_keeps_existing_preferences() {
+        let conn = open_in_memory().unwrap();
+        // A pre-V103 fixture: the preference row exists with its dashboard column only.
+        conn.execute_batch(
+            "CREATE TABLE profiles (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, created_at INTEGER);",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA_V46).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES('p','[\"inbox\"]')",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 46).unwrap();
+        migrate(&conn).unwrap();
+        let (widgets, weekends, declined, start): (String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT dashboard_hidden_widgets,calendar_show_weekends,calendar_show_declined,calendar_working_hours_start FROM user_preferences WHERE profile_id='p'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(widgets, "[\"inbox\"]", "existing preference survives");
+        assert_eq!((weekends, declined, start), (1, 0, 9), "defaults backfill");
     }
 }

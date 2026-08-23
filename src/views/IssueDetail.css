@@ -41,3 +41,19 @@
 .assignee-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-hover); color: #c9d6f0; border: 1px solid #3a4f80; border-radius: 12px; padding: 3px 8px 3px 11px; font-size: 12px; }
 .assignee-chip button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; width: auto; }
 .assignee-chip button:hover { color: #fff; }
+
+.idp-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.idp-attachment { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 7px; width: min(180px, 100%); padding: 8px; border: 1px solid var(--surface-border); border-radius: 8px; font-size: 12px; }
+.idp-attachment img { grid-column: 1 / -1; max-width: 100%; max-height: 120px; object-fit: cover; border-radius: 5px; }
+.idp-attachment a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.idp-attachment button { padding: 0 4px; }
+.idp-section .attachment-button { justify-self: start; border: 1px solid var(--surface-border); border-radius: 7px; color: var(--text-muted); }
+
+.issue-comments, .issue-activity { display: grid; gap: 6px; list-style: none; padding: 0; margin: 0; }
+.issue-comments li, .issue-activity li { display: grid; grid-template-columns: auto 1fr auto; gap: 7px; padding: 7px 0; border-top: 1px solid var(--surface-border); font-size: 12px; }
+.issue-comments p { grid-column: 1 / -1; margin: 0; white-space: pre-wrap; color: var(--text-muted); }
+.issue-comments time, .issue-activity time { color: var(--text-faint); font-size: 11px; }
+.issue-activity span { color: var(--text-muted); }
+.comment-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.comment-form textarea { min-height: 56px; resize: vertical; }
+.issue-transfer-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:#0008}.issue-transfer-dialog{display:grid;gap:.8rem;min-width:20rem;padding:1rem;border-radius:.5rem;background:var(--surface,#fff);box-shadow:0 .5rem 2rem #0005}.issue-transfer-dialog label{display:grid;gap:.35rem}.issue-transfer-dialog select{min-width:16rem}

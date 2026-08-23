@@ -30,6 +30,19 @@ pub struct Review {
     pub channel_id: Option<String>,
     pub repo_path: Option<String>,
 }
+/// KB §1 `CodeReviewAggregatedStatus`: one list badge derived from persisted review facts.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewAggregatedStatus {
+    Merged,
+    Closed,
+    Accepted,
+    NeedsMyReview,
+    NeedsMyAttention,
+    WaitingForReview,
+    WaitingForUpdates,
+    Opened,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewParticipant {
     pub review_id: String,
@@ -37,6 +50,14 @@ pub struct ReviewParticipant {
     pub role: String,
     pub state: Option<String>,
     pub their_turn: bool,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewFileState {
+    pub review_id: String,
+    pub profile_id: String,
+    pub file_path: String,
+    pub viewed: bool,
+    pub collapsed: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewDiscussion {
@@ -48,6 +69,12 @@ pub struct ReviewDiscussion {
     pub revision: Option<String>,
     pub resolved: bool,
     pub channel_id: Option<String>,
+    pub suggestion_commit_id: Option<String>,
+    pub suggestion_status: Option<String>,
+    pub suggestion_content: Option<String>,
+    pub suggestion_has_conflicts: Option<bool>,
+    pub suggestion_identical_contents: Option<bool>,
+    pub suggestion_resolved_by: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QualityGateRule {
@@ -70,6 +97,56 @@ pub struct QualityGateRule {
     pub roles_json: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MergePreferences {
+    pub review_id: String,
+    pub delete_source_branch: bool,
+    /// JSON list of {"issue_id":"…","status_id":"…"}; validated against review project on merge.
+    pub linked_issue_statuses_json: String,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MergePolicy {
+    pub project_id: String,
+    pub allow_merge: bool,
+    pub allow_rebase: bool,
+    pub allow_squash: bool,
+    pub merge_message_option: String,
+    pub squash_message_option: String,
+}
+fn validate_merge_policy(policy: &MergePolicy) -> Result<()> {
+    if !matches!(
+        policy.merge_message_option.as_str(),
+        "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION"
+    ) {
+        return Err("invalid merge message option".into());
+    }
+    if !matches!(
+        policy.squash_message_option.as_str(),
+        "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION" | "TITLE_AND_COMMITS"
+    ) {
+        return Err("invalid squash message option".into());
+    }
+    if !policy.allow_merge && !policy.allow_rebase && !policy.allow_squash {
+        return Err("at least one merge strategy must remain allowed".into());
+    }
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_merge_policy(project_id: String) -> Result<MergePolicy> {
+    let c = db::conn()?;
+    c.query_row("SELECT project_id,allow_merge,allow_rebase,allow_squash,merge_message_option,squash_message_option FROM review_merge_policies WHERE project_id=?1", rusqlite::params![project_id], |r| Ok(MergePolicy { project_id:r.get(0)?, allow_merge:r.get(1)?, allow_rebase:r.get(2)?, allow_squash:r.get(3)?, merge_message_option:r.get(4)?, squash_message_option:r.get(5)? })).or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(MergePolicy { project_id, allow_merge:true, allow_rebase:true, allow_squash:true, merge_message_option:"DEFAULT".into(), squash_message_option:"DEFAULT".into() }) } else { Err(e) }).map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_merge_policy(policy: MergePolicy) -> Result<()> {
+    validate_merge_policy(&policy)?;
+    db::conn()?.execute("INSERT INTO review_merge_policies(project_id,allow_merge,allow_rebase,allow_squash,merge_message_option,squash_message_option) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id) DO UPDATE SET allow_merge=excluded.allow_merge,allow_rebase=excluded.allow_rebase,allow_squash=excluded.allow_squash,merge_message_option=excluded.merge_message_option,squash_message_option=excluded.squash_message_option", rusqlite::params![policy.project_id,policy.allow_merge,policy.allow_rebase,policy.allow_squash,policy.merge_message_option,policy.squash_message_option]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[derive(Debug, Deserialize)]
+struct LinkedIssueStatus {
+    issue_id: String,
+    status_id: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SafeMergeRun {
     pub id: String,
     pub review_id: String,
@@ -88,6 +165,13 @@ pub struct ReviewStack {
     pub target_branch: String,
     pub source_branch: String,
     pub review_ids: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalIssueLink {
+    pub id: String,
+    pub review_id: String,
+    pub external_url: String,
+    pub title: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCheck {
@@ -134,6 +218,14 @@ pub struct NewDiscussion {
     pub revision: Option<String>,
     pub author_id: String,
     pub message: String,
+    #[serde(default)]
+    pub suggestion_commit_id: Option<String>,
+    #[serde(default)]
+    pub suggestion_content: Option<String>,
+    #[serde(default)]
+    pub suggestion_has_conflicts: Option<bool>,
+    #[serde(default)]
+    pub suggestion_identical_contents: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,6 +242,61 @@ pub struct QualityGateEvaluation {
     /// job that has not posted anything yet.
     #[serde(default)]
     pub required_checks: Vec<String>,
+}
+
+fn validate_external_issue_link(link: &ExternalIssueLink) -> Result<()> {
+    let url = link.external_url.trim();
+    if url.is_empty() || !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("external issue URL must start with http:// or https://".into());
+    }
+    if link
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err("external issue title cannot be blank".into());
+    }
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_external_issue_links(review_id: String) -> Result<Vec<ExternalIssueLink>> {
+    let c = db::conn()?;
+    let mut statement = c.prepare("SELECT id,review_id,external_url,title FROM review_external_issue_links WHERE review_id=?1 ORDER BY id").map_err(|e| e.to_string())?;
+    let links = statement
+        .query_map(rusqlite::params![review_id], |row| {
+            Ok(ExternalIssueLink {
+                id: row.get(0)?,
+                review_id: row.get(1)?,
+                external_url: row.get(2)?,
+                title: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(links)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_external_issue_link(link: ExternalIssueLink) -> Result<()> {
+    validate_external_issue_link(&link)?;
+    let c = db::conn()?;
+    c.execute("INSERT INTO review_external_issue_links(id,review_id,external_url,title) VALUES(?1,?2,?3,?4)", rusqlite::params![link.id, link.review_id, link.external_url.trim(), link.title.as_deref().map(str::trim)])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_external_issue_link(id: String) -> Result<()> {
+    let c = db::conn()?;
+    if c.execute(
+        "DELETE FROM review_external_issue_links WHERE id=?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?
+        == 0
+    {
+        return Err("external issue link not found".into());
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -215,6 +362,70 @@ fn review_event_by_id(event_type: &str, review_id: &str) {
         Ok(None) => {}
         Err(e) => eprintln!("webhook fan-out for {event_type} failed: {e}"),
     }
+}
+
+// ---------- file reading state (KB §1 reviewProgress / ReviewChangesCollapsingVM) ----------
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_review_file_states(
+    review_id: String,
+    profile_id: String,
+) -> Result<Vec<ReviewFileState>> {
+    let c = db::conn()?;
+    let mut s = c.prepare("SELECT review_id,profile_id,file_path,viewed,collapsed FROM review_file_states WHERE review_id=?1 AND profile_id=?2 ORDER BY file_path").map_err(|e|e.to_string())?;
+    let rows = s
+        .query_map(rusqlite::params![review_id, profile_id], |r| {
+            Ok(ReviewFileState {
+                review_id: r.get(0)?,
+                profile_id: r.get(1)?,
+                file_path: r.get(2)?,
+                viewed: r.get(3)?,
+                collapsed: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_review_file_state(state: ReviewFileState) -> Result<()> {
+    db::conn()?.execute("INSERT INTO review_file_states(review_id,profile_id,file_path,viewed,collapsed) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(review_id,profile_id,file_path) DO UPDATE SET viewed=excluded.viewed,collapsed=excluded.collapsed", rusqlite::params![state.review_id,state.profile_id,state.file_path,state.viewed,state.collapsed]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn review_aggregated_status(
+    review_id: String,
+    profile_id: String,
+) -> Result<ReviewAggregatedStatus> {
+    let c = db::conn()?;
+    let review =
+        get_review(review_id.clone())?.ok_or_else(|| format!("review '{review_id}' not found"))?;
+    match review.state.as_str() {
+        "Merged" => return Ok(ReviewAggregatedStatus::Merged),
+        "Closed" | "Deleted" => return Ok(ReviewAggregatedStatus::Closed),
+        _ => {}
+    }
+    let mine: Option<(String, Option<String>, bool)> = c.query_row("SELECT role,state,their_turn FROM review_participants WHERE review_id=?1 AND profile_id=?2", rusqlite::params![review_id,profile_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).ok();
+    if let Some((role, state, their_turn)) = mine {
+        if role == "Reviewer" && their_turn {
+            return Ok(ReviewAggregatedStatus::NeedsMyReview);
+        }
+        if role == "Author" && their_turn {
+            return Ok(ReviewAggregatedStatus::NeedsMyAttention);
+        }
+        if state.as_deref() == Some("accepted") {
+            return Ok(ReviewAggregatedStatus::Accepted);
+        }
+    }
+    let reviewers_waiting: i64 = c.query_row("SELECT COUNT(*) FROM review_participants WHERE review_id=?1 AND role='Reviewer' AND (state IS NULL OR state='waiting')", rusqlite::params![review_id], |r|r.get(0)).map_err(|e|e.to_string())?;
+    Ok(if reviewers_waiting > 0 {
+        ReviewAggregatedStatus::WaitingForReview
+    } else if review.turn_based {
+        ReviewAggregatedStatus::WaitingForUpdates
+    } else {
+        ReviewAggregatedStatus::Opened
+    })
 }
 
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------
@@ -300,7 +511,9 @@ pub fn set_participant_state(
     state: Option<String>,
 ) -> Result<()> {
     let c = db::conn()?;
-    set_participant_state_tx(&c, &review_id, &profile_id, state.as_deref())
+    set_participant_state_tx(&c, &review_id, &profile_id, state.as_deref())?;
+    review_event_by_id(crate::events::REVIEW_PARTICIPANT_UPDATED, &review_id);
+    Ok(())
 }
 
 // ---------- create a review from a registered repo's real branches ----------
@@ -429,7 +642,7 @@ pub fn review_diff(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents,suggestion_resolved_by FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
             Ok(ReviewDiscussion {
@@ -441,6 +654,12 @@ pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion
                 revision: r.get(5)?,
                 resolved: r.get(6)?,
                 channel_id: r.get(7)?,
+                suggestion_commit_id: r.get(8)?,
+                suggestion_status: r.get(9)?,
+                suggestion_content: r.get(10)?,
+                suggestion_has_conflicts: r.get(11)?,
+                suggestion_identical_contents: r.get(12)?,
+                suggestion_resolved_by: r.get(13)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -459,8 +678,8 @@ fn create_review_discussion_tx(
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,resolved,channel_id) VALUES(?1,?2,?3,?4,?5,?6,0,?7)",
-        rusqlite::params![d.id, d.review_id, d.file_path, d.line_start, d.line_end, d.revision, d.channel_id],
+        "INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents) VALUES(?1,?2,?3,?4,?5,?6,0,?7,?8,CASE WHEN ?9 IS NULL THEN NULL ELSE 'OPEN' END,?9,?10,?11)",
+        rusqlite::params![d.id, d.review_id, d.file_path, d.line_start, d.line_end, d.revision, d.channel_id, d.suggestion_commit_id, d.suggestion_content, d.suggestion_has_conflicts, d.suggestion_identical_contents],
     )
     .map_err(|e| e.to_string())?;
     if !d.message.trim().is_empty() {
@@ -485,6 +704,12 @@ fn create_review_discussion_tx(
         revision: d.revision.clone(),
         resolved: false,
         channel_id: Some(d.channel_id.clone()),
+        suggestion_commit_id: d.suggestion_commit_id.clone(),
+        suggestion_status: d.suggestion_content.as_ref().map(|_| "OPEN".to_string()),
+        suggestion_content: d.suggestion_content.clone(),
+        suggestion_has_conflicts: d.suggestion_has_conflicts,
+        suggestion_identical_contents: d.suggestion_identical_contents,
+        suggestion_resolved_by: None,
     })
 }
 /// Anchored inline discussion on the real diff; backing channel row is a direct insert
@@ -496,7 +721,9 @@ pub fn create_review_discussion(discussion: NewDiscussion) -> Result<ReviewDiscu
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    create_review_discussion_tx(&c, &discussion, now)
+    let created = create_review_discussion_tx(&c, &discussion, now)?;
+    review_event_by_id(crate::events::REVIEW_DISCUSSION_CREATED, &created.review_id);
+    Ok(created)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
@@ -506,9 +733,39 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
         rusqlite::params![id, resolved],
     )
     .map_err(|e| e.to_string())?;
+    let review_id: String = c.query_row("SELECT review_id FROM review_discussions WHERE id=?1", rusqlite::params![id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    review_event_by_id(crate::events::REVIEW_DISCUSSION_UPDATED, &review_id);
     Ok(())
 }
 
+fn valid_suggested_edit_transition(from: &str, to: &str) -> bool {
+    matches!(
+        (from, to),
+        ("OPEN", "ACCEPTED" | "REJECTED") | ("ACCEPTED" | "REJECTED", "OPEN")
+    )
+}
+/// Changes only the proposed-edit lifecycle; it deliberately does not apply code to a repository.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_suggested_edit_status(id: String, status: String, actor_id: String) -> Result<()> {
+    let c = db::conn()?;
+    let current: Option<String> = c.query_row(
+"SELECT suggestion_status FROM review_discussions WHERE id=?1 AND suggestion_content IS NOT NULL",
+rusqlite::params![&id], |r| r.get(0),
+).map_err(|_| "suggested edit not found".to_string())?;
+    let current = current.ok_or_else(|| "suggested edit has no lifecycle state".to_string())?;
+    if !valid_suggested_edit_transition(&current, &status) {
+        return Err(format!(
+            "invalid suggested edit transition {current} -> {status}"
+        ));
+    }
+    c.execute(
+"UPDATE review_discussions SET suggestion_status=?2, suggestion_resolved_by=CASE WHEN ?2='OPEN' THEN NULL ELSE ?3 END WHERE id=?1",
+rusqlite::params![id, status, actor_id],
+    ).map_err(|e| e.to_string())?;
+    let review_id: String = c.query_row("SELECT review_id FROM review_discussions WHERE id=?1", rusqlite::params![id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    review_event_by_id(crate::events::REVIEW_SUGGESTION_UPDATED, &review_id);
+    Ok(())
+}
 // ---------- stacked merge requests ----------
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_review_stack(input: NewReviewStack) -> Result<ReviewStack> {
@@ -1279,6 +1536,18 @@ fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOw
     Ok(matches)
 }
 
+/// Changed files whose source-branch CODEOWNERS rule resolves to this profile.
+/// This is intentionally independent of quality-gate configuration: ownership-aware
+/// review stays useful even when the target branch has no CODEOWNERS gate.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_owned_review_files(review_id: String, profile_id: String) -> Result<Vec<String>> {
+    Ok(codeowner_matches_tx(&db::conn()?, &review_id)?
+        .into_iter()
+        .filter(|entry| entry.owner_ids.iter().any(|owner| owner == &profile_id))
+        .map(|entry| entry.path)
+        .collect())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn record_external_check(check: ExternalCheck) -> Result<()> {
     if check.check_name.trim().is_empty() {
@@ -1714,6 +1983,34 @@ fn advance_verified_ref(
     Ok(())
 }
 
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_merge_preferences(preferences: MergePreferences) -> Result<()> {
+    serde_json::from_str::<Vec<LinkedIssueStatus>>(&preferences.linked_issue_statuses_json)
+        .map_err(|_| "linked issue transitions must be a JSON list".to_string())?;
+    db::conn()?.execute("INSERT INTO review_merge_preferences(review_id,delete_source_branch,linked_issue_statuses_json) VALUES(?1,?2,?3) ON CONFLICT(review_id) DO UPDATE SET delete_source_branch=excluded.delete_source_branch,linked_issue_statuses_json=excluded.linked_issue_statuses_json", rusqlite::params![preferences.review_id, preferences.delete_source_branch, preferences.linked_issue_statuses_json]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn merge_preferences_tx(c: &Connection, review_id: &str) -> Result<(bool, String)> {
+    c.query_row("SELECT delete_source_branch,linked_issue_statuses_json FROM review_merge_preferences WHERE review_id=?1", rusqlite::params![review_id], |r| Ok((r.get(0)?, r.get(1)?))).or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok((false, "[]".into())) } else { Err(e) }).map_err(|e|e.to_string())
+}
+fn transition_linked_issues_tx(
+    c: &Connection,
+    project_id: &str,
+    transitions_json: &str,
+) -> Result<usize> {
+    let transitions: Vec<LinkedIssueStatus> = serde_json::from_str(transitions_json)
+        .map_err(|_| "stored linked issue transitions are invalid".to_string())?;
+    let mut changed = 0;
+    for transition in transitions {
+        changed += c
+            .execute(
+                "UPDATE issues SET status_id=?1 WHERE id=?2 AND project_id=?3",
+                rusqlite::params![transition.status_id, transition.issue_id, project_id],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(changed)
+}
 /// Final merge is deliberate, ref-only Git plumbing: no checkout or worktree mutation.
 /// It rechecks CI and both branch tips immediately before updating the target ref.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1729,6 +2026,10 @@ pub fn attempt_merge(
         merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
     let project_id = review_project_tx(&c, &review_id)?;
+    if !get_merge_policy(project_id.clone())?.allow_merge {
+        return Err("merge strategy is disabled by repository policy".into());
+    }
+    let (delete_source_branch, linked_issue_statuses_json) = merge_preferences_tx(&c, &review_id)?;
     enforce_merge_permission_tx(&c, &project_id, &target_branch, &actor_id)?;
     let bypassed = bypasses_quality_gate_tx(&c, &project_id, &target_branch, &actor_id)?;
     if !bypassed {
@@ -1809,6 +2110,13 @@ pub fn attempt_merge(
         rusqlite::params![review_id],
     )
     .map_err(|e| e.to_string())?;
+    let transitioned = transition_linked_issues_tx(&c, &project_id, &linked_issue_statuses_json)?;
+    if delete_source_branch && source_branch != target_branch {
+        repo.find_reference(&format!("refs/heads/{source_branch}"))
+            .map_err(|e| e.to_string())?
+            .delete()
+            .map_err(|e| e.to_string())?;
+    }
     let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
     review_event_by_id(crate::events::REVIEW_MERGED, &review_id);
     record_merge_run_tx(
@@ -1817,7 +2125,7 @@ pub fn attempt_merge(
         &review_id,
         "SUCCEEDED",
         false,
-        format!("merged as {merge_oid}; CI green; quality gate {}; retargeted {retargeted} stacked review(s)", if bypassed { "bypassed by protected-branch permission" } else { "satisfied" }),
+        format!("merged as {merge_oid}; CI green; quality gate {}; retargeted {retargeted} stacked review(s); transitioned {transitioned} linked issue(s)", if bypassed { "bypassed by protected-branch permission" } else { "satisfied" }),
         Some(&source_oid),
         Some(&target_oid),
         Some(&merge_oid.to_string()),
@@ -1845,6 +2153,32 @@ mod tests {
     /// across processes; nothing here ever deletes a path it did not create.
     fn temp_db() -> db::TempDb {
         db::TempDb::new("gaia-space-review-test")
+    }
+    #[test]
+    fn merge_policy_rejects_invalid_modes_and_an_empty_allow_list() {
+        let base = MergePolicy {
+            project_id: "p".into(),
+            allow_merge: true,
+            allow_rebase: false,
+            allow_squash: false,
+            merge_message_option: "DEFAULT".into(),
+            squash_message_option: "DEFAULT".into(),
+        };
+        assert!(validate_merge_policy(&base).is_ok());
+        let invalid = MergePolicy {
+            merge_message_option: "COMMITS".into(),
+            ..base
+        };
+        assert!(validate_merge_policy(&invalid).is_err());
+        let none = MergePolicy {
+            project_id: "p".into(),
+            allow_merge: false,
+            allow_rebase: false,
+            allow_squash: false,
+            merge_message_option: "DEFAULT".into(),
+            squash_message_option: "DEFAULT".into(),
+        };
+        assert!(validate_merge_policy(&none).is_err());
     }
 
     /// Builds a commit via plumbing only (blob + treebuilder) — no working-directory
@@ -1915,6 +2249,47 @@ mod tests {
             "main-change\n",
         );
         (dir, repo)
+    }
+
+    #[test]
+    fn external_issue_links_are_review_scoped_and_validate_urls() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,target_branch,title) VALUES('review-1','demo-project',1,'MR','Opened','main','Review')", []).unwrap();
+        let link = ExternalIssueLink {
+            id: "link-1".into(),
+            review_id: "review-1".into(),
+            external_url: "https://tracker.example/PROJ-42".into(),
+            title: Some("PROJ-42".into()),
+        };
+        validate_external_issue_link(&link).expect("valid external issue URL");
+        conn.execute("INSERT INTO review_external_issue_links(id,review_id,external_url,title) VALUES(?1,?2,?3,?4)", rusqlite::params![link.id, link.review_id, link.external_url, link.title]).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_external_issue_links WHERE review_id='review-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(validate_external_issue_link(&ExternalIssueLink {
+            id: "bad".into(),
+            review_id: "review-1".into(),
+            external_url: "tracker.example/PROJ-42".into(),
+            title: None
+        })
+        .is_err());
+        conn.execute("DELETE FROM reviews WHERE id='review-1'", [])
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_external_issue_links",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "review deletion cascades to external links");
+        drop(db_path);
     }
 
     #[test]

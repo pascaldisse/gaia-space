@@ -30,14 +30,39 @@ export default function ServerConnect() {
     setUrl(saved);
     if (saved && !editing) void connect(saved);
   });
-  const submit = (event: SubmitEvent) => { event.preventDefault(); void connect(url()); };
-  return <div class="login-screen"><form class="login-box" onSubmit={submit}>
-    <h1>GAIA Space</h1>
-    <p class="login-intro">Connect to a GAIA Space server.</p>
-    <Show when={error()}><div class="error">{error()}</div></Show>
-    <label>Server URL<input type="url" inputMode="url" placeholder="https://space.example.com/space/" value={url()} onInput={event => setUrl(event.currentTarget.value)} autofocus required /></label>
-    <button class="primary" type="submit" disabled={busy()}>{busy() ? "Connecting…" : "Continue"}</button>
-  </form></div>;
+  const submit = (event: SubmitEvent) => {
+    event.preventDefault();
+    void connect(url());
+  };
+  return (
+    <div class="login-screen">
+      <form class="login-box" onSubmit={submit}>
+        <h1>GAIA Space</h1>
+        <p class="login-intro">
+          Connect to a GAIA Space server. Scan a pairing QR link to authorize
+          this device.
+        </p>
+        <Show when={error()}>
+          <div class="error">{error()}</div>
+        </Show>
+        <label>
+          Server URL
+          <input
+            type="url"
+            inputMode="url"
+            placeholder="https://space.example.com/space/"
+            value={url()}
+            onInput={(event) => setUrl(event.currentTarget.value)}
+            autofocus
+            required
+          />
+        </label>
+        <button class="primary" type="submit" disabled={busy()}>
+          {busy() ? "Connecting…" : "Continue"}
+        </button>
+      </form>
+    </div>
+  );
 }
 
 export function editSavedServer() {

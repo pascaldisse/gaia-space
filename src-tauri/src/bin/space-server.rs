@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db, devenv, documents,
     events, issues, meetings, oauth, organization, package_registry, payload_dispatch, personal,
     pipelines, platform, review,
 };
@@ -17,6 +17,7 @@ use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest;
 use std::{
     collections::HashMap,
     env,
@@ -138,6 +139,19 @@ struct CreateUser {
     profile_id: Option<String>,
 }
 #[derive(Deserialize)]
+struct SelfRegistration {
+    username: String,
+    password: String,
+    display_name: String,
+}
+#[derive(Deserialize, Serialize)]
+struct VerifiedDomain {
+    domain: String,
+    auto_join: bool,
+    self_registration: bool,
+    verified_at: i64,
+}
+#[derive(Deserialize)]
 struct PatchUser {
     display_name: Option<String>,
     role: Option<String>,
@@ -146,22 +160,6 @@ struct PatchUser {
 }
 fn err(code: StatusCode, s: &str) -> (StatusCode, Json<Value>) {
     (code, Json(json!({"ok":false,"error":s})))
-}
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    value
-        .strip_prefix("Bearer ")
-        .or_else(|| value.strip_prefix("bearer "))
-}
-/// Normal-room admission is bearer-only; browser-supplied query identity is ignored.
-async fn public_room(Path(room): Path<String>, headers: HeaderMap) -> axum::response::Response {
-    let Some(token) = bearer_token(&headers) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    match calls::join_oidc_normal_meeting_call(room, token) {
-        Ok(join) => Json(join).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
 }
 fn hash(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
@@ -459,217 +457,6 @@ async fn app_create_issue(
     .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
 }
 
-/// External room API scopes intentionally match the upstream Meet application API.
-/// Generic `read`/`write` grants are not aliases: a token must explicitly carry the
-/// capability for this endpoint (or `*`).
-#[allow(clippy::result_large_err)]
-fn app_room_scope(
-    token: &applications::AppToken,
-    required: &str,
-) -> Result<(), axum::response::Response> {
-    if token
-        .scope
-        .split_whitespace()
-        .any(|scope| scope == required || scope == "*")
-    {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::FORBIDDEN,
-            [(
-                header::WWW_AUTHENTICATE,
-                format!("Bearer error=\"insufficient_scope\", scope=\"{required}\""),
-            )],
-            Json(json!({"ok": false, "error": "insufficient_scope"})),
-        )
-            .into_response())
-    }
-}
-
-#[allow(clippy::result_large_err)]
-fn app_room_project_id(
-    c: &rusqlite::Connection,
-    room_id: &str,
-) -> Result<String, axum::response::Response> {
-    c.query_row(
-        "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
-        [room_id],
-        |row| row.get(0),
-    ).map_err(|_| err(StatusCode::NOT_FOUND, "room not found").into_response())
-}
-
-/// Lists must skip unscoped rooms rather than fail the entire authorized result set.
-#[allow(clippy::result_large_err)]
-fn app_room_project_id_if_scoped(c: &rusqlite::Connection, room_id: &str) -> Result<Option<String>, axum::response::Response> {
-    c.query_row(
-        "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
-        [room_id],
-        |row| row.get(0),
-    ).optional().map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())
-}
-
-#[allow(clippy::result_large_err)]
-fn app_has_project_right(
-    c: &rusqlite::Connection,
-    application_id: &str,
-    project_id: &str,
-    right: &str,
-) -> Result<bool, axum::response::Response> {
-    app_rights::app_has_right_anywhere(
-        c,
-        application_id,
-        &app_rights::app_project_contexts(project_id),
-        right,
-    )
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response())
-}
-
-async fn app_list_rooms(
-    headers: HeaderMap,
-) -> Result<Json<Vec<meetings::Meeting>>, axum::response::Response> {
-    let (token, application) = app_bearer(&headers)?;
-    app_room_scope(&token, "rooms:list")?;
-    let c = db::conn().map_err(|_| {
-        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
-    })?;
-    // Channel-less/public rooms have no project authorization context, so are never
-    // exposed to applications. This is deliberately narrower than the human API.
-    let mut rooms = Vec::new();
-    for room in meetings::list_meetings_scoped_for_application(&c)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())?
-    {
-        let Some(project_id) = app_room_project_id_if_scoped(&c, &room.id)? else {
-            continue;
-        };
-        if app_has_project_right(&c, &application.id, &project_id, "Project.ViewMeetings")? {
-            rooms.push(room);
-        }
-    }
-    Ok(Json(rooms))
-}
-
-async fn app_get_room(
-    headers: HeaderMap,
-    Path(room_id): Path<String>,
-) -> Result<Json<meetings::Meeting>, axum::response::Response> {
-    let (token, application) = app_bearer(&headers)?;
-    app_room_scope(&token, "rooms:retrieve")?;
-    let c = db::conn().map_err(|_| {
-        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
-    })?;
-    let project_id = app_room_project_id(&c, &room_id)?;
-    if !app_has_project_right(&c, &application.id, &project_id, "Project.ViewMeetings")? {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.ViewMeetings"}))).into_response());
-    }
-    meetings::get_meeting_unscoped(&c, &room_id)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())?
-        .map(Json)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "room not found").into_response())
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AppRoomInput {
-    id: String,
-    title: String,
-    #[serde(default)]
-    description: Option<String>,
-    starts_at: i64,
-    ends_at: i64,
-    #[serde(default)]
-    rrule: Option<String>,
-    #[serde(default)]
-    location: Option<String>,
-    project_id: String,
-    channel_id: String,
-    #[serde(default = "app_native_provider")]
-    video_provider: String,
-    #[serde(default = "app_scheduled_status")]
-    video_status: String,
-    #[serde(default = "app_private_access")]
-    access_level: String,
-}
-fn app_native_provider() -> String {
-    "native".into()
-}
-fn app_scheduled_status() -> String {
-    "scheduled".into()
-}
-fn app_private_access() -> String {
-    "PRIVATE".into()
-}
-
-async fn app_create_room(
-    headers: HeaderMap,
-    Json(input): Json<AppRoomInput>,
-) -> Result<Json<meetings::Meeting>, axum::response::Response> {
-    let (token, application) = app_bearer(&headers)?;
-    app_room_scope(&token, "rooms:create")?;
-    let c = db::conn().map_err(|_| {
-        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
-    })?;
-    let channel_project: String = c
-        .query_row(
-            "SELECT project_id FROM channels WHERE id=?1 AND project_id IS NOT NULL",
-            [&input.channel_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| {
-            err(StatusCode::BAD_REQUEST, "channel must belong to project").into_response()
-        })?;
-    if channel_project != input.project_id {
-        return Err(err(StatusCode::BAD_REQUEST, "channel project mismatch").into_response());
-    }
-    if !app_has_project_right(
-        &c,
-        &application.id,
-        &input.project_id,
-        "Project.CreateMeetings",
-    )? {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.CreateMeetings"}))).into_response());
-    }
-    drop(c);
-    let room = meetings::Meeting {
-        id: input.id,
-        title: input.title,
-        description: input.description,
-        starts_at: input.starts_at,
-        ends_at: input.ends_at,
-        rrule: input.rrule,
-        location: input.location,
-        organizer_id: None,
-        channel_id: Some(input.channel_id),
-        video_provider: input.video_provider,
-        video_status: input.video_status,
-        access_level: input.access_level,
-        archived: false,
-    };
-    meetings::create_meeting(room.clone())
-        .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
-    Ok(Json(room))
-}
-
-/// An application joins only as its own fixed, non-admin identity. Public access
-/// needs both the persisted room flag and the server-wide anonymous-admission opt-in.
-async fn app_join_room(
-    headers: HeaderMap,
-    Path(room_id): Path<String>,
-) -> Result<Json<calls::CallJoin>, axum::response::Response> {
-    let (token, application) = app_bearer(&headers)?;
-    app_room_scope(&token, "rooms:join")?;
-    let c = db::conn().map_err(|_| {
-        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
-    })?;
-    let project_id = app_room_project_id(&c, &room_id)?;
-    if !app_has_project_right(&c, &application.id, &project_id, "Project.JoinMeetings")? {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.JoinMeetings"}))).into_response());
-    }
-    drop(c);
-    calls::join_application_public_meeting_call(room_id, application.id, application.name)
-        .map(Json)
-        .map_err(|_| err(StatusCode::FORBIDDEN, "room_join_denied").into_response())
-}
-
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     let t = headers
         .get(header::COOKIE)
@@ -785,7 +572,7 @@ enum RepoAccess {
 /// and only one of them was locked (☎Kali-VIII round 4).
 fn repository_access(user: &User, repository_id: &str, level: RepoAccess) -> Result<bool, String> {
     let write = level != RepoAccess::Read;
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return Ok(true);
     }
     let c = db::conn()?;
@@ -1225,7 +1012,7 @@ async fn caldav_delete_event(
 
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     let (id, username, password_hash, display_name, profile_id, role) = row;
     let verified = PasswordHash::new(&password_hash)
         .ok()
@@ -1243,38 +1030,96 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
         username,
         display_name,
         profile_id,
-        account_admin: role == "admin",
+        account_admin: role == "GlobalAdmin",
         role,
     };
-    if user.role != "admin"
+    if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
     {
-        user.role = "admin".into();
+        user.role = "GlobalAdmin".into();
     }
     Ok(user)
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
-    // Every `user.role=="admin"` test below is the *unified* admin predicate
+    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,CASE WHEN u.role='admin' THEN 'GlobalAdmin' ELSE u.global_role END FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
+    // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
     // (platform::is_admin_on): the account role or the Global.Superadmin right, one
     // meaning on both transports. The raw column alone would leave a rights-model
     // admin powerless over HTTP.
-    if user.role != "admin"
+    if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
     {
-        user.role = "admin".into();
+        user.role = "GlobalAdmin".into();
     }
     Ok(user)
 }
 fn admin(h: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     let u = user_by_token(h)?;
-    if u.role == "admin" {
+    if u.role == "GlobalAdmin" {
         Ok(u)
     } else {
         Err(err(StatusCode::FORBIDDEN, "admin required"))
+    }
+}
+async fn capabilities() -> impl IntoResponse {
+    Json(
+        json!({"ok":true,"value":{"protocol":1,"features":{"mobile_qr_pairing":true,"project_role_templates":true,"membership_approval":true}}}),
+    )
+}
+#[derive(Deserialize)]
+struct PairConsume {
+    code: String,
+}
+async fn create_mobile_pairing(h: HeaderMap) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    let raw = token();
+    let digest = format!("{:x}", sha2::Sha256::digest(raw.as_bytes()));
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    if let Err(e) = c.execute(
+        "INSERT INTO mobile_pairings(code_hash,user_id,expires_at) VALUES(?1,?2,unixepoch()+120)",
+        params![digest, user.id],
+    ) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    Json(json!({"ok":true,"value":{"code":raw,"expires_in":120,"protocol":1}})).into_response()
+}
+async fn consume_mobile_pairing(Json(input): Json<PairConsume>) -> impl IntoResponse {
+    if input.code.len() < 32 {
+        return err(StatusCode::BAD_REQUEST, "invalid pairing code").into_response();
+    }
+    let digest = format!("{:x}", sha2::Sha256::digest(input.code.as_bytes()));
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let user_id: Option<String> = c.query_row("UPDATE mobile_pairings SET consumed_at=unixepoch() WHERE code_hash=?1 AND consumed_at IS NULL AND expires_at>unixepoch() RETURNING user_id", [&digest], |r| r.get(0)).optional().unwrap_or(None);
+    let Some(user_id) = user_id else {
+        return err(
+            StatusCode::UNAUTHORIZED,
+            "pairing code expired or already used",
+        )
+        .into_response();
+    };
+    let session = token();
+    if let Err(e)=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![session,user_id]) { return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response(); }
+    let mut response = Json(json!({"ok":true,"value":{"paired":true}})).into_response();
+    let cookie =
+        format!("space_session={session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000");
+    match HeaderValue::from_str(&cookie) {
+        Ok(value) => {
+            response.headers_mut().insert(header::SET_COOKIE, value);
+            response
+        }
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "cookie").into_response(),
     }
 }
 async fn login(
@@ -1309,7 +1154,7 @@ async fn login(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
+    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
     let Ok((id, username, ph, display_name, profile_id, role)) = row else {
         let locked = app
             .login_limiter
@@ -1379,7 +1224,7 @@ async fn login(
     let t = token();
     let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]);
     let mut resp = Json(
-        json!({"user":User{id,username,display_name,profile_id,account_admin:role=="admin",role}}),
+        json!({"user":User{id,username,display_name,profile_id,account_admin:role=="GlobalAdmin",role}}),
     )
     .into_response();
     resp.headers_mut().insert(
@@ -1393,6 +1238,128 @@ async fn login(
     );
     resp
 }
+fn registration_domain(username: &str) -> Option<String> {
+    let (_, domain) = username.trim().rsplit_once('@')?;
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if domain.is_empty() || domain.contains(['/', '@', ' ']) {
+        None
+    } else {
+        Some(domain)
+    }
+}
+async fn register(Json(x): Json<SelfRegistration>) -> impl IntoResponse {
+    let username = x.username.trim();
+    let display_name = x.display_name.trim();
+    if username.is_empty() || display_name.is_empty() {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "username and display name are required",
+        )
+        .into_response();
+    }
+    if x.password.len() < 8 {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters",
+        )
+        .into_response();
+    }
+    let Some(domain) = registration_domain(username) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "registration requires an email username",
+        )
+        .into_response();
+    };
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let permitted: Option<i64> = match c
+        .query_row(
+            "SELECT 1 FROM verified_domains WHERE domain=?1 AND self_registration=1",
+            [&domain],
+            |r| r.get(0),
+        )
+        .optional()
+    {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    if permitted.is_none() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "self-registration is not enabled for this verified domain",
+        )
+        .into_response();
+    }
+    let id = token();
+    let pid = format!("profile-{}", &id[..12]);
+    let password_hash = match hash(&x.password) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    if let Err(e) = c.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())",
+        params![pid, username, display_name],
+    ) {
+        return err(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
+    }
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,'member','GlobalMember',unixepoch())",params![id,username,password_hash,display_name,pid]) { Ok(_)=>Json(json!({"id":id})).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response() }
+}
+async fn domains(h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let mut q=match c.prepare("SELECT domain,auto_join,self_registration,verified_at FROM verified_domains WHERE org_id='default' ORDER BY domain"){Ok(q)=>q,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};
+    let response = match q.query_map([], |r| {
+        Ok(VerifiedDomain {
+            domain: r.get(0)?,
+            auto_join: r.get::<_, i64>(1)? != 0,
+            self_registration: r.get::<_, i64>(2)? != 0,
+            verified_at: r.get(3)?,
+        })
+    }) {
+        Ok(rows) => Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    response
+}
+async fn save_domain(h: HeaderMap, Json(mut x): Json<VerifiedDomain>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    x.domain = x.domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if x.domain.is_empty() || x.domain.contains(['/', '@', ' ']) {
+        return err(StatusCode::BAD_REQUEST, "invalid domain").into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute("INSERT INTO verified_domains(domain,org_id,auto_join,self_registration,verified_at) VALUES(?1,'default',?2,?3,unixepoch()) ON CONFLICT(domain) DO UPDATE SET auto_join=excluded.auto_join,self_registration=excluded.self_registration,verified_at=unixepoch()",params![x.domain,x.auto_join as i32,x.self_registration as i32]){Ok(_)=>Json(x).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response()}
+}
+async fn delete_domain(h: HeaderMap, Path(domain): Path<String>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute(
+        "DELETE FROM verified_domains WHERE domain=?1 AND org_id='default'",
+        [domain],
+    ) {
+        Ok(_) => (StatusCode::NO_CONTENT).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
+    }
+}
+
 async fn me(h: HeaderMap) -> impl IntoResponse {
     match user_by_token(&h) {
         Ok(u) => Json(json!({"user":u})).into_response(),
@@ -1480,7 +1447,7 @@ async fn users(h: HeaderMap) -> impl IntoResponse {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
     let mut q = match c.prepare(
-        "SELECT id,username,display_name,profile_id,role,active FROM users ORDER BY username",
+        "SELECT id,username,display_name,profile_id,global_role,active FROM users ORDER BY username",
     ) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
@@ -1526,13 +1493,20 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         )
         .into_response();
     }
-    if !matches!(x.role.as_str(), "admin" | "member") {
+    // Legacy wire compat: pre-V90 clients say "admin"/"member"; they mean the
+    // account-global pair. Unknown strings stay invalid.
+    let role = match x.role.as_str() {
+        "admin" => "GlobalAdmin",
+        "member" => "GlobalMember",
+        other => other,
+    };
+    if !matches!(role, "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
-    if x.role == "admin" && !me.account_admin {
+    if role == "GlobalAdmin" && !me.account_admin {
         return err(
             StatusCode::FORBIDDEN,
-            "only an account admin can grant the admin role",
+            "only a GlobalAdmin can grant GlobalAdmin",
         )
         .into_response();
     }
@@ -1574,7 +1548,7 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         Ok(v) => v,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES(?1,?2,?3,?4,?5,?6,unixepoch())", params![id, username, password_hash, display_name, pid, x.role]) {
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())", params![id, username, password_hash, display_name, pid, if role == "GlobalAdmin" { "admin" } else { "member" }, role]) {
         Ok(_) => Json(json!({"id":id})).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
     }
@@ -1591,26 +1565,25 @@ async fn delete_user(h: HeaderMap, Path(id): Path<String>) -> impl IntoResponse 
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     let active_admins: i64 = c
         .query_row(
-            "SELECT count(*) FROM users WHERE role='admin' AND active=1",
+            "SELECT count(*) FROM users WHERE global_role='GlobalAdmin' AND active=1",
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
-    if target.0 == "admin" && target.1 && active_admins <= 1 {
+    if target.0 == "GlobalAdmin" && target.1 && active_admins <= 1 {
         return err(StatusCode::BAD_REQUEST, "cannot delete last active admin").into_response();
     }
     let tx = match c.unchecked_transaction() {
@@ -1637,18 +1610,28 @@ async fn patch_user(
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
-    if let Some(role) = x.role.as_deref() {
-        if !matches!(role, "admin" | "member") {
+    // Legacy wire compat: pre-V90 clients say "admin"/"member"; they mean the
+    // account-global pair. Unknown strings stay invalid.
+    let normalized_role = x.role.as_deref().map(|r| match r {
+        "admin" => "GlobalAdmin",
+        "member" => "GlobalMember",
+        other => other,
+    });
+    if let Some(role) = normalized_role {
+        if !matches!(
+            role,
+            "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+        ) {
             return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
         }
         // Promotion gate: the account role is the thing that mints admins, so only
         // an account admin may hand it out. A Global.Superadmin is an admin
         // everywhere it matters, but it cannot promote itself into the column that
         // grants it — the rights model would otherwise be its own escalation path.
-        if role == "admin" && !me.account_admin {
+        if role == "GlobalAdmin" && !me.account_admin {
             return err(
                 StatusCode::FORBIDDEN,
-                "only an account admin can grant the admin role",
+                "only a GlobalAdmin can grant GlobalAdmin",
             )
             .into_response();
         }
@@ -1664,28 +1647,27 @@ async fn patch_user(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     if id == me.id && x.active == Some(false) {
         return err(StatusCode::BAD_REQUEST, "cannot deactivate yourself").into_response();
     }
-    let removes_active_admin = target.0 == "admin"
+    let removes_active_admin = target.0 == "GlobalAdmin"
         && target.1
-        && (x.role.as_deref() == Some("member") || x.active == Some(false));
+        && (normalized_role != Some("GlobalAdmin") || x.active == Some(false));
     if removes_active_admin {
         let n: i64 = c
             .query_row(
-                "SELECT count(*) FROM users WHERE role='admin' AND active=1",
+                "SELECT count(*) FROM users WHERE global_role='GlobalAdmin' AND active=1",
                 [],
                 |r| r.get(0),
             )
@@ -1709,8 +1691,19 @@ async fn patch_user(
             return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
         }
     }
-    if let Some(v) = x.role {
-        if let Err(e) = c.execute("UPDATE users SET role=?1 WHERE id=?2", params![v, id]) {
+    if let Some(v) = normalized_role {
+        if let Err(e) = c.execute(
+            "UPDATE users SET role=?1,global_role=?2 WHERE id=?3",
+            params![
+                if v == "GlobalAdmin" {
+                    "admin"
+                } else {
+                    "member"
+                },
+                v,
+                id
+            ],
+        ) {
             return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
         }
     }
@@ -1905,6 +1898,7 @@ enum CommandPolicy {
     CalendarFeedUpsert,
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
+    CalendarOptionsWrite,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -1918,14 +1912,15 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
-        "create_board" | "create_issue" | "create_issue_status" => {
+        "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
-        "get_project" | "list_boards" | "list_issue_statuses" => CommandPolicy::ProjectRead,
+        "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
         "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
-        "calendar_aggregate" => CommandPolicy::CalendarRead,
+        "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
+        "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
@@ -1947,6 +1942,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
         | "join_meeting_call"
+        | "end_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
         | "trigger_pipeline_on_push"
@@ -1962,10 +1958,16 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
         "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
-        "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
+        // Reading the role catalog is a logged-in read; every *write* below also
+        // passes RIGHTS_ADMIN_COMMANDS (EditRoles), so Session alone never grants one.
+        "list_project_role_templates" | "list_project_roles" | "list_project_team_roles"
+        | "create_project_role_template" | "archive_project_role_template"
+        | "create_project_role" | "archive_project_role"
+        | "assign_project_team_role" | "remove_project_team_role" => CommandPolicy::Session,
         "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
         | "get_organization" | "get_org_settings" | "update_organization" | "update_org_settings" => CommandPolicy::Session,
         "create_cf_definition"
@@ -1984,6 +1986,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "create_review_stack"
         | "create_review"
         | "create_review_discussion"
+        | "set_suggested_edit_status"
         | "create_role"
         | "create_role_assignment" => CommandPolicy::Session,
         "create_sprint"
@@ -2006,7 +2009,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "emit_notification"
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
-        "get_channel" | "get_channel_by_entity" => CommandPolicy::Session,
+        "get_channel" | "get_channel_by_entity" | "get_profile_email_status" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
@@ -2021,7 +2024,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "search_book_documents" | "list_book_access" | "update_book_access" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -2041,6 +2044,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_package_repositories"
         | "list_pipeline_scripts"
         | "list_planning_tags"
+        | "list_messenger_contacts"
+        | "list_principals"
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
@@ -2069,6 +2074,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_sprints"
         | "list_subscription_settings"
         | "list_subscription_scopes"
+        | "list_subscription_deliveries"
+        | "list_follows"
+        | "get_channel_notification_preference"
+        | "private_feed"
         | "list_marketplace_apps"
         | "list_app_installs"
         | "list_swimlanes" => CommandPolicy::Session,
@@ -2132,13 +2141,21 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "remove_issue_link"
         | "remove_reaction"
         | "remove_team_membership"
+        | "request_membership_edit"
+        | "decide_membership_edit"
         | "save_board_column" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
+        | "save_messenger_contact"
         | "save_planning_tag"
         | "save_subscription_setting"
         | "save_subscription_scope"
         | "delete_subscription_scope"
+        | "save_subscription_delivery"
+        | "delete_subscription_delivery"
+        | "save_follow"
+        | "delete_follow"
+        | "save_channel_notification_preference"
         | "save_swimlane" => CommandPolicy::Session,
         "save_time_tracking_entry"
         | "schedule_deployment"
@@ -2147,6 +2164,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "set_issue_tags" => CommandPolicy::Session,
         "set_meeting_participant_status" => CommandPolicy::MeetingParticipantWrite,
         "set_participant_state"
+        | "set_profile_email_status"
         | "set_role_rights"
         | "toggle_checklist_item"
         | "transition_deployment"
@@ -2323,7 +2341,7 @@ fn board_project(board_id: &str) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())
 }
 fn project_readable(user: &User, project_id: &str) -> Result<bool, String> {
-    Ok(user.role == "admin"
+    Ok(user.role == "GlobalAdmin"
         || project_owner(project_id)?.is_some_and(|owner| owner == user.profile_id)
         || personal::project_member_by(project_id, &user.profile_id)?)
 }
@@ -2331,7 +2349,7 @@ fn project_readable(user: &User, project_id: &str) -> Result<bool, String> {
 /// Firing a pipeline executes shell commands on the server host. Unlike reading a project,
 /// it therefore belongs only to its owner (or a platform administrator).
 fn project_pipeline_executable(user: &User, project_id: &str) -> Result<bool, String> {
-    Ok(user.role == "admin"
+    Ok(user.role == "GlobalAdmin"
         || project_owner(project_id)?.is_some_and(|owner| owner == user.profile_id))
 }
 fn issue_id(body: &Value) -> Option<String> {
@@ -2392,7 +2410,7 @@ fn bind_document_create(user: &User, body: &mut Value) -> Result<(), String> {
             .get("container_id")
             .and_then(Value::as_str)
             .ok_or("project document requires container_id")?;
-        if user.role != "admin" && !personal::project_member_by(p, &user.profile_id)? {
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
             return Err("project access denied".into());
         }
     }
@@ -2416,7 +2434,7 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
             .get("container_id")
             .and_then(Value::as_str)
             .ok_or("project folder requires container_id")?;
-        if user.role != "admin" && !personal::project_member_by(p, &user.profile_id)? {
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
             return Err("project access denied".into());
         }
     }
@@ -2457,6 +2475,32 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
         gaia_space_lib::rights::Right::EditRoles,
     ),
     ("seed_rights", gaia_space_lib::rights::Right::EditRoles),
+    // Project role templates/roles/team bindings are the project-scoped half of the
+    // same role model: minting one hands out access, so it costs the same right.
+    (
+        "create_project_role_template",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "archive_project_role_template",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "create_project_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "archive_project_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "assign_project_team_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "remove_project_team_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
 ];
 fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
     let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
@@ -2492,7 +2536,7 @@ fn authorize_command(
             object.insert("user_id".to_string(), json!(user.profile_id));
         }
     }
-    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
+    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
     {
@@ -2522,7 +2566,7 @@ fn authorize_command(
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
             // One refusal for both halves: an id that does not exist and one you may not
             // touch must be indistinguishable, or the error text becomes an existence oracle.
-            if user.role != "admin" && owner != user.profile_id {
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
                 return Err(err(StatusCode::FORBIDDEN, "project access denied"));
             }
             Ok(())
@@ -2533,7 +2577,7 @@ fn authorize_command(
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
-            if user.role != "admin" && owner != user.profile_id {
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the project owner or an admin can change this project",
@@ -2676,7 +2720,7 @@ fn authorize_command(
         // back on: an ordinary member must not rotate another app's secret, mint a
         // token, or probe one for validity.
         CommandPolicy::AppAdmin => {
-            if user.role == "admin" {
+            if user.role == "GlobalAdmin" {
                 Ok(())
             } else {
                 Err(err(
@@ -2693,7 +2737,7 @@ fn authorize_command(
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
             // `member_id` deliberately escapes bind_session_identity: naming somebody
             // else is the whole point here, and the right to do it is checked below.
-            if user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str()) {
+            if user.role == "GlobalAdmin" || owner.as_deref() == Some(user.profile_id.as_str()) {
                 Ok(())
             } else {
                 Err(err(
@@ -2719,7 +2763,7 @@ fn authorize_command(
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
             let may_admit =
-                user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str());
+                user.role == "GlobalAdmin" || owner.as_deref() == Some(user.profile_id.as_str());
             let people: Vec<String> = arg(body, "profile_ids").unwrap_or_default();
             for profile in &people {
                 let member = owner.as_deref() == Some(profile.as_str())
@@ -2797,6 +2841,14 @@ fn authorize_command(
                 .insert("profile_id".into(), json!(user.profile_id));
             Ok(())
         }
+        CommandPolicy::CalendarOptionsWrite => {
+            body.as_object_mut()
+                .and_then(|body| body.get_mut("options"))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "options are required"))?
+                .insert("profile_id".into(), json!(user.profile_id));
+            Ok(())
+        }
         CommandPolicy::CalendarRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
@@ -2810,7 +2862,7 @@ fn authorize_command(
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
             if let Some(id) = input.get("id").and_then(Value::as_str) {
-                if user.role != "admin"
+                if user.role != "GlobalAdmin"
                     && calendar_feeds::calendar_owner(id).ok().flatten().as_deref()
                         != Some(&user.profile_id)
                 {
@@ -2825,7 +2877,7 @@ fn authorize_command(
         }
         CommandPolicy::CalendarOwnerAction => {
             let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role != "admin"
+            if user.role != "GlobalAdmin"
                 && calendar_feeds::calendar_owner(&id)
                     .ok()
                     .flatten()
@@ -2849,7 +2901,7 @@ fn authorize_command(
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
             if let Some(id) = input.get("id").and_then(Value::as_str).map(str::to_owned) {
-                if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+                if user.role != "GlobalAdmin" && !calendar_feed_owned_by(&user.profile_id, &id) {
                     return Err(err(
                         StatusCode::FORBIDDEN,
                         "only the owner can change this calendar feed",
@@ -2861,7 +2913,7 @@ fn authorize_command(
         }
         CommandPolicy::CalendarFeedOwnerAction => {
             let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+            if user.role != "GlobalAdmin" && !calendar_feed_owned_by(&user.profile_id, &id) {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the owner can change this calendar feed",
@@ -2875,7 +2927,7 @@ fn authorize_command(
             if name == "list_project_member_ids" {
                 let project_id: String =
                     arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-                if user.role != "admin"
+                if user.role != "GlobalAdmin"
                     && !personal::project_member_by(&project_id, &user.profile_id)
                         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 {
@@ -2897,7 +2949,7 @@ fn authorize_command(
             let Some(todo_id) = todo_id else {
                 return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`"));
             };
-            if user.role != "admin" && !todo_owned_by(&user.profile_id, &todo_id) {
+            if user.role != "GlobalAdmin" && !todo_owned_by(&user.profile_id, &todo_id) {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the owner can change this todo",
@@ -2907,7 +2959,7 @@ fn authorize_command(
         }
         CommandPolicy::TodoCompletionWrite => {
             let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role == "admin" || todo_owned_by(&user.profile_id, &todo_id) {
+            if user.role == "GlobalAdmin" || todo_owned_by(&user.profile_id, &todo_id) {
                 return Ok(());
             }
             let assigned = personal::todo_assigned_by(&todo_id, &user.profile_id)
@@ -2936,7 +2988,7 @@ fn authorize_command(
         CommandPolicy::AbsenceWrite => {
             // Admins manage any profile's absences, approval included; identity rebinding is
             // skipped for them upstream so the client-supplied `profile_id` survives.
-            if user.role == "admin" {
+            if user.role == "GlobalAdmin" {
                 return Ok(());
             }
             // Members own their rows only, and may never move the `approved` flag.
@@ -3040,7 +3092,7 @@ fn authorize_command(
         CommandPolicy::DocumentWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_writable_by(&id, &user.profile_id, user.role == "admin")
+            if documents::document_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 if matches!(name, "save_document" | "restore_doc_version") {
@@ -3059,8 +3111,12 @@ fn authorize_command(
         CommandPolicy::DocumentOwnerWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_owner_writable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_owner_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -3070,8 +3126,12 @@ fn authorize_command(
         CommandPolicy::DocumentAccessWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_access_manageable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_access_manageable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -3092,8 +3152,12 @@ fn authorize_command(
                 arg(body, "id").ok()
             }
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid folder id"))?;
-            if documents::document_folder_writable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_folder_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -3119,7 +3183,7 @@ fn authorize_command(
         CommandPolicy::MeetingWrite => {
             let id = meeting_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid meeting id"))?;
-            if !meetings::meeting_writable_by(&id, &user.profile_id, user.role == "admin")
+            if !meetings::meeting_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 return Err(err(StatusCode::FORBIDDEN, "meeting write denied"));
@@ -3150,7 +3214,7 @@ fn authorize_command(
                     |r| r.get(0),
                 )
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-            if (target == user.profile_id && self_rsvp) || organizer || user.role == "admin" {
+            if (target == user.profile_id && self_rsvp) || organizer || user.role == "GlobalAdmin" {
                 Ok(())
             } else {
                 Err(err(StatusCode::FORBIDDEN, "only a participant may change their RSVP; organizer access is required for another participant"))
@@ -3158,7 +3222,7 @@ fn authorize_command(
         }
         CommandPolicy::SearchRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
-            put_arg(body, "allow_all", json!(user.role == "admin"));
+            put_arg(body, "allow_all", json!(user.role == "GlobalAdmin"));
             Ok(())
         }
         CommandPolicy::PackageRepositoryRead
@@ -3345,7 +3409,7 @@ macro_rules! dispatch {
                 }
             })*
             n if n.starts_with("repo_") || matches!(n,
-                "app_info" | "join_meeting_call" | "start_livekit_server" |
+                "app_info" | "join_meeting_call" | "end_meeting_call" | "start_livekit_server" |
                 "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
                 "attempt_merge" | "open_merge_request"
             ) => err(StatusCode::NOT_IMPLEMENTED,"not available in web mode").into_response(),
@@ -3360,7 +3424,7 @@ fn absence_update(user: &User, body: &Value) -> axum::response::Response {
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response(),
     };
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return match personal::update_absence(absence) {
             Ok(v) => Json(json!({"ok":true,"value":v})).into_response(),
             Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
@@ -3379,7 +3443,7 @@ fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response(),
     };
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return match personal::delete_absence(id) {
             Ok(()) => Json(json!({"ok":true,"value":null})).into_response(),
             Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
@@ -4166,7 +4230,7 @@ async fn cmd(
     // the person themselves or an administrator: redaction happens here, at the one
     // chokepoint every web read passes through, not in the view.
     if name == "list_absences" || name == "current_absences" {
-        let admin = user.role == "admin";
+        let admin = user.role == "GlobalAdmin";
         let rows = if name == "list_absences" {
             personal::list_absences(arg::<Option<String>>(&body, "profile_id").ok().flatten())
         } else {
@@ -4248,6 +4312,7 @@ async fn cmd(
     "delete_document" => documents::delete_document(id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
+    "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
     "delete_meeting" => meetings::delete_meeting(id: String),
     "archive_role" => platform::archive_role(id: String, archived: bool),
     "archive_sprint" => issues::archive_sprint(id: String, archived: bool),
@@ -4262,10 +4327,13 @@ async fn cmd(
     "create_cf_definition" => platform::create_cf_definition(input: platform::CfDefinitionInput),
     "create_channel" => chat::create_channel(channel: chat::Channel, member_ids: Vec<String>),
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
+    "ensure_project_document_root" => documents::ensure_project_document_root(project_id: String),
     "create_document" => documents::create_document(document: documents::Document),
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
     "create_issue" => issues::create_issue(input: issues::IssueInput),
+    "clone_issue" => issues::clone_issue(input: issues::IssueTransferInput),
+    "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),
     "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
     "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
@@ -4285,14 +4353,24 @@ async fn cmd(
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
     "dashboard_aggregate" => personal::dashboard_aggregate(profile_id: String),
+    "project_dashboard_aggregate" => personal::project_dashboard_aggregate(project_id: String),
+    "list_follows" => personal::list_follows(profile_id: String),
+    "save_follow" => personal::save_follow(follow: personal::Follow),
+    "delete_follow" => personal::delete_follow(follow: personal::Follow),
+    "list_subscription_deliveries" => personal::list_subscription_deliveries(profile_id: String),
+    "save_subscription_delivery" => personal::save_subscription_delivery(d: personal::SubscriptionDeliveryTarget),
+    "delete_subscription_delivery" => personal::delete_subscription_delivery(profile_id: String, event_type: String, target_kind: String, target_id: String),
     "get_dashboard_preferences" => personal::get_dashboard_preferences_http(profile_id: String),
     "set_dashboard_preferences" => personal::set_dashboard_preferences_http(preferences: personal::DashboardPreferences),
+    "get_calendar_options" => personal::get_calendar_options_http(profile_id: String),
+    "set_calendar_options" => personal::set_calendar_options_http(options: personal::CalendarOptions),
     "delete_board" => issues::delete_board(id: String),
     "delete_board_column" => issues::delete_board_column(id: String),
     "delete_checklist" => issues::delete_checklist(id: String),
     "delete_checklist_item" => issues::delete_checklist_item(id: String),
     "delete_deploy_target" => pipelines::delete_deploy_target(id: String),
     "delete_issue_status" => issues::delete_issue_status(id: String),
+    "delete_issue_attachment" => issues::delete_issue_attachment(id: String),
     "delete_message" => chat::delete_message(id: String),
     "delete_package_repository" => pipelines::delete_package_repository(id: String),
     "delete_package_version" => pipelines::delete_package_version(id: String),
@@ -4311,12 +4389,16 @@ async fn cmd(
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
     "expand_meeting_occurrences" => meetings::expand_meeting_occurrences_scoped(range_start: i64, range_end: i64, profile_id: String),
     "get_channel" => chat::get_channel(id: String),
+    "private_feed" => chat::private_feed(profile_id: String),
+    "get_channel_notification_preference" => chat::get_channel_notification_preference(profile_id: String, channel_id: String),
+    "save_channel_notification_preference" => chat::save_channel_notification_preference(preference: chat::ChannelNotificationPreference),
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_issue" => issues::get_issue(id: String),
     "get_issue_detail" => issues::get_issue_detail(id: String),
     "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
     "get_profile" => platform::get_profile(id: String),
+    "get_profile_email_status" => platform::get_profile_email_status(profile_id: String),
     "get_project" => platform::get_project(id: String),
     "get_review" => review::get_review(id: String),
     "get_role" => platform::get_role(id: String),
@@ -4337,6 +4419,9 @@ async fn cmd(
     "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
     "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
+    "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
+    "request_membership_edit" => platform::request_membership_edit(membership: platform::TeamMembership, requested_by: String),
+    "decide_membership_edit" => platform::decide_membership_edit(id: String, approver_id: String, approve: bool),
     "list_channel_members" => chat::list_channel_members(channel_id: String),
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
@@ -4351,6 +4436,8 @@ async fn cmd(
     "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
     "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
+    "list_issue_attachments" => issues::list_issue_attachments(issue_id: String),
+    "add_issue_attachment" => issues::add_issue_attachment(issue_id: String, attachment: issues::IssueAttachmentInput),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
     "list_job_artifacts" => pipelines::list_job_artifacts(job_run_id: String),
@@ -4359,7 +4446,21 @@ async fn cmd(
     "list_jobs" => pipelines::list_jobs(),
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
     "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
+    "list_meeting_rooms" => meetings::list_meeting_rooms(),
+    "meeting_availability" => meetings::meeting_availability(starts_at: i64, ends_at: i64, profile_ids: Vec<String>, meeting_id: Option<String>),
+    "attach_document_discussion" => documents::attach_document_discussion(document_id: String, meeting_id: Option<String>),
+    "get_document_discussion" => documents::get_document_discussion(document_id: String),
+    "import_document_folder" => documents::import_document_folder(request: documents::DocumentImportRequest),
+    "search_book_documents" => documents::search_book_documents(book_id: String, query: String),
+    "list_book_access" => documents::list_book_access(book_id: String),
+    "update_book_access" => documents::update_book_access(book_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
+    "save_channel_subscription" => channel_feeds::save_channel_subscription(value: channel_feeds::ChannelSubscription),
+    "list_channel_subscriptions" => channel_feeds::list_channel_subscriptions(profile_id: String),
+    "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
+    "list_locations" => platform::list_locations(),
+    "save_location" => platform::save_location(location: platform::Location),
+    "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
@@ -4371,9 +4472,14 @@ async fn cmd(
     "update_organization" => organization::update_organization(value: organization::Organization),
     "get_org_settings" => organization::get_org_settings(),
     "update_org_settings" => organization::update_org_settings(value: organization::OrgSettings),
+    "list_messenger_contacts" => platform::list_messenger_contacts(profile_id: String),
+    "list_principals" => platform::list_principals(),
     "list_profiles" => platform::list_profiles(),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),
+    "get_merge_policy" => review::get_merge_policy(project_id: String),
+    "save_merge_policy" => review::save_merge_policy(policy: review::MergePolicy),
+    "save_merge_preferences" => review::save_merge_preferences(preferences: review::MergePreferences),
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),
@@ -4391,13 +4497,27 @@ async fn cmd(
     "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
     "remove_review_stack" => review::remove_review_stack(stack_id: String),
     "list_review_discussions" => review::list_review_discussions(review_id: String),
+    "set_suggested_edit_status" => review::set_suggested_edit_status(id: String, status: String, actor_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
+    "review_aggregated_status" => review::review_aggregated_status(review_id: String, profile_id: String),
+    "list_owned_review_files" => review::list_owned_review_files(review_id: String, profile_id: String),
+    "list_review_file_states" => review::list_review_file_states(review_id: String, profile_id: String),
+    "save_review_file_state" => review::save_review_file_state(state: review::ReviewFileState),
     "list_reviews" => review::list_reviews(),
     "list_rights" => platform::list_rights(),
     "list_right_groups" => platform::list_right_groups(),
     "list_role_assignments" => platform::list_role_assignments(profile_id: Option<String>, team_id: Option<String>),
     "list_role_rights" => platform::list_role_rights(role_id: String),
     "list_roles" => platform::list_roles(),
+    "list_project_role_templates" => platform::list_project_role_templates(),
+    "create_project_role_template" => platform::create_project_role_template(input: platform::ProjectRoleTemplateInput),
+    "archive_project_role_template" => platform::archive_project_role_template(id: String, archived: bool),
+    "list_project_roles" => platform::list_project_roles(project_id: Option<String>),
+    "create_project_role" => platform::create_project_role(input: platform::ProjectRoleInput),
+    "archive_project_role" => platform::archive_project_role(id: String, archived: bool),
+    "list_project_team_roles" => platform::list_project_team_roles(project_id: Option<String>),
+    "assign_project_team_role" => platform::assign_project_team_role(project_id: String, team_id: String, project_role_id: String),
+    "remove_project_team_role" => platform::remove_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
     "list_sprints" => issues::list_sprints(board_id: Option<String>),
     "list_app_installs" => applications::list_app_installs(),
@@ -4420,7 +4540,7 @@ async fn cmd(
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
-    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>),
+    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>, target_profile_id: Option<String>, target_location: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
     "list_calendars" => calendar_feeds::list_calendars(profile_id: String),
     "save_calendar" => calendar_feeds::save_calendar(input: calendar_feeds::CalendarInput),
@@ -4458,6 +4578,7 @@ async fn cmd(
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
+    "save_messenger_contact" => platform::save_messenger_contact(value: platform::MessengerContact),
     "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
     "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
@@ -4471,6 +4592,7 @@ async fn cmd(
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
+    "set_profile_email_status" => platform::set_profile_email_status(value: platform::ProfileEmailStatus),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
@@ -4590,7 +4712,7 @@ fn bootstrap() {
             p
         });
         c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('profile-admin','admin','Administrator',unixepoch())",[]).unwrap();
-        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin','GlobalAdmin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
     }
 }
 /// Background delivery ticker configuration, read from the environment.
@@ -4736,8 +4858,19 @@ async fn main() {
                 .put(caldav_put_event)
                 .delete(caldav_delete_event),
         )
-        .route("/api/rooms/{room}", get(public_room))
+        .route("/api/capabilities", get(capabilities))
+        .route("/api/auth/mobile-pairings", post(create_mobile_pairing))
+        .route(
+            "/api/auth/mobile-pairings/consume",
+            post(consume_mobile_pairing),
+        )
         .route("/api/auth/login", post(login))
+        .route("/api/auth/register", post(register))
+        .route("/api/domains", get(domains).post(save_domain))
+        .route(
+            "/api/domains/{domain}",
+            axum::routing::delete(delete_domain),
+        )
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
@@ -4748,9 +4881,6 @@ async fn main() {
         .route("/api/documents/files/{document_id}", get(document_download))
         .route("/api/app/me", get(app_me))
         .route("/api/app/projects", get(app_projects))
-        .route("/api/app/rooms", get(app_list_rooms).post(app_create_room))
-        .route("/api/app/rooms/{room_id}", get(app_get_room))
-        .route("/api/app/rooms/{room_id}/join", post(app_join_room))
         .route(
             "/api/app/projects/{project_id}/issues",
             post(app_create_issue),
@@ -5707,92 +5837,6 @@ mod tests {
         assert_eq!(
             invalid.headers()[header::WWW_AUTHENTICATE],
             "Bearer error=\"invalid_token\""
-        );
-    }
-
-    #[tokio::test]
-    async fn app_room_api_requires_room_scope_and_project_rights_before_join() {
-        let _serial = test_lock();
-        setup();
-        platform::seed_rights().unwrap();
-        let c = db::conn().unwrap();
-        c.execute_batch("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-room','Room App','Application','client-room',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('room-project','Rooms','ROOM','pa',1); INSERT INTO channels(id,content_type,name,project_id) VALUES('room-channel','entity-bound','Rooms','room-project'); INSERT INTO meetings(id,title,starts_at,ends_at,channel_id,video_provider,video_status,access_level) VALUES('room-live','Live',1,2,'room-channel','native','scheduled','PUBLIC'),('room-ended','Ended',1,2,'room-channel','native','ended','PUBLIC'),('room-archived','Archived',1,2,'room-channel','native','scheduled','PUBLIC'); UPDATE meetings SET archived=1 WHERE id='room-archived';").unwrap();
-        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at,video_provider,video_status,access_level) VALUES('room-unscoped','Unscoped',1,2,'native','scheduled','PUBLIC')", []).unwrap();
-        drop(c);
-        let secret = applications::rotate_app_secret("app-room".into()).unwrap();
-        let mint = |scope: &str| {
-            applications::issue_app_token(
-                "client-room".into(),
-                secret.client_secret.clone(),
-                Some(scope.into()),
-                Some(60),
-            )
-            .unwrap()
-            .access_token
-            .unwrap()
-        };
-        // Generic read is never a room-join capability.
-        assert_eq!(
-            app_join_room(bearer(&mint("read")), Path("room-live".into()))
-                .await
-                .unwrap_err()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        let join = mint("rooms:join");
-        // A declared/issued scope is still insufficient without the dedicated stage-2 grant.
-        assert_eq!(
-            app_join_room(bearer(&join), Path("room-live".into()))
-                .await
-                .unwrap_err()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        app_rights::update_authorized_rights(
-            "app-room".into(),
-            "project:room-project".into(),
-            vec!["Project.JoinMeetings".into()],
-            None,
-            Some("test".into()),
-        )
-        .unwrap();
-        // Lifecycle and archival both fail before a non-admin LiveKit token can be minted.
-        assert_eq!(
-            app_join_room(bearer(&join), Path("room-ended".into()))
-                .await
-                .unwrap_err()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            app_join_room(bearer(&join), Path("room-archived".into()))
-                .await
-                .unwrap_err()
-                .status(),
-            StatusCode::NOT_FOUND
-        );
-        let list = mint("rooms:list");
-        let rooms = app_list_rooms(bearer(&list)).await.unwrap().0;
-        assert!(
-            rooms.is_empty(),
-            "join authority must not imply list authority"
-        );
-        app_rights::update_authorized_rights(
-            "app-room".into(),
-            "project:room-project".into(),
-            vec!["Project.ViewMeetings".into(), "Project.JoinMeetings".into()],
-            None,
-            Some("test".into()),
-        )
-        .unwrap();
-        let rooms = app_list_rooms(bearer(&list)).await.unwrap().0;
-        assert_eq!(
-            rooms
-                .iter()
-                .map(|room| room.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["room-live", "room-ended"],
-            "channel-less rooms are skipped; they cannot poison an authorized list"
         );
     }
 
@@ -8996,12 +9040,6 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "plain http off localhost stays out: {value}"
         );
-    }
-
-    #[tokio::test]
-    async fn normal_room_http_join_fails_closed_without_a_bearer() {
-        let response = public_room(Path("normal-room".into()), HeaderMap::new()).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     /// Without a session there is no resource owner to consent.
