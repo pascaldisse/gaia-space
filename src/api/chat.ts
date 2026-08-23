@@ -45,6 +45,7 @@ export type AttachmentUploadState = "loading" | "uploading" | "completed" | "fai
 export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string; upload_state: AttachmentUploadState; error: string | null };
 export type NewMessageAttachment = Omit<MessageAttachment, "message_id" | "upload_state" | "error"> & { upload_state?: AttachmentUploadState };
 export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; };
+export type MentionView = MessageView & { channel_name: string | null; notification_id: string; read: boolean };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
 // command (not owned by this lane; only invoked, never redefined here).
@@ -94,7 +95,16 @@ export const chatApi = {
   setMessageAttachmentState: (messageId: string, id: string, state: AttachmentUploadState, error?: string | null) =>
     invoke<MessageAttachment>("set_message_attachment_state", { messageId, id, state, error: error ?? null }),
   removeMessageAttachment: (messageId: string, id: string) => invoke<void>("remove_message_attachment", { messageId, id }),
-  updateMessage: (id: string, text: string) => invoke<MessageView>("update_message", { id, text }),
+  // `mentionIds` omitted (null) means "leave the mentions alone"; an array replaces them
+  // wholesale, so removing a name from the text also removes the notification.
+  updateMessage: (id: string, text: string, mentionIds?: string[] | null) =>
+    invoke<MessageView>("update_message", { id, text, mentionIds: mentionIds ?? null }),
+
+  // mentions inbox / badge (KB §04: MentionsFolderVM, getTotalUnreadMentions)
+  listMentionsForProfile: (profileId: string, unreadOnly?: boolean) =>
+    invoke<MentionView[]>("list_mentions_for_profile", { profileId, unreadOnly: unreadOnly ?? null }),
+  countUnreadMentions: (profileId: string) =>
+    invoke<number>("count_unread_mentions", { profileId }),
   deleteMessage: (id: string) => invoke<void>("delete_message", { id }),
 
   // reactions

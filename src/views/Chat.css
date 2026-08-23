@@ -370,3 +370,15 @@
 .attachment-card img, .attachment-card video { max-width: 260px; max-height: 180px; border-radius: 5px; border: 1px solid #33405e; }
 .attachment-card audio { max-width: 260px; }
 .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* mentions: the badge counts only unread alerts, the panel lists the inbox */
+.mention-badge { margin-left: .4em; padding: 0 .4em; border-radius: 999px; background: #7a4dd6; color: #fff; font-size: .75em; }
+.mentions-panel { display: grid; gap: .25em; max-height: 40vh; overflow: auto; padding: .5em; border-bottom: 1px solid #22304d; background: #0d1420; }
+.mention-item { display: grid; grid-template-columns: auto auto 1fr auto; gap: .5em; align-items: baseline; text-align: left; background: transparent; border: 0; color: var(--text); padding: .35em .5em; border-radius: 4px; }
+.mention-item:hover { background: #243050; }
+.mention-item.unread { background: #1b1630; }
+.mention-item .mention-where { color: #8fa6d0; }
+.mention-item .mention-who { font-weight: 600; }
+.mention-item .mention-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-item .mention-when { color: #6c7c99; font-size: .85em; }
+.message-text.mentions-me { border-left: 2px solid #7a4dd6; padding-left: .5em; }

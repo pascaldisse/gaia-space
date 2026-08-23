@@ -10,13 +10,16 @@ import {
   type Channel,
   type ChannelContentType,
   type ChannelSummary,
+  type MentionView,
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
 } from "../api/chat";
 import { applicationsApi } from "../api/applications";
+import { personalApi } from "../api/personal";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
+import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf } from "../chatMentions";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -138,9 +141,27 @@ export default function Chat() {
       refetchMessages();
       if (threadRootId()) refetchThread();
       refetchMembers();
+      refetchMentions();
     }, ms);
     onCleanup(() => clearInterval(t));
   });
+
+  // ---- mentions inbox (KB §04: MentionsFolderVM / getTotalUnreadMentions) ----
+  const [mentions, { refetch: refetchMentions }] = createResource(actingProfileId, (id) =>
+    id ? chatApi.listMentionsForProfile(id) : Promise.resolve([] as MentionView[]),
+  );
+  const unreadMentions = () => (mentions() ?? []).filter((mention) => !mention.read);
+  const [showMentions, setShowMentions] = createSignal(false);
+  // Opening a mention is reading it: jump to the message's channel and retire the alert.
+  async function openMention(mention: MentionView) {
+    setActiveChannelId(mention.channel_id);
+    if (mention.thread_of) setThreadRootId(mention.thread_of);
+    setShowMentions(false);
+    if (!mention.read) {
+      try { await personalApi.markRead(mention.notification_id); } catch (e) { fail(e); }
+      refetchMentions();
+    }
+  }
 
   // ---- composing ----
   // A pending attachment carries its own lifecycle: one bad file (too large, unreadable,
@@ -151,17 +172,23 @@ export default function Chat() {
   const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
   const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
   const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
-  const mentionQuery = (text: string) => text.match(/(?:^|\s)@([^\s@]*)$/)?.[1].toLocaleLowerCase() ?? null;
-  const mentionCandidates = (text: string) => {
-    const query = mentionQuery(text);
-    if (query === null) return [];
-    return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && [profile.display_name, profile.username].some((value) => value.toLocaleLowerCase().includes(query))).slice(0, 5);
+  // Only someone who can read the channel is offered: a private channel must not leak
+  // its non-members a notification (the backend drops such a mention anyway, so an
+  // unrestricted list would just promise a delivery that never happens).
+  const mentionable = () => {
+    const ids = memberIds();
+    const open = activeChannel()?.content_type;
+    const everyone = open === "public" || open === "entity-bound";
+    return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && (everyone || ids.has(profile.id)));
   };
-  function selectMention(kind: "draft" | "thread", profile: ProfileLite) {
-    const text = kind === "draft" ? draft() : threadDraft();
-    const replace = text.replace(/(?:^|\s)@([^\s@]*)$/, (match) => match.startsWith(" ") ? ` @${profile.display_name} ` : `@${profile.display_name} `);
-    if (kind === "draft") { setDraft(replace); setDraftMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
-    else { setThreadDraft(replace); setThreadMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
+  const mentionCandidates = (text: string) => candidatesFor(text, mentionable());
+  function selectMention(kind: "draft" | "thread" | "edit", profile: ProfileLite) {
+    const text = kind === "draft" ? draft() : kind === "thread" ? threadDraft() : editText();
+    const replace = insertMention(text, profile);
+    const add = (ids: string[]) => ids.includes(profile.id) ? ids : [...ids, profile.id];
+    if (kind === "draft") { setDraft(replace); setDraftMentionIds(add); }
+    else if (kind === "thread") { setThreadDraft(replace); setThreadMentionIds(add); }
+    else { setEditText(replace); setEditMentionIds(add); }
   }
   // ---- slash commands: asked of each bot's endpoint, never read from a local catalog ----
   const [chatbots] = createResource(async () => {
@@ -344,15 +371,22 @@ export default function Chat() {
   // ---- edit / delete ----
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editText, setEditText] = createSignal("");
+  // An edit carries the mention list it started with, so saving is a diff against the
+  // stored one: a name deleted from the text loses its mention, the rest stay put.
+  const [editMentionIds, setEditMentionIds] = createSignal<string[]>([]);
   function startEdit(m: MessageView) {
     setEditingId(m.id);
     setEditText(m.text);
+    setEditMentionIds(m.mention_ids ?? []);
   }
+  // A mention only survives while its name is still written in the text; dropping the
+  // "@name" is how a user un-mentions someone, and the row must follow the text.
+  const survivingMentions = (text: string, ids: string[]) => survivorsOf(text, ids, profiles() ?? []);
   async function saveEdit() {
     const id = editingId();
     if (!id) return;
     try {
-      await chatApi.updateMessage(id, editText());
+      await chatApi.updateMessage(id, editText(), survivingMentions(editText(), editMentionIds()));
       setEditingId(null);
       refetchMessages();
       refetchThread();
@@ -468,7 +502,7 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
-              <div class="message-text">{m.text}</div>
+              <div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
@@ -483,6 +517,7 @@ export default function Chat() {
           }
         >
           <div class="edit-box">
+            <Show when={mentionCandidates(editText()).length}><div class="mention-menu"><For each={mentionCandidates(editText())}>{(profile) => <button type="button" onClick={() => selectMention("edit", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <textarea value={editText()} onInput={(e) => setEditText(e.currentTarget.value)} />
             <div class="row-actions">
               <button class="ghost small" onClick={() => setEditingId(null)}>
@@ -656,11 +691,32 @@ export default function Chat() {
             <span class="branch-chip">{activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">
+            <button class="ghost small" onClick={() => setShowMentions((v) => !v)}>
+              mentions
+              <Show when={unreadMentions().length}>
+                <span class="mention-badge">{unreadMentions().length}</span>
+              </Show>
+            </button>
             <button class="ghost small" onClick={() => setShowMembers((v) => !v)}>
               members ({members()?.length ?? 0})
             </button>
           </div>
         </header>
+
+        <Show when={showMentions()}>
+          <div class="mentions-panel">
+            <Show when={(mentions() ?? []).length} fallback={<p class="hint pad">Nobody has mentioned you yet.</p>}>
+              <For each={mentions()}>{(mention) => (
+                <button type="button" class={`mention-item${mention.read ? "" : " unread"}`} onClick={() => openMention(mention)}>
+                  <span class="mention-where">{mention.channel_name ?? mention.channel_id}</span>
+                  <span class="mention-who">{profileName(mention.author_id)}</span>
+                  <span class="mention-what">{mention.text}</span>
+                  <span class="mention-when">{when(mention.created_at)}</span>
+                </button>
+              )}</For>
+            </Show>
+          </div>
+        </Show>
 
         <div class="message-pane">
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
