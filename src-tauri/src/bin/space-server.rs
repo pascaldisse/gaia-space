@@ -2408,7 +2408,12 @@ fn authorize_command(
                 if matches!(name, "save_document" | "restore_doc_version") {
                     put_arg(body, "actor", json!(user.profile_id));
                 }
-                Ok(())
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::EditDocument,
+                    "document",
+                    Some(&id),
+                )
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document write denied"))
             }
@@ -2622,6 +2627,29 @@ fn authorize_command(
                         "only the author can change this message",
                     ));
                 }
+            }
+            if matches!(name, "create_channel" | "create_entity_channel") {
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::ManageChannel,
+                    "global",
+                    None,
+                )?;
+            }
+            if matches!(name, "update_channel" | "add_channel_member" | "remove_channel_member") {
+                let channel_id: String = if name == "update_channel" {
+                    body.get("channel")
+                        .and_then(|channel| arg(channel, "id").ok())
+                        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid channel"))?
+                } else {
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+                };
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::ManageChannel,
+                    "channel",
+                    Some(&channel_id),
+                )?;
             }
             if name == "create_channel" {
                 let supplied: Vec<String> = arg(body, "member_ids").unwrap_or_default();
