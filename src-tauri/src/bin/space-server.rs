@@ -1635,6 +1635,7 @@ fn chat_can_manage(profile_id: &str, channel_id: &str) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CommandPolicy {
     Session,
+    MessageAttachmentWrite,
     PackageRepositoryRead,
     PackageRepositoryWrite,
     PackageRepositoryAdmin,
@@ -1769,11 +1770,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_deploy_target"
         | "delete_issue_status"
         | "delete_message" => CommandPolicy::Session,
-        // Attachment lifecycle rides the message it belongs to. Per-message authorship
-        // checks are TODO (P1, tracked with the reader-race + atomic-batch work); today
-        // these require a session exactly like `create_message`/`delete_message`.
+        // Attachment lifecycle rides the message it belongs to: a session alone is not
+        // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
-            CommandPolicy::Session
+            CommandPolicy::MessageAttachmentWrite
         }
         "delete_planning_tag"
         | "delete_quality_gate_rule"
@@ -2663,6 +2663,22 @@ fn authorize_command(
             }
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
+        }
+        CommandPolicy::MessageAttachmentWrite => {
+            // The message id is the scope of the whole attachment family; without it an
+            // attachment id alone would be a capability over every message in the space.
+            let message_id: String =
+                arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if chat::message_attachment_writable_by(&message_id, &user.profile_id, user.role == "admin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the message author or a channel administrator can change its attachments",
+                ))
+            }
         }
         CommandPolicy::TodoOwnerWrite => {
             let todo_id: Option<String> = if name == "update_todo" {
@@ -4020,8 +4036,8 @@ async fn cmd(
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
     "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_message_attachment" => chat::add_message_attachment(message_id: String, attachment: chat::NewMessageAttachment),
-    "set_message_attachment_state" => chat::set_message_attachment_state(id: String, state: String, error: Option<String>),
-    "remove_message_attachment" => chat::remove_message_attachment(id: String),
+    "set_message_attachment_state" => chat::set_message_attachment_state(message_id: String, id: String, state: String, error: Option<String>),
+    "remove_message_attachment" => chat::remove_message_attachment(message_id: String, id: String),
     "add_reaction" => chat::add_reaction(message_id: String, profile_id: String, emoji: String),
     "add_review_participant" => review::add_review_participant(participant: review::ReviewParticipant),
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
@@ -4742,6 +4758,78 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
+    }
+
+    #[tokio::test]
+    async fn message_attachment_writes_answer_to_the_message_author() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('ch-att','public','Files',0)", []).unwrap();
+        // bob is a plain member of the channel; dora administers it
+        c.execute("INSERT INTO channel_members(channel_id,profile_id,administrator) VALUES('ch-att','pa',0),('ch-att','pb',0),('ch-att','pd',1)", []).unwrap();
+        c.execute("INSERT INTO messages(id,channel_id,author_id,text,created_at,archived) VALUES('m-att','ch-att','pa','alice writes',1,0)", []).unwrap();
+        drop(c);
+
+        let payload = |id: &str| {
+            json!({
+                "message_id": "m-att",
+                "attachment": {
+                    "id": id,
+                    "file_name": "f.txt",
+                    "mime_type": "text/plain",
+                    "byte_length": 2,
+                    "data_url": "data:,hi",
+                    "upload_state": "uploading"
+                }
+            })
+        };
+
+        // a session is no longer a licence to write on someone else's message
+        let (status, _) = call(cookie("tb"), "add_message_attachment", payload("att-bob")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = call(cookie("ta"), "add_message_attachment", payload("att-alice")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // the state machine is enforced across the wire too
+        let (status, _) = call(
+            cookie("tb"),
+            "set_message_attachment_state",
+            json!({"message_id": "m-att", "id": "att-alice", "state": "completed"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body) = call(
+            cookie("ta"),
+            "set_message_attachment_state",
+            json!({"message_id": "m-att", "id": "att-alice", "state": "completed"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, body) = call(
+            cookie("ta"),
+            "set_message_attachment_state",
+            json!({"message_id": "m-att", "id": "att-alice", "state": "uploading"}),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK, "completed must not reopen: {body}");
+
+        // the channel administrator may clean up; the plain member may not
+        let (status, _) = call(
+            cookie("tb"),
+            "remove_message_attachment",
+            json!({"message_id": "m-att", "id": "att-alice"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body) = call(
+            cookie("td"),
+            "remove_message_attachment",
+            json!({"message_id": "m-att", "id": "att-alice"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
     }
 
     #[tokio::test]
