@@ -207,6 +207,11 @@ pub fn update_profile(profile: Profile) -> Result<()> {
         ],
     )
     .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE principals SET label=?2 WHERE kind='profile' AND profile_id=?1",
+        params![profile.id, profile.display_name],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

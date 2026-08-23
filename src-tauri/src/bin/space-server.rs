@@ -1779,7 +1779,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "emit_notification"
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
-        "get_channel" | "get_channel_by_entity" => CommandPolicy::Session,
+        "get_channel" | "get_channel_by_entity" | "get_profile_email_status" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
@@ -1814,6 +1814,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_package_repositories"
         | "list_pipeline_scripts"
         | "list_planning_tags"
+        | "list_messenger_contacts"
+        | "list_principals"
         | "list_profiles" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
@@ -1908,6 +1910,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "save_board_column" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
+        | "save_messenger_contact"
         | "save_planning_tag"
         | "save_subscription_setting"
         | "save_subscription_scope"
@@ -1920,6 +1923,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "set_issue_tags" => CommandPolicy::Session,
         "set_meeting_participant_status" => CommandPolicy::MeetingParticipantWrite,
         "set_participant_state"
+        | "set_profile_email_status"
         | "set_role_rights"
         | "toggle_checklist_item"
         | "transition_deployment"
@@ -4090,6 +4094,7 @@ async fn cmd(
     "get_issue_detail" => issues::get_issue_detail(id: String),
     "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
     "get_profile" => platform::get_profile(id: String),
+    "get_profile_email_status" => platform::get_profile_email_status(profile_id: String),
     "get_project" => platform::get_project(id: String),
     "get_review" => review::get_review(id: String),
     "get_role" => platform::get_role(id: String),
@@ -4144,6 +4149,8 @@ async fn cmd(
     "update_organization" => organization::update_organization(value: organization::Organization),
     "get_org_settings" => organization::get_org_settings(),
     "update_org_settings" => organization::update_org_settings(value: organization::OrgSettings),
+    "list_messenger_contacts" => platform::list_messenger_contacts(profile_id: String),
+    "list_principals" => platform::list_principals(),
     "list_profiles" => platform::list_profiles(),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),
@@ -4231,6 +4238,7 @@ async fn cmd(
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
+    "save_messenger_contact" => platform::save_messenger_contact(value: platform::MessengerContact),
     "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
     "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
@@ -4244,6 +4252,7 @@ async fn cmd(
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
+    "set_profile_email_status" => platform::set_profile_email_status(value: platform::ProfileEmailStatus),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
     "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
