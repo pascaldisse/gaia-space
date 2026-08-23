@@ -10,13 +10,17 @@ import {
   type Channel,
   type ChannelContentType,
   type ChannelSummary,
+  type MentionView,
   type ChannelNotificationPreference,
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
 } from "../api/chat";
 import { applicationsApi } from "../api/applications";
+import { personalApi } from "../api/personal";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
+import { canSendDraft, uploadableAttachments } from "../chatAttachments";
+import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf } from "../chatMentions";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -142,28 +146,54 @@ export default function Chat() {
       refetchMessages();
       if (threadRootId()) refetchThread();
       refetchMembers();
+      refetchMentions();
     }, ms);
     onCleanup(() => clearInterval(t));
   });
 
+  // ---- mentions inbox (KB §04: MentionsFolderVM / getTotalUnreadMentions) ----
+  const [mentions, { refetch: refetchMentions }] = createResource(actingProfileId, (id) =>
+    id ? chatApi.listMentionsForProfile(id) : Promise.resolve([] as MentionView[]),
+  );
+  const unreadMentions = () => (mentions() ?? []).filter((mention) => !mention.read);
+  const [showMentions, setShowMentions] = createSignal(false);
+  // Opening a mention is reading it: jump to the message's channel and retire the alert.
+  async function openMention(mention: MentionView) {
+    setActiveChannelId(mention.channel_id);
+    if (mention.thread_of) setThreadRootId(mention.thread_of);
+    setShowMentions(false);
+    if (!mention.read) {
+      try { await personalApi.markRead(mention.notification_id); } catch (e) { fail(e); }
+      refetchMentions();
+    }
+  }
+
   // ---- composing ----
-  type PendingAttachment = NewMessageAttachment;
+  // A pending attachment carries its own lifecycle: one bad file (too large, unreadable,
+  // rejected by the backend) must not discard the ones that are fine.
+  type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
   const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
   const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
   const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
-  const mentionQuery = (text: string) => text.match(/(?:^|\s)@([^\s@]*)$/)?.[1].toLocaleLowerCase() ?? null;
-  const mentionCandidates = (text: string) => {
-    const query = mentionQuery(text);
-    if (query === null) return [];
-    return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && [profile.display_name, profile.username].some((value) => value.toLocaleLowerCase().includes(query))).slice(0, 5);
+  // Only someone who can read the channel is offered: a private channel must not leak
+  // its non-members a notification (the backend drops such a mention anyway, so an
+  // unrestricted list would just promise a delivery that never happens).
+  const mentionable = () => {
+    const ids = memberIds();
+    const open = activeChannel()?.content_type;
+    const everyone = open === "public" || open === "entity-bound";
+    return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && (everyone || ids.has(profile.id)));
   };
-  function selectMention(kind: "draft" | "thread", profile: ProfileLite) {
-    const text = kind === "draft" ? draft() : threadDraft();
-    const replace = text.replace(/(?:^|\s)@([^\s@]*)$/, (match) => match.startsWith(" ") ? ` @${profile.display_name} ` : `@${profile.display_name} `);
-    if (kind === "draft") { setDraft(replace); setDraftMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
-    else { setThreadDraft(replace); setThreadMentionIds((ids) => ids.includes(profile.id) ? ids : [...ids, profile.id]); }
+  const mentionCandidates = (text: string) => candidatesFor(text, mentionable());
+  function selectMention(kind: "draft" | "thread" | "edit", profile: ProfileLite) {
+    const text = kind === "draft" ? draft() : kind === "thread" ? threadDraft() : editText();
+    const replace = insertMention(text, profile);
+    const add = (ids: string[]) => ids.includes(profile.id) ? ids : [...ids, profile.id];
+    if (kind === "draft") { setDraft(replace); setDraftMentionIds(add); }
+    else if (kind === "thread") { setThreadDraft(replace); setThreadMentionIds(add); }
+    else { setEditText(replace); setEditMentionIds(add); }
   }
   // ---- slash commands: asked of each bot's endpoint, never read from a local catalog ----
   const [chatbots] = createResource(async () => {
@@ -201,24 +231,86 @@ export default function Chat() {
 
   async function queueAttachments(files: FileList | null, setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void) {
     if (!files) return;
-    try {
-      const loaded = await Promise.all([...files].map((file) => new Promise<PendingAttachment>((resolve, reject) => {
-        if (file.size > 10 * 1024 * 1024) { reject(new Error(`${file.name} exceeds the 10 MiB attachment limit`)); return; }
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
-        reader.onload = () => resolve({ id: newId("attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url: String(reader.result) });
-        reader.readAsDataURL(file);
-      })));
-      setAttachments((items) => [...items, ...loaded]);
-    } catch (e) { fail(e); }
+    // settled, not all-or-nothing: an oversized file is reported as its own failed chip
+    const loaded = await Promise.all([...files].map((file) => new Promise<PendingAttachment>((resolve) => {
+      const base = { id: newId("attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size };
+      if (file.size > 10 * 1024 * 1024) { resolve({ ...base, data_url: "", state: "failed", error: `${file.name} exceeds the 10 MiB attachment limit` }); return; }
+      const reader = new FileReader();
+      reader.onerror = () => resolve({ ...base, data_url: "", state: "failed", error: reader.error?.message ?? `Could not read ${file.name}` });
+      reader.onload = () => resolve({ ...base, data_url: String(reader.result), state: "loading" });
+      reader.readAsDataURL(file);
+    })));
+    setAttachments((items) => [...items, ...loaded]);
+    const rejected = loaded.filter((item) => item.state === "failed");
+    if (rejected.length) fail(new Error(rejected.map((item) => item.error).join("; ")));
   }
-  async function saveAttachments(messageId: string, attachments: PendingAttachment[]) { await Promise.all(attachments.map((attachment) => chatApi.addMessageAttachment(messageId, attachment))); }
+
+  /// Stores every attachment the backend accepts and leaves the rest in the composer,
+  /// marked failed, so a retry reuses the same message instead of posting a duplicate.
+  async function saveAttachments(
+    messageId: string,
+    attachments: PendingAttachment[],
+    setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void,
+  ): Promise<boolean> {
+    // Only a readable payload can be uploaded; a chip that never produced one stays in
+    // the composer as its own failure instead of becoming an empty backend row.
+    const uploadable = uploadableAttachments(attachments);
+    if (!uploadable.length) return attachments.length === 0;
+    setAttachments((items) => items.map((item) => uploadable.some((u) => u.id === item.id) ? { ...item, state: "uploading", error: undefined } : item));
+    const results = await Promise.all(uploadable.map(async (attachment) => {
+      try {
+        // The row is written before the upload is claimed done, so a reload in the middle
+        // still shows the attachment as uploading/failed with its retry, rather than
+        // losing it. `completed` is asserted only once the payload is actually stored.
+        await chatApi.addMessageAttachment(messageId, { id: attachment.id, file_name: attachment.file_name, mime_type: attachment.mime_type, byte_length: attachment.byte_length, data_url: attachment.data_url, upload_state: "uploading" });
+        await chatApi.setMessageAttachmentState(messageId, attachment.id, "completed");
+        return { id: attachment.id, error: null as string | null };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        // If the row exists, carry the failure into the database so the retry survives a
+        // reload; if the insert itself failed there is nothing to mark.
+        await chatApi.setMessageAttachmentState(messageId, attachment.id, "failed", message).catch(() => {});
+        return { id: attachment.id, error: message };
+      }
+    }));
+    const failures = results.filter((r) => r.error);
+    setAttachments((items) => items
+      .filter((item) => failures.some((f) => f.id === item.id) || !uploadable.some((u) => u.id === item.id))
+      .map((item) => {
+        const failure = failures.find((f) => f.id === item.id);
+        return failure ? { ...item, state: "failed" as const, error: failure.error ?? "upload failed" } : item;
+      }));
+    if (failures.length) fail(new Error(failures.map((f) => f.error).join("; ")));
+    return failures.length === 0;
+  }
+
+  // The message id of a post whose attachments partly failed: a retry attaches to it
+  // rather than creating a second message.
+  const [draftMessageId, setDraftMessageId] = createSignal<string | null>(null);
+  const [threadMessageId, setThreadMessageId] = createSignal<string | null>(null);
+  async function retryDraftAttachments() {
+    const id = draftMessageId();
+    if (!id) return;
+    if (await saveAttachments(id, draftAttachments().filter((a) => a.data_url), setDraftAttachments)) setDraftMessageId(null);
+    refetchMessages();
+  }
+  async function retryThreadAttachments() {
+    const id = threadMessageId();
+    if (!id) return;
+    if (await saveAttachments(id, threadAttachments().filter((a) => a.data_url), setThreadAttachments)) setThreadMessageId(null);
+    refetchThread(); refetchMessages();
+  }
   async function sendMessage() {
     const ch = activeChannelId();
     const p = actingProfileId();
     const text = draft().trim();
     const attachments = draftAttachments();
-    if (!ch || !p || (!text && !attachments.length)) return;
+    // a half-posted message is finished, never duplicated
+    if (draftMessageId()) { await retryDraftAttachments(); return; }
+    if (!ch || !p) return;
+    // Chips that never produced a payload are not content: an empty text carrying only
+    // failed files must not post an empty message.
+    if (!canSendDraft(text, attachments)) return;
     try {
       const message = await chatApi.createMessage({
         id: newId("msg"),
@@ -231,8 +323,9 @@ export default function Chat() {
         archived: false,
         mention_ids: draftMentionIds(),
       });
-      await saveAttachments(message.id, attachments);
-      setDraft(""); setDraftAttachments([]); setDraftMentionIds([]);
+      const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
+      setDraftMessageId(ok ? null : message.id);
+      setDraft(""); setDraftMentionIds([]);
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -246,7 +339,9 @@ export default function Chat() {
     const p = actingProfileId();
     const text = threadDraft().trim();
     const attachments = threadAttachments();
-    if (!root || !p || (!text && !attachments.length)) return;
+    if (threadMessageId()) { await retryThreadAttachments(); return; }
+    if (!root || !p) return;
+    if (!canSendDraft(text, attachments)) return;
     try {
       const message = await chatApi.createMessage({
         id: newId("msg"),
@@ -259,8 +354,9 @@ export default function Chat() {
         archived: false,
         mention_ids: threadMentionIds(),
       });
-      await saveAttachments(message.id, attachments);
-      setThreadDraft(""); setThreadAttachments([]); setThreadMentionIds([]);
+      const ok = await saveAttachments(message.id, attachments, setThreadAttachments);
+      setThreadMessageId(ok ? null : message.id);
+      setThreadDraft(""); setThreadMentionIds([]);
       refetchThread();
       refetchMessages();
       refetchChannels();
@@ -269,18 +365,33 @@ export default function Chat() {
     }
   }
 
+  async function deleteAttachment(messageId: string, id: string) {
+    try {
+      await chatApi.removeMessageAttachment(messageId, id);
+      refetchMessages();
+      refetchThread();
+    } catch (e) { fail(e); }
+  }
+
   // ---- edit / delete ----
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editText, setEditText] = createSignal("");
+  // An edit carries the mention list it started with, so saving is a diff against the
+  // stored one: a name deleted from the text loses its mention, the rest stay put.
+  const [editMentionIds, setEditMentionIds] = createSignal<string[]>([]);
   function startEdit(m: MessageView) {
     setEditingId(m.id);
     setEditText(m.text);
+    setEditMentionIds(m.mention_ids ?? []);
   }
+  // A mention only survives while its name is still written in the text; dropping the
+  // "@name" is how a user un-mentions someone, and the row must follow the text.
+  const survivingMentions = (text: string, ids: string[]) => survivorsOf(text, ids, profiles() ?? []);
   async function saveEdit() {
     const id = editingId();
     if (!id) return;
     try {
-      await chatApi.updateMessage(id, editText());
+      await chatApi.updateMessage(id, editText(), survivingMentions(editText(), editMentionIds()));
       setEditingId(null);
       refetchMessages();
       refetchThread();
@@ -400,19 +511,24 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
-              <Show when={card()} fallback={<div class="message-text">{m.text}</div>}>
+              <Show when={card()} fallback={<div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>}>
                 {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
               </Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
                   <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
+                  <Show when={attachment.upload_state !== "completed"}>
+                    <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
+                  </Show>
+                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
                 </div>
               )}</For></div></Show>
             </>
           }
         >
           <div class="edit-box">
+            <Show when={mentionCandidates(editText()).length}><div class="mention-menu"><For each={mentionCandidates(editText())}>{(profile) => <button type="button" onClick={() => selectMention("edit", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <textarea value={editText()} onInput={(e) => setEditText(e.currentTarget.value)} />
             <div class="row-actions">
               <button class="ghost small" onClick={() => setEditingId(null)}>
@@ -586,10 +702,31 @@ export default function Chat() {
             <span class="branch-chip">{activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">
+            <button class="ghost small" onClick={() => setShowMentions((v) => !v)}>
+              mentions
+              <Show when={unreadMentions().length}>
+                <span class="mention-badge">{unreadMentions().length}</span>
+              </Show>
+            </button>
             <Show when={notificationPreference()}>{pref => <details class="chat-notification-settings"><summary>Notifications</summary><label><input type="checkbox" checked={pref().email_enabled} onChange={e=>void updateNotificationPreference({email_enabled:e.currentTarget.checked})}/> Email</label><label><input type="checkbox" checked={pref().push_enabled} onChange={e=>void updateNotificationPreference({push_enabled:e.currentTarget.checked})}/> Push</label><label>Threads <select value={pref().thread_scope} onChange={e=>void updateNotificationPreference({thread_scope:e.currentTarget.value as ChannelNotificationPreference["thread_scope"]})}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></details>}</Show>
             <Show when={!activeChannel()?.read_only}><button class="ghost small" onClick={() => setShowMembers((v) => !v)}>members ({members()?.length ?? 0})</button></Show>
           </div>
         </header>
+
+        <Show when={showMentions()}>
+          <div class="mentions-panel">
+            <Show when={(mentions() ?? []).length} fallback={<p class="hint pad">Nobody has mentioned you yet.</p>}>
+              <For each={mentions()}>{(mention) => (
+                <button type="button" class={`mention-item${mention.read ? "" : " unread"}`} onClick={() => openMention(mention)}>
+                  <span class="mention-where">{mention.channel_name ?? mention.channel_id}</span>
+                  <span class="mention-who">{profileName(mention.author_id)}</span>
+                  <span class="mention-what">{mention.text}</span>
+                  <span class="mention-when">{when(mention.created_at)}</span>
+                </button>
+              )}</For>
+            </Show>
+          </div>
+        </Show>
 
         <div class="message-pane">
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
@@ -616,7 +753,17 @@ export default function Chat() {
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
-            <Show when={draftAttachments().length}><div class="pending-attachments"><For each={draftAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
+            <Show when={draftAttachments().length}><div class="pending-attachments">
+              <For each={draftAttachments()}>{(attachment) => (
+                <span class={`attachment-chip state-${attachment.state}`} title={attachment.error ?? attachment.state}>
+                  <Show when={attachment.state === "uploading"}>⏳ </Show><Show when={attachment.state === "failed"}>⚠ </Show>{attachment.file_name}
+                  <Show when={attachment.state === "failed" && attachment.data_url && draftMessageId()}>
+                    <button class="attachment-retry" onClick={retryDraftAttachments}>Retry</button>
+                  </Show>
+                  <button class="attachment-remove" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>×</button>
+                </span>
+              )}</For>
+            </div></Show>
           </div>
         </Show>
       </section>
@@ -697,7 +844,17 @@ export default function Chat() {
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.display_name}</button>}</For></div></Show>
-            <Show when={threadAttachments().length}><div class="pending-attachments"><For each={threadAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setThreadAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
+            <Show when={threadAttachments().length}><div class="pending-attachments">
+              <For each={threadAttachments()}>{(attachment) => (
+                <span class={`attachment-chip state-${attachment.state}`} title={attachment.error ?? attachment.state}>
+                  <Show when={attachment.state === "uploading"}>⏳ </Show><Show when={attachment.state === "failed"}>⚠ </Show>{attachment.file_name}
+                  <Show when={attachment.state === "failed" && attachment.data_url && threadMessageId()}>
+                    <button class="attachment-retry" onClick={retryThreadAttachments}>Retry</button>
+                  </Show>
+                  <button class="attachment-remove" onClick={() => setThreadAttachments((items) => items.filter((item) => item.id !== attachment.id))}>×</button>
+                </span>
+              )}</For>
+            </div></Show>
           </div>
         </Show>
       </aside>

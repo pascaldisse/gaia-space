@@ -356,7 +356,12 @@
 .attachment-button:hover { color: #5fe6d4; }
 .attachment-button input { display: none; }
 .pending-attachments { width: 100%; display: flex; gap: .3em; flex-wrap: wrap; }
-.attachment-chip { border: 1px solid #33405e; border-radius: 10px; background: #141d30; color: var(--text-muted); font-size: .78em; }
+.attachment-chip { display: inline-flex; align-items: center; gap: .3em; padding: .1em .4em; border: 1px solid #33405e; border-radius: 10px; background: #141d30; color: var(--text-muted); font-size: .78em; }
+.attachment-chip.state-uploading { border-color: #4b6ea9; }
+.attachment-chip.state-failed { border-color: #b4544a; color: #f0a49c; }
+.attachment-retry, .attachment-remove { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 1em; padding: 0 .2em; }
+.attachment-state { font-size: .75em; }
+.attachment-state.state-failed { color: #f0a49c; }
 .mention-menu { position: absolute; bottom: calc(100% - .25em); left: .9em; z-index: 3; display: grid; min-width: 180px; padding: .25em; border: 1px solid #33405e; border-radius: 6px; background: #101827; box-shadow: 0 8px 20px #0008; }
 .mention-menu button { text-align: left; background: transparent; border: 0; color: var(--text); padding: .35em .5em; }
 .mention-menu button:hover { background: #243050; }
@@ -366,5 +371,16 @@
 .attachment-card audio { max-width: 260px; }
 .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* mentions: the badge counts only unread alerts, the panel lists the inbox */
+.mention-badge { margin-left: .4em; padding: 0 .4em; border-radius: 999px; background: #7a4dd6; color: #fff; font-size: .75em; }
+.mentions-panel { display: grid; gap: .25em; max-height: 40vh; overflow: auto; padding: .5em; border-bottom: 1px solid #22304d; background: #0d1420; }
+.mention-item { display: grid; grid-template-columns: auto auto 1fr auto; gap: .5em; align-items: baseline; text-align: left; background: transparent; border: 0; color: var(--text); padding: .35em .5em; border-radius: 4px; }
+.mention-item:hover { background: #243050; }
+.mention-item.unread { background: #1b1630; }
+.mention-item .mention-where { color: #8fa6d0; }
+.mention-item .mention-who { font-weight: 600; }
+.mention-item .mention-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-item .mention-when { color: #6c7c99; font-size: .85em; }
+.message-text.mentions-me { border-left: 2px solid #7a4dd6; padding-left: .5em; }
 .absence-chat-card { display:grid; gap:3px; max-width:360px; padding:10px 12px; border:1px solid var(--line, #29443a); border-left:3px solid #65a879; border-radius:8px; background:var(--surface-2, #18251f); color:var(--text, #e8eee9); }
 .absence-chat-card span,.absence-chat-card small { color:var(--muted, #9dac9f); }

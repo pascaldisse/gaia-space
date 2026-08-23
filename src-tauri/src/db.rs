@@ -621,15 +621,26 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V95)?;
     }
     // V96: organization locations, schedules, equipment catalog, and rooms.
-    if version < 96 { tx.execute_batch(SCHEMA_V96)?; }
+    if version < 96 {
+        tx.execute_batch(SCHEMA_V96)?;
+    }
     // V97: typed absence cards in chat.
     if version < 97 && table_exists(&tx, "messages")? {
-        add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+        add_column_if_missing(
+            &tx,
+            "messages",
+            "content_kind",
+            "TEXT NOT NULL DEFAULT 'text'",
+        )?;
     }
     // V98: profile email status and messenger contacts.
-    if version < 98 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V98)?; }
+    if version < 98 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V98)?;
+    }
     // V99: principals unify people, applications, and external identities.
-    if version < 99 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V99)?; }
+    if version < 99 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V99)?;
+    }
     // V107: KB book grants. Guarded: hand-built legacy fixtures can lack documents.
     if version < 107 && table_exists(&tx, "document_folders")? {
         tx.execute_batch(SCHEMA_V107)?;
@@ -711,18 +722,66 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
     if version < 103 && table_exists(&tx, "user_preferences")? {
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_weekends", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_issues", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_todos", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_declined", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_only", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_start", "INTEGER NOT NULL DEFAULT 9")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_end", "INTEGER NOT NULL DEFAULT 18")?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_weekends",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_issues",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_todos",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_declined",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_only",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_start",
+            "INTEGER NOT NULL DEFAULT 9",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_end",
+            "INTEGER NOT NULL DEFAULT 18",
+        )?;
     }
     // V71: importer runs are durable audit facts. The stored source is the operator-selected
     // path (never its contents); counts make partial imports visible after the toast is gone.
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
+    }
+    // V76: an attachment's upload is a lifecycle, not an instant. A row can exist while its
+    // bytes are still moving (uploading) or after the transfer failed; without a stored state
+    // the client cannot tell a finished attachment from a stalled one after a reload.
+    // Existing rows are complete by construction, hence DEFAULT 'completed'.
+    if version < 76 && table_exists(&tx, "message_attachments")? {
+        add_column_if_missing(
+            &tx,
+            "message_attachments",
+            "upload_state",
+            "TEXT NOT NULL DEFAULT 'completed'",
+        )?;
+        add_column_if_missing(&tx, "message_attachments", "error", "TEXT")?;
     }
     // V100: availability reads are derived from existing room, booking, meeting,
     // participant, and absence rows. Guard each additive index so partially
@@ -1927,7 +1986,9 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92] {
+        for start in [
+            0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92,
+        ] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");
@@ -2551,6 +2612,45 @@ mod v39_webhook_migration_tests {
             )
             .expect("calendar owner");
         assert_eq!(profile, "default-org");
+    }
+
+    #[test]
+    fn v75_adds_attachment_upload_lifecycle_columns() {
+        let c = open_in_memory().unwrap();
+        // legacy shape: pre-V76 attachments table, database stamped at 74.
+        c.execute_batch(SCHEMA_V1).unwrap();
+        c.execute_batch(
+            "CREATE TABLE message_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, data_url TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));",
+        )
+        .unwrap();
+        c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,created_at) VALUES('a','m','f.png','image/png',3,'data:,x',0)", []).unwrap();
+        c.pragma_update(None, "user_version", 74).unwrap();
+        migrate(&c).unwrap();
+        let (state, err): (String, Option<String>) = c
+            .query_row(
+                "SELECT upload_state,error FROM message_attachments WHERE id='a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, "completed");
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn v75_is_idempotent_on_a_fresh_database() {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        migrate(&c).unwrap();
+        let cols: Vec<String> = c
+            .prepare("PRAGMA table_info(message_attachments)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(cols.contains(&"upload_state".to_string()));
+        assert!(cols.contains(&"error".to_string()));
     }
 
     #[test]

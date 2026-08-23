@@ -125,6 +125,30 @@ VM layer: `m2/threads/M2ChannelContentThreadVM`, `M2ThreadPanelVM`, `M2PlainThre
 `m2/attachments/`: `LoadingAttachment`, `AttachmentIsUploading`, `AttachmentUploadCompleted`,
 `AttachmentUploadFailed`.
 
+*Implementation notes (this codebase, `chat::message_attachments`):*
+
+- **Lifecycle is one-way.** `loading -> uploading -> {completed|failed}`, plus
+  `failed -> uploading` for a retry. A completed upload never reopens. The predecessors
+  ride in the `UPDATE ... WHERE upload_state IN (...)` clause, so two concurrent writers
+  cannot interleave into an illegal transition. Same-state writes are idempotent no-ops.
+- **Every write is scoped by its message.** `set_message_attachment_state` and
+  `remove_message_attachment` take `message_id` alongside the attachment id and match on
+  both; an attachment id alone would otherwise be a capability over any message.
+- **Authorization** (`chat::message_attachment_writable_by`, enforced over HTTP by
+  `CommandPolicy::MessageAttachmentWrite`): the message author, an administrator of the
+  message's channel, or the global admin. Plain channel membership grants reading, not
+  writing — attachments are message content and content belongs to its author.
+- **Deletion is soft, and attachments are retained.** `delete_message` archives the row
+  (`messages.archived=1`) and deliberately leaves `message_attachments` intact: the
+  message can be restored with its files, and an audit of what was posted survives the
+  hiding of the post. The payload therefore disappears only through an explicit
+  `remove_message_attachment`, which answers to the same author/channel-admin gate as
+  every other attachment write — hiding a message must not become a way to strip files
+  from somebody else's post.
+- **Size is measured, never declared.** The encoded payload length bounds the request
+  before any decoding (a 200 MiB base64 blob is refused by arithmetic), then the decoded
+  length is checked against the 10 MiB limit and against the client's claim.
+
 **Drafts**: `chat.M2Draft`/`M2DraftsArena` (server-persisted draft per channel),
 `m2.channel.M2DraftContainer`/`M2DraftSnapshot`/`M2DraftsVm` (client-side draft cache +
 sync-to-server).

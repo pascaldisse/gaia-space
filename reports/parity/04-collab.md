@@ -14,8 +14,8 @@ Scope: KB §1–§4 feature overview + data-model capabilities; legacy Flutter `
 |Message record richness|KB §1.2 `ChannelItemRecord` / `M2ItemContentDetails`|partial|`src-tauri/src/chat.rs:40-62`; `src/api/chat.ts:31-46`; `src/views/Chat.tsx:305-379`|Stores author/text/times/thread/archive and reaction summary only; no mentions, attachment, pinned, external/pending/imported/rich content fields.|
 |Threads and replies|KB §1.1–1.2 threads-as-channel|partial|`src-tauri/src/chat.rs:304-328,508-517`; `src/api/chat.ts:86-89`; `src/views/Chat.tsx:104-119,167-190,369-379,576-609`|Thread reply UI and persistence work, but threads are `thread_of` messages rather than separately addressable channels/custom threads.|
 |Emoji reactions|KB §1.1–1.2 reactions|done|`src-tauri/src/chat.rs:249-280,367-391,536-554`; `src/api/chat.ts:93-96`; `src/views/Chat.tsx:224-237,337-358`|Add/remove, aggregate count and current-user state are end-to-end.|
-|Attachments/upload lifecycle|KB §1.1–1.2 attachments|missing|`src-tauri/src/chat.rs:40-62,563`; `src/views/Chat.tsx:512-529`|No attachment schema, upload command, API or composer control.|
-|Mentions and mention resolution|KB §1.1/§1.3 mentions|missing|`src-tauri/src/chat.rs:563`; `src/api/chat.ts:84-102`; `src/views/Chat.tsx:512-529`|Inbox can display externally-created mention notifications, but chat neither resolves nor stores mentions.|
+|Attachments/upload lifecycle|KB §1.1–1.2 attachments|partial|`src-tauri/src/chat.rs:40-62,563`; `src/views/Chat.tsx:512-529`|No attachment schema, upload command, API or composer control.|
+|Mentions and mention resolution|KB §1.1/§1.3 mentions|partial|`src-tauri/src/chat.rs` (`sync_mentions_impl`, `list_mentions_for_profile`, `count_unread_mentions`); `src/chatMentions.ts`; `src/api/chat.ts`; `src/views/Chat.tsx`|Stored, read back on every view, edited as a diff, author-only, channel-readable targets only; inbox + unread badge land. Still missing: `EntityMention` over non-profile entities (issue/document/team), group mentions (`@here`/`@channel` — no KB spec found, see below), and `processMentionInvite` (mentioning a non-member offering an invite).|
 |Scheduled/postponed messages|KB §1.1/§1.3|missing|`src-tauri/src/chat.rs:563`; `src/api/chat.ts:84-102`|Explicit backend TODO; no scheduled-message model or view.|
 |Message pinning|KB §1.1/§1.3|missing|`src-tauri/src/chat.rs:40-62,563`; `src/views/Chat.tsx:360-374`|No pin field/commands/pinned list.|
 |Polls, stickers, saved messages/labels|KB §1.1–1.2|missing|`src-tauri/src/chat.rs:563`; `src/views/Chat.tsx:24-30,475-487`|“Poll” control is refresh interval only; no poll/sticker/saved-message implementation.|
@@ -74,6 +74,14 @@ Scope: KB §1–§4 feature overview + data-model capabilities; legacy Flutter `
 - Preview → image/video/audio/download; `src/views/Chat.tsx`
 - Mention autocomplete → composer + thread composer; selected recipient IDs → `message_mentions`; notification hook → `notifications(event_type='chat.mention')`
 - Gates → cargo check ✓ · tsc ✓ · bun test 110/0 ✓ · vite ✓
+
+### Mentions lifecycle (2026-08-23) — landed
+- Read-back: `mentions_for_impl` fills `Message.mention_ids` on every `MessageView`, so a reload shows what a message actually stored rather than the `@name` spelling in its text.
+- Edit = diff (`sync_mentions_impl`): dropped targets lose row + *unread* notification, added targets gain both, survivors are not re-notified; an already-read alert is history and is kept. Omitting `mention_ids` on `update_message` leaves mentions untouched (old clients cannot silently strip them).
+- Target validity: must be an existing profile, not the author, and allowed to read the channel — a private channel cannot notify a non-member.
+- Inbox/badge: `list_mentions_for_profile(profile_id, unread_only)` + `count_unread_mentions`, both re-checking channel access at read time (leaving a private channel hides its mentions) and skipping archived messages. Server-side both are bound to the caller by `bind_session_identity`.
+- Authorization: mention writes ride only on `create_message`/`update_message`, which are already author-gated at dispatch (`chat_message_owned`) — same shape as the attachment author/channel-admin gate.
+- **Dead branch — `@here`/`@channel` group mentions**: searched KB §04 and the Space API surface; only per-principal `EntityMention` and `getTotalUnreadMentions` exist, no broadcast mention token is specified anywhere. Not invented, deliberately not implemented; revisit if a KB row appears.
 
 ### Document sharing + per-document ACL — UNVERIFIED / not implemented
 - Existing document-scoped role/rights engine identified: `role_assignments.scope_type='document'`; `Document.ViewDocuments`/`Document.EditDocuments`.
