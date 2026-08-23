@@ -351,7 +351,13 @@ mod tests {
             location: None,
             organizer_id: Some("p-1".into()),
             channel_id: None,
+            visibility: "participants".into(),
+            modification_preference: "organizer-only".into(),
             archived: false,
+            video_provider: None,
+            video_room_id: None,
+            join_url: None,
+            video_status: "scheduled".into(),
         }
     }
 
