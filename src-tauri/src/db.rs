@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 75;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -589,6 +589,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // path (never its contents); counts make partial imports visible after the toast is gone.
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
+    }
+    // V75: an attachment's upload is a lifecycle, not an instant. A row can exist while its
+    // bytes are still moving (uploading) or after the transfer failed; without a stored state
+    // the client cannot tell a finished attachment from a stalled one after a reload.
+    // Existing rows are complete by construction, hence DEFAULT 'completed'.
+    if version < 75 && table_exists(&tx, "message_attachments")? {
+        add_column_if_missing(
+            &tx,
+            "message_attachments",
+            "upload_state",
+            "TEXT NOT NULL DEFAULT 'completed'",
+        )?;
+        add_column_if_missing(&tx, "message_attachments", "error", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -2178,5 +2191,44 @@ mod v39_webhook_migration_tests {
             )
             .expect("calendar owner");
         assert_eq!(profile, "default-org");
+    }
+
+    #[test]
+    fn v75_adds_attachment_upload_lifecycle_columns() {
+        let c = open_in_memory().unwrap();
+        // legacy shape: pre-V75 attachments table, database stamped at 74.
+        c.execute_batch(SCHEMA_V1).unwrap();
+        c.execute_batch(
+            "CREATE TABLE message_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, data_url TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));",
+        )
+        .unwrap();
+        c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,created_at) VALUES('a','m','f.png','image/png',3,'data:,x',0)", []).unwrap();
+        c.pragma_update(None, "user_version", 74).unwrap();
+        migrate(&c).unwrap();
+        let (state, err): (String, Option<String>) = c
+            .query_row(
+                "SELECT upload_state,error FROM message_attachments WHERE id='a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, "completed");
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn v75_is_idempotent_on_a_fresh_database() {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        migrate(&c).unwrap();
+        let cols: Vec<String> = c
+            .prepare("PRAGMA table_info(message_attachments)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(cols.contains(&"upload_state".to_string()));
+        assert!(cols.contains(&"error".to_string()));
     }
 }
