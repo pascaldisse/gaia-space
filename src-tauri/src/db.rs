@@ -670,8 +670,6 @@ CREATE TABLE IF NOT EXISTS review_external_issue_links (
 );
 CREATE INDEX IF NOT EXISTS review_external_issue_links_review ON review_external_issue_links(review_id);
 "#;
-/// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
-/// imported document bodies and attachment payloads remain in their normal stores.
 
 pub(crate) const SCHEMA_V83: &str = r#"
 CREATE TABLE IF NOT EXISTS review_merge_policies (
@@ -684,6 +682,8 @@ CREATE TABLE IF NOT EXISTS review_merge_policies (
 );
 "#;
 
+/// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
+/// imported document bodies and attachment payloads remain in their normal stores.
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,
