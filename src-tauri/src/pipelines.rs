@@ -570,7 +570,11 @@ pub fn expire_stale_workers_conn(c: &Connection, now: i64, timeout_secs: i64) ->
     .map_err(|e| e.to_string())
 }
 
-pub fn set_worker_suspended_conn(c: &Connection, worker_id: &str, suspended: bool) -> Result<Worker> {
+pub fn set_worker_suspended_conn(
+    c: &Connection,
+    worker_id: &str,
+    suspended: bool,
+) -> Result<Worker> {
     read_worker(c, worker_id)?;
     c.execute(
         "UPDATE workers SET suspended=?2 WHERE id=?1",
@@ -709,8 +713,12 @@ pub fn create_job_artifact(input: JobArtifactInput) -> Result<JobArtifact> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn download_job_artifact(id: String) -> Result<Vec<u8>> {
     let c = db::conn()?;
-    c.query_row("SELECT content FROM job_artifacts WHERE id=?1", params![id], |r| r.get(0))
-        .map_err(|_| "artifact not found".to_string())
+    c.query_row(
+        "SELECT content FROM job_artifacts WHERE id=?1",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(|_| "artifact not found".to_string())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2630,8 +2638,11 @@ mod tests {
         );
 
         // DISABLED is likewise administrative and a heartbeat must not clear it.
-        conn.execute("UPDATE workers SET status='DISABLED',suspended=0 WHERE id='w-hb'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE workers SET status='DISABLED',suspended=0 WHERE id='w-hb'",
+            [],
+        )
+        .unwrap();
         let disabled = worker_heartbeat_conn(&conn, "w-hb", now + 2).unwrap();
         assert_eq!(disabled.status, "DISABLED");
         assert_eq!(
@@ -2712,7 +2723,9 @@ mod tests {
             .unwrap()
             .expect("gpu run");
         assert_eq!(gpu.id, "run-gpu");
-        assert!(assign_job_run_conn(&conn, "w-gpu", now, 120).unwrap().is_none());
+        assert!(assign_job_run_conn(&conn, "w-gpu", now, 120)
+            .unwrap()
+            .is_none());
 
         // Independent check: exactly three runs are owned, each by one worker.
         let owned: i64 = conn

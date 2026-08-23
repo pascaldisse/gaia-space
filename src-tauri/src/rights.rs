@@ -451,7 +451,8 @@ pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
         "Modify issues in a project.",
         "Project",
         "Planning",
-    ),    (
+    ),
+    (
         "Project.ManageProjectPins",
         "Manage project pins",
         "Pin and unpin items in the project.",
@@ -1179,7 +1180,6 @@ pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
         "Team",
         "Positions",
     ),
-
 ];
 
 /// KB §05 §2.1 `RightGroup`: the UI grouping categories a Right belongs to, as
@@ -1197,7 +1197,11 @@ pub const RIGHT_GROUPS: &[(&str, &str, i32)] = &[
     ("MemberWorkingDays", "Member working days", 90),
     ("MemberConsents", "Member consents", 100),
     ("MemberPermanentTokens", "Member permanent tokens", 110),
-    ("MemberNotificationSettings", "Member notification settings", 120),
+    (
+        "MemberNotificationSettings",
+        "Member notification settings",
+        120,
+    ),
     ("TwoFactorAuthentication", "Two-factor authentication", 130),
     ("EmailVerification", "Email verification", 140),
     ("MemberCustomFields", "Member custom fields", 150),

@@ -2217,11 +2217,10 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
     ),
     ("seed_rights", gaia_space_lib::rights::Right::EditRoles),
 ];
-fn require_rights_administration(
-    user: &User,
-    name: &str,
-) -> Result<(), (StatusCode, Json<Value>)> {
-    let Some((_, right)) = RIGHTS_ADMIN_COMMANDS.iter().find(|(command, _)| *command == name)
+fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
+    let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
+        .iter()
+        .find(|(command, _)| *command == name)
     else {
         return Ok(());
     };
@@ -2953,7 +2952,10 @@ fn authorize_command(
                     None,
                 )?;
             }
-            if matches!(name, "update_channel" | "add_channel_member" | "remove_channel_member") {
+            if matches!(
+                name,
+                "update_channel" | "add_channel_member" | "remove_channel_member"
+            ) {
                 let channel_id: String = if name == "update_channel" {
                     body.get("channel")
                         .and_then(|channel| arg(channel, "id").ok())
@@ -3414,7 +3416,10 @@ async fn registry_composer_get(
             let base = registry_base_url(&headers, &repository_id, "composer");
             (
                 StatusCode::OK,
-                Json(package_registry::composer_packages_json(&base, &repository_id)),
+                Json(package_registry::composer_packages_json(
+                    &base,
+                    &repository_id,
+                )),
             )
                 .into_response()
         }
@@ -3555,10 +3560,7 @@ async fn registry_oci_get(
                 Ok(bytes) => (
                     StatusCode::OK,
                     [
-                        (
-                            header::CONTENT_TYPE,
-                            "application/octet-stream".to_string(),
-                        ),
+                        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
                         (DOCKER_CONTENT_DIGEST, digest.clone()),
                     ],
                     bytes,
@@ -3592,7 +3594,8 @@ async fn registry_oci_put(
     };
     if matches!(
         target,
-        package_registry::OciTarget::BlobUpload { .. } | package_registry::OciTarget::BlobUploadStart
+        package_registry::OciTarget::BlobUpload { .. }
+            | package_registry::OciTarget::BlobUploadStart
     ) {
         let Some(digest) = query.get("digest") else {
             return err(
@@ -4341,12 +4344,12 @@ async fn main() {
             post(app_create_issue),
         )
         .route(
-            "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
-            get(registry_generic_metadata),
-        .route(
             "/api/app/reviews/{review_id}/checks",
             post(app_record_external_check),
         )
+        .route(
+            "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
+            get(registry_generic_metadata),
         )
         .route(
             "/api/registry/{repository_id}/generic/{package_name}/{version}/{filename}",
@@ -4526,9 +4529,6 @@ mod tests {
         headers
     }
 
-    /// The external app API consumes the stage-2 grant: a valid token with the right
-    /// OAuth scope still sees nothing and writes nothing until an admin authorized the
-    /// application in that context, and the grant scopes to exactly that project.
     #[tokio::test]
     async fn app_external_check_requires_review_right_and_reports_only_its_own_name() {
         let _serial = test_lock();
@@ -4602,6 +4602,9 @@ mod tests {
         );
     }
 
+    /// The external app API consumes the stage-2 grant: a valid token with the right
+    /// OAuth scope still sees nothing and writes nothing until an admin authorized the
+    /// application in that context, and the grant scopes to exactly that project.
     #[tokio::test]
     async fn the_app_api_shows_and_writes_only_what_the_rights_model_authorized() {
         let _serial = test_lock();
@@ -5139,7 +5142,10 @@ mod tests {
         .await;
         assert_eq!(fetched.status(), StatusCode::OK);
         assert_eq!(
-            to_bytes(fetched.into_body(), 1 << 20).await.unwrap().to_vec(),
+            to_bytes(fetched.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
             layer
         );
         // Session start hands out a Location the client PUTs the blob to.

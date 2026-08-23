@@ -1341,12 +1341,17 @@ mod tests {
         let temp = TempDb::new("gaia-space-v60-caldav");
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
-        conn.execute("DROP TABLE calendar_caldav_events", []).unwrap();
+        conn.execute("DROP TABLE calendar_caldav_events", [])
+            .unwrap();
         conn.pragma_update(None, "user_version", 59).unwrap();
         migrate(&conn).expect("V60 migration");
         let columns: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('calendar_caldav_events') WHERE name='calendar_id'", [], |row| row.get(0)).unwrap();
         assert_eq!(columns, 1);
-        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     /// The integration lane merged three schema-touching branches into one serial

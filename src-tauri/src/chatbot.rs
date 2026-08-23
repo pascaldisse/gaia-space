@@ -150,7 +150,11 @@ fn filtered(commands: Vec<CommandDetail>, prefix: &str) -> Vec<CommandDetail> {
         .filter(|command| matches_prefix(command, prefix))
         .filter(|command| seen.insert(command.name.to_ascii_lowercase()))
         .collect();
-    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    out.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
     out
 }
 

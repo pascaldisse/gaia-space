@@ -84,7 +84,11 @@ pub fn revoke_permanent_token(user_id: &str, token_id: &str) -> Result<bool> {
     Ok(db::conn()?.execute("UPDATE permanent_tokens SET revoked_at=unixepoch() WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL",params![token_id,user_id]).map_err(|e|e.to_string())?>0)
 }
 #[tauri::command]
-pub fn issue_permanent_token(user_id: String, name: String, expires_at: Option<i64>) -> Result<(PermanentToken, String)> {
+pub fn issue_permanent_token(
+    user_id: String,
+    name: String,
+    expires_at: Option<i64>,
+) -> Result<(PermanentToken, String)> {
     create_permanent_token(&user_id, &name, expires_at)
 }
 #[tauri::command]
@@ -371,7 +375,10 @@ pub fn revoke_application_password(user_id: &str, id: &str) -> Result<bool> {
         > 0)
 }
 #[tauri::command]
-pub fn issue_application_password(user_id: String, name: String) -> Result<(ApplicationPassword, String)> {
+pub fn issue_application_password(
+    user_id: String,
+    name: String,
+) -> Result<(ApplicationPassword, String)> {
     create_application_password(&user_id, &name)
 }
 #[tauri::command]
@@ -437,9 +444,11 @@ pub fn disable_totp(user_id: &str, code: &str) -> Result<bool> {
     let c = db::conn()?;
     c.execute("DELETE FROM totp_scratch_codes WHERE user_id=?1", [user_id])
         .map_err(|e| e.to_string())?;
-    Ok(c.execute("DELETE FROM user_totp WHERE user_id=?1", [user_id])
-        .map_err(|e| e.to_string())?
-        > 0)
+    Ok(
+        c.execute("DELETE FROM user_totp WHERE user_id=?1", [user_id])
+            .map_err(|e| e.to_string())?
+            > 0,
+    )
 }
 
 #[derive(Serialize)]
@@ -495,7 +504,14 @@ pub fn issue_invitation(
     expires_at: Option<i64>,
     max_uses: i64,
 ) -> Result<(Invitation, String)> {
-    create_invitation(&invited_by, email, &role_id, &project_id, expires_at, max_uses)
+    create_invitation(
+        &invited_by,
+        email,
+        &role_id,
+        &project_id,
+        expires_at,
+        max_uses,
+    )
 }
 pub fn accept_invitation(
     raw: &str,
@@ -589,13 +605,25 @@ mod tests {
         std::env::set_var(crate::secretbox::KEY_ENV, "aa".repeat(32));
 
         let enrollment = begin_totp("totp-user", "totp-user").expect("enrollment");
-        let code = totp_code(&enrollment.secret, (chrono::Utc::now().timestamp() / 30) as u64).expect("code");
-        let scratch = confirm_totp("totp-user", &code).expect("confirmation").expect("accepted code");
+        let code = totp_code(
+            &enrollment.secret,
+            (chrono::Utc::now().timestamp() / 30) as u64,
+        )
+        .expect("code");
+        let scratch = confirm_totp("totp-user", &code)
+            .expect("confirmation")
+            .expect("accepted code");
         assert_eq!(scratch.len(), SCRATCH_CODE_COUNT);
-        assert_eq!(scratch_codes_remaining("totp-user").expect("remaining"), SCRATCH_CODE_COUNT as i64);
+        assert_eq!(
+            scratch_codes_remaining("totp-user").expect("remaining"),
+            SCRATCH_CODE_COUNT as i64
+        );
         assert!(consume_scratch_code("totp-user", &scratch[0]).expect("consume"));
         assert!(!consume_scratch_code("totp-user", &scratch[0]).expect("reuse fails"));
-        assert_eq!(scratch_codes_remaining("totp-user").expect("remaining"), (SCRATCH_CODE_COUNT - 1) as i64);
+        assert_eq!(
+            scratch_codes_remaining("totp-user").expect("remaining"),
+            (SCRATCH_CODE_COUNT - 1) as i64
+        );
     }
     #[test]
     fn permanent_tokens_and_application_passwords_are_individually_revocable() {
@@ -607,14 +635,23 @@ mod tests {
         std::env::set_var("SPACE_DB", temp.path());
 
         let (token, token_raw) = create_permanent_token("token-user", "CLI", None).expect("token");
-        assert_eq!(permanent_token_user(&token_raw).expect("verify token"), Some("token-user".into()));
+        assert_eq!(
+            permanent_token_user(&token_raw).expect("verify token"),
+            Some("token-user".into())
+        );
         assert!(revoke_permanent_token("token-user", &token.id).expect("revoke token"));
-        assert_eq!(permanent_token_user(&token_raw).expect("revoked token"), None);
+        assert_eq!(
+            permanent_token_user(&token_raw).expect("revoked token"),
+            None
+        );
 
-        let (password, password_raw) = create_application_password("token-user", "Mail").expect("password");
+        let (password, password_raw) =
+            create_application_password("token-user", "Mail").expect("password");
         assert!(verify_application_password("token-user", &password_raw).expect("verify password"));
         assert!(revoke_application_password("token-user", &password.id).expect("revoke password"));
-        assert!(!verify_application_password("token-user", &password_raw).expect("revoked password"));
+        assert!(
+            !verify_application_password("token-user", &password_raw).expect("revoked password")
+        );
     }
     #[test]
     fn invitation_redeem_assigns_the_preselected_project_role() {
@@ -623,15 +660,37 @@ mod tests {
         let c = crate::db::migrate_path(&temp).expect("migration");
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('inviter-profile','inviter','Inviter',unixepoch())", []).expect("profile");
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('inviter','inviter','hash','Inviter','inviter-profile','admin',unixepoch())", []).expect("inviter");
-        c.execute("INSERT INTO roles(id,name,role_type) VALUES('invite-role','Guest','CUSTOM')", []).expect("role");
+        c.execute(
+            "INSERT INTO roles(id,name,role_type) VALUES('invite-role','Guest','CUSTOM')",
+            [],
+        )
+        .expect("role");
         std::env::set_var("SPACE_DB", temp.path());
 
-        let (invite, token) = create_invitation("inviter", Some("new@example.test".into()), "invite-role", "demo-project", None, 1).expect("invite");
-        let user_id = accept_invitation(&token, "new-user", "New User", "password-123").expect("redeem");
-        let profile_id: String = c.query_row("SELECT profile_id FROM users WHERE id=?1", [&user_id], |row| row.get(0)).expect("created user");
+        let (invite, token) = create_invitation(
+            "inviter",
+            Some("new@example.test".into()),
+            "invite-role",
+            "demo-project",
+            None,
+            1,
+        )
+        .expect("invite");
+        let user_id =
+            accept_invitation(&token, "new-user", "New User", "password-123").expect("redeem");
+        let profile_id: String = c
+            .query_row(
+                "SELECT profile_id FROM users WHERE id=?1",
+                [&user_id],
+                |row| row.get(0),
+            )
+            .expect("created user");
         let assigned: i64 = c.query_row("SELECT count(*) FROM role_assignments WHERE role_id=?1 AND profile_id=?2 AND scope_type='project' AND scope_id=?3", rusqlite::params![invite.role_id, profile_id, invite.project_id], |row| row.get(0)).expect("assignment");
         assert_eq!(assigned, 1);
-        assert!(accept_invitation(&token, "second", "Second", "password-123").is_err(), "single-use invitation is exhausted");
+        assert!(
+            accept_invitation(&token, "second", "Second", "password-123").is_err(),
+            "single-use invitation is exhausted"
+        );
     }
     #[test]
     fn base32_round_trips() {

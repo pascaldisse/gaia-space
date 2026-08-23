@@ -125,7 +125,10 @@ fn an_unreadable_commands_response_falls_back_too() {
     let listing = list_commands_on(&c, "bot", "u1", None, garbage).unwrap();
     assert_eq!(listing.source, "registration");
     assert!(listing.error.unwrap().contains("unreadable"));
-    assert_eq!(names(&listing.commands), vec!["decommission", "deploy", "help"]);
+    assert_eq!(
+        names(&listing.commands),
+        vec!["decommission", "deploy", "help"]
+    );
 }
 
 /// An app with no endpoint can never be asked; the declared list still autocompletes.

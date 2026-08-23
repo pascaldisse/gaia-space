@@ -100,10 +100,7 @@ pub fn request_rights_on(
         if right_code.is_empty() {
             continue;
         }
-        let id = format!(
-            "appreq-{}",
-            &crate::auth_security::opaque("")[..16]
-        );
+        let id = format!("appreq-{}", &crate::auth_security::opaque("")[..16]);
         c.execute(
             "INSERT INTO app_right_requests(id,application_id,context_identifier,right_code) VALUES(?1,?2,?3,?4) ON CONFLICT(application_id,context_identifier,right_code) DO NOTHING",
             params![id, application_id, context_identifier.trim(), right_code],
@@ -184,11 +181,7 @@ pub fn list_requests(
     application_id: Option<String>,
     status: Option<String>,
 ) -> Result<Vec<RightRequest>> {
-    list_requests_on(
-        &db::conn()?,
-        application_id.as_deref(),
-        status.as_deref(),
-    )
+    list_requests_on(&db::conn()?, application_id.as_deref(), status.as_deref())
 }
 
 /// Admin decision on one requested right. Approving unions the right into the
@@ -256,14 +249,30 @@ mod tests {
         c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('consent-app','Consent app','Application','consent-client')", []).expect("application");
         c.execute("INSERT INTO rights(id,code,title,right_type) VALUES('consent-right','Project.View','View project','Project')", []).expect("right catalog");
 
-        let requests = request_rights_on(&c, "consent-app", "project:key:DEMO", &["Project.View".into()]).expect("request");
+        let requests = request_rights_on(
+            &c,
+            "consent-app",
+            "project:key:DEMO",
+            &["Project.View".into()],
+        )
+        .expect("request");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].status, "PENDING");
         let approved = decide_on(&c, &requests[0].id, true, None).expect("approval");
         assert_eq!(approved.status, "APPROVED");
-        let granted = app_rights::authorized_rights_on(&c, "consent-app", "project:key:DEMO").expect("grant");
-        assert_eq!(granted.iter().map(|right| right.right_code.as_str()).collect::<Vec<_>>(), vec!["Project.View"]);
-        assert!(decide_on(&c, &requests[0].id, true, None).is_err(), "a decision is single-use");
+        let granted =
+            app_rights::authorized_rights_on(&c, "consent-app", "project:key:DEMO").expect("grant");
+        assert_eq!(
+            granted
+                .iter()
+                .map(|right| right.right_code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Project.View"]
+        );
+        assert!(
+            decide_on(&c, &requests[0].id, true, None).is_err(),
+            "a decision is single-use"
+        );
     }
     #[test]
     fn a_context_keeps_its_colons_and_only_the_last_segment_is_the_right() {
