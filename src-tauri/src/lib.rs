@@ -46,6 +46,8 @@ pub mod auth_security;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod organization;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod oauth;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod payload_dispatch;
@@ -166,6 +168,10 @@ pub fn run() {
             app_consent::request_consent_rights,
             app_consent::list_requests,
             app_consent::decide,
+            organization::get_organization,
+            organization::update_organization,
+            organization::get_org_settings,
+            organization::update_org_settings,
             auth_security::enroll_totp,
             auth_security::verify_totp_enrollment,
             auth_security::totp_scratch_codes_remaining,

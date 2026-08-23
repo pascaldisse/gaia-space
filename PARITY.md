@@ -67,7 +67,7 @@ Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining 
 Progress: CalDAV named-calendar discovery + VEVENT PUT/DELETE write-back landed (V60); Google exposure remains absent. · document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
-32 rows — done 7 · partial 16 · missing 9.
+32 rows — done 7 · partial 17 · missing 8.
 Worst gaps: remaining operational right enforcement · org settings/multi-workspace · SSO/SAML external modules · OAuth consent UI depth.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)

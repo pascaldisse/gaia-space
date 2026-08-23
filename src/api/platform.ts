@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type Organization = { id:string; name:string; slogan:string|null; logo_id:string|null; timezone:string; onboarding_required:boolean; allow_domains_edit:boolean };
+export type OrgSettings = { org_id:string; available_right_codes:string[]; is_space_code:boolean; is_space_code_only:boolean };
 export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
 export type Team = { id: string; name: string; description: string | null; parent_id: string | null; archived: boolean };
 export type TeamMembership = {
@@ -32,6 +34,11 @@ const submitProject = (operation: "create" | "update", value: Project | NewProje
   call<void>(`${operation}_project`, { project: value });
 
 export const platformApi = {
+  // Organization
+  organization: () => call<Organization>("get_organization"),
+  updateOrganization: (value: Organization) => call<Organization>("update_organization", { value }),
+  orgSettings: () => call<OrgSettings>("get_org_settings"),
+  updateOrgSettings: (value: OrgSettings) => call<OrgSettings>("update_org_settings", { value }),
   // Profiles
   profiles: () => call<Profile[]>("list_profiles"),
   createProfile: (profile: Profile) => call<void>("create_profile", { profile }),
