@@ -8,7 +8,7 @@ import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
 import "./Meetings.css";
 
-type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "video_provider" | "video_status">;
+type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "video_provider" | "video_status" | "access_level">;
 
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
