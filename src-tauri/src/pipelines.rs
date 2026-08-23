@@ -1724,13 +1724,7 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
                 )
                 .unwrap_or(None);
             let since = last.unwrap_or(now - 60);
-            let fired = crons.iter().any(|c| {
-                CronSpec::parse(c)
-                    .ok()
-                    .and_then(|spec| spec.next_after(since))
-                    .is_some_and(|next| next <= now)
-            });
-            if fired {
+            if schedule_fired(&crons, since, now) {
                 due.push((script_id.clone(), job.name.clone()));
             }
         }
@@ -1750,6 +1744,19 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
     }
     Ok(runs)
 }
+/// Did any of `crons` fire in `(since, now]`? Split out of [`due_scheduled_runs`] so the
+/// watermark rule is testable without global database state. `next_after` is strictly after
+/// `since`, so once a run exists at the fired minute a second tick in that same minute finds
+/// nothing — no duplicate dispatch.
+fn schedule_fired(crons: &[String], since: i64, now: i64) -> bool {
+    crons.iter().any(|c| {
+        CronSpec::parse(c)
+            .ok()
+            .and_then(|spec| spec.next_after(since))
+            .is_some_and(|next| next <= now)
+    })
+}
+
 /// Repository push entry point. The caller supplies the repository + branch rather than a
 /// global watcher assumption; only GIT_PUSH jobs from that repository's script are scheduled.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -4413,13 +4420,17 @@ mod tests {
                 r#"{"type":"Schedule","cron":"0 0 * * *"}"#,
             ),
             (
-                TriggerDef::GitBranchDeleted {
-                    branches: vec![],
-                },
+                TriggerDef::GitBranchDeleted { branches: vec![] },
                 r#"{"type":"GitBranchDeleted","branches":[]}"#,
             ),
-            (TriggerDef::CodeReviewOpened, r#"{"type":"CodeReviewOpened"}"#),
-            (TriggerDef::CodeReviewClosed, r#"{"type":"CodeReviewClosed"}"#),
+            (
+                TriggerDef::CodeReviewOpened,
+                r#"{"type":"CodeReviewOpened"}"#,
+            ),
+            (
+                TriggerDef::CodeReviewClosed,
+                r#"{"type":"CodeReviewClosed"}"#,
+            ),
             (TriggerDef::SafeMerge, r#"{"type":"SafeMerge"}"#),
         ];
         for (trigger, wire) in cases {
@@ -4462,6 +4473,26 @@ mod tests {
         assert_eq!(host, StepDef::shell("echo"));
         // ...but a `scripts` array (plural) is NOT a step shape this server knows.
         assert!(serde_json::from_str::<StepDef>(r#"{"type":"host","scripts":["echo"]}"#).is_err());
+    }
+
+    /// The cron watermark must be edge-triggered: firing once at minute M and then ticking
+    /// again inside the same minute (with the fresh run's `triggered_at` as the watermark)
+    /// must not dispatch a second run.
+    #[test]
+    fn schedule_does_not_double_fire_within_one_minute() {
+        let crons = vec!["0 0 * * *".to_string()];
+        let midnight = 86_400; // 1970-01-02 00:00:00 UTC
+        assert!(schedule_fired(&crons, midnight - 60, midnight));
+        // watermark advanced to the run we just created, ticked again 1s and 59s later
+        assert!(!schedule_fired(&crons, midnight, midnight));
+        assert!(!schedule_fired(&crons, midnight, midnight + 1));
+        assert!(!schedule_fired(&crons, midnight, midnight + 59));
+        // the next day's occurrence still fires exactly once
+        assert!(schedule_fired(&crons, midnight, midnight + 86_400));
+        // a missed tick is not lost: a stale watermark still reports the elapsed occurrence
+        assert!(schedule_fired(&crons, midnight - 86_400, midnight + 3_600));
+        // an unparsable cron is ignored rather than firing or panicking
+        assert!(!schedule_fired(&["*/0 * * * *".to_string()], 0, midnight));
     }
 
     /// Adversarial inputs for the hand-written glob/cron: no panic, no unbounded loop.
