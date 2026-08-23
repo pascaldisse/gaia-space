@@ -22,10 +22,10 @@ import "./Pipelines.css";
 
 type EditJob = ScriptJobDef & { stepsText: string };
 function toEditJob(j: ScriptJobDef): EditJob {
-  return { ...j, stepsText: j.steps.join("\n") };
+  return { ...j, stepsText: j.steps.flatMap((step) => step.type === "host" ? step.scripts : [step.script]).join("\n") };
 }
 function fromEditJob(j: EditJob): ScriptJobDef {
-  return { name: j.name, trigger_type: j.trigger_type, timeout_secs: j.timeout_secs, steps: j.stepsText.split("\n").map((s) => s.trim()).filter(Boolean) };
+  return { name: j.name, trigger_type: j.trigger_type, timeout_secs: j.timeout_secs, steps: [{ type: "host", scripts: j.stepsText.split("\n").map((s) => s.trim()).filter(Boolean) }], ...(j.triggers?.length ? { triggers: j.triggers } : {}) };
 }
 
 export default function Pipelines() {
@@ -114,7 +114,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     }
   });
   function addJob() {
-    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], stepsText: "" }); }));
+    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], triggers: [{ type: "manual" }], stepsText: "" }); }));
   }
   function removeJob(i: number) {
     setJobs(produce((draft) => { draft.splice(i, 1); }));
@@ -227,6 +227,9 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                         />
                         <button class="ghost small danger" onClick={() => removeJob(i())}>Remove job</button>
                       </div>
+                      <Show when={job.triggers?.length}>
+                        <p class="hint">Triggers: {job.triggers!.map((trigger) => trigger.type.replaceAll("_", " ")).join(", ")}</p>
+                      </Show>
                       <textarea
                         class="steps-input"
                         placeholder={`shell steps, one per line (max ${MAX_STEPS_PER_JOB})`}

@@ -17,7 +17,19 @@ export type PackageFormat = (typeof PACKAGE_FORMATS)[number];
 export const REPO_MODES = ["HOSTING", "PROXY"] as const;
 
 // ---------- pipeline scripts (config-as-code, JSON in place of .space.kts) ----------
-export type ScriptJobDef = { name: string; trigger_type: string; timeout_secs: number | null; steps: string[] };
+/** Tagged exactly like Rust's `#[serde(tag = "type", rename_all = "snake_case")]` model. */
+export type TriggerDef =
+  | { type: "manual" }
+  | { type: "git_push"; branches: string[]; repository: string }
+  | { type: "schedule"; cron: string }
+  | { type: "git_branch_deleted"; branches: string[] }
+  | { type: "code_review_opened" }
+  | { type: "code_review_closed" }
+  | { type: "safe_merge" };
+export type StepDef =
+  | { type: "host"; scripts: string[] }
+  | { type: "container"; image: string; script: string };
+export type ScriptJobDef = { name: string; trigger_type: string; timeout_secs: number | null; steps: StepDef[]; triggers?: TriggerDef[] };
 export type ScriptDef = { jobs: ScriptJobDef[] };
 
 export type PipelineScript = { id: string; project_id: string; repository: string | null; path: string; source: string; archived: boolean };
@@ -38,13 +50,40 @@ export function isTerminalRun(status: string): boolean {
 export function emptyScriptDef(): ScriptDef {
   return { jobs: [] };
 }
+function normalizeStep(step: unknown): StepDef | null {
+  if (typeof step === "string") return { type: "host", scripts: [step] };
+  if (!step || typeof step !== "object") return null;
+  const value = step as Record<string, unknown>;
+  if (value.type === "host" && Array.isArray(value.scripts) && value.scripts.every((script) => typeof script === "string")) return { type: "host", scripts: value.scripts };
+  if (value.type === "container" && typeof value.image === "string" && typeof value.script === "string") return { type: "container", image: value.image, script: value.script };
+  return null;
+}
+function normalizeTrigger(trigger: unknown): TriggerDef | null {
+  if (!trigger || typeof trigger !== "object" || typeof (trigger as Record<string, unknown>).type !== "string") return null;
+  const value = trigger as Record<string, unknown>;
+  switch (value.type) {
+    case "manual": case "code_review_opened": case "code_review_closed": case "safe_merge": return { type: value.type };
+    case "git_push": return typeof value.repository === "string" && Array.isArray(value.branches) && value.branches.every((branch) => typeof branch === "string") ? { type: "git_push", repository: value.repository, branches: value.branches } : null;
+    case "schedule": return typeof value.cron === "string" ? { type: "schedule", cron: value.cron } : null;
+    case "git_branch_deleted": return Array.isArray(value.branches) && value.branches.every((branch) => typeof branch === "string") ? { type: "git_branch_deleted", branches: value.branches } : null;
+    default: return null;
+  }
+}
+/** Converts legacy string steps and `trigger_type` into the tagged script schema. */
+export function normalizeJob(job: unknown): ScriptJobDef | null {
+  if (!job || typeof job !== "object") return null;
+  const value = job as Record<string, unknown>;
+  if (typeof value.name !== "string") return null;
+  const steps = Array.isArray(value.steps) ? value.steps.map(normalizeStep).filter((step): step is StepDef => step !== null) : [];
+  const explicitTriggers = Array.isArray(value.triggers) ? value.triggers.map(normalizeTrigger).filter((trigger): trigger is TriggerDef => trigger !== null) : undefined;
+  const trigger_type = typeof value.trigger_type === "string" ? value.trigger_type : "MANUAL";
+  return { name: value.name, trigger_type, timeout_secs: typeof value.timeout_secs === "number" ? value.timeout_secs : null, steps, ...(explicitTriggers?.length ? { triggers: explicitTriggers } : {}) };
+}
 export function parseScriptSource(source: string): ScriptDef {
   try {
-    const parsed = JSON.parse(source);
-    if (parsed && Array.isArray(parsed.jobs)) return parsed as ScriptDef;
-  } catch {
-    /* fall through to empty */
-  }
+    const parsed = JSON.parse(source) as { jobs?: unknown };
+    if (parsed && Array.isArray(parsed.jobs)) return { jobs: parsed.jobs.map(normalizeJob).filter((job): job is ScriptJobDef => job !== null) };
+  } catch { /* fall through to empty */ }
   return emptyScriptDef();
 }
 
