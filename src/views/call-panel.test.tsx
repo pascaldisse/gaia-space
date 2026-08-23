@@ -21,6 +21,7 @@ class FakeRoom {
     setMicrophoneEnabled: async (enabled: boolean) => { calls.push(`microphone:${enabled}`); },
     setCameraEnabled: async (enabled: boolean) => { calls.push(`camera:${enabled}`); },
     setScreenShareEnabled: async (enabled: boolean) => { calls.push(`screen:${enabled}`); },
+    publishData: async (payload: Uint8Array) => { calls.push(`chat:${new TextDecoder().decode(payload)}`); },
   };
   remoteParticipants = new Map([["them", remoteParticipant]]);
   listeners = new Map<string, ((...args: any[]) => void)[]>();
@@ -31,7 +32,7 @@ class FakeRoom {
 }
 mock.module("livekit-client", () => ({
   Room: FakeRoom,
-  RoomEvent: { ConnectionStateChanged: "connection", ParticipantConnected: "participant-connected", ParticipantDisconnected: "participant-disconnected", TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", LocalTrackPublished: "track-published", LocalTrackUnpublished: "track-unpublished" },
+  RoomEvent: { ConnectionStateChanged: "connection", ParticipantConnected: "participant-connected", ParticipantDisconnected: "participant-disconnected", TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", LocalTrackPublished: "track-published", LocalTrackUnpublished: "track-unpublished", DataReceived: "data-received" },
   Track: { Source: { Camera: "camera", Microphone: "microphone", ScreenShare: "screen" } },
 }));
 const { default: CallPanel } = await import("./CallPanel");
@@ -49,6 +50,7 @@ test("joining exposes native media controls, device selectors, and a clean leave
     if (command === "stop_meeting_recording") return { egress_id: "EG_1", status: "stopped" };
     if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
     if (command === "list_meeting_recordings") return [];
+if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", meeting_id: "meeting-1", speaker_id: "them", text: "Caption proof", started_at: 1, ended_at: 2, source: "external", created_at: 1 }];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
@@ -60,11 +62,19 @@ test("joining exposes native media controls, device selectors, and a clean leave
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
   expect(host.querySelectorAll("select")).toHaveLength(3);
+  const chat = host.querySelector('input[aria-label="Chat message"]') as HTMLInputElement;
+  chat.value = "Ship it"; chat.dispatchEvent(new Event("input", { bubbles: true }));
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement).click();
+  await settle();
+  expect(calls.some(call => call.includes('chat:') && call.includes("Ship it"))).toBe(true);
+  expect(host.textContent).toContain("Ship it");
+expect(host.textContent).toContain("Caption proof");
+expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();
   await settle();
-  expect(calls).toEqual(["microphone:true", "camera:true", "microphone:false", "camera:false", "screen:true"]);
+  expect(calls).toEqual(["microphone:true", "camera:true", expect.stringContaining("chat:"), "microphone:false", "camera:false", "screen:true"]);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("start_meeting_recording");

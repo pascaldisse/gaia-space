@@ -1,9 +1,12 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { Room, RoomEvent, Track, type Participant } from "livekit-client";
-import { meetingsApi, type CallJoin, type Meeting } from "../api/meetings";
+import { meetingsApi, type CallJoin, type CallTranscriptSegment, type Meeting } from "../api/meetings";
 
 type DeviceLists = { audioinput: MediaDeviceInfo[]; videoinput: MediaDeviceInfo[]; audiooutput: MediaDeviceInfo[] };
 type DeviceKind = keyof DeviceLists;
+type ChatMessage = { id: string; author: string; text: string };
+const chatEncoder = new TextEncoder();
+const chatDecoder = new TextDecoder();
 const emptyDevices: DeviceLists = { audioinput: [], videoinput: [], audiooutput: [] };
 const sourceFor = (participant: Participant) => participant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack
   ? Track.Source.ScreenShare
@@ -55,6 +58,9 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
   const [screenSharing, setScreenSharing] = createSignal(false);
   const [waitingForAdmission, setWaitingForAdmission] = createSignal(false);
   const [recording, setRecording] = createSignal(false);
+  const [chatMessages, setChatMessages] = createSignal<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = createSignal("");
+const [transcriptSegments, setTranscriptSegments] = createSignal<CallTranscriptSegment[]>([]);
   // Native answer to "can this machine name who is acting?". Undefined until asked.
   const [actorRefusal, setActorRefusal] = createSignal<string>();
   const [join, setJoin] = createSignal<CallJoin>();
@@ -98,6 +104,13 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       next.on(RoomEvent.ParticipantConnected, sync); next.on(RoomEvent.ParticipantDisconnected, sync);
       next.on(RoomEvent.TrackSubscribed, sync); next.on(RoomEvent.TrackUnsubscribed, sync);
       next.on(RoomEvent.LocalTrackPublished, sync); next.on(RoomEvent.LocalTrackUnpublished, sync);
+      next.on(RoomEvent.DataReceived, (payload, _participant) => {
+        try {
+          const message = JSON.parse(chatDecoder.decode(payload)) as ChatMessage;
+          if (typeof message.id !== "string" || typeof message.author !== "string" || typeof message.text !== "string") return;
+          setChatMessages(items => items.some(item => item.id === message.id) ? items : [...items, message]);
+        } catch { /* Ignore non-chat data packets from other LiveKit features. */ }
+      });
       await next.connect(credentials.url, credentials.token);
       sync();
       await Promise.all([next.localParticipant.setMicrophoneEnabled(true), next.localParticipant.setCameraEnabled(true)]);
@@ -107,6 +120,7 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       // joins late (or after an app restart) must still see that this call is being
       // recorded, and the organizer must be able to stop that job.
       void syncRecording();
+void syncTranscript();
     } catch (reason) {
       await next?.disconnect();
       setRoom(undefined); setParticipants([]); setJoin(undefined); setState("disconnected");
@@ -117,7 +131,7 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     const current = room();
     if (current) await current.disconnect();
     setRoom(undefined); setParticipants([]); setJoin(undefined); setState("disconnected");
-    setMicrophoneOn(false); setCameraOn(false); setScreenSharing(false); setWaitingForAdmission(false); setRecording(false); setDevices(emptyDevices); setNotice("");
+    setMicrophoneOn(false); setCameraOn(false); setScreenSharing(false); setWaitingForAdmission(false); setRecording(false); setChatMessages([]); setChatDraft(""); setTranscriptSegments([]); setDevices(emptyDevices); setNotice("");
   };
   const toggleMicrophone = async () => {
     const current = room(); if (!current) return;
@@ -140,7 +154,11 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     try { setRecording((await meetingsApi.recordings(props.meeting.id)).some(item => item.status === "recording")); }
     catch (reason) { setNotice(`Connected; recording state unavailable: ${String(reason)}`); }
   };
-  const toggleRecording = async () => {
+  const syncTranscript = async () => {
+try { setTranscriptSegments(await meetingsApi.transcriptSegments(props.meeting.id)); }
+catch (reason) { setNotice(`Connected; captions unavailable: ${String(reason)}`); }
+};
+const toggleRecording = async () => {
     if (!organizer() || actorRefusal()) return;
     try {
       setError("");
@@ -160,6 +178,15 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     try { await current.switchActiveDevice(kind, deviceId, true); }
     catch (reason) { setError(`Could not change ${kind}: ${String(reason)}`); }
   };
+  const sendChat = async () => {
+    const current = room(); const text = chatDraft().trim();
+    if (!current || !text) return;
+    const message: ChatMessage = { id: crypto.randomUUID(), author: props.displayName || props.identity, text };
+    try {
+      await current.localParticipant.publishData(chatEncoder.encode(JSON.stringify(message)), { reliable: true });
+      setChatMessages(items => [...items, message]); setChatDraft("");
+    } catch (reason) { setError(`Could not send chat message: ${String(reason)}`); }
+  };
   onCleanup(() => { void room()?.disconnect(); });
   return <section class="call-panel" aria-label="Live call">
     <header class="call-heading"><div><p class="call-eyebrow">LiveKit meeting</p><h3>{props.meeting.title}</h3><p class="call-state">State: <strong data-call-state>{state()}</strong>{join() && <> · {participants().length} participant{participants().length === 1 ? "" : "s"}</>}</p></div>
@@ -172,7 +199,7 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     <Show when={organizer() && actorRefusal()}><p class="call-notice" role="status">Recording is unavailable: {actorRefusal()}</p></Show>
     <Show when={join()} fallback={<Show when={props.meeting.video_room_id}>{room => <p class="call-room">Room: {room()} · {props.meeting.video_status}</p>}</Show>}><p class="call-room">Room: {join()!.room}</p></Show>
     <div class="call-tiles" aria-live="polite"><For each={participants()}>{participant => <VideoTile participant={participant} />}</For><Show when={connected() && participants().length === 0}><p class="call-empty">You are connected. Waiting for participants…</p></Show></div>
-    <Show when={room()}><footer class="call-controls"><div class="call-toggle-group"><button classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button><button classList={{ active: cameraOn() }} aria-pressed={cameraOn()} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button><button classList={{ active: screenSharing() }} aria-pressed={screenSharing()} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button><Show when={organizer()}><button classList={{ active: recording(), recording: true }} aria-pressed={recording()} disabled={!!actorRefusal()} title={actorRefusal()} onClick={() => void toggleRecording()}>{recording() ? "Stop recording" : "Start recording"}</button></Show></div>
+    <Show when={room()}><section class="call-chat" aria-label="In-call chat"><div class="call-chat-heading"><strong>Chat</strong><span>{chatMessages().length} message{chatMessages().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={chatMessages().length === 0}><p>Messages sent here are delivered to people currently in this call.</p></Show><For each={chatMessages()}>{message => <p><strong>{message.author}</strong><span>{message.text}</span></p>}</For></div><form class="call-chat-compose" onSubmit={event => { event.preventDefault(); void sendChat(); }}><input aria-label="Chat message" value={chatDraft()} onInput={event => setChatDraft(event.currentTarget.value)} maxlength={2_000} placeholder="Message everyone in this call" /><button disabled={!chatDraft().trim()}>Send</button></form></section><section class="call-transcript" aria-label="Live captions"><div class="call-chat-heading"><strong>Live captions</strong><span>{transcriptSegments().length} segment{transcriptSegments().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={transcriptSegments().length === 0}><p>Captions appear here when a transcriber submits transcript segments.</p></Show><For each={transcriptSegments()}>{segment => <p><strong>{segment.speaker_id ?? "Unknown speaker"}</strong><span>{segment.text}</span></p>}</For></div></section><footer class="call-controls"><div class="call-toggle-group"><button classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button><button classList={{ active: cameraOn() }} aria-pressed={cameraOn()} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button><button classList={{ active: screenSharing() }} aria-pressed={screenSharing()} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button><Show when={organizer()}><button classList={{ active: recording(), recording: true }} aria-pressed={recording()} disabled={!!actorRefusal()} title={actorRefusal()} onClick={() => void toggleRecording()}>{recording() ? "Stop recording" : "Start recording"}</button></Show></div>
       <div class="call-devices"><DevicePicker label="Microphone" kind="audioinput" devices={devices().audioinput} disabled={!connected()} onChange={id => void switchDevice("audioinput", id)} /><DevicePicker label="Camera" kind="videoinput" devices={devices().videoinput} disabled={!connected()} onChange={id => void switchDevice("videoinput", id)} /><DevicePicker label="Speaker" kind="audiooutput" devices={devices().audiooutput} disabled={!connected()} onChange={id => void switchDevice("audiooutput", id)} /></div>
     </footer></Show>
   </section>;

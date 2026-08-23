@@ -194,6 +194,27 @@ pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
         "Project",
     ),
     (
+        "Project.ViewMeetings",
+        "View meetings",
+        "List and retrieve project video rooms.",
+        "Project",
+        "Meetings",
+    ),
+    (
+        "Project.CreateMeetings",
+        "Create meetings",
+        "Create project video rooms.",
+        "Project",
+        "Meetings",
+    ),
+    (
+        "Project.JoinMeetings",
+        "Join meetings",
+        "Join explicitly public project video rooms as an application participant.",
+        "Project",
+        "Meetings",
+    ),
+    (
         "Project.AdminProject",
         "Administer project",
         "Manage project settings and membership.",
@@ -1251,6 +1272,7 @@ pub const RIGHT_GROUPS: &[(&str, &str, i32)] = &[
     ("VaultConnection", "Vault connection", 590),
     ("Internal", "Internal", 600),
     ("Planning", "Planning", 610),
+    ("Meetings", "Meetings", 620),
 ];
 /// KB §2.1 `RightType`: the seven contexts a right can belong to. Every catalog code is
 /// namespaced by its type, so this list is also the code prefix vocabulary.

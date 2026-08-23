@@ -1,8 +1,7 @@
 //! Native LiveKit runtime + token authority. Claims mirror `meet/src/backend/core/utils.py`.
 use crate::{actor, db, meetings};
-#[cfg(test)]
-use jsonwebtoken::{decode, DecodingKey, Validation};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rand::RngCore;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,6 +33,8 @@ pub struct LivekitConfig {
     pub port: Option<u16>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
+    /// Enables anonymous admission to explicitly public meetings; defaults false.
+    pub allow_unregistered_rooms: Option<bool>,
     /// Optional HTTP endpoint for the LiveKit Egress RPC service. Credentials stay
     /// in the native process and are never exposed to the Solid webview.
     pub egress_url: Option<String>,
@@ -81,6 +82,7 @@ impl std::fmt::Debug for LivekitConfig {
             .field("port", &self.port)
             .field("api_key", &redacted(&self.api_key))
             .field("api_secret", &redacted(&self.api_secret))
+            .field("allow_unregistered_rooms", &self.allow_unregistered_rooms)
             .field("egress_url", &self.egress_url)
             .field("recording_filepath", &self.recording_filepath)
             .field("egress_timeout_ms", &self.egress_timeout_ms)
@@ -135,6 +137,15 @@ impl LivekitConfig {
     }
     fn url(&self) -> String {
         format!("ws://{}:{}", self.host(), self.port())
+    }
+    /// Invalid and absent environment values keep anonymous access closed.
+    fn allow_unregistered_rooms(&self) -> bool {
+        self.allow_unregistered_rooms.unwrap_or_else(|| {
+            matches!(
+                std::env::var("ALLOW_UNREGISTERED_ROOMS").ok().as_deref(),
+                Some("true") | Some("1")
+            )
+        })
     }
     fn egress_url(&self) -> String {
         self.egress_url
@@ -474,6 +485,185 @@ pub struct CallJoin {
     pub token: String,
 }
 
+/// HS256 OIDC normal-room admission. Real IdP JWKS discovery is not implemented.
+#[derive(Debug, Deserialize)]
+struct NormalRoomOidcClaims {
+    sub: String,
+    iss: String,
+    aud: serde_json::Value,
+    exp: usize,
+    #[serde(default)]
+    name: Option<String>,
+}
+#[derive(Clone)]
+pub struct NormalRoomOidcConfig {
+    pub issuer: String,
+    pub audience: String,
+    pub hs256_secret: String,
+}
+impl NormalRoomOidcConfig {
+    pub fn from_env() -> Result<Self> {
+        let required = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .ok_or_else(|| format!("{key} must be configured for OIDC normal-room admission"))
+        };
+        Ok(Self {
+            issuer: required("SPACE_NORMAL_ROOM_OIDC_ISSUER")?,
+            audience: required("SPACE_NORMAL_ROOM_OIDC_AUDIENCE")?,
+            hs256_secret: required("SPACE_NORMAL_ROOM_OIDC_HS256_SECRET")?,
+        })
+    }
+}
+fn verify_normal_room_oidc_token(
+    token: &str,
+    config: &NormalRoomOidcConfig,
+) -> Result<(String, String)> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_issuer(&[&config.issuer]);
+    validation.set_audience(&[&config.audience]);
+    let claims = decode::<NormalRoomOidcClaims>(
+        token,
+        &DecodingKey::from_secret(config.hs256_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| "invalid OIDC normal-room token".to_string())?
+    .claims;
+    let _ = (&claims.iss, &claims.aud, claims.exp);
+    let subject = claims.sub.trim();
+    if subject.is_empty() || subject.len() > 128 {
+        return Err("OIDC subject must be 1 to 128 characters".into());
+    }
+    let name = claims
+        .name
+        .unwrap_or_else(|| subject.into())
+        .trim()
+        .to_owned();
+    if name.is_empty() || name.len() > 128 {
+        return Err("OIDC display name must be 1 to 128 characters".into());
+    }
+    Ok((subject.into(), name))
+}
+/// Authenticated normal-room join: LiveKit identity derives from token `sub`.
+pub fn join_oidc_normal_meeting_call(meeting_id: String, oidc_token: &str) -> Result<CallJoin> {
+    let oidc = NormalRoomOidcConfig::from_env()?;
+    let (subject, display_name) = verify_normal_room_oidc_token(oidc_token, &oidc)?;
+    join_oidc_normal_meeting_call_with_config(
+        meeting_id,
+        subject,
+        display_name,
+        LivekitConfig::default(),
+    )
+}
+fn join_oidc_normal_meeting_call_with_config(
+    meeting_id: String,
+    subject: String,
+    display_name: String,
+    config: LivekitConfig,
+) -> Result<CallJoin> {
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered normal rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Normal room not found")?;
+    if meeting.video_provider.as_deref() != Some("livekit") {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("oidc-{subject}"),
+            display_name,
+            false,
+        )?,
+        room,
+    })
+}
+
+/// Anonymous admission is independent of persisted participant scope. Both this
+/// config flag and the meeting's persisted PUBLIC access level must opt in.
+pub fn join_public_meeting_call(
+    meeting_id: String,
+    display_name: Option<String>,
+) -> Result<CallJoin> {
+    join_public_meeting_call_with_config(meeting_id, display_name, LivekitConfig::default())
+}
+pub(crate) fn join_public_meeting_call_with_config(
+    meeting_id: String,
+    display_name: Option<String>,
+    config: LivekitConfig,
+) -> Result<CallJoin> {
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered public rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
+    if meeting.video_provider.as_deref() != Some("livekit") {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let name = display_name
+        .unwrap_or_else(|| "Anonymous".into())
+        .trim()
+        .to_owned();
+    if name.is_empty() || name.len() > 128 {
+        return Err("Anonymous display name must be 1 to 128 characters".into());
+    }
+    let mut entropy = [0_u8; 16];
+    rand::thread_rng().fill_bytes(&mut entropy);
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("anonymous-{}", hex::encode(entropy)),
+            name,
+            false,
+        )?,
+        room,
+    })
+}
+
+/// Application API admission has no user profile. Its identity derives solely from
+/// the authenticated application and it never receives the LiveKit room-admin grant.
+pub fn join_application_public_meeting_call(
+    meeting_id: String,
+    application_id: String,
+    application_name: String,
+) -> Result<CallJoin> {
+    if application_id.trim().is_empty() || application_name.trim().is_empty() {
+        return Err("Application identity is required".into());
+    }
+    let config = LivekitConfig::default();
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered application rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
+    if meeting.video_provider.as_deref() != Some("livekit") {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("application-{application_id}"),
+            application_name,
+            false,
+        )?,
+        room,
+    })
+}
+
 /// Public IPC surface: the webview names the meeting and nothing else. Who is joining
 /// comes from native state (`actor::resolve`) and their display name from that profile
 /// row; the LiveKit endpoint and signing keys from native config/env. A caller that could
@@ -528,6 +718,9 @@ pub(crate) fn join_meeting_call_with_config(
         .ok_or("Meeting not found")?;
     if meeting.archived {
         return Err("Cannot join an archived meeting".into());
+    }
+    if meeting.video_provider.as_deref() != Some("livekit") {
+        return Err("External Meet rooms are not configured; select Native LiveKit or configure the external room API".into());
     }
     let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection
@@ -599,6 +792,122 @@ pub struct CallRecording {
 
 const RECORDING_COLUMNS: &str =
     "id,meeting_id,egress_id,status,filepath,started_by,started_at,stopped_at,stop_attempts,last_error";
+
+/// A durable caption fact. Audio never crosses this boundary; an external
+/// transcriber may submit source-attributed text, while the desktop UI reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallTranscriptSegment {
+    pub id: String,
+    pub meeting_id: String,
+    pub speaker_id: Option<String>,
+    pub text: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub source: String,
+    pub created_at: i64,
+}
+
+const TRANSCRIPT_COLUMNS: &str =
+    "id,meeting_id,speaker_id,text,started_at,ended_at,source,created_at";
+
+fn row_to_transcript_segment(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallTranscriptSegment> {
+    Ok(CallTranscriptSegment {
+        id: row.get(0)?,
+        meeting_id: row.get(1)?,
+        speaker_id: row.get(2)?,
+        text: row.get(3)?,
+        started_at: row.get(4)?,
+        ended_at: row.get(5)?,
+        source: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn new_transcript_segment_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("segment-{nanos:x}")
+}
+
+pub(crate) fn append_transcript_segment(
+    connection: &rusqlite::Connection,
+    meeting_id: &str,
+    speaker_id: Option<&str>,
+    text: &str,
+    started_at: i64,
+    ended_at: i64,
+    source: &str,
+) -> Result<CallTranscriptSegment> {
+    let text = text.trim();
+    if text.is_empty() || ended_at < started_at || !matches!(source, "external" | "manual") {
+        return Err("Transcript segment is invalid".into());
+    }
+    let segment = CallTranscriptSegment {
+        id: new_transcript_segment_id(),
+        meeting_id: meeting_id.to_owned(),
+        speaker_id: speaker_id.map(str::to_owned),
+        text: text.to_owned(),
+        started_at,
+        ended_at,
+        source: source.to_owned(),
+        created_at: now_seconds(),
+    };
+    connection.execute(
+        "INSERT INTO call_transcript_segments (id,meeting_id,speaker_id,text,started_at,ended_at,source,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        rusqlite::params![segment.id, segment.meeting_id, segment.speaker_id, segment.text, segment.started_at, segment.ended_at, segment.source, segment.created_at],
+    ).map_err(|e| e.to_string())?;
+    Ok(segment)
+}
+
+pub(crate) fn transcript_segments_for_meeting(
+    connection: &rusqlite::Connection,
+    meeting_id: &str,
+) -> Result<Vec<CallTranscriptSegment>> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT {TRANSCRIPT_COLUMNS} FROM call_transcript_segments WHERE meeting_id=?1 ORDER BY started_at,id"
+    )).map_err(|e| e.to_string())?;
+    let segments = statement
+        .query_map(rusqlite::params![meeting_id], row_to_transcript_segment)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(segments)
+}
+
+/// Captions are readable only through the same meeting scope as recordings.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_meeting_transcript_segments(meeting_id: String) -> Result<Vec<CallTranscriptSegment>> {
+    let connection = db::conn()?;
+    let (actor_id, _) = actor::resolve(&connection)?;
+    meetings::get_meeting_scoped(meeting_id.clone(), actor_id)?.ok_or("Meeting not found")?;
+    transcript_segments_for_meeting(&connection, &meeting_id)
+}
+
+/// A participant can contribute only a self-attributed manual caption. External
+/// provider ingestion stays outside IPC and uses `append_transcript_segment` directly.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn append_manual_transcript_segment(
+    meeting_id: String,
+    text: String,
+    started_at: i64,
+    ended_at: i64,
+) -> Result<CallTranscriptSegment> {
+    let connection = db::conn()?;
+    let (actor_id, _) = actor::resolve(&connection)?;
+    meetings::get_meeting_scoped(meeting_id.clone(), actor_id.clone())?
+        .ok_or("Meeting not found")?;
+    append_transcript_segment(
+        &connection,
+        &meeting_id,
+        Some(&actor_id),
+        &text,
+        started_at,
+        ended_at,
+        "manual",
+    )
+}
 
 fn row_to_recording(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallRecording> {
     Ok(CallRecording {
@@ -1167,6 +1476,34 @@ mod tests {
     }
 
     #[test]
+    fn transcript_segments_are_ordered_and_validate_their_facts() {
+        let connection = recording_conn();
+        let later = append_transcript_segment(
+            &connection,
+            "m-1",
+            Some("default-org"),
+            "Later",
+            20,
+            21,
+            "manual",
+        )
+        .unwrap();
+        let first =
+            append_transcript_segment(&connection, "m-1", None, " First ", 10, 12, "external")
+                .unwrap();
+        assert!(
+            append_transcript_segment(&connection, "m-1", None, "   ", 1, 1, "external").is_err()
+        );
+        assert!(
+            append_transcript_segment(&connection, "m-1", None, "bad range", 2, 1, "external")
+                .is_err()
+        );
+        let segments = transcript_segments_for_meeting(&connection, "m-1").unwrap();
+        assert_eq!(segments, vec![first, later]);
+        assert_eq!(segments[0].text, "First");
+    }
+
+    #[test]
     fn reservation_prevents_a_second_egress_before_rpc() {
         let connection = recording_conn();
         let reserved = reserve_recording(&connection, "m-1", "a.mp4", "default-org").unwrap();
@@ -1487,6 +1824,62 @@ mod tests {
         assert!(!decoded.claims.video.room_join);
         assert!(!decoded.claims.video.can_publish);
         assert!(!decoded.claims.video.can_subscribe);
+    }
+
+    #[test]
+    fn normal_room_oidc_verifies_signature_issuer_audience_and_expiry() {
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            iss: &'a str,
+            aud: &'a str,
+            exp: usize,
+            name: &'a str,
+        }
+        let config = NormalRoomOidcConfig {
+            issuer: "https://idp.test".into(),
+            audience: "space-room".into(),
+            hs256_secret: "test-secret".into(),
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &Claims {
+                sub: "person-1",
+                iss: "https://idp.test",
+                aud: "space-room",
+                exp: (SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + 60) as usize,
+                name: "Person One",
+            },
+            &EncodingKey::from_secret(config.hs256_secret.as_bytes()),
+        )
+        .unwrap();
+        assert_eq!(
+            verify_normal_room_oidc_token(&token, &config).unwrap(),
+            ("person-1".into(), "Person One".into())
+        );
+        let wrong = NormalRoomOidcConfig {
+            audience: "other".into(),
+            ..config
+        };
+        assert!(verify_normal_room_oidc_token(&token, &wrong).is_err());
+    }
+
+    #[test]
+    fn anonymous_rooms_need_an_explicit_config_opt_in() {
+        assert!(!LivekitConfig {
+            allow_unregistered_rooms: Some(false),
+            ..Default::default()
+        }
+        .allow_unregistered_rooms());
+        assert!(LivekitConfig {
+            allow_unregistered_rooms: Some(true),
+            ..Default::default()
+        }
+        .allow_unregistered_rooms());
     }
 
     #[test]

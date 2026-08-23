@@ -450,6 +450,8 @@ pub fn run() {
             calls::start_meeting_recording,
             calls::stop_meeting_recording,
             calls::list_meeting_recordings,
+            calls::list_meeting_transcript_segments,
+            calls::append_manual_transcript_segment,
             calls::recording_actor_status,
             pipelines::list_pipeline_scripts,
             pipelines::create_pipeline_script,

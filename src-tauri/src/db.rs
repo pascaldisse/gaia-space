@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 109;
+pub const SCHEMA_VERSION: i64 = 113;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -589,6 +589,28 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
+    }
+    // V85: transcript segments are durable, source-attributed call facts. The
+    // transcriber remains external; this boundary deliberately stores no audio.
+    if version < 110 {
+        tx.execute_batch(SCHEMA_V110)?;
+    }
+    // V86/V87: legacy calls-lane lifecycle/provider guards. V75 owns the canonical
+    // column names and constraints; these version slots intentionally remain no-ops.
+    if version < 111 && table_exists(&tx, "meetings")? {
+        tx.execute_batch(SCHEMA_V111)?;
+    }
+    if version < 112 && table_exists(&tx, "meetings")? {
+        tx.execute_batch(SCHEMA_V112)?;
+    }
+    // V88: public normal-room admission remains inert unless server policy enables it.
+    if version < 113 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(
+            &tx,
+            "meetings",
+            "access_level",
+            "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))",
+        )?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1437,6 +1459,27 @@ CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_parti
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+/// V85: durable transcription substrate; captions and summaries derive from these segments.
+pub(crate) const SCHEMA_V110: &str = r#"
+CREATE TABLE IF NOT EXISTS call_transcript_segments (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker_id TEXT REFERENCES profiles(id),
+    text TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'external' CHECK(source IN ('external','manual')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK(length(trim(text)) > 0),
+    CHECK(ended_at >= started_at)
+);
+CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
+"#;
+
+/// V86/V87 are retained migration slots; V75 supplies the canonical call columns.
+pub(crate) const SCHEMA_V111: &str = "";
+pub(crate) const SCHEMA_V112: &str = "";
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1847,7 +1890,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 109);
+        assert_eq!(SCHEMA_VERSION, 113);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
