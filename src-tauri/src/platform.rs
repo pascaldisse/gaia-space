@@ -84,7 +84,8 @@ pub fn get_profile_email_status(profile_id: String) -> Result<ProfileEmailStatus
             })
         },
     )
-    .optional()?
+    .optional()
+    .map_err(|e| e.to_string())?
     .unwrap_or(ProfileEmailStatus {
         profile_id,
         status: "unverified".into(),
@@ -104,18 +105,20 @@ pub fn set_profile_email_status(value: ProfileEmailStatus) -> Result<()> {
 pub fn list_messenger_contacts(profile_id: String) -> Result<Vec<MessengerContact>> {
     let c = db::conn()?;
     let mut q=c.prepare("SELECT id,profile_id,contact_type,login,deep_link FROM profile_messenger_contacts WHERE profile_id=?1 ORDER BY contact_type,login").map_err(|e|e.to_string())?;
-    q.query_map([profile_id], |r| {
-        Ok(MessengerContact {
-            id: Some(r.get(0)?),
-            profile_id: r.get(1)?,
-            contact_type: r.get(2)?,
-            login: r.get(3)?,
-            deep_link: r.get(4)?,
+    let result = q
+        .query_map([profile_id], |r| {
+            Ok(MessengerContact {
+                id: Some(r.get(0)?),
+                profile_id: r.get(1)?,
+                contact_type: r.get(2)?,
+                login: r.get(3)?,
+                deep_link: r.get(4)?,
+            })
         })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<std::result::Result<_, _>>()
-    .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerContact> {
@@ -134,17 +137,19 @@ pub fn list_principals() -> Result<Vec<Principal>> {
     let mut q = c
         .prepare("SELECT id,kind,profile_id,label FROM principals ORDER BY label")
         .map_err(|e| e.to_string())?;
-    q.query_map([], |r| {
-        Ok(Principal {
-            id: r.get(0)?,
-            kind: r.get(1)?,
-            profile_id: r.get(2)?,
-            label: r.get(3)?,
+    let result = q
+        .query_map([], |r| {
+            Ok(Principal {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                profile_id: r.get(2)?,
+                label: r.get(3)?,
+            })
         })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<std::result::Result<_, _>>()
-    .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_profiles() -> Result<Vec<Profile>> {
