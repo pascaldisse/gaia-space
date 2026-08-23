@@ -595,6 +595,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 85 {
         tx.execute_batch(SCHEMA_V85)?;
     }
+    // V86/V87: legacy calls-lane lifecycle/provider guards. V75 owns the canonical
+    // column names and constraints; these version slots intentionally remain no-ops.
+    if version < 86 && table_exists(&tx, "meetings")? { tx.execute_batch(SCHEMA_V86)?; }
+    if version < 87 && table_exists(&tx, "meetings")? { tx.execute_batch(SCHEMA_V87)?; }
+    // V88: public normal-room admission remains inert unless server policy enables it.
+    if version < 88 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "access_level", "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))")?;
+    }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
@@ -1399,6 +1407,10 @@ CREATE TABLE IF NOT EXISTS call_transcript_segments (
 );
 CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
 "#;
+
+/// V86/V87 are retained migration slots; V75 supplies the canonical call columns.
+pub(crate) const SCHEMA_V86: &str = "";
+pub(crate) const SCHEMA_V87: &str = "";
 
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END

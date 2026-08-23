@@ -4858,6 +4858,7 @@ async fn main() {
                 .put(caldav_put_event)
                 .delete(caldav_delete_event),
         )
+        .route("/api/rooms/{room}", get(public_room))
         .route("/api/capabilities", get(capabilities))
         .route("/api/auth/mobile-pairings", post(create_mobile_pairing))
         .route(
