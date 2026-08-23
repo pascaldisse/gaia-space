@@ -1433,7 +1433,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "create_package_repository"
         | "create_pipeline_script"
         | "register_worker"
-        | "save_test_report" => CommandPolicy::Session,
+        | "save_test_report"
+        | "ingest_teamcity_test_messages" => CommandPolicy::Session,
         "create_profile"
         | "create_quality_gate_rule"
         | "create_review_stack"
@@ -3617,6 +3618,7 @@ async fn cmd(
     "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
     "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
     "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
+    "ingest_teamcity_test_messages" => pipelines::ingest_teamcity_test_messages(input: pipelines::TeamCityTestReportInput),
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
     "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
