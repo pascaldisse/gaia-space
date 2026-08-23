@@ -181,6 +181,36 @@ pub fn visible_meetings_on(c: &rusqlite::Connection, profile_id: &str) -> Result
     rows
 }
 
+/// Server-side application transport already authorizes a project before reading.
+/// Keep this connection-bound reader private to that transport instead of inventing a
+/// fake profile or accidentally using the human visibility predicate.
+pub fn get_meeting_unscoped(c: &rusqlite::Connection, id: &str) -> Result<Option<Meeting>> {
+    c.query_row(
+        &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id=?1 AND m.archived=0"),
+        [id],
+        row_to_meeting,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Application room lists begin from every non-archived room; the HTTP boundary then
+/// filters each row through its channel's project grant. Rooms with no project channel
+/// intentionally cannot become application-visible.
+pub fn list_meetings_scoped_for_application(c: &rusqlite::Connection) -> Result<Vec<Meeting>> {
+    let mut statement = c
+        .prepare(&format!(
+            "SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.archived=0 ORDER BY m.starts_at"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rooms = statement
+        .query_map([], row_to_meeting)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rooms)
+}
+
 pub fn get_meeting_scoped(id: String, profile_id: String) -> Result<Option<Meeting>> {
     let c = db::conn()?;
     c.query_row(
