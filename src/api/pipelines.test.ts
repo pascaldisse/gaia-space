@@ -1,17 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-
-// `mock.module` is process-global, permanent, and live-patches already-imported
-// bindings. A stub installed inside a test therefore swallows every later test
-// file's IPC (CI's file order made that three real failures while the local order
-// hid it). So install ONE delegating stub that behaves exactly like the real
-// module unless this file has explicitly armed a recorder.
-const realCore = await import("@tauri-apps/api/core");
-let capture: ((cmd: string, args: Record<string, unknown>) => unknown) | null = null;
-mock.module("@tauri-apps/api/core", () => ({
-  ...realCore,
-  invoke: (cmd: string, args: Record<string, unknown>) =>
-    capture ? Promise.resolve(capture(cmd, args)) : realCore.invoke(cmd, args as never),
-}));
+import { afterEach, describe, expect, test } from "bun:test";
 import { editableJob, normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
 
 describe("pipeline script normalization", () => {
@@ -120,14 +107,20 @@ describe("validation parity with parse_and_validate_script", () => {
  *  Rust *variant* name. Pinned on the Rust side by
  *  `pipelines::tests::serialized_dsl_tags_are_variant_names`. */
 describe("event trigger wire contract", () => {
+  // Record through the IPC global, never `mock.module`: a module mock is
+  // process-global and permanent, so it leaks into every test file that runs
+  // after this one (on CI's file order that swallowed three other files' IPC,
+  // while the local order hid it). The global is per-test and removable.
   afterEach(() => {
-    capture = null;
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
   async function captureCall(call: (api: typeof import("./pipelines").pipelinesApi) => Promise<unknown>) {
     const calls: Array<{ cmd: string; args: Record<string, unknown> }> = [];
-    capture = (cmd, args) => {
-      calls.push({ cmd, args });
-      return [];
+    (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+      invoke: (cmd: string, args: Record<string, unknown>) => {
+        calls.push({ cmd, args });
+        return Promise.resolve([]);
+      },
     };
     const { pipelinesApi } = await import("./pipelines");
     await call(pipelinesApi);

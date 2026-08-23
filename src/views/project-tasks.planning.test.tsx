@@ -1,7 +1,5 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { render } from "solid-js/web";
-import { invoke } from "../api/invoke";
-mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import ProjectTasks from "./ProjectTasks";
 import { navigate, registerViews, route } from "../router";
 import { projectId } from "../session";
@@ -20,17 +18,24 @@ async function until(check: () => boolean, timeoutMs = 4000) {
   }
 }
 
+// Serve through the IPC global rather than `mock.module`: an ES module's imports
+// are evaluated BEFORE its own `mock.module` call, so a module mock can never fix
+// this file's own graph — it only leaks into later files. Both transports (Tauri
+// core and the HTTP shim) read this global, so the stub holds whichever one the
+// component ended up bound to.
 function serve(table: Record<string, unknown>) {
   calls = [];
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    const command = url.split("api/cmd/")[1] ?? url;
-    calls.push({ command, body: init?.body ? JSON.parse(String(init.body)) : {} });
-    return new Response(JSON.stringify({ ok: true, value: table[command] ?? [] }), { headers: { "content-type": "application/json" } });
-  }) as typeof fetch;
+  (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+    invoke: async (command: string, args: Record<string, unknown>) => {
+      calls.push({ command, body: args ?? {} });
+      return table[command] ?? [];
+    },
+  };
 }
 
 afterEach(() => {
   dispose?.(); dispose = undefined;
+  delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   globalThis.fetch = realFetch;
   document.body.innerHTML = "";
   navigate({ view: "Dashboard" });
