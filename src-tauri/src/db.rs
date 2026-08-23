@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 113;
+pub const SCHEMA_VERSION: i64 = 114;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -611,6 +611,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "access_level",
             "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))",
         )?;
+    }
+    // V114: channel message pins survive reloads and remain queryable without parsing text.
+    if version < 114 && table_exists(&tx, "messages")? {
+        add_column_if_missing(
+            &tx,
+            "messages",
+            "pinned",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1))",
+        )?;
+        tx.execute_batch(SCHEMA_V114)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1479,6 +1489,10 @@ CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcr
 /// V86/V87 are retained migration slots; V75 supplies the canonical call columns.
 pub(crate) const SCHEMA_V111: &str = "";
 pub(crate) const SCHEMA_V112: &str = "";
+/// V114: newest-first channel pinned-message lookup.
+pub(crate) const SCHEMA_V114: &str = r#"
+CREATE INDEX IF NOT EXISTS messages_channel_pinned_created ON messages(channel_id, pinned, created_at DESC, id DESC) WHERE archived=0 AND pinned=1;
+"#;
 
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
@@ -1890,7 +1904,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 113);
+        assert_eq!(SCHEMA_VERSION, 114);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
