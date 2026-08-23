@@ -10,10 +10,8 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
-    events,
-    issues,
-    meetings,
-    oauth, package_registry, payload_dispatch, personal, pipelines, platform, review,
+    events, issues, meetings, oauth, package_registry, payload_dispatch, personal, pipelines,
+    platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -284,16 +282,21 @@ async fn app_projects(
     let all = platform::list_projects().map_err(|_| {
         err(StatusCode::INTERNAL_SERVER_ERROR, "project lookup failed").into_response()
     })?;
-    let c = db::conn()
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response())?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
     let mut visible = Vec::new();
     for project in all {
         let contexts = app_rights::app_project_contexts(&project.id);
-        let granted =
-            app_rights::app_has_right_anywhere(&c, &application.id, &contexts, "Project.ViewProject")
-                .map_err(|_| {
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response()
-                })?;
+        let granted = app_rights::app_has_right_anywhere(
+            &c,
+            &application.id,
+            &contexts,
+            "Project.ViewProject",
+        )
+        .map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response()
+        })?;
         if granted {
             visible.push(project);
         }
@@ -339,8 +342,9 @@ async fn app_create_issue(
 ) -> Result<Json<issues::Issue>, axum::response::Response> {
     let (token, application) = app_bearer(&headers)?;
     app_write_scope(&token)?;
-    let c = db::conn()
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response())?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
     let contexts = app_rights::app_project_contexts(&project_id);
     let granted =
         app_rights::app_has_right_anywhere(&c, &application.id, &contexts, "Project.CreateIssues")
@@ -553,7 +557,6 @@ fn repository_access(user: &User, repository_id: &str, level: RepoAccess) -> Res
     }
 }
 
-
 /// CalDAV deliberately accepts only HTTP Basic credentials. It reuses the same
 /// active-user lookup and Argon2 verification as login and package registries;
 /// calendar software cannot rely on browser cookies or interactive redirects.
@@ -599,6 +602,135 @@ fn ics_time(seconds: i64) -> String {
         .unwrap_or(chrono::DateTime::UNIX_EPOCH)
         .format("%Y%m%dT%H%M%SZ")
         .to_string()
+}
+fn caldav_unescape(value: &str) -> String {
+    value
+        .replace("\\n", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+}
+fn caldav_time(value: &str) -> Result<(i64, Option<String>), String> {
+    let value = value.trim();
+    if value.len() == 8 && value.as_bytes().iter().all(u8::is_ascii_digit) {
+        let date =
+            chrono::NaiveDate::parse_from_str(value, "%Y%m%d").map_err(|_| "invalid DATE")?;
+        return Ok((
+            date.and_hms_opt(0, 0, 0)
+                .ok_or("invalid DATE")?
+                .and_utc()
+                .timestamp(),
+            Some(value.into()),
+        ));
+    }
+    let value = value.strip_suffix('Z').unwrap_or(value);
+    let parsed = chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S")
+        .map_err(|_| "invalid DTSTART/DTEND")?;
+    Ok((parsed.and_utc().timestamp(), None))
+}
+fn caldav_xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+fn caldav_multistatus(hrefs: impl IntoIterator<Item = String>) -> String {
+    let responses = hrefs.into_iter().map(|href| format!(
+        "<D:response><D:href>{}</D:href><D:propstat><D:prop><D:resourcetype><D:collection/>{}</D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>",
+        caldav_xml_escape(&href), if href.ends_with('/') { "<C:calendar/>" } else { "" }
+    )).collect::<String>();
+    format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><D:multistatus xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">{responses}</D:multistatus>")
+}
+fn caldav_calendar_owned(profile_id: &str, calendar_id: &str) -> Result<(), String> {
+    let c = db::conn().map_err(|e| e.to_string())?;
+    c.query_row(
+        "SELECT 1 FROM calendars WHERE id=?1 AND profile_id=?2",
+        params![calendar_id, profile_id],
+        |_| Ok(()),
+    )
+    .map_err(|_| "calendar not found".into())
+}
+type CaldavStoredEvent = (String, String, String, i64, Option<i64>, Option<String>);
+fn caldav_events(profile_id: &str, calendar_id: &str) -> Result<Vec<CaldavStoredEvent>, String> {
+    caldav_calendar_owned(profile_id, calendar_id)?;
+    let c = db::conn().map_err(|e| e.to_string())?;
+    let mut events = Vec::new();
+    let mut statement = c.prepare("SELECT e.href,e.uid,e.title,e.starts_at,e.ends_at,e.all_day_date FROM calendar_caldav_events e WHERE e.calendar_id=?1 ORDER BY e.starts_at,e.href").map_err(|e| e.to_string())?;
+    for row in statement
+        .query_map([calendar_id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+    {
+        events.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(events)
+}
+fn caldav_vevent(
+    uid: &str,
+    title: &str,
+    starts_at: i64,
+    ends_at: Option<i64>,
+    all_day_date: Option<&str>,
+) -> String {
+    let start = all_day_date
+        .map(|date| format!("DTSTART;VALUE=DATE:{date}\r\n"))
+        .unwrap_or_else(|| format!("DTSTART:{}\r\n", ics_time(starts_at)));
+    let end = ends_at
+        .map(|time| format!("DTEND:{}\r\n", ics_time(time)))
+        .unwrap_or_default();
+    format!(
+        "BEGIN:VEVENT\r\nUID:{}\r\nSUMMARY:{}\r\n{}{}END:VEVENT\r\n",
+        ics_escape(uid),
+        ics_escape(title),
+        start,
+        end
+    )
+}
+fn caldav_ics(profile_id: &str, calendar_id: &str) -> Result<String, String> {
+    let mut body =
+        String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Gaia Space//CalDAV//EN\r\n");
+    let c = db::conn().map_err(|e| e.to_string())?;
+    caldav_calendar_owned(profile_id, calendar_id)?;
+    let mut feeds = c.prepare("SELECT e.uid,e.title,e.starts_at,e.ends_at,e.all_day_date FROM calendar_feed_events e JOIN calendar_feeds f ON f.id=e.feed_id WHERE f.calendar_id=?1 ORDER BY e.starts_at,e.uid").map_err(|e| e.to_string())?;
+    for row in feeds
+        .query_map([calendar_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+                r.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+    {
+        let (uid, title, start, end, date) = row.map_err(|e| e.to_string())?;
+        body.push_str(&caldav_vevent(&uid, &title, start, end, date.as_deref()));
+    }
+    for (_, uid, title, start, end, date) in caldav_events(profile_id, calendar_id)? {
+        body.push_str(&caldav_vevent(&uid, &title, start, end, date.as_deref()));
+    }
+    body.push_str("END:VCALENDAR\r\n");
+    Ok(body)
+}
+fn caldav_event_ics(profile_id: &str, calendar_id: &str, href: &str) -> Result<String, String> {
+    let event = caldav_events(profile_id, calendar_id)?
+        .into_iter()
+        .find(|event| event.0 == href)
+        .ok_or("event not found")?;
+    Ok(format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Gaia Space//CalDAV//EN\r\n{}END:VCALENDAR\r\n",
+        caldav_vevent(&event.1, &event.2, event.3, event.4, event.5.as_deref())
+    ))
 }
 type CaldavParsedEvent = (String, String, i64, Option<i64>, Option<String>);
 fn caldav_event(body: &str) -> Result<CaldavParsedEvent, String> {
@@ -675,18 +807,7 @@ async fn caldav_collection(
         Ok(user) => user,
         Err(response) => return response,
     };
-    match caldav_calendar_owned(&user.profile_id, &calendar_id) {
-        Ok(()) => (
-            StatusCode::MULTI_STATUS,
-            [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-            caldav_multistatus(vec![
-                format!("/caldav/{calendar_id}/"),
-                format!("/caldav/{calendar_id}/calendar.ics"),
-            ]),
-        )
-            .into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    caldav_collection_for_user(&user.profile_id, &calendar_id)
 }
 async fn caldav_calendar(
     headers: HeaderMap,
@@ -702,8 +823,19 @@ async fn caldav_calendar(
     {
         return caldav_collection_for_user(&user.profile_id, &calendar_id);
     }
+    if method == Method::OPTIONS {
+        return (
+            StatusCode::NO_CONTENT,
+            [(header::ALLOW, "GET, OPTIONS, PROPFIND, REPORT")],
+        )
+            .into_response();
+    }
     if method != Method::GET {
-        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            [(header::ALLOW, "GET, OPTIONS, PROPFIND, REPORT")],
+        )
+            .into_response();
     }
     match caldav_ics(&user.profile_id, &calendar_id) {
         Ok(ics) => (
@@ -716,14 +848,43 @@ async fn caldav_calendar(
     }
 }
 fn caldav_collection_for_user(profile_id: &str, calendar_id: &str) -> axum::response::Response {
-    match caldav_calendar_owned(profile_id, calendar_id) {
-        Ok(()) => (
-            StatusCode::MULTI_STATUS,
-            [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-            caldav_multistatus(vec![
+    match caldav_events(profile_id, calendar_id) {
+        Ok(events) => {
+            let mut hrefs = vec![
                 format!("/caldav/{calendar_id}/"),
                 format!("/caldav/{calendar_id}/calendar.ics"),
-            ]),
+            ];
+            hrefs.extend(
+                events
+                    .into_iter()
+                    .map(|event| format!("/caldav/{calendar_id}/{}", event.0)),
+            );
+            (
+                StatusCode::MULTI_STATUS,
+                [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+                caldav_multistatus(hrefs),
+            )
+                .into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+async fn caldav_get_event(
+    headers: HeaderMap,
+    Path((calendar_id, href)): Path<(String, String)>,
+) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if !href.ends_with(".ics") || href == "calendar.ics" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match caldav_event_ics(&user.profile_id, &calendar_id, &href) {
+        Ok(ics) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/calendar; charset=utf-8")],
+            ics,
         )
             .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -3051,8 +3212,11 @@ async fn registry_nuget_put(
         Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
     };
     let Some(version) = version else {
-        return err(StatusCode::BAD_REQUEST, "nuget upload needs {id}/{version}/{file}")
-            .into_response();
+        return err(
+            StatusCode::BAD_REQUEST,
+            "nuget upload needs {id}/{version}/{file}",
+        )
+        .into_response();
     };
     let metadata = json!({"formatMetadata": {"id": package_name, "version": version}});
     match pipelines::publish_registry_bytes(
@@ -3910,7 +4074,12 @@ async fn main() {
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
         .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
-        .route("/caldav/{calendar_id}/{href}", put(caldav_put_event).delete(caldav_delete_event))
+        .route(
+            "/caldav/{calendar_id}/{href}",
+            get(caldav_get_event)
+                .put(caldav_put_event)
+                .delete(caldav_delete_event),
+        )
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
@@ -4130,10 +4299,8 @@ mod tests {
         .unwrap();
 
         // Stage 0: nothing declared, nothing approved.
-        let (status, body) = status_and_body(
-            app_projects(bearer(&token)).await.unwrap().into_response(),
-        )
-        .await;
+        let (status, body) =
+            status_and_body(app_projects(bearer(&token)).await.unwrap().into_response()).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body.as_array().unwrap().len(), 0);
         let denied = app_create_issue(
@@ -4167,10 +4334,8 @@ mod tests {
         )
         .unwrap();
 
-        let (status, body) = status_and_body(
-            app_projects(bearer(&token)).await.unwrap().into_response(),
-        )
-        .await;
+        let (status, body) =
+            status_and_body(app_projects(bearer(&token)).await.unwrap().into_response()).await;
         assert_eq!(status, StatusCode::OK);
         let ids: Vec<&str> = body
             .as_array()
@@ -4243,7 +4408,12 @@ mod tests {
         let promote = json!({"entry": {"repository_id": "repo-grant", "profile_id": "pb", "role": "MANAGER"}});
         let (status, _) = call(cookie("tb"), "set_package_repository_acl", promote.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, _) = call(cookie("tb"), "delete_package_repository", json!({"id": "repo-grant"})).await;
+        let (status, _) = call(
+            cookie("tb"),
+            "delete_package_repository",
+            json!({"id": "repo-grant"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(
             cookie("tb"),
@@ -4256,7 +4426,12 @@ mod tests {
         let (status, _) = call(cookie("td"), "set_package_repository_acl", promote).await;
         assert_eq!(status, StatusCode::OK);
         // Reading stays open to the writer.
-        let (status, _) = call(cookie("tb"), "list_package_versions", json!({"repository_id": "repo-grant", "query": null})).await;
+        let (status, _) = call(
+            cookie("tb"),
+            "list_package_versions",
+            json!({"repository_id": "repo-grant", "query": null}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
     }
 
@@ -4269,7 +4444,11 @@ mod tests {
         let c = db::conn().unwrap();
         c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('proj-cmd','Cmd','CMD','pa',1)", []).unwrap();
         c.execute("INSERT INTO package_repositories(id,project_id,name,format,mode) VALUES('repo-cmd','proj-cmd','cmd','npm','HOSTING')", []).unwrap();
-        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('proj-cmd','pb')", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('proj-cmd','pb')",
+            [],
+        )
+        .unwrap();
         drop(c);
         let publish = json!({
             "repositoryId": "repo-cmd",
@@ -4283,7 +4462,12 @@ mod tests {
         // A member of the project may read it, but publishing is the owner's or a grantee's.
         let (status, _) = call(cookie("tb"), "publish_package_version", publish.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, _) = call(cookie("td"), "package_retention_candidates", json!({"repositoryId": "repo-cmd"})).await;
+        let (status, _) = call(
+            cookie("td"),
+            "package_retention_candidates",
+            json!({"repositoryId": "repo-cmd"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(cookie("ta"), "publish_package_version", publish).await;
         assert_eq!(status, StatusCode::OK);
@@ -4296,7 +4480,8 @@ mod tests {
     async fn a_registry_repository_is_not_open_to_every_logged_in_account() {
         let _serial = test_lock();
         setup();
-        let package_dir = env::temp_dir().join(format!("gaia-space-registry-acl-{}", std::process::id()));
+        let package_dir =
+            env::temp_dir().join(format!("gaia-space-registry-acl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&package_dir);
         env::set_var("SPACE_PACKAGE_DIR", &package_dir);
         let c = db::conn().unwrap();
@@ -4308,15 +4493,21 @@ mod tests {
 
         // The project's owner reaches it; a logged-in stranger does not.
         assert_eq!(
-            registry_nuget_get(bearer("ta"), Path(("repo-owned".into(), "index.json".into())))
-                .await
-                .status(),
+            registry_nuget_get(
+                bearer("ta"),
+                Path(("repo-owned".into(), "index.json".into()))
+            )
+            .await
+            .status(),
             StatusCode::OK
         );
         assert_eq!(
-            registry_nuget_get(bearer("tb"), Path(("repo-owned".into(), "index.json".into())))
-                .await
-                .status(),
+            registry_nuget_get(
+                bearer("tb"),
+                Path(("repo-owned".into(), "index.json".into()))
+            )
+            .await
+            .status(),
             StatusCode::FORBIDDEN
         );
 
@@ -4354,9 +4545,12 @@ mod tests {
         .unwrap();
         drop(c);
         assert_eq!(
-            registry_nuget_get(bearer("tb"), Path(("repo-owned".into(), "index.json".into())))
-                .await
-                .status(),
+            registry_nuget_get(
+                bearer("tb"),
+                Path(("repo-owned".into(), "index.json".into()))
+            )
+            .await
+            .status(),
             StatusCode::OK
         );
         assert_eq!(
@@ -4382,9 +4576,12 @@ mod tests {
 
         // An account admin still reaches both, and the unowned legacy repository is unchanged.
         assert_eq!(
-            registry_nuget_get(bearer("tc"), Path(("repo-owned".into(), "index.json".into())))
-                .await
-                .status(),
+            registry_nuget_get(
+                bearer("tc"),
+                Path(("repo-owned".into(), "index.json".into()))
+            )
+            .await
+            .status(),
             StatusCode::OK
         );
         let _ = std::fs::remove_dir_all(&package_dir);
@@ -4397,7 +4594,8 @@ mod tests {
     async fn format_registry_protocols_are_reachable_over_http() {
         let _serial = test_lock();
         setup();
-        let package_dir = env::temp_dir().join(format!("gaia-space-registry-{}", std::process::id()));
+        let package_dir =
+            env::temp_dir().join(format!("gaia-space-registry-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&package_dir);
         env::set_var("SPACE_PACKAGE_DIR", &package_dir);
         let c = db::conn().unwrap();
@@ -4418,13 +4616,20 @@ mod tests {
         // NuGet: flat-container upload → service index → version list.
         let put = registry_nuget_put(
             bearer("ta"),
-            Path(("repo-nuget".into(), "Newtonsoft.Json/13.0.1/Newtonsoft.Json.13.0.1.nupkg".into())),
+            Path((
+                "repo-nuget".into(),
+                "Newtonsoft.Json/13.0.1/Newtonsoft.Json.13.0.1.nupkg".into(),
+            )),
             Bytes::from_static(b"nupkg-bytes"),
         )
         .await;
         assert_eq!(put.status(), StatusCode::CREATED);
         let (status, body) = status_and_body(
-            registry_nuget_get(bearer("ta"), Path(("repo-nuget".into(), "index.json".into()))).await,
+            registry_nuget_get(
+                bearer("ta"),
+                Path(("repo-nuget".into(), "index.json".into())),
+            )
+            .await,
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -4440,9 +4645,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["versions"], json!(["13.0.1"]));
         assert_eq!(
-            registry_nuget_get(HeaderMap::new(), Path(("repo-nuget".into(), "index.json".into())))
-                .await
-                .status(),
+            registry_nuget_get(
+                HeaderMap::new(),
+                Path(("repo-nuget".into(), "index.json".into()))
+            )
+            .await
+            .status(),
             StatusCode::UNAUTHORIZED
         );
 
@@ -4466,13 +4674,26 @@ mod tests {
             Some(b"sdist"),
         )
         .unwrap();
-        let simple = registry_pypi_get(bearer("ta"), Path(("repo-pypi".into(), "flask.login/".into()))).await;
+        let simple = registry_pypi_get(
+            bearer("ta"),
+            Path(("repo-pypi".into(), "flask.login/".into())),
+        )
+        .await;
         assert_eq!(simple.status(), StatusCode::OK);
-        let html = String::from_utf8(to_bytes(simple.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        let html = String::from_utf8(
+            to_bytes(simple.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
         assert!(html.contains("flask_login-0.6.3.tar.gz"), "{html}");
         let file = registry_pypi_get(
             bearer("ta"),
-            Path(("repo-pypi".into(), "flask-login/flask_login-0.6.3.tar.gz".into())),
+            Path((
+                "repo-pypi".into(),
+                "flask-login/flask_login-0.6.3.tar.gz".into(),
+            )),
         )
         .await;
         assert_eq!(file.status(), StatusCode::OK);
@@ -4488,11 +4709,18 @@ mod tests {
         )
         .unwrap();
         let (status, body) = status_and_body(
-            registry_composer_get(bearer("ta"), Path(("repo-composer".into(), "packages.json".into()))).await,
+            registry_composer_get(
+                bearer("ta"),
+                Path(("repo-composer".into(), "packages.json".into())),
+            )
+            .await,
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body["metadata-url"].as_str().unwrap().ends_with("/p2/%package%.json"));
+        assert!(body["metadata-url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/p2/%package%.json"));
         let (status, body) = status_and_body(
             registry_composer_get(
                 bearer("ta"),
@@ -4503,10 +4731,14 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["packages"]["monolog/monolog"][0]["version"], "3.5.0");
-        assert_eq!(body["packages"]["monolog/monolog"][0]["description"], "logging");
+        assert_eq!(
+            body["packages"]["monolog/monolog"][0]["description"],
+            "logging"
+        );
 
         // OCI: tagged manifest upload, tag list, referrers by subject digest.
-        let manifest = json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"});
+        let manifest =
+            json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"});
         assert_eq!(
             registry_oci_put(
                 bearer("ta"),
@@ -4529,7 +4761,11 @@ mod tests {
             StatusCode::CREATED
         );
         let (status, body) = status_and_body(
-            registry_oci_get(bearer("ta"), Path(("repo-oci".into(), "library/nginx/tags/list".into()))).await,
+            registry_oci_get(
+                bearer("ta"),
+                Path(("repo-oci".into(), "library/nginx/tags/list".into())),
+            )
+            .await,
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -4538,7 +4774,10 @@ mod tests {
         let (status, body) = status_and_body(
             registry_oci_get(
                 bearer("ta"),
-                Path(("repo-oci".into(), "library/nginx/referrers/sha256:deadbeef".into())),
+                Path((
+                    "repo-oci".into(),
+                    "library/nginx/referrers/sha256:deadbeef".into(),
+                )),
             )
             .await,
         )
@@ -4762,13 +5001,18 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "create: {created}");
         assert_eq!(created["value"]["state"], "STARTING");
 
-        let (status, touched) =
-            call(cookie("ta"), "touch_dev_environment", json!({"id":"env-http"})).await;
+        let (status, touched) = call(
+            cookie("ta"),
+            "touch_dev_environment",
+            json!({"id":"env-http"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "touch: {touched}");
         assert_eq!(touched["value"]["state"], "RUNNING");
 
         // Timeout 0 means the sweep must take it immediately.
-        let (status, swept) = call(cookie("ta"), "hibernate_idle_dev_environments", json!({})).await;
+        let (status, swept) =
+            call(cookie("ta"), "hibernate_idle_dev_environments", json!({})).await;
         assert_eq!(status, StatusCode::OK, "sweep: {swept}");
         assert_eq!(swept["value"][0]["id"], "env-http");
         assert_eq!(swept["value"][0]["state"], "HIBERNATED");
@@ -5445,6 +5689,32 @@ mod tests {
             .await
             .status(),
             StatusCode::NO_CONTENT
+        );
+        let report = caldav_calendar(
+            auth.clone(),
+            Method::from_bytes(b"REPORT").unwrap(),
+            Path("work".into()),
+        )
+        .await;
+        let report = String::from_utf8(
+            to_bytes(report.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(report.contains("/caldav/work/write-1.ics") && report.contains("<C:calendar/>"));
+        let item =
+            caldav_get_event(auth.clone(), Path(("work".into(), "write-1.ics".into()))).await;
+        assert_eq!(item.status(), StatusCode::OK);
+        let item =
+            String::from_utf8(to_bytes(item.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(item.contains("UID:write-1\r\n") && item.contains("SUMMARY:Writable event"));
+        let options = caldav_calendar(auth.clone(), Method::OPTIONS, Path("work".into())).await;
+        assert_eq!(options.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            options.headers()[header::ALLOW],
+            "GET, OPTIONS, PROPFIND, REPORT"
         );
         let exported = caldav_calendar(auth.clone(), Method::GET, Path("work".into())).await;
         let exported = String::from_utf8(
