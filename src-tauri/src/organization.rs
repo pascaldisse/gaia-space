@@ -29,12 +29,12 @@ fn organization_on(c: &rusqlite::Connection) -> Result<Organization> {
     c.query_row("SELECT id,name,slogan,logo_id,timezone,onboarding_required,allow_domains_edit FROM organizations WHERE id=?1", [DEFAULT_ORG_ID], |r| Ok(Organization { id:r.get(0)?, name:r.get(1)?, slogan:r.get(2)?, logo_id:r.get(3)?, timezone:r.get(4)?, onboarding_required:r.get::<_,i64>(5)? != 0, allow_domains_edit:r.get::<_,i64>(6)? != 0 })).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_organization() -> Result<Organization> {
     organization_on(&db::conn()?)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_organization(value: Organization) -> Result<Organization> {
     if value.name.trim().is_empty() || value.timezone.trim().is_empty() {
         return Err("organization name and timezone are required".into());
@@ -44,13 +44,13 @@ pub fn update_organization(value: Organization) -> Result<Organization> {
     organization_on(&c)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_org_settings() -> Result<OrgSettings> {
     let c = db::conn()?;
     c.query_row("SELECT org_id,available_right_codes,is_space_code,is_space_code_only FROM org_settings WHERE org_id=?1", [DEFAULT_ORG_ID], |r| { let raw:String=r.get(1)?; Ok(OrgSettings { org_id:r.get(0)?, available_right_codes:serde_json::from_str(&raw).unwrap_or_default(),is_space_code:r.get::<_,i64>(2)? != 0,is_space_code_only:r.get::<_,i64>(3)? != 0 }) }).map_err(|e|e.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_org_settings(value: OrgSettings) -> Result<OrgSettings> {
     let codes = serde_json::to_string(&value.available_right_codes).map_err(|e| e.to_string())?;
     let c = db::conn()?;

@@ -83,7 +83,7 @@ pub fn list_permanent_tokens(user_id: &str) -> Result<Vec<PermanentToken>> {
 pub fn revoke_permanent_token(user_id: &str, token_id: &str) -> Result<bool> {
     Ok(db::conn()?.execute("UPDATE permanent_tokens SET revoked_at=unixepoch() WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL",params![token_id,user_id]).map_err(|e|e.to_string())?>0)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn issue_permanent_token(
     user_id: String,
     name: String,
@@ -91,11 +91,11 @@ pub fn issue_permanent_token(
 ) -> Result<(PermanentToken, String)> {
     create_permanent_token(&user_id, &name, expires_at)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn permanent_tokens_for_user(user_id: String) -> Result<Vec<PermanentToken>> {
     list_permanent_tokens(&user_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn revoke_permanent_token_for_user(user_id: String, token_id: String) -> Result<bool> {
     revoke_permanent_token(&user_id, &token_id)
 }
@@ -214,7 +214,7 @@ pub fn begin_totp(user_id: &str, username: &str) -> Result<TotpEnrollment> {
     db::conn()?.execute("INSERT INTO user_totp(user_id,secret_sealed,enabled,enrolled_at) VALUES(?1,?2,0,unixepoch()) ON CONFLICT(user_id) DO UPDATE SET secret_sealed=excluded.secret_sealed,enabled=0,enrolled_at=excluded.enrolled_at",params![user_id,sealed]).map_err(|e|e.to_string())?;
     Ok(TotpEnrollment{otpauth_uri:format!("otpauth://totp/GAIA%20Space:{}?secret={}&issuer=GAIA%20Space&algorithm=SHA1&digits=6&period=30",username,secret),secret})
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn enroll_totp(user_id: String, username: String) -> Result<TotpEnrollment> {
     begin_totp(&user_id, &username)
 }
@@ -263,11 +263,11 @@ fn issue_scratch_codes(user_id: &str) -> Result<Vec<String>> {
     }
     Ok(codes)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn verify_totp_enrollment(user_id: String, code: String) -> Result<Option<Vec<String>>> {
     confirm_totp(&user_id, &code)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn totp_scratch_codes_remaining(user_id: String) -> Result<i64> {
     scratch_codes_remaining(&user_id)
 }
@@ -309,7 +309,7 @@ pub fn consume_scratch_code(user_id: &str, code: &str) -> Result<bool> {
     }
     Ok(false)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn use_totp_scratch_code(user_id: String, code: String) -> Result<bool> {
     consume_scratch_code(&user_id, &code)
 }
@@ -374,18 +374,18 @@ pub fn revoke_application_password(user_id: &str, id: &str) -> Result<bool> {
         .map_err(|e| e.to_string())?
         > 0)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn issue_application_password(
     user_id: String,
     name: String,
 ) -> Result<(ApplicationPassword, String)> {
     create_application_password(&user_id, &name)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn application_passwords_for_user(user_id: String) -> Result<Vec<ApplicationPassword>> {
     list_application_passwords(&user_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn revoke_application_password_for_user(user_id: String, password_id: String) -> Result<bool> {
     revoke_application_password(&user_id, &password_id)
 }
@@ -495,7 +495,7 @@ pub fn create_invitation(
     c.execute("INSERT INTO invitations(id,token_hash,email,role_id,project_id,invited_by,created_at,expires_at,max_uses) VALUES(?1,?2,?3,?4,?5,?6,unixepoch(),?7,?8)",params![item.id,hash(&raw)?,item.email,item.role_id,item.project_id,invited_by,item.expires_at,item.max_uses]).map_err(|e|e.to_string())?;
     Ok((item, raw))
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn issue_invitation(
     invited_by: String,
     email: Option<String>,
@@ -575,7 +575,7 @@ pub fn accept_invitation(
     tx.commit().map_err(|e| e.to_string())?;
     Ok(user_id)
 }
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn redeem_invitation(
     token: String,
     username: String,

@@ -120,7 +120,7 @@ pub fn request_rights_on(
     Ok(out)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn request_consent_rights(
     application_id: String,
     context_identifier: String,
@@ -176,7 +176,7 @@ pub fn list_requests_on(
     Ok(rows)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_requests(
     application_id: Option<String>,
     status: Option<String>,
@@ -232,7 +232,7 @@ pub fn decide_on(
     read(c, request_id)?.ok_or_else(|| "right request vanished".to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn decide(request_id: String, approve: bool, actor: Option<String>) -> Result<RightRequest> {
     decide_on(&db::conn()?, &request_id, approve, actor.as_deref())
 }
