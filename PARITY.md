@@ -48,7 +48,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 87 · partial 183 · stub 4 · missing 82. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 88 · partial 183 · stub 4 · missing 81. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -61,7 +61,8 @@ Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob m
 Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
-## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
+## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ bcaad14)
+33 rows — done 11 · partial 18 · stub 0 · missing 4.
 33 rows — done 10 · partial 18 · stub 0 · missing 5.
 Worst gaps: swimlane grouping dimensions · matrix reports · tracker synchronization/import. · V79: tracker links connect issue↔issue, issue↔merge request, and HTTP(S) external targets. · V78: authored issue comments + durable issue activity timeline, API and Issue Detail UI wired.
 

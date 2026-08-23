@@ -56,3 +56,4 @@
 .issue-activity span { color: var(--text-muted); }
 .comment-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .comment-form textarea { min-height: 56px; resize: vertical; }
+.issue-transfer-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:#0008}.issue-transfer-dialog{display:grid;gap:.8rem;min-width:20rem;padding:1rem;border-radius:.5rem;background:var(--surface,#fff);box-shadow:0 .5rem 2rem #0005}.issue-transfer-dialog label{display:grid;gap:.35rem}.issue-transfer-dialog select{min-width:16rem}
