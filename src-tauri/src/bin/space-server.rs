@@ -420,6 +420,62 @@ async fn app_record_external_check(
     Ok(Json(check))
 }
 
+/// Read access to issues is separately scoped and authorized. A token's `read`
+/// scope is only transport authority; the application also needs the project grant.
+async fn app_list_project_issues(
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+) -> Result<Json<Vec<issues::Issue>>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_read_scope(&token)?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    if !app_has_project_right(&c, &application.id, &project_id, "Project.ViewIssues")? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.ViewIssues"})),
+        )
+        .into_response());
+    }
+    drop(c);
+    issues::list_issues(
+        Some(project_id),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(false),
+    )
+    .map(Json)
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "issue lookup failed").into_response())
+}
+
+/// An issue id alone must not bypass its project's application-rights boundary.
+async fn app_get_issue(
+    headers: HeaderMap,
+    Path(issue_id): Path<String>,
+) -> Result<Json<issues::Issue>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_read_scope(&token)?;
+    let issue = issues::get_issue(issue_id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "issue lookup failed").into_response())?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "issue not found").into_response())?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    if !app_has_project_right(&c, &application.id, &issue.project_id, "Project.ViewIssues")? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.ViewIssues"})),
+        )
+        .into_response());
+    }
+    Ok(Json(issue))
+}
+
 async fn app_create_issue(
     headers: HeaderMap,
     Path(project_id): Path<String>,
@@ -5345,8 +5401,9 @@ async fn main() {
         .route("/api/app/rooms/{room_id}/join", post(app_join_room))
         .route(
             "/api/app/projects/{project_id}/issues",
-            post(app_create_issue),
+            get(app_list_project_issues).post(app_create_issue),
         )
+        .route("/api/app/issues/{issue_id}", get(app_get_issue))
         .route(
             "/api/app/reviews/{review_id}/checks",
             post(app_record_external_check),
@@ -6485,6 +6542,72 @@ mod tests {
         );
         env::remove_var("SPACE_PACKAGE_DIR");
         let _ = std::fs::remove_dir_all(&package_dir);
+    }
+
+    #[tokio::test]
+    async fn app_issue_reads_require_read_scope_and_project_view_right() {
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-issues','Issue App','Application','client-issues',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('issues-project','Issues','ISSUE','pa',1); INSERT INTO issues(id,project_id,number,title,archived) VALUES('issue-visible','issues-project',1,'Visible',0);").unwrap();
+        drop(c);
+        let secret = applications::rotate_app_secret("app-issues".into()).unwrap();
+        let mint = |scope: &str| {
+            applications::issue_app_token(
+                "client-issues".into(),
+                secret.client_secret.clone(),
+                Some(scope.into()),
+                Some(60),
+            )
+            .unwrap()
+            .access_token
+            .unwrap()
+        };
+        let readable = mint("read");
+        assert_eq!(
+            app_list_project_issues(bearer(&readable), Path("issues-project".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN,
+            "read scope does not replace the project grant"
+        );
+        app_rights::update_authorized_rights(
+            "app-issues".into(),
+            "project:issues-project".into(),
+            vec!["Project.ViewIssues".into()],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let issues = app_list_project_issues(bearer(&readable), Path("issues-project".into()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            issues
+                .iter()
+                .map(|issue| issue.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["issue-visible"]
+        );
+        assert_eq!(
+            app_get_issue(bearer(&readable), Path("issue-visible".into()))
+                .await
+                .unwrap()
+                .0
+                .title,
+            "Visible"
+        );
+        assert_eq!(
+            app_get_issue(bearer(&mint("write")), Path("issue-visible".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN,
+            "write is not an issue-read scope"
+        );
     }
 
     #[tokio::test]
