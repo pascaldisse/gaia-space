@@ -69,10 +69,17 @@ test("project tasks filters persisted issues and links to the matching board", a
   board.click();
   expect(projectId()).toBe("p1");
   expect(route().view).toBe("Boards");
-  const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement;
-  tag.value = "t1";
-  tag.dispatchEvent(new Event("change", { bubbles: true }));
-  await until(() => calls.some(call =>
-    call.command === "list_issues" && (call.body as { tag_id?: string }).tag_id === "t1"));
+  // The tag options arrive on their own resource, and the select is re-rendered
+  // when they do: a single set+dispatch can land on a node that is about to be
+  // replaced (it did, on CI). Keep selecting until the refetch is observed.
+  await until(() => {
+    if (calls.some(call =>
+      call.command === "list_issues" && (call.body as { tag_id?: string }).tag_id === "t1")) return true;
+    const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement | null;
+    if (!tag || !Array.from(tag.options).some(option => option.value === "t1")) return false;
+    tag.value = "t1";
+    tag.dispatchEvent(new Event("change", { bubbles: true }));
+    return false;
+  });
   expect(calls.filter(call => call.command === "list_issues").slice(-1)[0]?.body).toMatchObject({ project_id: "p1", tag_id: "t1" });
 });
