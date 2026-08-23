@@ -4,8 +4,8 @@
 //!
 //! Simplifications vs. docs/space-knowledge-base/05-platform-auth-permissions.md
 //! (documented, not silently dropped):
-//! - `TD_Membership` (§2.5) is reduced to `profile x team x role` (+ lead/manager/
-//!   since/till/requires_approval/archived) — no pending-edit/approver workflow.
+//! - Membership edits are durable review requests; approval atomically applies the
+//!   serialized membership patch, while rejection preserves its ledger record.
 //! - `role_assignments.scope_type` supports global/project/team/channel/document
 //!   (matches the `roles.scope_type` CHECK in db.rs); Space's `Profile` RightType
 //!   scope is not a separate assignment scope here — profile-scoped rights are
