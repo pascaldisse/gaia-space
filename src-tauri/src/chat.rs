@@ -63,6 +63,79 @@ fn validate_attachment_state(state: &str) -> Result<()> {
     }
 }
 
+/// Upload lifecycle is a one-way road: `loading -> uploading -> {completed|failed}`,
+/// with `failed -> uploading` for a retry. A finished upload never walks backwards, so
+/// a late/duplicated client message cannot reopen an attachment that already landed.
+/// Same-state writes stay legal (idempotent retries of the same notification).
+fn attachment_transition_sources(target: &str) -> Result<&'static [&'static str]> {
+    match target {
+        "loading" => Ok(&["loading"]),
+        "uploading" => Ok(&["loading", "uploading", "failed"]),
+        "completed" => Ok(&["uploading", "completed"]),
+        "failed" => Ok(&["uploading", "failed"]),
+        other => Err(format!("invalid attachment state: {other}")),
+    }
+}
+
+/// Who may touch the attachments of a message: its author, an administrator of the
+/// channel it lives in, or the global admin. Read membership alone is not enough —
+/// attachments are message content, and content belongs to whoever wrote it.
+/// The same rule governs add, state change and removal (including the removal that
+/// an archived/soft-deleted message leaves behind: the rows are retained, so their
+/// deletion stays under the author/channel-admin gate).
+pub fn message_attachment_writable_by(
+    message_id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
+    message_attachment_writable_by_impl(&db::conn()?, message_id, profile_id, is_admin)
+}
+
+fn message_attachment_writable_by_impl(
+    c: &Connection,
+    message_id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
+    if is_admin {
+        return Ok(true);
+    }
+    let row: Option<(Option<String>, String)> = c
+        .query_row(
+            "SELECT author_id, channel_id FROM messages WHERE id=?1",
+            [message_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some((author_id, channel_id)) = row else {
+        return Ok(false);
+    };
+    if author_id.as_deref() == Some(profile_id) {
+        return Ok(true);
+    }
+    let channel_admin: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM channel_members WHERE channel_id=?1 AND profile_id=?2 AND administrator=1",
+            rusqlite::params![channel_id, profile_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(channel_admin > 0)
+}
+
+/// The message an attachment row belongs to, for scoping an id-only request.
+pub fn message_id_of_attachment(id: &str) -> Result<Option<String>> {
+    db::conn()?
+        .query_row(
+            "SELECT message_id FROM message_attachments WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
 /// The declared `byte_length` is a client claim; the payload is the fact. Decode the
 /// data URL and measure it, so `{byte_length: 0, data_url: <10MB>}` cannot slip past
 /// the size gate. Returns the measured length.
@@ -75,6 +148,21 @@ pub fn measure_data_url(data_url: &str, declared: i64) -> Result<i64> {
         .ok_or_else(|| "invalid attachment: data URL has no payload".to_string())?;
     let (meta, payload) = rest.split_at(comma);
     let payload = &payload[1..];
+    // Bound the *encoded* input before decoding: a 10 GiB base64 blob must be refused
+    // by arithmetic on its length, never by allocating its decoded bytes first.
+    let encoded_len = payload.len() as i64;
+    let lower_bound = if meta.ends_with(";base64") {
+        // 4 encoded chars -> at most 3 bytes, and never fewer than 3*(n/4 - 1).
+        (encoded_len / 4).saturating_sub(1).saturating_mul(3)
+    } else {
+        // percent-decoding shrinks by at most 3x.
+        encoded_len / 3
+    };
+    if lower_bound > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "attachment too large: encoded payload of {encoded_len} chars exceeds {MAX_ATTACHMENT_BYTES} bytes"
+        ));
+    }
     let measured: i64 = if meta.ends_with(";base64") {
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD
@@ -677,6 +765,24 @@ fn add_message_attachment_impl(
     measure_data_url(&attachment.data_url, attachment.byte_length)?;
     let state = attachment.upload_state.as_deref().unwrap_or("completed");
     validate_attachment_state(state)?;
+    // Idempotent add: a retried upload of the identical payload returns the stored row
+    // instead of a UNIQUE violation, so a client that lost the answer can repeat itself.
+    // A different payload under the same id is a real conflict and stays an error.
+    if let Some(existing) = attachment_by_id_impl(c, &attachment.id)? {
+        let same = existing.message_id == message_id
+            && existing.file_name == attachment.file_name
+            && existing.mime_type == attachment.mime_type
+            && existing.byte_length == attachment.byte_length
+            && existing.data_url == attachment.data_url;
+        return if same {
+            Ok(existing)
+        } else {
+            Err(format!(
+                "attachment id conflict: {} already stores a different payload",
+                attachment.id
+            ))
+        };
+    }
     c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url, state]).map_err(|e| e.to_string())?;
     attachments_for_impl(c, message_id)?
         .into_iter()
@@ -684,44 +790,86 @@ fn add_message_attachment_impl(
         .ok_or_else(|| "attachment missing".into())
 }
 
+fn attachment_by_id_impl(c: &Connection, id: &str) -> Result<Option<MessageAttachment>> {
+    c.query_row(
+        "SELECT id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error FROM message_attachments WHERE id=?1",
+        [id],
+        |r| {
+            Ok(MessageAttachment {
+                id: r.get(0)?,
+                message_id: r.get(1)?,
+                file_name: r.get(2)?,
+                mime_type: r.get(3)?,
+                byte_length: r.get(4)?,
+                data_url: r.get(5)?,
+                upload_state: r.get(6)?,
+                error: r.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 fn set_message_attachment_state_impl(
     c: &Connection,
+    message_id: &str,
     id: &str,
     state: &str,
     error: Option<&str>,
 ) -> Result<MessageAttachment> {
     validate_attachment_state(state)?;
+    let sources = attachment_transition_sources(state)?;
     // An error string only carries meaning on a failed upload; clearing it on any other
     // transition keeps a retried attachment from displaying its previous failure.
     let error = if state == "failed" { error } else { None };
+    // Compare-and-swap: the legal predecessor states ride in the WHERE clause, so two
+    // concurrent writers cannot interleave read-then-write into an illegal transition.
+    // ?1 id, ?2 message_id, ?3 state, ?4 error; the legal source states start at ?5.
+    let placeholders = (0..sources.len())
+        .map(|i| format!("?{}", i + 5))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "UPDATE message_attachments SET upload_state=?3, error=?4 WHERE id=?1 AND message_id=?2 AND upload_state IN ({placeholders})"
+    );
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&id, &message_id, &state, &error];
+    for source in sources {
+        params.push(source);
+    }
     let changed = c
-        .execute(
-            "UPDATE message_attachments SET upload_state=?2, error=?3 WHERE id=?1",
-            rusqlite::params![id, state, error],
-        )
+        .execute(&sql, params.as_slice())
         .map_err(|e| e.to_string())?;
     if changed == 0 {
-        return Err("attachment not found".into());
+        return Err(match attachment_by_id_impl(c, id)? {
+            Some(existing) if existing.message_id != message_id => {
+                "attachment does not belong to this message".to_string()
+            }
+            Some(existing) => format!(
+                "invalid attachment transition: {} -> {state}",
+                existing.upload_state
+            ),
+            None => "attachment not found".to_string(),
+        });
     }
-    let message_id: String = c
-        .query_row(
-            "SELECT message_id FROM message_attachments WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    attachments_for_impl(c, &message_id)?
+    attachments_for_impl(c, message_id)?
         .into_iter()
         .find(|item| item.id == id)
         .ok_or_else(|| "attachment missing".into())
 }
 
-fn remove_message_attachment_impl(c: &Connection, id: &str) -> Result<()> {
+fn remove_message_attachment_impl(c: &Connection, message_id: &str, id: &str) -> Result<()> {
     let changed = c
-        .execute("DELETE FROM message_attachments WHERE id=?1", [id])
+        .execute(
+            "DELETE FROM message_attachments WHERE id=?1 AND message_id=?2",
+            rusqlite::params![id, message_id],
+        )
         .map_err(|e| e.to_string())?;
     if changed == 0 {
-        return Err("attachment not found".into());
+        return Err(match attachment_by_id_impl(c, id)? {
+            Some(_) => "attachment does not belong to this message".to_string(),
+            None => "attachment not found".to_string(),
+        });
     }
     Ok(())
 }
@@ -736,16 +884,17 @@ pub fn add_message_attachment(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_message_attachment_state(
+    message_id: String,
     id: String,
     state: String,
     error: Option<String>,
 ) -> Result<MessageAttachment> {
-    set_message_attachment_state_impl(&db::conn()?, &id, &state, error.as_deref())
+    set_message_attachment_state_impl(&db::conn()?, &message_id, &id, &state, error.as_deref())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn remove_message_attachment(id: String) -> Result<()> {
-    remove_message_attachment_impl(&db::conn()?, &id)
+pub fn remove_message_attachment(message_id: String, id: String) -> Result<()> {
+    remove_message_attachment_impl(&db::conn()?, &message_id, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_message(id: String, text: String) -> Result<MessageView> {
@@ -861,12 +1010,15 @@ mod tests {
         assert!(stored.error.is_none());
 
         let failed =
-            set_message_attachment_state_impl(&c, "att-1", "failed", Some("network down")).unwrap();
+            set_message_attachment_state_impl(&c, "msg-att", "att-1", "failed", Some("network down"))
+                .unwrap();
         assert_eq!(failed.upload_state, "failed");
         assert_eq!(failed.error.as_deref(), Some("network down"));
 
         // a retry clears the stale failure text, so the UI cannot show a cured error
-        let retried = set_message_attachment_state_impl(&c, "att-1", "completed", None).unwrap();
+        set_message_attachment_state_impl(&c, "msg-att", "att-1", "uploading", None).unwrap();
+        let retried =
+            set_message_attachment_state_impl(&c, "msg-att", "att-1", "completed", None).unwrap();
         assert_eq!(retried.upload_state, "completed");
         assert!(retried.error.is_none());
         drop(c);
@@ -887,9 +1039,142 @@ mod tests {
             new_attachment("att-3", "data:,hi", 2, Some("teleporting"))
         )
         .is_err());
-        assert!(set_message_attachment_state_impl(&c, "att-2", "teleporting", None).is_err());
+        assert!(
+            set_message_attachment_state_impl(&c, "msg-att2", "att-2", "teleporting", None).is_err()
+        );
         drop(c);
         drop(path);
+    }
+
+    #[test]
+    fn attachment_state_transitions_are_one_way() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att6", "msg-att6");
+        add_message_attachment_impl(
+            &c,
+            "msg-att6",
+            new_attachment("att-6", "data:,hi", 2, Some("loading")),
+        )
+        .unwrap();
+        // loading cannot jump straight to completed
+        let err = set_message_attachment_state_impl(&c, "msg-att6", "att-6", "completed", None)
+            .unwrap_err();
+        assert!(err.contains("invalid attachment transition"), "{err}");
+        set_message_attachment_state_impl(&c, "msg-att6", "att-6", "uploading", None).unwrap();
+        set_message_attachment_state_impl(&c, "msg-att6", "att-6", "completed", None).unwrap();
+        // a finished upload never walks backwards
+        let err = set_message_attachment_state_impl(&c, "msg-att6", "att-6", "uploading", None)
+            .unwrap_err();
+        assert!(err.contains("invalid attachment transition"), "{err}");
+        // and the same-state write stays idempotent
+        set_message_attachment_state_impl(&c, "msg-att6", "att-6", "completed", None).unwrap();
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_writes_are_scoped_to_their_message() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att7", "msg-att7");
+        create_message_impl(
+            &c,
+            &Message {
+                id: "msg-att7b".into(),
+                channel_id: "chan-att7".into(),
+                author_id: Some("default-org".into()),
+                text: "other".into(),
+                created_at: 2,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                mention_ids: Vec::new(),
+            },
+        )
+        .unwrap();
+        add_message_attachment_impl(
+            &c,
+            "msg-att7",
+            new_attachment("att-7", "data:,hi", 2, Some("uploading")),
+        )
+        .unwrap();
+        // another message's id must not reach this attachment
+        let err = set_message_attachment_state_impl(&c, "msg-att7b", "att-7", "completed", None)
+            .unwrap_err();
+        assert!(err.contains("does not belong"), "{err}");
+        let err = remove_message_attachment_impl(&c, "msg-att7b", "att-7").unwrap_err();
+        assert!(err.contains("does not belong"), "{err}");
+        assert_eq!(attachments_for_impl(&c, "msg-att7").unwrap().len(), 1);
+        remove_message_attachment_impl(&c, "msg-att7", "att-7").unwrap();
+        assert!(attachments_for_impl(&c, "msg-att7").unwrap().is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_add_is_idempotent_but_refuses_a_different_payload() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att8", "msg-att8");
+        let first = add_message_attachment_impl(
+            &c,
+            "msg-att8",
+            new_attachment("att-8", "data:,hi", 2, Some("uploading")),
+        )
+        .unwrap();
+        // the lost-answer retry returns the stored row, state untouched
+        let again = add_message_attachment_impl(
+            &c,
+            "msg-att8",
+            new_attachment("att-8", "data:,hi", 2, Some("uploading")),
+        )
+        .unwrap();
+        assert_eq!(first.id, again.id);
+        assert_eq!(again.upload_state, "uploading");
+        assert_eq!(attachments_for_impl(&c, "msg-att8").unwrap().len(), 1);
+        let err = add_message_attachment_impl(
+            &c,
+            "msg-att8",
+            new_attachment("att-8", "data:,ho", 2, None),
+        )
+        .unwrap_err();
+        assert!(err.contains("conflict"), "{err}");
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn attachment_writes_require_author_or_channel_admin() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att9", "msg-att9");
+        for (id, username) in [("outsider", "outsider-user"), ("chan-admin", "chan-admin-user")] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
+                rusqlite::params![id, username],
+            )
+            .unwrap();
+        }
+        add_channel_member_impl(&c, "chan-att9", "outsider", false).unwrap();
+        add_channel_member_impl(&c, "chan-att9", "chan-admin", true).unwrap();
+        // author of msg-att9 is "default-org" (see seed_message)
+        assert!(
+            message_attachment_writable_by_impl(&c, "msg-att9", "default-org", false).unwrap()
+        );
+        assert!(message_attachment_writable_by_impl(&c, "msg-att9", "chan-admin", false).unwrap());
+        // a plain member of the channel is not the owner of someone else's content
+        assert!(!message_attachment_writable_by_impl(&c, "msg-att9", "outsider", false).unwrap());
+        // the global admin always passes; an unknown message never does
+        assert!(message_attachment_writable_by_impl(&c, "msg-att9", "outsider", true).unwrap());
+        assert!(!message_attachment_writable_by_impl(&c, "msg-nope", "default-org", false).unwrap());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn oversized_encoded_payload_is_refused_before_decoding() {
+        // 200 MiB of base64: the bound must come from the length, not from a decode
+        let payload = "A".repeat(200 * 1024 * 1024);
+        let url = format!("data:application/octet-stream;base64,{payload}");
+        let err = measure_data_url(&url, 0).unwrap_err();
+        assert!(err.contains("encoded payload"), "{err}");
     }
 
     #[test]
@@ -928,11 +1213,11 @@ mod tests {
             .unwrap();
         add_message_attachment_impl(&c, "msg-att4", new_attachment("att-5", "data:,hi", 2, None))
             .unwrap();
-        remove_message_attachment_impl(&c, "att-4").unwrap();
+        remove_message_attachment_impl(&c, "msg-att4", "att-4").unwrap();
         let left = attachments_for_impl(&c, "msg-att4").unwrap();
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].id, "att-5");
-        assert!(remove_message_attachment_impl(&c, "att-4").is_err());
+        assert!(remove_message_attachment_impl(&c, "msg-att4", "att-4").is_err());
         drop(c);
         drop(path);
     }
