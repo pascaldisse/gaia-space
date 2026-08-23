@@ -87,7 +87,8 @@ pub fn extract_urls(text: &str) -> Vec<String> {
             continue;
         };
         // A URL must not begin mid-word: `xhttp://` is not a link.
-        if start > 0 && !text[..start].ends_with(|c: char| c.is_whitespace() || "(<[\"'".contains(c))
+        if start > 0
+            && !text[..start].ends_with(|c: char| c.is_whitespace() || "(<[\"'".contains(c))
         {
             i = start + scheme_len;
             continue;
@@ -325,11 +326,7 @@ fn meta_content(html: &str, key: &str) -> Option<String> {
             attribute(tag, tag_lower, "property"),
             attribute(tag, tag_lower, "name"),
         ];
-        if names
-            .iter()
-            .flatten()
-            .any(|n| n.eq_ignore_ascii_case(key))
-        {
+        if names.iter().flatten().any(|n| n.eq_ignore_ascii_case(key)) {
             if let Some(content) = attribute(tag, tag_lower, "content") {
                 return Some(content);
             }

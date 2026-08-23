@@ -1546,7 +1546,9 @@ fn list_channel_polls_impl(
         }
     }
     let mut s = c
-        .prepare("SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC")
+        .prepare(
+            "SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC",
+        )
         .map_err(|e| e.to_string())?;
     let ids: Vec<String> = s
         .query_map([channel_id], |r| r.get(0))
@@ -1931,10 +1933,7 @@ fn update_message_impl(
     mention_team_ids: Option<&[String]>,
 ) -> Result<()> {
     if mention_ids.is_some() || mention_team_ids.is_some() {
-        validate_mention_count(
-            mention_ids.unwrap_or(&[]),
-            mention_team_ids.unwrap_or(&[]),
-        )?;
+        validate_mention_count(mention_ids.unwrap_or(&[]), mention_team_ids.unwrap_or(&[]))?;
     }
     let changed = c
         .execute(
@@ -2461,11 +2460,7 @@ pub fn list_channel_polls(
     list_channel_polls_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn vote_poll(
-    poll_id: String,
-    voter_id: String,
-    option_ids: Vec<String>,
-) -> Result<PollView> {
+pub fn vote_poll(poll_id: String, voter_id: String, option_ids: Vec<String>) -> Result<PollView> {
     vote_poll_impl(&db::conn()?, &poll_id, &voter_id, &option_ids)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2817,7 +2812,10 @@ mod tests {
         );
         vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&pizza)).unwrap();
         let after = vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&sushi)).unwrap();
-        assert_eq!(after.options[0].vote_count, 0, "the old ballot is retracted");
+        assert_eq!(
+            after.options[0].vote_count, 0,
+            "the old ballot is retracted"
+        );
         assert_eq!(after.options[1].vote_count, 1);
         assert_eq!(after.voter_count, 1);
         assert!(after.options[1].me_voted);
@@ -2867,10 +2865,7 @@ mod tests {
         let view = vote_poll_impl(&c, "p-multi", "voter-b", std::slice::from_ref(&mon)).unwrap();
         assert_eq!(view.options[0].vote_count, 2);
         assert_eq!(view.options[1].vote_count, 1);
-        assert_eq!(
-            view.voter_count, 2,
-            "turnout counts people, not ballots"
-        );
+        assert_eq!(view.voter_count, 2, "turnout counts people, not ballots");
         // Voter B reads B's own picks only; A's second choice is never attributed.
         assert!(view.options[0].me_voted && !view.options[1].me_voted);
         let json = serde_json::to_string(&view).unwrap();
@@ -3556,8 +3551,14 @@ mod tests {
             [],
         )
         .unwrap();
-        post_teams(&c, "chan-tm", "msg-tm1", "alice", &["team-a", "team-a", "ghost-team"])
-            .unwrap();
+        post_teams(
+            &c,
+            "chan-tm",
+            "msg-tm1",
+            "alice",
+            &["team-a", "team-a", "ghost-team"],
+        )
+        .unwrap();
         // duplicates collapse, an unknown team is ignored, the row records the utterance
         assert_eq!(
             team_mentions_for_impl(&c, "msg-tm1").unwrap(),
@@ -3800,7 +3801,14 @@ mod tests {
             vec!["bob".to_string()]
         );
         // an explicit list is the whole truth: bob leaves, carol arrives
-        update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()]), None).unwrap();
+        update_message_impl(
+            &c,
+            "msg-m3",
+            "now carol",
+            Some(&["carol".to_string()]),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             mentions_for_impl(&c, "msg-m3").unwrap(),
             vec!["carol".to_string()]
@@ -4296,8 +4304,8 @@ mod tests {
         )
         .unwrap();
         post(&c, "chan-private", "m-secret", "alice", &[]).unwrap();
-        let page =
-            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice")).unwrap();
+        let page = list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice"))
+            .unwrap();
         assert_eq!(page.messages.len(), 1);
         // Same channel, same (absent) cursor, different reader: the ACL is re-checked on
         // every page, so holding a cursor grants nothing.
@@ -4453,7 +4461,11 @@ mod tests {
             .unwrap_err(),
             "channel access denied"
         );
-        assert_eq!(calls.get(), 0, "a denied request must not reach the network");
+        assert_eq!(
+            calls.get(),
+            0,
+            "a denied request must not reach the network"
+        );
 
         // The member's request runs, the guard refuses the link-local address, and the
         // refusal is terminal: a second request does not re-dial.
