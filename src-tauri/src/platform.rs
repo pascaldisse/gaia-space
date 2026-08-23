@@ -177,6 +177,15 @@ pub fn get_profile(id: String) -> Result<Option<Profile>> {
 pub fn create_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
+    c.execute(
+        "INSERT OR IGNORE INTO principals(id,kind,profile_id,label) VALUES(?1,'profile',?2,?3)",
+        params![
+            format!("profile:{}", profile.id),
+            profile.id,
+            profile.display_name
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
