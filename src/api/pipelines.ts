@@ -342,12 +342,15 @@ export type RetentionCandidate = { id: string; package_name: string; version: st
 export type DetailDependency = { name: string; requirement: string };
 export type OciDescriptor = { digest: string; media_type: string; size: number };
 export type PackageDetail =
-  | { format: "nuget"; id: string; version: string; authors: string | null; description: string | null; license: string | null; tags: string[]; dependencies: DetailDependency[] }
-  | { format: "pypi"; name: string; version: string; summary: string | null; requires_python: string | null; requires_dist: DetailDependency[]; files: string[] }
-  | { format: "composer"; name: string; version: string; description: string | null; package_type: string | null; licenses: string[]; require: DetailDependency[] }
-  | { format: "container"; name: string; reference: string; media_type: string | null; config: OciDescriptor | null; layers: OciDescriptor[]; total_size: number; subject: string | null }
-  | { format: "generic"; name: string; version: string; fields: unknown };
-
+| { format: "maven"; group_id: string; artifact_id: string; version: string; packaging: string | null; description: string | null; licenses: string[]; scm_url: string | null; dependencies: DetailDependency[]; snapshot: boolean }
+| { format: "npm"; name: string; version: string; description: string | null; dependencies: DetailDependency[]; keywords: string[]; license: string | null; project_url: string | null; repository_url: string | null; repository_revision: string | null; unity_version: string | null }
+| { format: "nuget"; id: string; version: string; authors: string | null; description: string | null; license: string | null; tags: string[]; dependencies: DetailDependency[] }
+| { format: "pypi"; name: string; version: string; summary: string | null; requires_python: string | null; requires_dist: DetailDependency[]; files: string[] }
+| { format: "dart"; name: string; version: string; description: string | null; home_page: string | null; repository_url: string | null; issue_tracker: string | null; documentation: string | null; license: string | null; dependencies: DetailDependency[]; dev_dependencies: DetailDependency[]; dependency_overrides: DetailDependency[]; environment: unknown }
+| { format: "composer"; name: string; version: string; description: string | null; package_type: string | null; licenses: string[]; require: DetailDependency[] }
+| { format: "container"; name: string; reference: string; schema_version: number | null; media_type: string | null; manifest_type: string | null; config: OciDescriptor | null; layers: OciDescriptor[]; total_size: number; subject: string | null; annotations: unknown }
+| { format: "file"; name: string; version: string; files: string[]; content_type: string | null }
+| { format: "generic"; name: string; version: string; fields: unknown };
 export const pipelinesApi = {
   // scripts
   listScripts: () => invoke<PipelineScript[]>("list_pipeline_scripts"),
