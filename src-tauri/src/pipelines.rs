@@ -1771,6 +1771,102 @@ fn schedule_fire_at(crons: &[String], since: i64, now: i64) -> Option<i64> {
         .min()
 }
 
+/// Scope of an event: which scripts may react to it.
+///
+/// Repository-scoped events (push, branch deleted) match `pipeline_scripts.repository`
+/// against the event repository string **or** its path basename — repositories are free
+/// strings in this schema, so a script configured with the bare repo name still reacts to
+/// a write that only knows the checkout path.
+/// Review-scoped events match the review's `project_id`.
+fn scripts_for_event(conn: &Connection, event: &TriggerEvent) -> Result<Vec<String>> {
+    let ids = match event {
+        TriggerEvent::Manual => Vec::new(),
+        TriggerEvent::Push { repository, .. } | TriggerEvent::BranchDeleted { repository, .. } => {
+            let base = repository
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or(repository)
+                .to_string();
+            let mut s = conn
+                .prepare(
+                    "SELECT id FROM pipeline_scripts WHERE archived=0 AND repository IN (?1,?2)",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = s
+                .query_map(params![repository, base], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        }
+        TriggerEvent::CodeReviewOpened { review_id }
+        | TriggerEvent::CodeReviewClosed { review_id }
+        | TriggerEvent::SafeMerge { review_id } => {
+            let project_id: Option<String> = conn
+                .query_row(
+                    "SELECT project_id FROM reviews WHERE id=?1",
+                    params![review_id],
+                    |r| r.get(0),
+                )
+                .ok();
+            match project_id {
+                None => Vec::new(),
+                Some(pid) => {
+                    let mut s = conn
+                        .prepare(
+                            "SELECT id FROM pipeline_scripts WHERE archived=0 AND project_id=?1",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let rows = s
+                        .query_map(params![pid], |r| r.get::<_, String>(0))
+                        .map_err(|e| e.to_string())?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?
+                }
+            }
+        }
+    };
+    Ok(ids)
+}
+
+/// Automatic fan-out from a real domain write (git commit, branch deleted, review
+/// opened/closed, safe merge).
+///
+/// Unlike [`trigger_pipeline_event`], no `script_id` is supplied: every non-archived script
+/// in scope schedules its matching jobs. Returns the runs it started.
+pub fn dispatch_pipeline_event(event: &TriggerEvent) -> Result<Vec<JobRun>> {
+    let conn = db::conn()?;
+    let script_ids = scripts_for_event(&conn, event)?;
+    if script_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    let shared = Arc::new(Mutex::new(conn));
+    let mut runs = Vec::new();
+    for script_id in script_ids {
+        // One broken script must not stop the others from reacting to the same event.
+        match spawn_script_jobs(
+            Arc::clone(&shared),
+            pipeline_workdir_root(),
+            &script_id,
+            &|job| job.fires_for(event),
+            None,
+        ) {
+            Ok((mut r, _handles)) => runs.append(&mut r),
+            Err(e) => eprintln!("pipeline dispatch for script {script_id} failed: {e}"),
+        }
+    }
+    Ok(runs)
+}
+
+/// Same as [`dispatch_pipeline_event`], for call sites inside a write path: the write has
+/// already landed, so a scheduling failure is logged and swallowed, never returned.
+pub fn dispatch_pipeline_event_best_effort(event: &TriggerEvent) {
+    if let Err(e) = dispatch_pipeline_event(event) {
+        eprintln!("pipeline dispatch failed: {e}");
+    }
+}
+
 /// Repository push entry point. The caller supplies the repository + branch rather than a
 /// global watcher assumption; only GIT_PUSH jobs from that repository's script are scheduled.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -3265,6 +3361,20 @@ mod tests {
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir_all(path);
     }
+    /// `JobRun` carries only `job_id`; the owning script is read back from `jobs`.
+    fn script_ids_of(runs: &[JobRun]) -> Vec<String> {
+        let c = db::conn().expect("connection");
+        runs.iter()
+            .map(|r| {
+                c.query_row(
+                    "SELECT script_id FROM jobs WHERE id=?1",
+                    params![r.job_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("job row")
+            })
+            .collect()
+    }
 
     #[test]
     fn teamcity_messages_preserve_suite_status_duration_and_escapes() {
@@ -3631,6 +3741,114 @@ mod tests {
         assert_eq!(payload["event"], "deployment.status_changed");
         assert_eq!(payload["previous_status"], "DEPLOYING");
         assert_eq!(payload["deployment"]["status"], "CURRENT");
+    }
+
+    /// Auto-dispatch scope: a push reaches every non-archived script of that repository —
+    /// by exact string **and** by path basename — and no script of another repository.
+    #[test]
+    fn push_dispatch_reaches_scripts_of_that_repository_only() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("pipeline-dispatch");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let workdir = temp_dir("dispatch-work");
+        std::env::set_var("SPACE_PIPELINE_WORKDIR", &workdir);
+        let c = db::conn().expect("connection");
+        c.execute(
+            "INSERT INTO projects(id,name,key,created_at) VALUES('project-1','Project','P',0)",
+            [],
+        )
+        .unwrap();
+        let src = r#"{"jobs":[{"name":"on-push","triggers":[{"type":"GitPush","branches":["main"]}],"steps":["true"]}]}"#;
+        for (id, repo) in [
+            ("script-name", "core"),
+            ("script-path", "/srv/git/core"),
+            ("script-other", "other"),
+        ] {
+            c.execute(
+                "INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived) VALUES(?1,'project-1',?2,'.space.kts',?3,0)",
+                params![id, repo, src],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived) VALUES('script-archived','project-1','core','.space.kts',?1,1)",
+            params![src],
+        )
+        .unwrap();
+        drop(c);
+
+        let runs = dispatch_pipeline_event(&TriggerEvent::Push {
+            repository: "/srv/git/core".into(),
+            branch: "main".into(),
+        })
+        .expect("dispatch");
+        let mut scripts = script_ids_of(&runs);
+        scripts.sort();
+        assert_eq!(
+            scripts,
+            vec!["script-name".to_string(), "script-path".to_string()]
+        );
+
+        // A branch the jobs do not match schedules nothing at all.
+        let none = dispatch_pipeline_event(&TriggerEvent::Push {
+            repository: "core".into(),
+            branch: "release/9".into(),
+        })
+        .expect("dispatch");
+        assert!(none.is_empty());
+
+        std::env::remove_var("SPACE_PIPELINE_WORKDIR");
+        sweep(&workdir);
+    }
+
+    /// Review-scoped events resolve their scope through the review's project, and an unknown
+    /// review is a silent no-op rather than an error on a write path.
+    #[test]
+    fn review_dispatch_is_project_scoped_and_ignores_unknown_reviews() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("pipeline-dispatch-review");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let workdir = temp_dir("dispatch-review-work");
+        std::env::set_var("SPACE_PIPELINE_WORKDIR", &workdir);
+        let c = db::conn().expect("connection");
+        for (id, key) in [("project-1", "P"), ("project-2", "Q")] {
+            c.execute(
+                "INSERT INTO projects(id,name,key,created_at) VALUES(?1,'Project',?2,0)",
+                params![id, key],
+            )
+            .unwrap();
+        }
+        let src = r#"{"jobs":[{"name":"on-merge","triggers":["SAFE_MERGE"],"steps":["true"]}]}"#;
+        for (id, project) in [("script-1", "project-1"), ("script-2", "project-2")] {
+            c.execute(
+                "INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived) VALUES(?1,?2,NULL,'.space.kts',?3,0)",
+                params![id, project, src],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('review-1','project-1',1,'MR','Merged','MR')",
+            [],
+        )
+        .unwrap();
+        drop(c);
+
+        let runs = dispatch_pipeline_event(&TriggerEvent::SafeMerge {
+            review_id: "review-1".into(),
+        })
+        .expect("dispatch");
+        assert_eq!(script_ids_of(&runs), vec!["script-1".to_string()]);
+
+        let unknown = dispatch_pipeline_event(&TriggerEvent::SafeMerge {
+            review_id: "missing".into(),
+        })
+        .expect("dispatch");
+        assert!(unknown.is_empty());
+
+        std::env::remove_var("SPACE_PIPELINE_WORKDIR");
+        sweep(&workdir);
     }
 
     #[test]

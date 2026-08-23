@@ -186,6 +186,7 @@ pub fn create_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,turn_based,channel_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params![review.id,review.project_id,review.number,review.kind,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
     review_event(crate::events::REVIEW_CREATED, &review);
+    pipeline_event_for_review(&review, true);
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -193,7 +194,27 @@ pub fn update_review(review: Review) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE reviews SET state=?2,source_branch=?3,target_branch=?4,title=?5,turn_based=?6,channel_id=?7 WHERE id=?1",rusqlite::params![review.id,review.state,review.source_branch,review.target_branch,review.title,review.turn_based,review.channel_id]).map_err(|e|e.to_string())?;
     review_event(crate::events::REVIEW_UPDATED, &review);
+    pipeline_event_for_review(&review, false);
     Ok(())
+}
+
+/// Pipeline triggers driven by a review write. `created` maps to CODE_REVIEW_OPENED; an
+/// update maps to CODE_REVIEW_CLOSED only once the state is terminal (Closed/Merged), so a
+/// title edit does not schedule jobs. Best effort: the review row is already written.
+fn pipeline_event_for_review(review: &Review, created: bool) {
+    let state = review.state.trim().to_ascii_lowercase();
+    let event = if created {
+        crate::pipelines::TriggerEvent::CodeReviewOpened {
+            review_id: review.id.clone(),
+        }
+    } else if state == "closed" || state == "merged" {
+        crate::pipelines::TriggerEvent::CodeReviewClosed {
+            review_id: review.id.clone(),
+        }
+    } else {
+        return;
+    };
+    crate::pipelines::dispatch_pipeline_event_best_effort(&event);
 }
 
 /// Webhook fan-out envelope: `{"event": …, "review": …}`; filters address it by
@@ -384,6 +405,7 @@ pub fn open_merge_request(req: NewMergeRequest) -> Result<Review> {
     let c = db::conn()?;
     let review = open_merge_request_tx(&c, &req)?;
     review_event(crate::events::REVIEW_CREATED, &review);
+    pipeline_event_for_review(&review, true);
     Ok(review)
 }
 
@@ -1811,6 +1833,11 @@ pub fn attempt_merge(
     .map_err(|e| e.to_string())?;
     let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
     review_event_by_id(crate::events::REVIEW_MERGED, &review_id);
+    crate::pipelines::dispatch_pipeline_event_best_effort(
+        &crate::pipelines::TriggerEvent::SafeMerge {
+            review_id: review_id.clone(),
+        },
+    );
     record_merge_run_tx(
         &c,
         &id,

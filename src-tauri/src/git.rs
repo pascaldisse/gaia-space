@@ -298,6 +298,14 @@ pub fn repo_commit(path: String, message: String) -> Result<String> {
         .ok()
         .and_then(|h| h.shorthand().ok().map(str::to_string));
     commit_event(&path, &oid.to_string(), &message, branch.as_deref());
+    // Real trigger source for GIT_PUSH jobs: a landed commit on a branch, not a hand-fired
+    // API call. Best effort after the commit object exists.
+    if let Some(branch) = branch.as_deref() {
+        crate::pipelines::dispatch_pipeline_event_best_effort(&crate::pipelines::TriggerEvent::Push {
+            repository: path.clone(),
+            branch: branch.to_string(),
+        });
+    }
     Ok(oid.to_string())
 }
 
