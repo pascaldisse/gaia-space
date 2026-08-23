@@ -1036,3 +1036,14 @@ button.rail-item:hover { border-color: var(--surface-border-hover); background: 
 .picker { display: grid; gap: 4px; font-size: 12px; color: #aeb1b8; min-width: min(210px, 100%); }
 .picker select { width: 100%; max-width: 320px; }
 @media (max-width: 720px) { .picker select { max-width: none; } }
+
+.diff-whitespace {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  color: var(--text-faint);
+  font-size: 0.82em;
+}
+
+.diff-word-del { background: #702727; }
+.diff-word-add { background: #196b38; }

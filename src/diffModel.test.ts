@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { diffStat, parseUnifiedDiff } from "./diffModel";
+import { diffStat, parseUnifiedDiff, wordDiff } from "./diffModel";
 
 const SAMPLE = `diff --git a/src/a.ts b/src/a.ts
 index 111..222 100644
@@ -32,7 +32,13 @@ describe("parseUnifiedDiff", () => {
 
   test("pairs del/add runs and leaves extra add one-sided", () => {
     const rows = files[0].hunks[0].rows;
-    expect(rows.map((r) => r.kind)).toEqual(["ctx", "chg", "chg", "add", "ctx"]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "ctx",
+      "chg",
+      "chg",
+      "add",
+      "ctx",
+    ]);
     expect(rows[1].left).toEqual({ n: 2, text: "const y = 2;" });
     expect(rows[1].right).toEqual({ n: 2, text: "const y = 20;" });
     expect(rows[3].left).toBeUndefined();
@@ -53,7 +59,9 @@ describe("parseUnifiedDiff", () => {
   });
 
   test("ignores no-newline marker", () => {
-    const f = parseUnifiedDiff("@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n");
+    const f = parseUnifiedDiff(
+      "@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n",
+    );
     expect(f[0].hunks[0].rows).toEqual([
       { kind: "chg", left: { n: 1, text: "a" }, right: { n: 1, text: "b" } },
     ]);
@@ -66,5 +74,32 @@ describe("parseUnifiedDiff", () => {
 
   test("stat counts changed lines on both sides", () => {
     expect(diffStat(files)).toEqual({ files: 2, additions: 3, deletions: 3 });
+  });
+});
+
+describe("wordDiff", () => {
+  test("marks changed tokens while retaining shared context", () => {
+    expect(wordDiff("const count = 1;", "const total = 2;")).toEqual({
+      left: [
+        { kind: "same", text: "const " },
+        { kind: "del", text: "count" },
+        { kind: "same", text: " = " },
+        { kind: "del", text: "1" },
+        { kind: "same", text: ";" },
+      ],
+      right: [
+        { kind: "same", text: "const " },
+        { kind: "add", text: "total" },
+        { kind: "same", text: " = " },
+        { kind: "add", text: "2" },
+        { kind: "same", text: ";" },
+      ],
+    });
+  });
+  test("can ignore whitespace-only token changes", () => {
+    expect(wordDiff("a  + b", "a\t+ b", true)).toEqual({
+      left: [{ kind: "same", text: "a  + b" }],
+      right: [{ kind: "same", text: "a\t+ b" }],
+    });
   });
 });

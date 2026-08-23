@@ -16,6 +16,68 @@ export interface SideRow {
   right?: SideCell;
 }
 
+export type WordDiffKind = "same" | "del" | "add";
+export interface WordDiffSegment {
+  kind: WordDiffKind;
+  text: string;
+}
+export interface WordDiff {
+  left: WordDiffSegment[];
+  right: WordDiffSegment[];
+}
+
+/** Split a changed line into displayable tokens without losing whitespace. */
+function wordTokens(text: string): string[] {
+  return text.match(/\s+|\w+|[^\w\s]/g) ?? [];
+}
+
+/**
+ * LCS word mapping for paired changed lines. Whitespace can be treated as equal so
+ * formatting-only changes do not distract the review, while displayed text stays exact.
+ */
+export function wordDiff(
+  left: string,
+  right: string,
+  ignoreWhitespace = false,
+): WordDiff {
+  const a = wordTokens(left);
+  const b = wordTokens(right);
+  const same = (x: string, y: string) =>
+    x === y || (ignoreWhitespace && /^\s+$/.test(x) && /^\s+$/.test(y));
+  const lcs = Array.from({ length: a.length + 1 }, () =>
+    Array<number>(b.length + 1).fill(0),
+  );
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i][j] = same(a[i], b[j])
+        ? lcs[i + 1][j + 1] + 1
+        : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const result: WordDiff = { left: [], right: [] };
+  const push = (side: WordDiffSegment[], kind: WordDiffKind, text: string) => {
+    const last = side[side.length - 1];
+    if (last?.kind === kind) last.text += text;
+    else side.push({ kind, text });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && same(a[i], b[j])) {
+      push(result.left, "same", a[i++]);
+      push(result.right, "same", b[j++]);
+    } else if (
+      j < b.length &&
+      (i === a.length || lcs[i][j + 1] >= lcs[i + 1][j])
+    ) {
+      push(result.right, "add", b[j++]);
+    } else {
+      push(result.left, "del", a[i++]);
+    }
+  }
+  return result;
+}
+
 export interface DiffHunk {
   header: string;
   rows: SideRow[];

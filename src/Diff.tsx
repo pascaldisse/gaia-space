@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
-import { diffStat, parseUnifiedDiff } from "./diffModel";
+import { diffStat, parseUnifiedDiff, wordDiff } from "./diffModel";
 
 function classify(line: string) {
   if (line.startsWith("+++") || line.startsWith("---")) return "hdr";
@@ -10,7 +10,13 @@ function classify(line: string) {
   return "ctx";
 }
 
-export function Diff(props: { text: string; loading: boolean; focusFile?: string | null; ownedFiles?: string[]; ownedOnly?: boolean }) {
+export function Diff(props: {
+  text: string;
+  loading: boolean;
+  focusFile?: string | null;
+  ownedFiles?: string[];
+  ownedOnly?: boolean;
+}) {
   const lines = createMemo(() => props.text.split("\n"));
   const fileForHeader = (line: string) => {
     const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
@@ -18,12 +24,19 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
   };
   createEffect(() => {
     const file = props.focusFile;
-    if (file) document.querySelector(`[data-review-file="${CSS.escape(file)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (file)
+      document
+        .querySelector(`[data-review-file="${CSS.escape(file)}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
   });
   const [mode, setMode] = createSignal<"unified" | "side">("unified");
-  const files = createMemo(() => parseUnifiedDiff(props.text).filter((file) =>
-    !props.ownedOnly || (props.ownedFiles ?? []).includes(file.path),
-  ));
+  const [ignoreWhitespace, setIgnoreWhitespace] = createSignal(false);
+  const files = createMemo(() =>
+    parseUnifiedDiff(props.text).filter(
+      (file) =>
+        !props.ownedOnly || (props.ownedFiles ?? []).includes(file.path),
+    ),
+  );
   const visibleLines = createMemo(() => {
     if (!props.ownedOnly) return lines();
     const owned = new Set(props.ownedFiles ?? []);
@@ -40,7 +53,10 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
 
   return (
     <div class="diff-view">
-      <Show when={!props.loading} fallback={<p class="hint pad">Loading diff…</p>}>
+      <Show
+        when={!props.loading}
+        fallback={<p class="hint pad">Loading diff…</p>}
+      >
         <Show
           when={props.text.trim().length}
           fallback={<p class="hint pad">No changes.</p>}
@@ -65,6 +81,14 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
                 Side by side
               </button>
             </div>
+            <label class="diff-whitespace">
+              <input
+                type="checkbox"
+                checked={ignoreWhitespace()}
+                onChange={(e) => setIgnoreWhitespace(e.currentTarget.checked)}
+              />{" "}
+              Ignore whitespace
+            </label>
           </div>
           <Show
             when={mode() === "side"}
@@ -72,7 +96,12 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
               <pre class="diff-pre">
                 <For each={visibleLines()}>
                   {(line) => (
-                    <div class={`diff-line ${classify(line)}`} data-review-file={fileForHeader(line) ?? undefined}>{line || " "}</div>
+                    <div
+                      class={`diff-line ${classify(line)}`}
+                      data-review-file={fileForHeader(line) ?? undefined}
+                    >
+                      {line || " "}
+                    </div>
                   )}
                 </For>
               </pre>
@@ -81,7 +110,10 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
             <div class="diff-side">
               <For each={files()}>
                 {(file) => (
-                  <div class="diff-side-file" data-review-file={file.path || undefined}>
+                  <div
+                    class="diff-side-file"
+                    data-review-file={file.path || undefined}
+                  >
                     <div class="diff-line hdr">{file.path || "(diff)"}</div>
                     <For each={file.hunks}>
                       {(hunk) => (
@@ -99,8 +131,39 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
                                       : "empty"
                                   }`}
                                 >
-                                  <span class="diff-lno">{row.left?.n ?? ""}</span>
-                                  <span class="diff-txt">{row.left?.text ?? ""}</span>
+                                  <span class="diff-lno">
+                                    {row.left?.n ?? ""}
+                                  </span>
+                                  <span class="diff-txt">
+                                    <For
+                                      each={
+                                        row.kind === "chg" && row.left
+                                          ? wordDiff(
+                                              row.left.text,
+                                              row.right?.text ?? "",
+                                              ignoreWhitespace(),
+                                            ).left
+                                          : [
+                                              {
+                                                kind: "same" as const,
+                                                text: row.left?.text ?? "",
+                                              },
+                                            ]
+                                      }
+                                    >
+                                      {(segment) => (
+                                        <span
+                                          class={
+                                            segment.kind === "del"
+                                              ? "diff-word-del"
+                                              : undefined
+                                          }
+                                        >
+                                          {segment.text}
+                                        </span>
+                                      )}
+                                    </For>
+                                  </span>
                                 </div>
                                 <div
                                   class={`diff-side-cell ${
@@ -111,8 +174,39 @@ export function Diff(props: { text: string; loading: boolean; focusFile?: string
                                       : "empty"
                                   }`}
                                 >
-                                  <span class="diff-lno">{row.right?.n ?? ""}</span>
-                                  <span class="diff-txt">{row.right?.text ?? ""}</span>
+                                  <span class="diff-lno">
+                                    {row.right?.n ?? ""}
+                                  </span>
+                                  <span class="diff-txt">
+                                    <For
+                                      each={
+                                        row.kind === "chg" && row.right
+                                          ? wordDiff(
+                                              row.left?.text ?? "",
+                                              row.right.text,
+                                              ignoreWhitespace(),
+                                            ).right
+                                          : [
+                                              {
+                                                kind: "same" as const,
+                                                text: row.right?.text ?? "",
+                                              },
+                                            ]
+                                      }
+                                    >
+                                      {(segment) => (
+                                        <span
+                                          class={
+                                            segment.kind === "add"
+                                              ? "diff-word-add"
+                                              : undefined
+                                          }
+                                        >
+                                          {segment.text}
+                                        </span>
+                                      )}
+                                    </For>
+                                  </span>
                                 </div>
                               </div>
                             )}
