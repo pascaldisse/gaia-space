@@ -60,7 +60,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V124 → feat/w12-api (§07 non-devenv HTTP API remainder) ☀wave12
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 357 rows): done 101 · partial 198 · stub 5 · missing 53. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 357 rows): done 102 · partial 199 · stub 5 · missing 51. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Frozen baseline revised 356→357 (2026-08-23 ruling): 133f77c split the Polls row into `done` (V117) + `missing` (stickers/saved) — legitimate row split, no freeze violation. 371 has no row source in this tree.
 
