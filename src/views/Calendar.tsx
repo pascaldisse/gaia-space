@@ -75,7 +75,7 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,video_provider:"native",video_status:"scheduled",archived:false};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,video_provider:"native",video_status:"scheduled",access_level:"PRIVATE",archived:false};
 await meetingsApi.create(meeting);
 setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();

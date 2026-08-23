@@ -3,6 +3,7 @@ use crate::{actor, db, meetings};
 #[cfg(test)]
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use rand::RngCore;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,6 +35,8 @@ pub struct LivekitConfig {
     pub port: Option<u16>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
+    /// Enables anonymous admission to explicitly public meetings; defaults false.
+    pub allow_unregistered_rooms: Option<bool>,
     /// Optional HTTP endpoint for the LiveKit Egress RPC service. Credentials stay
     /// in the native process and are never exposed to the Solid webview.
     pub egress_url: Option<String>,
@@ -81,6 +84,7 @@ impl std::fmt::Debug for LivekitConfig {
             .field("port", &self.port)
             .field("api_key", &redacted(&self.api_key))
             .field("api_secret", &redacted(&self.api_secret))
+            .field("allow_unregistered_rooms", &self.allow_unregistered_rooms)
             .field("egress_url", &self.egress_url)
             .field("recording_filepath", &self.recording_filepath)
             .field("egress_timeout_ms", &self.egress_timeout_ms)
@@ -135,6 +139,12 @@ impl LivekitConfig {
     }
     fn url(&self) -> String {
         format!("ws://{}:{}", self.host(), self.port())
+    }
+    /// Invalid and absent environment values keep anonymous access closed.
+    fn allow_unregistered_rooms(&self) -> bool {
+        self.allow_unregistered_rooms.unwrap_or_else(|| {
+            matches!(std::env::var("ALLOW_UNREGISTERED_ROOMS").ok().as_deref(), Some("true") | Some("1"))
+        })
     }
     fn egress_url(&self) -> String {
         self.egress_url
@@ -468,6 +478,40 @@ pub struct CallJoin {
     pub url: String,
     pub room: String,
     pub token: String,
+}
+
+/// Anonymous admission is independent of persisted participant scope. Both this
+/// config flag and the meeting's persisted PUBLIC access level must opt in.
+pub fn join_public_meeting_call(meeting_id: String, display_name: Option<String>) -> Result<CallJoin> {
+    join_public_meeting_call_with_config(meeting_id, display_name, LivekitConfig::default())
+}
+pub(crate) fn join_public_meeting_call_with_config(
+    meeting_id: String,
+    display_name: Option<String>,
+    config: LivekitConfig,
+) -> Result<CallJoin> {
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered public rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?
+        .ok_or("Public room not found")?;
+    if meeting.video_provider != "native" {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let name = display_name.unwrap_or_else(|| "Anonymous".into()).trim().to_owned();
+    if name.is_empty() || name.len() > 128 {
+        return Err("Anonymous display name must be 1 to 128 characters".into());
+    }
+    let mut entropy = [0_u8; 16];
+    rand::thread_rng().fill_bytes(&mut entropy);
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(&config, room.clone(), format!("anonymous-{}", hex::encode(entropy)), name, false)?,
+        room,
+    })
 }
 
 /// Public IPC surface: the webview names the meeting and nothing else. Who is joining
@@ -1611,6 +1655,12 @@ mod tests {
         assert!(!decoded.claims.video.room_join);
         assert!(!decoded.claims.video.can_publish);
         assert!(!decoded.claims.video.can_subscribe);
+    }
+
+    #[test]
+    fn anonymous_rooms_need_an_explicit_config_opt_in() {
+        assert!(!LivekitConfig { allow_unregistered_rooms: Some(false), ..Default::default() }.allow_unregistered_rooms());
+        assert!(LivekitConfig { allow_unregistered_rooms: Some(true), ..Default::default() }.allow_unregistered_rooms());
     }
 
     #[test]

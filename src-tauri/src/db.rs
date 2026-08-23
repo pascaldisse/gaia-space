@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 87;
+pub const SCHEMA_VERSION: i64 = 88;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -591,6 +591,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V87: selected video provider is distinct from lifecycle and defaults to native LiveKit.
     if version < 87 && table_exists(&tx, "meetings")? {
         add_column_if_missing(&tx, "meetings", "video_provider", "TEXT NOT NULL DEFAULT 'native' CHECK(video_provider IN ('native','meet'))")?;
+    }
+    // V88: persisted public access remains inert unless the native
+    // ALLOW_UNREGISTERED_ROOMS setting also explicitly enables it.
+    if version < 88 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "access_level", "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))")?;
     }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
@@ -1452,7 +1457,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 87);
+        assert_eq!(SCHEMA_VERSION, 88);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2250,5 +2255,21 @@ mod v87_video_provider_migration_tests {
         let provider: String = c.query_row("SELECT video_provider FROM meetings WHERE id='video-provider'", [], |row| row.get(0)).unwrap();
         assert_eq!(provider, "native");
         assert!(c.execute("UPDATE meetings SET video_provider='zoom' WHERE id='video-provider'", []).is_err());
+    }
+}
+
+#[cfg(test)]
+mod v88_public_meeting_migration_tests {
+    use super::*;
+
+    #[test]
+    fn latest_schema_defaults_meetings_private_and_rejects_invalid_public_access() {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('public-access','Access',1,2)", []).unwrap();
+        let access: String = c.query_row("SELECT access_level FROM meetings WHERE id='public-access'", [], |row| row.get(0)).unwrap();
+        assert_eq!(access, "PRIVATE");
+        assert!(c.execute("UPDATE meetings SET access_level='PROJECT' WHERE id='public-access'", []).is_err());
+        c.execute("UPDATE meetings SET access_level='PUBLIC' WHERE id='public-access'", []).unwrap();
     }
 }

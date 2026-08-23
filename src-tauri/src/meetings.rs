@@ -10,6 +10,7 @@ const VIDEO_STATUSES: [&str; 4] = ["scheduled", "live", "ended", "cancelled"];
 const VIDEO_PROVIDERS: [&str; 2] = ["native", "meet"];
 fn default_video_provider() -> String { "native".into() }
 fn default_video_status() -> String { "scheduled".into() }
+fn default_access_level() -> String { "PRIVATE".into() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meeting {
@@ -26,6 +27,8 @@ pub struct Meeting {
     pub video_provider: String,
     #[serde(default = "default_video_status")]
     pub video_status: String,
+    #[serde(default = "default_access_level")]
+    pub access_level: String,
     pub archived: bool,
 }
 
@@ -59,7 +62,8 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         channel_id: r.get(8)?,
         video_provider: r.get(9)?,
         video_status: r.get(10)?,
-        archived: r.get(11)?,
+        access_level: r.get(11)?,
+        archived: r.get(12)?,
     })
 }
 
@@ -89,10 +93,13 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     if !VIDEO_STATUSES.contains(&meeting.video_status.as_str()) {
         return Err("Video status must be scheduled, live, ended, or cancelled".into());
     }
+    if !["PRIVATE", "PUBLIC"].contains(&meeting.access_level.as_str()) {
+        return Err("Meeting access level must be PRIVATE or PUBLIC".into());
+    }
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.video_provider,m.video_status,m.archived";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.video_provider,m.video_status,m.access_level,m.archived";
 /// Meeting read scope: organizer, explicitly invited participant, or a member of
 /// the project attached through the meeting's channel.
 const MEETING_READ_SCOPE: &str = "(m.organizer_id=?1 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))))";
@@ -157,6 +164,19 @@ pub fn get_meeting_scoped(id: String, profile_id: String) -> Result<Option<Meeti
     .map_err(|e| e.to_string())
 }
 
+/// Anonymous admission may only resolve an explicitly public, unarchived meeting.
+/// This is intentionally separate from profile-scoped reads.
+pub fn get_public_meeting(id: String) -> Result<Option<Meeting>> {
+    let c = db::conn()?;
+    c.query_row(
+        &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id=?1 AND m.access_level='PUBLIC' AND m.archived=0"),
+        [id],
+        row_to_meeting,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 /// Desktop transport. It carries the acting profile like every other reader:
 /// there is no unscoped meeting list left to call, on either transport.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -173,7 +193,7 @@ pub fn get_meeting(id: String, profile_id: String) -> Result<Option<Meeting>> {
 pub fn create_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,video_provider,video_status,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_provider, meeting.video_status, meeting.archived]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,video_provider,video_status,access_level,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_provider, meeting.video_status, meeting.access_level, meeting.archived]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -181,7 +201,7 @@ pub fn create_meeting(meeting: Meeting) -> Result<()> {
 pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,video_provider=?10,video_status=?11,archived=?12 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_provider, meeting.video_status, meeting.archived]).map_err(|e| e.to_string())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,video_provider=?10,video_status=?11,access_level=?12,archived=?13 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_provider, meeting.video_status, meeting.access_level, meeting.archived]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -459,6 +479,7 @@ mod tests {
             channel_id: None,
             video_provider: "native".into(),
             video_status: "scheduled".into(),
+            access_level: "PRIVATE".into(),
             archived: false,
         }
     }

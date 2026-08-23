@@ -85,6 +85,7 @@ export default function Meetings() {
         channel_id: draft.channel_id || null,
         video_provider: draft.video_provider,
         video_status: draft.video_status,
+        access_level: "PRIVATE",
         archived: false,
       };
       const invalid = validate(meeting);

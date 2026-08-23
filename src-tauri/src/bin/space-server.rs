@@ -147,6 +147,21 @@ struct PatchUser {
 fn err(code: StatusCode, s: &str) -> (StatusCode, Json<Value>) {
     (code, Json(json!({"ok":false,"error":s})))
 }
+#[derive(Deserialize)]
+struct PublicRoomQuery {
+    username: Option<String>,
+}
+/// The token authority remains in `calls`; this route neither accepts an identity
+/// nor sees LiveKit credentials. Disabled/private/unknown rooms all look absent.
+async fn public_room(
+    Path(room): Path<String>,
+    Query(query): Query<PublicRoomQuery>,
+) -> axum::response::Response {
+    match calls::join_public_meeting_call(room, query.username) {
+        Ok(join) => Json(join).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
 fn hash(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
@@ -4509,6 +4524,7 @@ async fn main() {
                 .put(caldav_put_event)
                 .delete(caldav_delete_event),
         )
+        .route("/api/rooms/{room}", get(public_room))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
