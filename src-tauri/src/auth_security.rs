@@ -208,18 +208,167 @@ fn stored_totp(user_id: &str) -> Result<Option<(String, bool)>> {
         .optional()
         .map_err(|e| e.to_string())
 }
-pub fn confirm_totp(user_id: &str, code: &str) -> Result<bool> {
+/// Confirms an enrollment and returns the fresh scratch codes, shown once.
+/// `None` means the code did not verify.
+pub fn confirm_totp(user_id: &str, code: &str) -> Result<Option<Vec<String>>> {
     let Some((sealed, _)) = stored_totp(user_id)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let secret = secretbox::open(&sealed)?;
     if !verify_totp(&secret, code, chrono::Utc::now().timestamp()) {
-        return Ok(false);
+        return Ok(None);
     };
     db::conn()?
         .execute("UPDATE user_totp SET enabled=1 WHERE user_id=?1", [user_id])
         .map_err(|e| e.to_string())?;
-    Ok(true)
+    Ok(Some(issue_scratch_codes(user_id)?))
+}
+/// KB §05 §3.3: enrollment hands out one-time scratch codes beside the secret. A
+/// lost authenticator must not be an account loss, so every confirmation mints a
+/// fresh set and invalidates the previous one.
+pub const SCRATCH_CODE_COUNT: usize = 10;
+fn issue_scratch_codes(user_id: &str) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    c.execute("DELETE FROM totp_scratch_codes WHERE user_id=?1", [user_id])
+        .map_err(|e| e.to_string())?;
+    let mut codes = Vec::with_capacity(SCRATCH_CODE_COUNT);
+    for _ in 0..SCRATCH_CODE_COUNT {
+        let raw = opaque("")[..12].to_string();
+        c.execute(
+            "INSERT INTO totp_scratch_codes(id,user_id,code_hash) VALUES(?1,?2,?3)",
+            params![id("scratch"), user_id, hash(&raw)?],
+        )
+        .map_err(|e| e.to_string())?;
+        codes.push(raw);
+    }
+    Ok(codes)
+}
+pub fn scratch_codes_remaining(user_id: &str) -> Result<i64> {
+    db::conn()?
+        .query_row(
+            "SELECT count(*) FROM totp_scratch_codes WHERE user_id=?1 AND used_at IS NULL",
+            [user_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+}
+/// Burns a scratch code. Each code answers exactly one login challenge.
+pub fn consume_scratch_code(user_id: &str, code: &str) -> Result<bool> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Ok(false);
+    }
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id,code_hash FROM totp_scratch_codes WHERE user_id=?1 AND used_at IS NULL")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([user_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (row_id, stored) = row.map_err(|e| e.to_string())?;
+        if matches(code, &stored) {
+            return Ok(c
+                .execute(
+                    "UPDATE totp_scratch_codes SET used_at=unixepoch() WHERE id=?1 AND used_at IS NULL",
+                    [row_id],
+                )
+                .map_err(|e| e.to_string())?
+                > 0);
+        }
+    }
+    Ok(false)
+}
+#[derive(Serialize)]
+pub struct ApplicationPassword {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}
+/// KB §05 §3.3: clients that cannot answer a TOTP prompt (IMAP, git-over-http,
+/// old mobile builds) authenticate with a named per-client password instead of
+/// the account password, revocable one client at a time.
+pub fn create_application_password(
+    user_id: &str,
+    name: &str,
+) -> Result<(ApplicationPassword, String)> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("application password name is required".into());
+    }
+    let raw = opaque("spap_");
+    let item = ApplicationPassword {
+        id: id("apppass"),
+        name: name.into(),
+        created_at: chrono::Utc::now().timestamp(),
+        last_used_at: None,
+    };
+    db::conn()?
+        .execute(
+            "INSERT INTO application_passwords(id,user_id,name,password_hash,created_at) VALUES(?1,?2,?3,?4,?5)",
+            params![item.id, user_id, item.name, hash(&raw)?, item.created_at],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok((item, raw))
+}
+pub fn list_application_passwords(user_id: &str) -> Result<Vec<ApplicationPassword>> {
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id,name,created_at,last_used_at FROM application_passwords WHERE user_id=?1 AND revoked_at IS NULL ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([user_id], |r| {
+            Ok(ApplicationPassword {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                created_at: r.get(2)?,
+                last_used_at: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+pub fn revoke_application_password(user_id: &str, id: &str) -> Result<bool> {
+    Ok(db::conn()?
+        .execute(
+            "UPDATE application_passwords SET revoked_at=unixepoch() WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL",
+            params![id, user_id],
+        )
+        .map_err(|e| e.to_string())?
+        > 0)
+}
+/// True when `raw` is a live application password of this account. Such a login
+/// is already a second factor by construction, so it skips the TOTP challenge.
+pub fn verify_application_password(user_id: &str, raw: &str) -> Result<bool> {
+    if !raw.starts_with("spap_") {
+        return Ok(false);
+    }
+    let c = db::conn()?;
+    let mut q = c
+        .prepare("SELECT id,password_hash FROM application_passwords WHERE user_id=?1 AND revoked_at IS NULL")
+        .map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([user_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (row_id, stored) = row.map_err(|e| e.to_string())?;
+        if matches(raw, &stored) {
+            c.execute(
+                "UPDATE application_passwords SET last_used_at=unixepoch() WHERE id=?1",
+                [row_id],
+            )
+            .map_err(|e| e.to_string())?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 pub fn totp_required(user_id: &str) -> Result<bool> {
     Ok(stored_totp(user_id)?.is_some_and(|(_, enabled)| enabled))
@@ -231,18 +380,24 @@ pub fn verify_user_totp(user_id: &str, code: Option<&str>) -> Result<bool> {
     if !enabled {
         return Ok(true);
     };
-    Ok(code.is_some_and(|v| {
-        secretbox::open(&sealed)
-            .ok()
-            .is_some_and(|s| verify_totp(&s, v, chrono::Utc::now().timestamp()))
-    }))
+    let Some(v) = code else { return Ok(false) };
+    if secretbox::open(&sealed)
+        .ok()
+        .is_some_and(|s| verify_totp(&s, v, chrono::Utc::now().timestamp()))
+    {
+        return Ok(true);
+    }
+    // A scratch code is the documented fallback for a lost authenticator.
+    consume_scratch_code(user_id, v)
 }
 pub fn disable_totp(user_id: &str, code: &str) -> Result<bool> {
     if !verify_user_totp(user_id, Some(code))? {
         return Ok(false);
     };
-    Ok(db::conn()?
-        .execute("DELETE FROM user_totp WHERE user_id=?1", [user_id])
+    let c = db::conn()?;
+    c.execute("DELETE FROM totp_scratch_codes WHERE user_id=?1", [user_id])
+        .map_err(|e| e.to_string())?;
+    Ok(c.execute("DELETE FROM user_totp WHERE user_id=?1", [user_id])
         .map_err(|e| e.to_string())?
         > 0)
 }

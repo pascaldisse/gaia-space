@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod actor;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod app_consent;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod app_rights;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
@@ -37,6 +39,8 @@ pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod auth_modules;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod auth_security;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
