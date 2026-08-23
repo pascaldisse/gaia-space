@@ -39,6 +39,7 @@ export type Message = {
   edited_at: number | null;
   thread_of: string | null;
   archived: boolean;
+  content_kind?: "text" | "absence-card";
   mention_ids?: string[];
 };
 export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string };

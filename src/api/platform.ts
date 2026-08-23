@@ -4,6 +4,7 @@ export type Profile = { id: string; username: string; display_name: string; emai
 export type Organization = { id:string; name:string; slogan:string|null; logo_id:string|null; timezone:string; onboarding_required:boolean; allow_domains_edit:boolean };
 export type OrgSettings = { org_id:string; available_right_codes:string[]; is_space_code:boolean; is_space_code_only:boolean };
 export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
+export type Location = { id:string; name:string; location_type:string; parent_id:string|null; timezone:string; work_schedule_json:string; channel_id:string|null; archived:boolean; equipment:string[] };
 export type Team = { id: string; name: string; description: string | null; parent_id: string | null; archived: boolean };
 export type TeamMembership = {
   id: string; profile_id: string; team_id: string; role_id: string | null; lead: boolean;
@@ -52,6 +53,10 @@ export const platformApi = {
   memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
 addMemberLocation: (member_id: string, location: string, location_type: string) => call<MemberLocation>("add_member_location", { memberId: member_id, location, locationType: location_type }),
 removeMemberLocation: (id: string) => call<void>("remove_member_location", { id }),
+// Organization locations
+locations: () => call<Location[]>("list_locations"),
+saveLocation: (location: Location) => call<Location>("save_location", { location }),
+locationChannel: (location_id: string) => call<string|null>("location_channel", { locationId: location_id }),
 // Teams + memberships
   teams: () => call<Team[]>("list_teams"),
   createTeam: (input: { id?: string; name: string; description: string | null; parent_id: string | null }) =>

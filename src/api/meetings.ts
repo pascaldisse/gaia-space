@@ -6,6 +6,7 @@ export type VideoStatus = "scheduled"|"live"|"ended"|"cancelled";
 export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
 export type MeetingOccurrence = { id:string; meeting_id:string; title:string; starts_at:number; ends_at:number; location:string|null };
+export type MeetingRoom = { id:string; name:string; location:string|null; capacity:number; archived:boolean; equipment:string[] };
 export type LivekitConfig = { server_path?:string; host?:string; port?:number; api_key?:string; api_secret?:string; egress_url?:string; recording_filepath?:string; egress_timeout_ms?:number; recording_reservation_ttl_seconds?:number; recording_max_stop_attempts?:number };
 export type CallJoin = { url:string; room:string; token:string };
 export type CallRecording = { id:string; meeting_id:string; egress_id:string|null; status:"starting"|"recording"|"stopping"|"stopped"|"failed"; filepath:string|null; started_by:string|null; started_at:number; stopped_at:number|null; stop_attempts:number; last_error:string|null };
@@ -22,6 +23,7 @@ export const meetingsApi = {
   create: (meeting:Meeting) => call<void>("create_meeting", {meeting}), update: (meeting:Meeting) => call<void>("update_meeting", {meeting}), archive: (id:string, archived:boolean) => call<void>("archive_meeting", {id, archived}),
   occurrences: (range_start:number, range_end:number, profileId:string) => call<MeetingOccurrence[]>("expand_meeting_occurrences", {rangeStart:range_start, rangeEnd:range_end, profileId}),
   participants: (meeting_id:string, profileId:string) => call<MeetingParticipant[]>("list_meeting_participants", {meetingId:meeting_id, profileId}),
+rooms: () => call<MeetingRoom[]>("list_meeting_rooms"), reserveRoom: (meeting_id:string, room_id:string) => call<void>("reserve_meeting_room", {meetingId:meeting_id, roomId:room_id}),
   invite: (meeting_id:string, profile_id:string) => call<void>("invite_meeting_participant", {meetingId:meeting_id, profileId:profile_id}),
   rsvp: (meeting_id:string, profile_id:string, status:MeetingParticipant["status"]) => call<void>("set_meeting_participant_status", {meetingId:meeting_id, profileId:profile_id, status}),
   // Runtime + join carry NO identity and NO config over IPC either: the LiveKit endpoint
