@@ -578,6 +578,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 77 {
         tx.execute_batch(SCHEMA_V77)?;
     }
+    // V78: issue discussion and a durable, queryable activity trail.
+    if version < 78 {
+        tx.execute_batch(SCHEMA_V78)?;
+    }
+    // V79: tracker links connect issues to issues, merge requests, and external systems.
+    if version < 79 {
+        tx.execute_batch(SCHEMA_V79)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
@@ -787,6 +795,36 @@ CREATE TABLE IF NOT EXISTS review_merge_policies (
     merge_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(merge_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION')),
     squash_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(squash_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION','TITLE_AND_COMMITS'))
 );
+"#;
+pub(crate) const SCHEMA_V78: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_comments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    author_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    body TEXT NOT NULL CHECK(length(trim(body)) > 0),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    edited_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS issue_comments_issue_created ON issue_comments(issue_id, created_at, id);
+CREATE TABLE IF NOT EXISTS issue_activities (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    activity_type TEXT NOT NULL,
+    actor_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    detail TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_activities_issue_created ON issue_activities(issue_id, created_at, id);
+"#;
+pub(crate) const SCHEMA_V79: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_tracker_links (
+ id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('ISSUE','REVIEW','EXTERNAL')),
+ target_id TEXT, url TEXT, title TEXT,
+ CHECK((target_kind='EXTERNAL' AND url IS NOT NULL AND target_id IS NULL) OR (target_kind IN ('ISSUE','REVIEW') AND target_id IS NOT NULL AND url IS NULL)),
+ UNIQUE(issue_id, target_kind, target_id), UNIQUE(issue_id, url)
+);
+CREATE INDEX IF NOT EXISTS issue_tracker_links_issue ON issue_tracker_links(issue_id);
 "#;
 pub(crate) const SCHEMA_V77: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_attachments (

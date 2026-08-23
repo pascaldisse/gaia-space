@@ -153,7 +153,7 @@ export default function Meetings() {
       setError(humanError(reason));
     }
   };
-  const filteredRooms = () => { const required = equipmentFilter().split(",").map(x => x.trim().toLowerCase()).filter(Boolean); return (rooms() ?? []).filter(room => required.every(item => room.equipment.some(equipment => equipment.toLowerCase() === item))); };
+  const filteredRooms = () => { const required = equipmentFilter().split(",").map(x => x.trim().toLowerCase()).filter(Boolean); return (rooms() ?? []).filter(room => required.every(item => room.equipment.some((equipment: string) => equipment.toLowerCase() === item))); };
   const rsvp = async (participant: MeetingParticipant, status: MeetingParticipant["status"]) => {
     setError("");
     try {

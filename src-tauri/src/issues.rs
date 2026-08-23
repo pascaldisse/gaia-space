@@ -152,6 +152,31 @@ pub struct TimeTrackingEntry {
     pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IssueComment {
+    pub id: String,
+    pub issue_id: String,
+    pub author_id: Option<String>,
+    pub body: String,
+    pub created_at: i64,
+    pub edited_at: Option<i64>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IssueActivity {
+    pub id: String,
+    pub issue_id: String,
+    pub activity_type: String,
+    pub actor_id: Option<String>,
+    pub detail: Option<String>,
+    pub created_at: i64,
+}
+#[derive(Debug, Deserialize)]
+pub struct IssueCommentInput {
+    pub id: Option<String>,
+    pub issue_id: String,
+    pub author_id: Option<String>,
+    pub body: String,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IssueAttachment {
     pub id: String,
     pub issue_id: String,
@@ -176,6 +201,23 @@ pub struct IssueLink {
     pub link_type: String,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TrackerLink {
+    pub id: String,
+    pub issue_id: String,
+    pub target_kind: String,
+    pub target_id: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+pub struct TrackerLinkInput {
+    pub issue_id: String,
+    pub target_kind: String,
+    pub target_id: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IssueDetail {
     #[serde(flatten)]
     pub issue: Issue,
@@ -185,6 +227,12 @@ pub struct IssueDetail {
     pub children: Vec<Issue>,
     #[serde(default)]
     pub attachments: Vec<IssueAttachment>,
+    #[serde(default)]
+    pub comments: Vec<IssueComment>,
+    #[serde(default)]
+    pub activities: Vec<IssueActivity>,
+    #[serde(default)]
+    pub tracker_links: Vec<TrackerLink>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,6 +452,100 @@ pub fn list_issues(
         include_archived.unwrap_or(false),
     )
 }
+fn record_activity(
+    c: &Connection,
+    issue_id: &str,
+    activity_type: &str,
+    actor_id: Option<&str>,
+    detail: Option<&str>,
+) -> Result<()> {
+    err(c.execute("INSERT INTO issue_activities(id,issue_id,activity_type,actor_id,detail) VALUES(?1,?2,?3,?4,?5)", params![new_id("issue-activity"), issue_id, activity_type, actor_id, detail]))?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_comments(issue_id: String) -> Result<Vec<IssueComment>> {
+    let c = db::conn()?;
+    let mut s = err(c.prepare("SELECT id,issue_id,author_id,body,created_at,edited_at FROM issue_comments WHERE issue_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(s.query_map([issue_id], |r| {
+        Ok(IssueComment {
+            id: r.get(0)?,
+            issue_id: r.get(1)?,
+            author_id: r.get(2)?,
+            body: r.get(3)?,
+            created_at: r.get(4)?,
+            edited_at: r.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_issue_comment(input: IssueCommentInput) -> Result<IssueComment> {
+    let body = input.body.trim().to_string();
+    if body.is_empty() {
+        return Err("Comment cannot be empty".into());
+    }
+    let c = db::conn()?;
+    let comment = IssueComment {
+        id: input.id.unwrap_or_else(|| new_id("issue-comment")),
+        issue_id: input.issue_id,
+        author_id: input.author_id,
+        body,
+        created_at: 0,
+        edited_at: None,
+    };
+    err(c.execute(
+        "INSERT INTO issue_comments(id,issue_id,author_id,body) VALUES(?1,?2,?3,?4)",
+        params![
+            comment.id,
+            comment.issue_id,
+            comment.author_id,
+            comment.body
+        ],
+    ))?;
+    record_activity(
+        &c,
+        &comment.issue_id,
+        "commented",
+        comment.author_id.as_deref(),
+        None,
+    )?;
+    let saved = err(c.query_row(
+        "SELECT id,issue_id,author_id,body,created_at,edited_at FROM issue_comments WHERE id=?1",
+        [&comment.id],
+        |r| {
+            Ok(IssueComment {
+                id: r.get(0)?,
+                issue_id: r.get(1)?,
+                author_id: r.get(2)?,
+                body: r.get(3)?,
+                created_at: r.get(4)?,
+                edited_at: r.get(5)?,
+            })
+        },
+    ))?;
+    // return the database timestamp rather than a client clock.
+    Ok(saved)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_activities(issue_id: String) -> Result<Vec<IssueActivity>> {
+    let c = db::conn()?;
+    let mut s = err(c.prepare("SELECT id,issue_id,activity_type,actor_id,detail,created_at FROM issue_activities WHERE issue_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(s.query_map([issue_id], |r| {
+        Ok(IssueActivity {
+            id: r.get(0)?,
+            issue_id: r.get(1)?,
+            activity_type: r.get(2)?,
+            actor_id: r.get(3)?,
+            detail: r.get(4)?,
+            created_at: r.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue(id: String) -> Result<Option<Issue>> {
     let c = db::conn()?;
@@ -432,6 +574,13 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
         input.assignee_ids
     };
     write_assignees(&c, &id, &people)?;
+    record_activity(
+        &c,
+        &id,
+        "created",
+        input.created_by.as_deref(),
+        Some("Issue created"),
+    )?;
     drop(c);
     let issue = get_issue(id)?.ok_or_else(|| "Created issue was not found".to_string())?;
     issue_event(crate::events::ISSUE_CREATED, &issue);
@@ -448,6 +597,13 @@ pub fn update_issue(issue: Issue) -> Result<Issue> {
         issue.assignee_ids.clone()
     };
     write_assignees(&c, &issue.id, &people)?;
+    record_activity(
+        &c,
+        &issue.id,
+        "updated",
+        issue.created_by.as_deref(),
+        Some("Issue updated"),
+    )?;
     drop(c);
     let saved = get_issue(issue.id)?.ok_or_else(|| "Issue not found".to_string())?;
     issue_event(crate::events::ISSUE_UPDATED, &saved);
@@ -460,6 +616,13 @@ pub fn archive_issue(id: String, archived: bool) -> Result<()> {
         "UPDATE issues SET archived=?2 WHERE id=?1",
         params![id, archived],
     ))?;
+    record_activity(
+        &c,
+        &id,
+        if archived { "archived" } else { "restored" },
+        None,
+        None,
+    )?;
     drop(c);
     // The command returns nothing, so the payload has to be read back for the event.
     if let Some(issue) = get_issue(id)? {
@@ -1253,6 +1416,102 @@ pub fn add_issue_child(parent_id: String, child_id: String) -> Result<IssueLink>
     ))?;
     Ok(link)
 }
+fn valid_external_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_tracker_links(issue_id: String) -> Result<Vec<TrackerLink>> {
+    let c = db::conn()?;
+    let mut s=err(c.prepare("SELECT id,issue_id,target_kind,target_id,url,title FROM issue_tracker_links WHERE issue_id=?1 ORDER BY id"))?;
+    let rows = err(s.query_map([issue_id], |r| {
+        Ok(TrackerLink {
+            id: r.get(0)?,
+            issue_id: r.get(1)?,
+            target_kind: r.get(2)?,
+            target_id: r.get(3)?,
+            url: r.get(4)?,
+            title: r.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_issue_tracker_link(input: TrackerLinkInput) -> Result<TrackerLink> {
+    let kind = input.target_kind.to_uppercase();
+    if !matches!(kind.as_str(), "ISSUE" | "REVIEW" | "EXTERNAL") {
+        return Err("target_kind must be ISSUE, REVIEW, or EXTERNAL".into());
+    }
+    let c = db::conn()?;
+    let issue_project: String = err(c.query_row(
+        "SELECT project_id FROM issues WHERE id=?1",
+        [&input.issue_id],
+        |r| r.get(0),
+    ))?;
+    match kind.as_str() {
+        "ISSUE" => {
+            let target = input
+                .target_id
+                .as_deref()
+                .ok_or("Issue target is required")?;
+            if target == input.issue_id {
+                return Err("An issue cannot link to itself".into());
+            };
+            let project: String = err(c.query_row(
+                "SELECT project_id FROM issues WHERE id=?1",
+                [target],
+                |r| r.get(0),
+            ))?;
+            if project != issue_project {
+                return Err("Linked issues must be in the same project".into());
+            }
+        }
+        "REVIEW" => {
+            let target = input
+                .target_id
+                .as_deref()
+                .ok_or("Review target is required")?;
+            let project: String = err(c.query_row(
+                "SELECT project_id FROM reviews WHERE id=?1",
+                [target],
+                |r| r.get(0),
+            ))?;
+            if project != issue_project {
+                return Err("Linked reviews must be in the same project".into());
+            }
+        }
+        "EXTERNAL" => {
+            if input.target_id.is_some() || !input.url.as_deref().is_some_and(valid_external_url) {
+                return Err("External link requires an http(s) URL".into());
+            }
+        }
+        _ => unreachable!(),
+    }
+    let link = TrackerLink {
+        id: new_id("tracker-link"),
+        issue_id: input.issue_id,
+        target_kind: kind,
+        target_id: input.target_id,
+        url: input.url,
+        title: input.title.filter(|v| !v.trim().is_empty()),
+    };
+    err(c.execute("INSERT INTO issue_tracker_links(id,issue_id,target_kind,target_id,url,title) VALUES(?1,?2,?3,?4,?5,?6)",params![link.id,link.issue_id,link.target_kind,link.target_id,link.url,link.title]))?;
+    record_activity(
+        &c,
+        &link.issue_id,
+        "tracker_linked",
+        None,
+        link.title.as_deref().or(link.url.as_deref()),
+    )?;
+    Ok(link)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn remove_issue_tracker_link(id: String) -> Result<()> {
+    err(db::conn()?.execute("DELETE FROM issue_tracker_links WHERE id=?1", [id]))?;
+    Ok(())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_issue_link(id: String) -> Result<()> {
     let c = db::conn()?;
@@ -1326,6 +1585,9 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     let checklists = list_checklists(id.clone())?;
     let time_total_minutes = issue_time_total(id.clone())?;
     let attachments = list_issue_attachments(id.clone())?;
+    let comments = list_issue_comments(id.clone())?;
+    let activities = list_issue_activities(id.clone())?;
+    let tracker_links = list_issue_tracker_links(id.clone())?;
     let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
     let mut children = err(child_s.query_map([id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -1338,6 +1600,9 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
         time_total_minutes,
         children,
         attachments,
+        comments,
+        activities,
+        tracker_links,
     }))
 }
 
@@ -1348,6 +1613,18 @@ mod tests {
         let c = crate::db::open_in_memory().unwrap();
         c.execute_batch("CREATE TABLE issues(id TEXT PRIMARY KEY,project_id TEXT,number INT,title TEXT,description TEXT,status_id TEXT,assignee_id TEXT,created_by TEXT,due_date TEXT,archived INT);CREATE TABLE issue_statuses(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,resolved INT,color TEXT,ordering INT,archived INT DEFAULT 0);CREATE TABLE boards(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,backlog_type TEXT,archived INT);CREATE TABLE board_columns(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,ordering INT);CREATE TABLE column_statuses(column_id TEXT,status_id TEXT);CREATE TABLE sprints(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,state TEXT,starts_on TEXT,ends_on TEXT,description TEXT,archived INT);CREATE TABLE issue_board_positions(issue_id TEXT,board_id TEXT,sprint_id TEXT,swimlane_id TEXT,position INT,PRIMARY KEY(issue_id,board_id));CREATE TABLE issue_links(id TEXT,issue_id TEXT,linked_issue_id TEXT,link_type TEXT);").unwrap();
         c
+    }
+    #[test]
+    fn tracker_link_schema_rejects_mismatched_target_shape() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE issues(id TEXT PRIMARY KEY);")
+            .unwrap();
+        c.execute_batch(crate::db::SCHEMA_V79).unwrap();
+        c.execute("INSERT INTO issues(id) VALUES('i')", []).unwrap();
+        c.execute("INSERT INTO issue_tracker_links(id,issue_id,target_kind,url) VALUES('external','i','EXTERNAL','https://tracker.example/ONE')",[]).unwrap();
+        assert!(c.execute("INSERT INTO issue_tracker_links(id,issue_id,target_kind,target_id) VALUES('bad','i','EXTERNAL','other')",[]).is_err());
+        assert!(valid_external_url("https://tracker.example/ONE"));
+        assert!(!valid_external_url("file:///not-a-tracker"));
     }
     #[test]
     fn status_to_column_mapping_is_project_scoped() {
