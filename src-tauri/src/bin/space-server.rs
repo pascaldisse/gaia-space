@@ -484,6 +484,7 @@ fn app_room_scope(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn app_room_project_id(
     c: &rusqlite::Connection,
     room_id: &str,
@@ -496,6 +497,7 @@ fn app_room_project_id(
 }
 
 /// Lists must skip unscoped rooms rather than fail the entire authorized result set.
+#[allow(clippy::result_large_err)]
 fn app_room_project_id_if_scoped(c: &rusqlite::Connection, room_id: &str) -> Result<Option<String>, axum::response::Response> {
     c.query_row(
         "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
@@ -504,6 +506,7 @@ fn app_room_project_id_if_scoped(c: &rusqlite::Connection, room_id: &str) -> Res
     ).optional().map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())
 }
 
+#[allow(clippy::result_large_err)]
 fn app_has_project_right(
     c: &rusqlite::Connection,
     application_id: &str,
