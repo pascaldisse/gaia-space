@@ -1325,6 +1325,8 @@ fn typed_format_metadata(
 /// — never a fixed/guessed location). Payload is stored as UTF-8 text (this local registry
 /// has no upload transport for arbitrary binaries yet; real Space's binary artifact storage is
 /// future work — noted here rather than faked).
+/// Distinguishes concurrent publishes of the same file within one process.
+static STAGING_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 // Transactional core of the `publish_package_version` tauri command; its arguments are
 // that command's IPC parameters plus the connection/base-dir it must run inside.
 #[allow(clippy::too_many_arguments)]
@@ -1448,7 +1450,14 @@ fn publish_package_version_tx(
         // payload used to land on disk before metadata validation and the upsert, so a
         // rejected publish left an orphan file the version never referenced
         // (☎Kali-VIII round 4).
-        let staged_path = dir.join(format!(".{filename}.staged-{}", std::process::id()));
+        // The staged name must be unique per publish, not per process: two publishes of the
+        // same file inside one server would otherwise share a staging path and race between
+        // commit and rename (☎Kali-VIII round 5).
+        let staged_path = dir.join(format!(
+            ".{filename}.staged-{}-{}",
+            std::process::id(),
+            STAGING_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         fs::write(&staged_path, content).map_err(|e| e.to_string())?;
         pending_rename = Some((staged_path, file_path.clone()));
         let canonical_file_path = canonical_path_within(base_dir, &dir)?.join(filename);
@@ -1510,7 +1519,12 @@ fn publish_package_version_tx(
     }
     // The row is durable, so the bytes may take their final name.
     if let Some((staged, final_path)) = pending_rename.take() {
-        fs::rename(&staged, &final_path).map_err(|e| e.to_string())?;
+        if let Err(e) = fs::rename(&staged, &final_path) {
+            let _ = fs::remove_file(&staged);
+            return Err(format!(
+                "published row committed but payload could not be stored: {e}"
+            ));
+        }
     }
     Ok(PackageVersion {
         id,

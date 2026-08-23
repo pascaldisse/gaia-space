@@ -463,7 +463,15 @@ fn registry_repo_auth(
     write: bool,
 ) -> Result<User, axum::response::Response> {
     let user = registry_auth(headers)?;
-    match repository_access(&user, repository_id, write) {
+    match repository_access(
+        &user,
+        repository_id,
+        if write {
+            RepoAccess::Write
+        } else {
+            RepoAccess::Read
+        },
+    ) {
         Ok(true) => Ok(user),
         Ok(false) => Err((
             StatusCode::FORBIDDEN,
@@ -474,10 +482,22 @@ fn registry_repo_auth(
     }
 }
 
+/// How far into a package repository a caller is asking to reach.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RepoAccess {
+    /// list, resolve, download
+    Read,
+    /// publish, retention, pinning — the repository's contents
+    Write,
+    /// the repository itself: its settings, its ACL, destroying a version
+    Admin,
+}
+
 /// The one answer to "may this account reach this package repository?", shared by the
 /// registry protocol routes and by `/api/cmd` — those were two doors to the same room,
 /// and only one of them was locked (☎Kali-VIII round 4).
-fn repository_access(user: &User, repository_id: &str, write: bool) -> Result<bool, String> {
+fn repository_access(user: &User, repository_id: &str, level: RepoAccess) -> Result<bool, String> {
+    let write = level != RepoAccess::Read;
     if user.role == "admin" {
         return Ok(true);
     }
@@ -491,7 +511,13 @@ fn repository_access(user: &User, repository_id: &str, write: bool) -> Result<bo
         .optional()
         .map_err(|e| e.to_string())?;
     if let Some(role) = role {
-        return Ok(!(write && role == "VIEWER"));
+        // A WRITER publishes but does not hand out rights: granting is the MANAGER's, or
+        // the owner's, otherwise a writer could quietly promote itself (☎Kali-VIII round 5).
+        return Ok(match level {
+            RepoAccess::Read => true,
+            RepoAccess::Write => role != "VIEWER",
+            RepoAccess::Admin => role == "MANAGER",
+        });
     }
     let acl_exists: i64 = c
         .query_row(
@@ -1296,6 +1322,7 @@ enum CommandPolicy {
     Session,
     PackageRepositoryRead,
     PackageRepositoryWrite,
+    PackageRepositoryAdmin,
     TodoRead,
     TodoCreate,
     TodoOwnerWrite,
@@ -1423,12 +1450,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_checklist_item"
         | "delete_deploy_target"
         | "delete_issue_status"
-        | "delete_message"
-        | "delete_package_repository" => CommandPolicy::Session,
-        "delete_package_version"
-        | "remove_package_repository_acl"
-        | "download_package_payload"
-        | "delete_pipeline_script"
+        | "delete_message" => CommandPolicy::Session,
+        "delete_pipeline_script"
         | "delete_planning_tag"
         | "delete_quality_gate_rule"
         | "delete_role_assignment"
@@ -1472,8 +1495,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "list_meetings" => CommandPolicy::MeetingReadList,
         "list_package_repositories"
-        | "list_package_repository_acl"
-        | "list_package_versions"
         | "list_pipeline_scripts"
         | "list_planning_tags"
         | "list_profiles" => CommandPolicy::Session,
@@ -1542,11 +1563,20 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // resolves that repository and asks the same question.
         "apply_package_retention"
         | "publish_package_version"
-        | "set_package_repository_acl"
         | "set_package_version_pinned" => CommandPolicy::PackageRepositoryWrite,
-        "package_retention_candidates" | "repository_vulnerability_report" => {
-            CommandPolicy::PackageRepositoryRead
-        }
+        // The repository itself, its ACL and destroying a version are the manager's.
+        "set_package_repository_acl"
+        | "remove_package_repository_acl"
+        | "update_package_repository"
+        | "delete_package_repository"
+        | "delete_package_version"
+        | "add_package_vulnerability" => CommandPolicy::PackageRepositoryAdmin,
+        "package_retention_candidates"
+        | "repository_vulnerability_report"
+        | "list_package_versions"
+        | "list_package_repository_acl"
+        | "download_package_payload"
+        | "dependency_overview" => CommandPolicy::PackageRepositoryRead,
         "move_issue_on_board" | "remove_channel_member" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
@@ -1580,7 +1610,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_document_folder" => CommandPolicy::DocumentFolderWrite,
         "update_issue_status"
         | "update_message"
-        | "update_package_repository"
         | "update_pipeline_script"
         | "update_profile" => CommandPolicy::Session,
         "update_meeting" => CommandPolicy::MeetingWrite,
@@ -2451,8 +2480,14 @@ fn authorize_command(
             put_arg(body, "allow_all", json!(user.role == "admin"));
             Ok(())
         }
-        CommandPolicy::PackageRepositoryRead | CommandPolicy::PackageRepositoryWrite => {
-            let write = policy == CommandPolicy::PackageRepositoryWrite;
+        CommandPolicy::PackageRepositoryRead
+        | CommandPolicy::PackageRepositoryWrite
+        | CommandPolicy::PackageRepositoryAdmin => {
+            let level = match policy {
+                CommandPolicy::PackageRepositoryRead => RepoAccess::Read,
+                CommandPolicy::PackageRepositoryWrite => RepoAccess::Write,
+                _ => RepoAccess::Admin,
+            };
             // The repository is named differently by each command; a write whose target
             // cannot be identified is refused rather than allowed.
             let repository_id = arg::<String>(body, "repository_id")
@@ -2462,13 +2497,23 @@ fn authorize_command(
                         .and_then(|entry| arg::<String>(entry, "repository_id").ok())
                 })
                 .or_else(|| {
+                    body.get("repo")
+                        .and_then(|repo| arg::<String>(repo, "id").ok())
+                })
+                .or_else(|| {
+                    body.get("vulnerability")
+                        .and_then(|v| arg::<String>(v, "version_id").ok())
+                        .and_then(|id| id.split("::").next().map(str::to_string))
+                })
+                .or_else(|| {
                     // A version id is `repository::package::version`.
-                    arg::<String>(body, "id")
+                    arg::<String>(body, "version_id")
                         .ok()
+                        .or_else(|| arg::<String>(body, "id").ok())
                         .and_then(|id| id.split("::").next().map(str::to_string))
                 })
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `repository_id`"))?;
-            if repository_access(user, &repository_id, write)
+            if repository_access(user, &repository_id, level)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
@@ -4083,6 +4128,36 @@ mod tests {
         assert_eq!(body["userId"], "pa");
         assert_eq!(body["user_id"], "pa");
         assert_eq!(body["prefix"], "/dep");
+    }
+
+    /// ☎Kali-VIII round 5: a WRITER publishes; it does not hand out rights. Granting is the
+    /// MANAGER's or the owner's, or a writer could quietly promote itself.
+    #[tokio::test]
+    async fn a_writer_cannot_promote_itself_or_delete_the_repository() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-grant','grant','npm','HOSTING')", []).unwrap();
+        c.execute("INSERT INTO package_repository_acl(repository_id,profile_id,role) VALUES('repo-grant','pb','WRITER'),('repo-grant','pd','MANAGER')", []).unwrap();
+        drop(c);
+        let promote = json!({"entry": {"repository_id": "repo-grant", "profile_id": "pb", "role": "MANAGER"}});
+        let (status, _) = call(cookie("tb"), "set_package_repository_acl", promote.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(cookie("tb"), "delete_package_repository", json!({"id": "repo-grant"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(
+            cookie("tb"),
+            "remove_package_repository_acl",
+            json!({"repository_id": "repo-grant", "profile_id": "pd"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // The manager may do what the writer may not.
+        let (status, _) = call(cookie("td"), "set_package_repository_acl", promote).await;
+        assert_eq!(status, StatusCode::OK);
+        // Reading stays open to the writer.
+        let (status, _) = call(cookie("tb"), "list_package_versions", json!({"repository_id": "repo-grant", "query": null})).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     /// ☎Kali-VIII round 4: the registry routes were gated while `/api/cmd` reached the same
