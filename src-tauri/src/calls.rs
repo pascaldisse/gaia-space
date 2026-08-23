@@ -566,7 +566,7 @@ fn join_oidc_normal_meeting_call_with_config(
         return Err("Unregistered normal rooms are disabled".into());
     }
     let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Normal room not found")?;
-    if meeting.video_provider != "native" {
+    if meeting.video_provider.as_deref() != Some("livekit") {
         return Err("External Meet rooms are not configured".into());
     }
     meetings::video_status_after_join(&meeting.video_status)?;
@@ -602,7 +602,7 @@ pub(crate) fn join_public_meeting_call_with_config(
         return Err("Unregistered public rooms are disabled".into());
     }
     let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
-    if meeting.video_provider != "native" {
+    if meeting.video_provider.as_deref() != Some("livekit") {
         return Err("External Meet rooms are not configured".into());
     }
     meetings::video_status_after_join(&meeting.video_status)?;
@@ -645,7 +645,7 @@ pub fn join_application_public_meeting_call(
         return Err("Unregistered application rooms are disabled".into());
     }
     let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
-    if meeting.video_provider != "native" {
+    if meeting.video_provider.as_deref() != Some("livekit") {
         return Err("External Meet rooms are not configured".into());
     }
     meetings::video_status_after_join(&meeting.video_status)?;
@@ -719,7 +719,7 @@ pub(crate) fn join_meeting_call_with_config(
     if meeting.archived {
         return Err("Cannot join an archived meeting".into());
     }
-    if meeting.video_provider != "native" {
+    if meeting.video_provider.as_deref() != Some("livekit") {
         return Err("External Meet rooms are not configured; select Native LiveKit or configure the external room API".into());
     }
     let connection = db::connection(&app)?;
