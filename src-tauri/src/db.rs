@@ -1632,7 +1632,7 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74] {
+        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");
