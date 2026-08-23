@@ -1,6 +1,5 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { connectServer } from "../mobile";
-import { serverCapabilities } from "../api/invoke";
 import "./Login.css";
 
 const SERVER_KEY = "space.server-url";

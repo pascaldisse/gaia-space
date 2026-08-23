@@ -4,7 +4,6 @@ import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, projectId as sessionProject, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
-import ProjectHome from "./ProjectHome";
 import "./Projects.css";
 import "./Portfolio.css";
 
