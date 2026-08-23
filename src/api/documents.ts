@@ -40,6 +40,7 @@ export type Document = {
   created_by: string | null;
 };
 
+export type DocumentDiscussion = { document_id:string; channel_id:string; meeting_id:string|null };
 export type DocVersion = {
   id: string;
   document_id: string;
@@ -129,6 +130,8 @@ export const documentsApi = {
   ensureProjectDocumentRoot: (projectId: string) => invoke<DocumentFolder>("ensure_project_document_root", { projectId }),
   listDocuments: () => invoke<Document[]>("list_documents"),
   getDocument: (id: string) => invoke<Document | null>("get_document", { id }),
+getDocumentDiscussion: (documentId: string) => invoke<DocumentDiscussion | null>("get_document_discussion", { documentId }),
+attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) => invoke<DocumentDiscussion>("attach_document_discussion", { documentId, meetingId }),
   createDocument: (document: Document) => invoke<void>("create_document", { document }),
   updateDocument: (document: Document) => invoke<void>("update_document", { document }),
   moveDocument: (id: string, containerType: string, containerId: string | null, folderId: string | null) =>

@@ -157,7 +157,7 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     .map_err(|e| e.to_string())
 }
 pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> { channel_allows_profile(&db::conn()?, channel_id, profile_id) }
-fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
     // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
     // channels stay generic/public as before; this avoids exposing a private agenda
     // merely because its discussion is implemented by the shared channel primitive.
@@ -494,6 +494,12 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         .map_err(|e| e.to_string())?;
         c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{}:{}", message.id, profile_id), profile_id, message.text, message.id]).map_err(|e| e.to_string())?;
     }
+    crate::channel_feeds::route_message_on(
+        c,
+        &message.channel_id,
+        message.author_id.as_deref(),
+        &message.text,
+    )?;
     Ok(())
 }
 fn update_message_impl(c: &Connection, id: &str, text: &str) -> Result<()> {

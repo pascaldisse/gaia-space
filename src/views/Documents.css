@@ -477,3 +477,13 @@
 .file-meta strong { color: inherit; font-size: 1.05em; }
 .file-image { max-width: 100%; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.4em; }
 .file-text { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; }
+.document-comments { padding: .75rem; border-bottom: 1px solid var(--surface-border); display:grid; gap:.55rem; max-width:20rem; }
+.comments-head { display:flex; justify-content:space-between; align-items:center; }
+.meeting-binding,.comment-compose { display:flex; gap:.35rem; }
+.meeting-binding input,.comment-compose textarea { min-width:0; flex:1; }
+.comment-compose textarea { min-height:3.5rem; resize:vertical; }
+.comment-feed { font-size:.8rem; color:var(--text-muted); }
+.comment-list { display:grid; gap:.4rem; max-height:16rem; overflow:auto; }
+.comment-row { padding:.45rem; border-radius:.4rem; background:var(--surface-raised, var(--surface)); }
+.comment-row p { margin:0 0 .3rem; white-space:pre-wrap; }
+.comment-row .active { border-color:var(--accent); }

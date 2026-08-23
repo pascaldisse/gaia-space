@@ -15,7 +15,10 @@ import {
   type DocumentImportSummary,
   type DocumentBodyFormat,
   type DocumentFilePreview,
+  type DocumentDiscussion,
 } from "../api/documents";
+import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
+import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
@@ -369,6 +372,66 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   const [access, { refetch: refetchAccess }] = createResource(selectedDocumentId, (id) =>
     id ? documentsApi.listDocumentAccess(id) : Promise.resolve([]),
   );
+  const [discussion, { refetch: refetchDiscussion }] = createResource(selectedDocumentId, (id) =>
+    id ? documentsApi.getDocumentDiscussion(id) : Promise.resolve(null as DocumentDiscussion | null),
+  );
+  const [discussionMessages, { refetch: refetchDiscussionMessages }] = createResource(
+    () => discussion()?.channel_id ?? null,
+    (channelId) => channelId ? chatApi.listMessages(channelId, actingProfileId()) : Promise.resolve([] as MessageView[]),
+  );
+  const [commentText, setCommentText] = createSignal("");
+  const [meetingBinding, setMeetingBinding] = createSignal("");
+  async function attachDiscussion() {
+    const doc = selectedDocument();
+    if (!doc) return;
+    try {
+      const item = await documentsApi.attachDocumentDiscussion(doc.id, meetingBinding().trim() || null);
+      setMeetingBinding(item.meeting_id ?? "");
+      await refetchDiscussion();
+    } catch (e) { fail(e); }
+  }
+  async function sendComment() {
+    const channelId = discussion()?.channel_id;
+    const actor = actingProfileId();
+    const text = commentText().trim();
+    if (!channelId || !actor || !text) return;
+    try {
+      await chatApi.createMessage({ id: newMessageId("message"), channel_id: channelId, author_id: actor, text, created_at: Math.floor(Date.now() / 1000), edited_at: null, thread_of: null, archived: false });
+      setCommentText("");
+      await refetchDiscussionMessages();
+    } catch (e) { fail(e); }
+  }
+  async function react(message: MessageView, emoji: string) {
+    const actor = actingProfileId();
+    if (!actor) return;
+    try {
+      const prior = message.reactions.find((item) => item.emoji === emoji);
+      if (prior?.mine) await chatApi.removeReaction(message.id, actor, emoji);
+      else await chatApi.addReaction(message.id, actor, emoji);
+      await refetchDiscussionMessages();
+    } catch (e) { fail(e); }
+  }
+  function CommentPanel() {
+    const [subscriptions, { refetch }] = createResource(() => actingProfileId(), (id) => id ? channelFeedsApi.list(id) : Promise.resolve([]));
+    const subscribed = () => subscriptions()?.some((entry) => entry.channel_id === discussion()?.channel_id && entry.enabled) ?? false;
+    const toggleFeed = async (enabled: boolean) => {
+      const channelId = discussion()?.channel_id;
+      const actor = actingProfileId();
+      if (!channelId || !actor) return;
+      try { await channelFeedsApi.save({ channel_id: channelId, profile_id: actor, enabled }); await refetch(); } catch (e) { fail(e); }
+    };
+    return <section class="document-comments" aria-label="Article comments">
+      <div class="comments-head"><strong>Comments</strong><span class="hint">Article discussion</span></div>
+      <Show when={discussion()} fallback={<button class="ghost small" onClick={attachDiscussion}>Start discussion</button>}>
+        {(item) => <>
+          <div class="meeting-binding"><input aria-label="Meeting ID binding" placeholder="Meeting ID (optional)" value={meetingBinding() || item().meeting_id || ""} onInput={(e) => setMeetingBinding(e.currentTarget.value)} /><button class="ghost small" onClick={attachDiscussion}>Bind meeting</button></div>
+          <label class="comment-feed"><input type="checkbox" checked={subscribed()} onChange={(e) => void toggleFeed(e.currentTarget.checked)} /> Send activity to #Spacebox</label>
+          <div class="comment-list"><For each={discussionMessages() ?? []}>{(message) => <article class="comment-row"><p>{message.text}</p><div><For each={message.reactions}>{(reaction) => <button class="ghost small" classList={{ active: reaction.mine }} onClick={() => react(message, reaction.emoji)}>{reaction.emoji} {reaction.count}</button>}</For><button class="ghost small" onClick={() => react(message, "👍")}>👍</button><button class="ghost small" onClick={() => react(message, "❤️")}>❤️</button></div></article>}</For></div>
+          <div class="comment-compose"><textarea aria-label="Write a comment" value={commentText()} onInput={(e) => setCommentText(e.currentTarget.value)} placeholder="Write a comment…" /><button class="primary small" onClick={sendComment} disabled={!commentText().trim() || !actingProfileId()}>Comment</button></div>
+        </>}
+      </Show>
+    </section>;
+  }
   const [showSharing, setShowSharing] = createSignal(false);
 
   // ---- uploaded files ----
@@ -1131,6 +1194,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <ul class="sharing-list"><For each={bookAccess()}>{(permission) => <li><span class="sharing-recipient">{recipientName(permission)}</span><span class="sharing-kind">{permission.recipient_type}</span><span class="sharing-level">{permission.access_level}</span><button class="ghost small" onClick={() => removeBookAccessRecipient(permission)}>Remove</button></li>}</For></ul>
               </section>
             </Show>
+            <CommentPanel />
             <Show when={canManageAccess() && showSharing()}>
               <section class="document-sharing" aria-label="Document sharing">
                 <div class="sharing-head">
