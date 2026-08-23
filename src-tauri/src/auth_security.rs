@@ -486,6 +486,17 @@ pub fn create_invitation(
     c.execute("INSERT INTO invitations(id,token_hash,email,role_id,project_id,invited_by,created_at,expires_at,max_uses) VALUES(?1,?2,?3,?4,?5,?6,unixepoch(),?7,?8)",params![item.id,hash(&raw)?,item.email,item.role_id,item.project_id,invited_by,item.expires_at,item.max_uses]).map_err(|e|e.to_string())?;
     Ok((item, raw))
 }
+#[tauri::command]
+pub fn issue_invitation(
+    invited_by: String,
+    email: Option<String>,
+    role_id: String,
+    project_id: String,
+    expires_at: Option<i64>,
+    max_uses: i64,
+) -> Result<(Invitation, String)> {
+    create_invitation(&invited_by, email, &role_id, &project_id, expires_at, max_uses)
+}
 pub fn accept_invitation(
     raw: &str,
     username: &str,
@@ -548,6 +559,15 @@ pub fn accept_invitation(
     tx.commit().map_err(|e| e.to_string())?;
     Ok(user_id)
 }
+#[tauri::command]
+pub fn redeem_invitation(
+    token: String,
+    username: String,
+    display_name: String,
+    password: String,
+) -> Result<String> {
+    accept_invitation(&token, &username, &display_name, &password)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +615,23 @@ mod tests {
         assert!(verify_application_password("token-user", &password_raw).expect("verify password"));
         assert!(revoke_application_password("token-user", &password.id).expect("revoke password"));
         assert!(!verify_application_password("token-user", &password_raw).expect("revoked password"));
+    }
+    #[test]
+    fn invitation_redeem_assigns_the_preselected_project_role() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("auth-security-invite");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('inviter-profile','inviter','Inviter',unixepoch())", []).expect("profile");
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('inviter','inviter','hash','Inviter','inviter-profile','admin',unixepoch())", []).expect("inviter");
+        c.execute("INSERT INTO roles(id,name,role_type) VALUES('invite-role','Guest','CUSTOM')", []).expect("role");
+        std::env::set_var("SPACE_DB", temp.path());
+
+        let (invite, token) = create_invitation("inviter", Some("new@example.test".into()), "invite-role", "demo-project", None, 1).expect("invite");
+        let user_id = accept_invitation(&token, "new-user", "New User", "password-123").expect("redeem");
+        let profile_id: String = c.query_row("SELECT profile_id FROM users WHERE id=?1", [&user_id], |row| row.get(0)).expect("created user");
+        let assigned: i64 = c.query_row("SELECT count(*) FROM role_assignments WHERE role_id=?1 AND profile_id=?2 AND scope_type='project' AND scope_id=?3", rusqlite::params![invite.role_id, profile_id, invite.project_id], |row| row.get(0)).expect("assignment");
+        assert_eq!(assigned, 1);
+        assert!(accept_invitation(&token, "second", "Second", "password-123").is_err(), "single-use invitation is exhausted");
     }
     #[test]
     fn base32_round_trips() {

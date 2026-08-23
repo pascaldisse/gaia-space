@@ -176,6 +176,8 @@ pub fn run() {
             auth_security::issue_application_password,
             auth_security::application_passwords_for_user,
             auth_security::revoke_application_password_for_user,
+            auth_security::issue_invitation,
+            auth_security::redeem_invitation,
             applications::save_chatbot,
             applications::delete_chatbot,
             applications::list_ui_extensions,
