@@ -653,6 +653,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 123 {
         tx.execute_batch(SCHEMA_V123)?;
     }
+    // V119: a mention may name a team, not only a person. The team target is its own
+    // row set (`message_team_mentions`) rather than a `target_type` column bolted onto
+    // `message_mentions`: that table's `profile_id` is a NOT NULL foreign key into
+    // `profiles`, so a team row could only live there by rebuilding the table — a
+    // destructive migration in exchange for nothing. Two tables keep the profile fact
+    // and the team fact separately editable, and every existing row keeps its meaning.
+    if version < 119 && table_exists(&tx, "messages")? && table_exists(&tx, "teams")? {
+        tx.execute_batch(SCHEMA_V119)?;
+    }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
@@ -1663,6 +1672,19 @@ CREATE INDEX IF NOT EXISTS message_links_message ON message_links(message_id, po
 -- Keyset paging reads (channel, created_at DESC, id DESC) for roots and per thread.
 CREATE INDEX IF NOT EXISTS messages_channel_page ON messages(channel_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS messages_thread_page ON messages(thread_of, created_at DESC, id DESC);
+"#;
+
+/// V119: team mentions (KB §04 `inviteTeam` / `teamSubscribers`). The row records what
+/// was said — "this message named that team" — and stays true when membership later
+/// changes; the fan-out to members is a notification, not a stored mention row, so a
+/// person who joins the team afterwards is not retroactively alerted.
+pub(crate) const SCHEMA_V119: &str = r#"
+CREATE TABLE IF NOT EXISTS message_team_mentions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    PRIMARY KEY(message_id, team_id)
+);
+CREATE INDEX IF NOT EXISTS message_team_mentions_team ON message_team_mentions(team_id);
 "#;
 
 pub(crate) const SCHEMA_V90: &str = r#"

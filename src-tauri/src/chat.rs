@@ -73,6 +73,11 @@ pub struct Message {
     pub content_kind: String,
     #[serde(default)]
     pub mention_ids: Vec<String>,
+    /// Teams named by this message (KB §04 `inviteTeam` / `teamSubscribers`). Kept apart
+    /// from `mention_ids` because a team is a target, not a recipient: the recipients are
+    /// derived from its membership at write time.
+    #[serde(default)]
+    pub mention_team_ids: Vec<String>,
 }
 /// Upload lifecycle of an attachment row (KB §04: LoadingAttachment /
 /// AttachmentIsUploading / AttachmentUploadCompleted / AttachmentUploadFailed).
@@ -613,6 +618,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         pinned: r.get(8)?,
         content_kind: r.get(9)?,
         mention_ids: Vec::new(),
+        mention_team_ids: Vec::new(),
     })
 }
 fn reply_count_impl(c: &Connection, message_id: &str) -> Result<i64> {
@@ -681,12 +687,27 @@ fn mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+/// The teams a message named, as stored rows (same reasoning as `mentions_for_impl`:
+/// the row is the fact, the `@name` spelling in the text is not).
+fn team_mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<String>> {
+    let mut s = c
+        .prepare("SELECT team_id FROM message_team_mentions WHERE message_id=?1 ORDER BY team_id")
+        .map_err(|e| e.to_string())?;
+    let ids = s
+        .query_map([message_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(ids)
+}
+
 fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Result<MessageView> {
     let reply_count = reply_count_impl(c, &m.id)?;
     let reactions = reactions_for_impl(c, &m.id, acting_profile_id)?;
     let attachments = attachments_for_impl(c, &m.id)?;
     let mut m = m;
     m.mention_ids = mentions_for_impl(c, &m.id)?;
+    m.mention_team_ids = team_mentions_for_impl(c, &m.id)?;
     let links = crate::chat_links::links_for(c, &m.id)?;
     Ok(MessageView {
         message: m,
@@ -1260,6 +1281,7 @@ fn deliver_one_scheduled(c: &Connection, id: &str) -> Result<Option<ScheduledMes
         pinned: false,
         content_kind: default_message_content_kind(),
         mention_ids: Vec::new(),
+        mention_team_ids: Vec::new(),
     };
     match create_message_impl(c, &message) {
         Ok(()) => Ok(Some(row)),
@@ -1404,6 +1426,7 @@ fn create_poll_impl(
             pinned: false,
             content_kind: "poll".into(),
             mention_ids: Vec::new(),
+            mention_team_ids: Vec::new(),
         },
     )?;
     tx.execute(
@@ -1666,8 +1689,8 @@ fn list_thread_replies_impl(
 }
 const MAX_MENTION_TARGETS: usize = 100;
 
-fn validate_mention_count(mention_ids: &[String]) -> Result<()> {
-    if mention_ids.len() > MAX_MENTION_TARGETS {
+fn validate_mention_count(mention_ids: &[String], mention_team_ids: &[String]) -> Result<()> {
+    if mention_ids.len() + mention_team_ids.len() > MAX_MENTION_TARGETS {
         return Err(format!(
             "at most {MAX_MENTION_TARGETS} mention targets are allowed"
         ));
@@ -1676,7 +1699,7 @@ fn validate_mention_count(mention_ids: &[String]) -> Result<()> {
 }
 
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
-    validate_mention_count(&message.mention_ids)?;
+    validate_mention_count(&message.mention_ids, &message.mention_team_ids)?;
     if is_read_only_channel_on(c, &message.channel_id)? {
         return Err("Private feeds are read-only".into());
     }
@@ -1701,6 +1724,7 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         message.author_id.as_deref(),
         &message.text,
         &message.mention_ids,
+        &message.mention_team_ids,
     )?;
     crate::chat_links::sync_links_on(c, &message.id, &message.text)?;
     crate::channel_feeds::route_message_on(
@@ -1748,6 +1772,7 @@ fn sync_mentions_impl(
     author_id: Option<&str>,
     text: &str,
     mention_ids: &[String],
+    mention_team_ids: &[String],
 ) -> Result<()> {
     let mut wanted: Vec<String> = Vec::new();
     for profile_id in mention_ids {
@@ -1781,7 +1806,121 @@ fn sync_mentions_impl(
         .map_err(|e| e.to_string())?;
         c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{message_id}:{profile_id}"), profile_id, text, message_id]).map_err(|e| e.to_string())?;
     }
+    sync_team_mentions_impl(c, message_id, channel_id, author_id, text, mention_team_ids)
+}
+
+/// How many members a single team mention may alert. A mention is an interruption, so
+/// naming a thousand-person team is a mistake, not a feature; the bound is a constant so
+/// deployments can move it in one place.
+const MAX_TEAM_MENTION_RECIPIENTS: usize = 500;
+
+/// A team target must exist and still be live: an archived team is history, and history
+/// does not get notified.
+fn team_mention_target_allowed(c: &Connection, team_id: &str) -> Result<bool> {
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM teams WHERE id=?1 AND archived=0)",
+        [team_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Who a team mention actually reaches: live members of the team, minus the author,
+/// minus anyone who cannot read the channel. Membership is read at write time — the
+/// alert belongs to the people who were on the team when it was named.
+fn team_mention_recipients(
+    c: &Connection,
+    channel_id: &str,
+    author_id: Option<&str>,
+    team_id: &str,
+) -> Result<Vec<String>> {
+    let mut s = c
+        .prepare(
+            "SELECT DISTINCT profile_id FROM team_memberships WHERE team_id=?1 AND archived=0 ORDER BY profile_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let members: Vec<String> = s
+        .query_map([team_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for profile_id in members {
+        if out.len() >= MAX_TEAM_MENTION_RECIPIENTS {
+            break;
+        }
+        if mention_target_allowed(c, channel_id, author_id, &profile_id)? {
+            out.push(profile_id);
+        }
+    }
+    Ok(out)
+}
+
+fn team_mention_notification_id(message_id: &str, team_id: &str, profile_id: &str) -> String {
+    format!("mention:{message_id}:team:{team_id}:{profile_id}")
+}
+
+/// Same diff discipline as the profile mentions: a team that leaves the message loses its
+/// row and every unread alert it raised, a team that arrives fans out to its members, a
+/// team that survives the edit is left alone (no re-notify on a typo fix). The alert id
+/// carries the team, so a person mentioned both directly and through a team keeps two
+/// independent notifications and neither erases the other.
+fn sync_team_mentions_impl(
+    c: &Connection,
+    message_id: &str,
+    channel_id: &str,
+    author_id: Option<&str>,
+    text: &str,
+    mention_team_ids: &[String],
+) -> Result<()> {
+    let mut wanted: Vec<String> = Vec::new();
+    for team_id in mention_team_ids {
+        if wanted.iter().any(|id| id == team_id) {
+            continue;
+        }
+        if team_mention_target_allowed(c, team_id)? {
+            wanted.push(team_id.clone());
+        }
+    }
+    let existing = team_mentions_for_impl(c, message_id)?;
+    for stale in existing.iter().filter(|id| !wanted.contains(id)) {
+        c.execute(
+            "DELETE FROM message_team_mentions WHERE message_id=?1 AND team_id=?2",
+            rusqlite::params![message_id, stale],
+        )
+        .map_err(|e| e.to_string())?;
+        // Every unread alert this team mention raised goes with it, whoever holds it:
+        // membership may have changed since the write, so the rows are matched by the
+        // (message, team) prefix of their id rather than by re-deriving the member list.
+        c.execute(
+            "DELETE FROM notifications WHERE id LIKE ?1 ESCAPE '\\' AND read_at IS NULL",
+            [format!(
+                "{}%",
+                like_prefix(&team_mention_notification_id(message_id, stale, ""))
+            )],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for team_id in wanted.iter().filter(|id| !existing.contains(id)) {
+        c.execute(
+            "INSERT OR IGNORE INTO message_team_mentions(message_id,team_id) VALUES(?1,?2)",
+            rusqlite::params![message_id, team_id],
+        )
+        .map_err(|e| e.to_string())?;
+        for profile_id in team_mention_recipients(c, channel_id, author_id, team_id)? {
+            c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','Your team was mentioned',?3,'message',?4)", rusqlite::params![team_mention_notification_id(message_id, team_id, &profile_id), profile_id, text, message_id]).map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
+}
+
+/// Ids are opaque strings, so a prefix used inside LIKE has its wildcards neutralised
+/// before it goes near the query.
+fn like_prefix(prefix: &str) -> String {
+    prefix
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn update_message_impl(
@@ -1789,9 +1928,13 @@ fn update_message_impl(
     id: &str,
     text: &str,
     mention_ids: Option<&[String]>,
+    mention_team_ids: Option<&[String]>,
 ) -> Result<()> {
-    if let Some(mention_ids) = mention_ids {
-        validate_mention_count(mention_ids)?;
+    if mention_ids.is_some() || mention_team_ids.is_some() {
+        validate_mention_count(
+            mention_ids.unwrap_or(&[]),
+            mention_team_ids.unwrap_or(&[]),
+        )?;
     }
     let changed = c
         .execute(
@@ -1808,15 +1951,20 @@ fn update_message_impl(
     crate::chat_links::sync_links_on(c, id, text)?;
     // Omitting `mention_ids` leaves the mentions untouched: an old client that only
     // knows how to edit text must not silently strip everyone off the message.
-    if let Some(mention_ids) = mention_ids {
+    if mention_ids.is_some() || mention_team_ids.is_some() {
         let message = get_message_impl(c, id)?.ok_or_else(|| "message not found".to_string())?;
+        // An omitted list means "leave that kind of target alone", so the current rows
+        // are re-sent for the side the caller did not speak about.
+        let current_profiles = mentions_for_impl(c, id)?;
+        let current_teams = team_mentions_for_impl(c, id)?;
         sync_mentions_impl(
             c,
             id,
             &message.channel_id,
             message.author_id.as_deref(),
             text,
-            mention_ids,
+            mention_ids.unwrap_or(&current_profiles),
+            mention_team_ids.unwrap_or(&current_teams),
         )?;
     }
     Ok(())
@@ -1850,14 +1998,62 @@ fn list_mentions_for_profile_impl(
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
+    // A message that named one of this profile's live teams belongs in the same inbox.
+    // A direct mention wins over a team mention of the same message: being named in
+    // person is the stronger fact, and the inbox lists a message once.
+    let mut named: Vec<(Message, String)> = msgs
+        .into_iter()
+        .map(|m| {
+            let id = format!("mention:{}:{}", m.id, profile_id);
+            (m, id)
+        })
+        .collect();
+    let mut ts = c
+        .prepare(
+            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived,m.pinned,m.content_kind,tm.team_id \
+             FROM message_team_mentions tm JOIN messages m ON m.id=tm.message_id \
+             JOIN team_memberships mem ON mem.team_id=tm.team_id AND mem.archived=0 AND mem.profile_id=?1 \
+             JOIN teams t ON t.id=tm.team_id AND t.archived=0 \
+             WHERE m.archived=0 ORDER BY m.created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let team_named: Vec<(Message, String)> = ts
+        .query_map([profile_id], |r| {
+            let team_id: String = r.get(10)?;
+            let m = message_row(r)?;
+            let notification_id = team_mention_notification_id(&m.id, &team_id, profile_id);
+            Ok((m, notification_id))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    for (m, notification_id) in team_named {
+        if named.iter().any(|(seen, _)| seen.id == m.id) {
+            continue;
+        }
+        // The alert raised at write time is what makes a team mention this profile's:
+        // the author of the message, and anyone who joined the team after it was sent,
+        // hold no notification and so have nothing in their inbox.
+        let alerted: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notifications WHERE id=?1)",
+                [&notification_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !alerted {
+            continue;
+        }
+        named.push((m, notification_id));
+    }
+    named.sort_by(|a, b| b.0.created_at.cmp(&a.0.created_at));
     let mut out = Vec::new();
-    for m in msgs {
+    for (m, notification_id) in named {
         // Access is re-checked at read time: leaving a private channel must hide its
         // mentions, even though the mention row survives for the message's own history.
         if !channel_allows_profile(c, &m.channel_id, profile_id)? {
             continue;
         }
-        let notification_id = format!("mention:{}:{}", m.id, profile_id);
         let read_at: Option<Option<i64>> = c
             .query_row(
                 "SELECT read_at FROM notifications WHERE id=?1",
@@ -2453,9 +2649,16 @@ pub fn update_message(
     id: String,
     text: String,
     mention_ids: Option<Vec<String>>,
+    mention_team_ids: Option<Vec<String>>,
 ) -> Result<MessageView> {
     let c = db::conn()?;
-    update_message_impl(&c, &id, &text, mention_ids.as_deref())?;
+    update_message_impl(
+        &c,
+        &id,
+        &text,
+        mention_ids.as_deref(),
+        mention_team_ids.as_deref(),
+    )?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
@@ -2844,6 +3047,7 @@ mod tests {
                 pinned: false,
                 content_kind: default_message_content_kind(),
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -2972,6 +3176,7 @@ mod tests {
                 archived: false,
                 pinned: false,
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3096,6 +3301,7 @@ mod tests {
                 archived: false,
                 pinned: false,
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3222,6 +3428,7 @@ mod tests {
                 archived: false,
                 pinned: false,
                 mention_ids: mentions.iter().map(|s| s.to_string()).collect(),
+                mention_team_ids: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3296,6 +3503,197 @@ mod tests {
         drop(path);
     }
 
+    fn post_teams(
+        c: &Connection,
+        channel: &str,
+        id: &str,
+        author: &str,
+        teams: &[&str],
+    ) -> Result<()> {
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some(author.into()),
+                text: "hey team".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: Vec::new(),
+                mention_team_ids: teams.iter().map(|s| s.to_string()).collect(),
+                content_kind: "text".into(),
+            },
+        )
+    }
+
+    fn seed_team(c: &Connection, team: &str, members: &[&str]) {
+        c.execute(
+            "INSERT OR IGNORE INTO teams(id,name,archived) VALUES(?1,?1,0)",
+            [team],
+        )
+        .unwrap();
+        for member in members {
+            c.execute(
+                "INSERT INTO team_memberships(id,profile_id,team_id,archived) VALUES(?1,?2,?3,0)",
+                rusqlite::params![format!("{team}-{member}"), member, team],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_team_mention_fans_out_to_its_live_members_only() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-tm");
+        seed_profiles(&c, &["alice", "bob", "carol", "dave"]);
+        seed_team(&c, "team-a", &["alice", "bob", "carol"]);
+        // carol left the team: an archived membership is not a recipient
+        c.execute(
+            "UPDATE team_memberships SET archived=1 WHERE id='team-a-carol'",
+            [],
+        )
+        .unwrap();
+        post_teams(&c, "chan-tm", "msg-tm1", "alice", &["team-a", "team-a", "ghost-team"])
+            .unwrap();
+        // duplicates collapse, an unknown team is ignored, the row records the utterance
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-tm1").unwrap(),
+            vec!["team-a".to_string()]
+        );
+        let view = list_messages_impl(&c, "chan-tm", Some("alice")).unwrap();
+        assert_eq!(view[0].message.mention_team_ids, vec!["team-a".to_string()]);
+        // bob is alerted; the author is not, the ex-member is not, the outsider is not
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        assert_eq!(count_unread_mentions_impl(&c, "alice").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "dave").unwrap(), 0);
+        // the inbox carries the message once, under the team-scoped notification id
+        let inbox = list_mentions_for_profile_impl(&c, "bob", false).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].message.message.id, "msg-tm1");
+        assert_eq!(inbox[0].notification_id, "mention:msg-tm1:team:team-a:bob");
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_team_mention_never_reaches_a_member_who_cannot_read_the_channel() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "bob"]);
+        seed_team(&c, "team-p", &["alice", "bob"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-tp".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .expect("channel");
+        add_channel_member_impl(&c, "chan-tp", "alice", true).unwrap();
+        post_teams(&c, "chan-tp", "msg-tp", "alice", &["team-p"]).unwrap();
+        // the team mention is stored (it was said) but bob, who cannot open the
+        // channel, gets neither an alert nor an inbox entry
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-tp").unwrap(),
+            vec!["team-p".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 0);
+        assert!(list_mentions_for_profile_impl(&c, "bob", false)
+            .unwrap()
+            .is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn editing_a_message_diffs_its_team_mentions() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-td");
+        seed_profiles(&c, &["alice", "bob", "carol"]);
+        seed_team(&c, "team-x", &["bob"]);
+        seed_team(&c, "team-y", &["carol"]);
+        post_teams(&c, "chan-td", "msg-td", "alice", &["team-x"]).unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        // omitting the team list leaves the team mentions untouched
+        update_message_impl(&c, "msg-td", "typo fixed", None, None).unwrap();
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-td").unwrap(),
+            vec!["team-x".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        // swapping the team drops bob's unread alert and raises carol's
+        update_message_impl(
+            &c,
+            "msg-td",
+            "now team y",
+            None,
+            Some(&["team-y".to_string()]),
+        )
+        .unwrap();
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-td").unwrap(),
+            vec!["team-y".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 1);
+        // a read alert of a dropped team is history and stays
+        c.execute(
+            "UPDATE notifications SET read_at=unixepoch() WHERE id='mention:msg-td:team:team-y:carol'",
+            [],
+        )
+        .unwrap();
+        update_message_impl(&c, "msg-td", "nobody", None, Some(&[])).unwrap();
+        assert!(team_mentions_for_impl(&c, "msg-td").unwrap().is_empty());
+        let kept: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE id='mention:msg-td:team:team-y:carol'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1);
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn profile_and_team_mention_targets_share_one_bound() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-tb");
+        seed_profiles(&c, &["alice"]);
+        let teams = (0..MAX_MENTION_TARGETS)
+            .map(|n| format!("t{n}"))
+            .collect::<Vec<_>>();
+        let message = Message {
+            id: "msg-tb".into(),
+            channel_id: "chan-tb".into(),
+            author_id: Some("alice".into()),
+            text: "flood".into(),
+            created_at: 1,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            pinned: false,
+            mention_ids: vec!["alice".to_string()],
+            mention_team_ids: teams,
+            content_kind: "text".into(),
+        };
+        assert!(create_message_impl(&c, &message)
+            .unwrap_err()
+            .contains("at most"));
+        drop(c);
+        drop(path);
+    }
+
     #[test]
     fn a_mention_target_must_be_able_to_read_the_channel() {
         let (c, path) = conn();
@@ -3357,6 +3755,7 @@ mod tests {
             archived: false,
             pinned: false,
             mention_ids: too_many.clone(),
+            mention_team_ids: Vec::new(),
             content_kind: "text".into(),
         };
         assert!(create_message_impl(&c, &message)
@@ -3371,7 +3770,7 @@ mod tests {
             .unwrap();
         assert_eq!(stored, 0);
         post(&c, "chan-m-limit", "msg-m-limit-ok", "default-org", &[]).unwrap();
-        assert!(update_message_impl(&c, "msg-m-limit-ok", "flood", Some(&too_many)).is_err());
+        assert!(update_message_impl(&c, "msg-m-limit-ok", "flood", Some(&too_many), None).is_err());
         let text: String = c
             .query_row(
                 "SELECT text FROM messages WHERE id='msg-m-limit-ok'",
@@ -3395,13 +3794,13 @@ mod tests {
         )
         .unwrap();
         // text-only edit keeps the mentions untouched
-        update_message_impl(&c, "msg-m3", "typo fixed", None).unwrap();
+        update_message_impl(&c, "msg-m3", "typo fixed", None, None).unwrap();
         assert_eq!(
             mentions_for_impl(&c, "msg-m3").unwrap(),
             vec!["bob".to_string()]
         );
         // an explicit list is the whole truth: bob leaves, carol arrives
-        update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()])).unwrap();
+        update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()]), None).unwrap();
         assert_eq!(
             mentions_for_impl(&c, "msg-m3").unwrap(),
             vec!["carol".to_string()]
@@ -3417,9 +3816,9 @@ mod tests {
         assert_eq!(bob_kept, 1);
         assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 1);
         // a target dropped while still unread loses the alert too
-        update_message_impl(&c, "msg-m3", "nobody", Some(&[])).unwrap();
+        update_message_impl(&c, "msg-m3", "nobody", Some(&[]), None).unwrap();
         assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 0);
-        assert!(update_message_impl(&c, "msg-nope", "x", None).is_err());
+        assert!(update_message_impl(&c, "msg-nope", "x", None, None).is_err());
         drop(c);
         drop(path);
     }
@@ -3583,6 +3982,7 @@ mod tests {
             pinned: false,
             content_kind: "text".into(),
             mention_ids: Vec::new(),
+            mention_team_ids: Vec::new(),
         };
         create_message_impl(&c, &root).unwrap();
         let reply = Message {
@@ -3597,6 +3997,7 @@ mod tests {
             pinned: false,
             content_kind: "text".into(),
             mention_ids: Vec::new(),
+            mention_team_ids: Vec::new(),
         };
         create_message_impl(&c, &reply).unwrap();
 
@@ -3633,6 +4034,7 @@ mod tests {
                 pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -3668,6 +4070,7 @@ mod tests {
                 pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -3746,6 +4149,7 @@ mod tests {
                 pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
             }
         )
         .is_err());
@@ -3971,6 +4375,7 @@ mod tests {
                 archived: false,
                 pinned: false,
                 mention_ids: vec![],
+                mention_team_ids: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3989,7 +4394,7 @@ mod tests {
             })
         })
         .unwrap();
-        update_message_impl(&c, "m-link", "only https://a.example/x now", None).unwrap();
+        update_message_impl(&c, "m-link", "only https://a.example/x now", None, None).unwrap();
         let links = crate::chat_links::links_for(&c, "m-link").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].url, "https://a.example/x");
@@ -4029,6 +4434,7 @@ mod tests {
                 archived: false,
                 pinned: false,
                 mention_ids: vec![],
+                mention_team_ids: Vec::new(),
                 content_kind: "text".into(),
             },
         )

@@ -415,3 +415,4 @@
 .link-card { display: flex; flex-direction: column; gap: .2em; padding: .35em .55em; border: 1px solid var(--border, #333); border-left: 3px solid var(--accent-soft, #7a9bd6); border-radius: 6px; max-width: 480px; }
 .link-card .link-description { color: var(--muted, #9dac9f); font-size: .9em; }
 .link-card.status-refused, .link-card.status-failed { border-left-color: #a6613f; }
+.mention-kind { margin-left: .45em; padding: .08em .35em; border-radius: 999px; color: #a8c7ff; background: #243b67; font-size: .72em; text-transform: uppercase; }
