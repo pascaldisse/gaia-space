@@ -1299,7 +1299,10 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         )
         .into_response();
     }
-    if !matches!(x.role.as_str(), "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
+    if !matches!(
+        x.role.as_str(),
+        "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+    ) {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
     if x.role == "GlobalAdmin" && !me.account_admin {
@@ -1364,18 +1367,17 @@ async fn delete_user(h: HeaderMap, Path(id): Path<String>) -> impl IntoResponse 
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT global_role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     let active_admins: i64 = c
         .query_row(
             "SELECT count(*) FROM users WHERE global_role='GlobalAdmin' AND active=1",
@@ -1411,7 +1413,10 @@ async fn patch_user(
         Err(e) => return e.into_response(),
     };
     if let Some(role) = x.role.as_deref() {
-        if !matches!(role, "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
+        if !matches!(
+            role,
+            "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+        ) {
             return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
         }
         // Promotion gate: the account role is the thing that mints admins, so only
@@ -1437,18 +1442,17 @@ async fn patch_user(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT global_role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     if id == me.id && x.active == Some(false) {
         return err(StatusCode::BAD_REQUEST, "cannot deactivate yourself").into_response();
     }
@@ -1483,7 +1487,18 @@ async fn patch_user(
         }
     }
     if let Some(v) = x.role {
-        if let Err(e) = c.execute("UPDATE users SET role=?1,global_role=?2 WHERE id=?3", params![if v == "GlobalAdmin" { "admin" } else { "member" }, v, id]) {
+        if let Err(e) = c.execute(
+            "UPDATE users SET role=?1,global_role=?2 WHERE id=?3",
+            params![
+                if v == "GlobalAdmin" {
+                    "admin"
+                } else {
+                    "member"
+                },
+                v,
+                id
+            ],
+        ) {
             return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
         }
     }
@@ -2832,8 +2847,12 @@ fn authorize_command(
         CommandPolicy::DocumentOwnerWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_owner_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_owner_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -2843,8 +2862,12 @@ fn authorize_command(
         CommandPolicy::DocumentAccessWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_access_manageable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_access_manageable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -2865,8 +2888,12 @@ fn authorize_command(
                 arg(body, "id").ok()
             }
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid folder id"))?;
-            if documents::document_folder_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_folder_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
