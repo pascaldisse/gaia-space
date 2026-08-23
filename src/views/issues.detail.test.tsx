@@ -21,6 +21,8 @@ const flat = {
   tags: [{ id: "t1", project_id: "p1", parent_id: null, name: "bug", archived: false }],
   checklists: [{ id: "c1", issue_id: "i1", title: "Acceptance", ordering: 0 }],
   time_total_minutes: 45,
+  comments: [{ id: "cm1", issue_id: "i1", author_id: "pa", body: "Please verify the fix.", created_at: 1_700_000_000, edited_at: null }],
+  activities: [{ id: "ac1", issue_id: "i1", activity_type: "created", actor_id: "pa", detail: "Issue created", created_at: 1_700_000_000 }],
   children: [{ id: "i2", project_id: "p1", number: 4, title: "sub work", description: null, status_id: null, assignee_id: "pb", assignee_ids: ["pb"], created_by: null, due_date: "2026-09-01", priority: null, archived: false }],
 };
 const child = { ...flat.children[0], tags: [], checklists: [], time_total_minutes: 0, children: [] };
@@ -75,11 +77,25 @@ describe("issue detail contract", () => {
     expect(host.textContent).toContain("#4 sub work");
     expect(host.textContent).toContain("45 min");
     expect(host.textContent).toContain("bug");
+expect(host.textContent).toContain("Please verify the fix.");
+expect(host.textContent).toContain("Issue created");
     const priority = [...host.querySelectorAll("select")].find(s => [...s.options].some(o => o.value === "URGENT"))!;
     expect(priority.value).toBe("HIGH");
   });
 
-  test("an issue carries several people, and only project members can be added", async () => {
+  test("posting a comment is wired to the persisted issue command", async () => {
+serve({ get_issue_detail: flat, create_issue_comment: { ...flat.comments[0], id: "cm2", body: "Ship it" } });
+const host = document.createElement("div"); document.body.appendChild(host);
+dispose = render(() => <IssueDetail issueId="i1" />, host);
+await settle();
+const input = host.querySelector('textarea[aria-label="New comment"]') as HTMLTextAreaElement;
+input.value = "Ship it"; input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "Ship it" }));
+(host.querySelector(".comment-form button") as HTMLButtonElement).click();
+await settle();
+const write = sent.find(c => c.cmd === "create_issue_comment");
+expect(write?.body.input).toEqual({ issue_id: "i1", author_id: null, body: "Ship it" });
+});
+test("an issue carries several people, and only project members can be added", async () => {
     serve({ get_issue_detail: flat, list_profiles: people, list_project_member_ids: ["pa", "pb"], set_issue_assignees: ["pa", "pb", "pd"] });
     await reloadProfiles();
     const host = document.createElement("div");

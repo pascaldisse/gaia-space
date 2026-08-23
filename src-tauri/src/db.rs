@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 77;
+pub const SCHEMA_VERSION: i64 = 78;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 77 {
         tx.execute_batch(SCHEMA_V77)?;
     }
+    // V78: issue discussion and a durable, queryable activity trail.
+    if version < 78 {
+        tx.execute_batch(SCHEMA_V78)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
@@ -627,6 +631,28 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V78: comments are authored discussion; activity is an immutable record of issue lifecycle actions.
+pub(crate) const SCHEMA_V78: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_comments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    author_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    body TEXT NOT NULL CHECK(length(trim(body)) > 0),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    edited_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS issue_comments_issue_created ON issue_comments(issue_id, created_at, id);
+CREATE TABLE IF NOT EXISTS issue_activities (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    activity_type TEXT NOT NULL,
+    actor_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    detail TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_activities_issue_created ON issue_activities(issue_id, created_at, id);
+"#;
 
 pub(crate) const SCHEMA_V77: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_attachments (

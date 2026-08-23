@@ -28,7 +28,7 @@ Scope: current `src/`, `src/api/`, and `src-tauri/src/`; KB §4 gap analysis int
 |Matrix report / cross-tab axes|KB §3 #21; §2 `IssueMatrixReport`|partial|`src/views/Boards.tsx`|Live board matrix supports status columns with assignee or priority rows; no persisted report definitions or arbitrary axes.|
 |External tracker links/import|KB §3 #22; §2 `ExternalIssue*`|missing|`src/api/issues.ts`; `src-tauri/src/issues.rs`|No external issue model, import/link handler, or surface.|
 |Issue attachments / image previews|KB §3 #23; §2 attachment capability|done|`src/api/issues.ts`; `src/views/IssueDetail.tsx:55-144`; `src-tauri/src/db.rs:198-210`|No issue attachment schema, API, or view.|
-|Issue comments / activity timeline|KB §3 #24; §2 Issue comments count|missing|`src/views/IssueDetail.tsx:55-144`; `src/api/chat.ts:54-103`|Generic chat exists but is not fetched/created as an issue timeline; no issue comment/activity model.|
+|Issue comments / activity timeline|KB §3 #24; §2 Issue comments count|done|`src-tauri/src/issues.rs`; `src/api/issues.ts`; `src/views/IssueDetail.tsx`|V78 persists authored comments plus immutable create/update/archive/comment activity; detail UI lists both and posts comments.|
 |Bulk sprint/backlog operations|KB §3 #25; §2 Boards RPC|missing|`src/api/issues.ts:35-39`; `src-tauri/src/issues.rs:629-682`|Only single-issue board move/remove; no bulk commands.|
 |Starred boards / dashboard widgets|KB §3 #26; §2 Boards RPC|missing|`src/views/Boards.tsx:119-196`; `src/api/issues.ts`|No star/widget data or controls.|
 |Export issues to Excel|KB §3 #27|missing|`src/views/Issues.tsx:32`; `src/api/issues.ts`|No export command or UI.|

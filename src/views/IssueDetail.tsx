@@ -1,5 +1,5 @@
 import { createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueAttachment, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
+import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import "./IssueDetail.css";
@@ -37,6 +37,8 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const [workDate, setWorkDate] = createSignal(new Date().toISOString().slice(0, 10));
   const [workDescription, setWorkDescription] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
+  const [commentBody, setCommentBody] = createSignal("");
+  const addComment = async () => { const issue_id = currentId(); const body = commentBody().trim(); if (!issue_id || !body) return; try { await planningApi.addComment({ issue_id, author_id: profileId() || null, body }); setCommentBody(""); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
 const addAttachments = async (files: FileList | null) => {
 const id = currentId(); if (!id || !files?.length) return;
 try {
@@ -131,6 +133,13 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
         </div>
 
         <section class="idp-section">
+          <h3>Comments <small>{detail()?.comments?.length ?? 0}</small></h3>
+          <Show when={detail()?.comments?.length} fallback={<p class="hint">No comments yet.</p>}><ul class="issue-comments"><For each={detail()?.comments}>{comment => <li><strong>{nameOf(comment.author_id)}</strong><time>{new Date(comment.created_at * 1000).toLocaleString()}</time><p>{comment.body}</p></li>}</For></ul></Show>
+          <div class="comment-form"><textarea aria-label="New comment" placeholder="Write a comment…" value={commentBody()} onInput={event => setCommentBody(event.currentTarget.value)} /><button type="button" onClick={addComment}>Comment</button></div>
+          <h3>Activity</h3>
+          <Show when={detail()?.activities?.length} fallback={<p class="hint">No activity recorded yet.</p>}><ul class="issue-activity"><For each={detail()?.activities}>{activity => <ActivityRow activity={activity} nameOf={nameOf} />}</For></ul></Show>
+        </section>
+        <section class="idp-section">
           <h3>Attachments</h3>
           <Show when={detail()?.attachments?.length}>
             <ul class="idp-attachments">
@@ -196,6 +205,7 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
   </aside>;
 }
 
+function ActivityRow(props: { activity: IssueActivity; nameOf: (id: string | null) => string }) { return <li><strong>{props.nameOf(props.activity.actor_id)}</strong><span>{props.activity.detail || props.activity.activity_type}</span><time>{new Date(props.activity.created_at * 1000).toLocaleString()}</time></li>; }
 function TimeEntryRow(props: { entry: TimeEntry; nameOf: (id: string | null) => string }) {
   return <li><time>{props.entry.entry_date}</time><strong>{props.entry.duration_minutes} min</strong><span>{props.entry.description || "No description"}</span><small>{props.nameOf(props.entry.profile_id)}</small></li>;
 }

@@ -152,6 +152,31 @@ pub struct TimeTrackingEntry {
     pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IssueComment {
+    pub id: String,
+    pub issue_id: String,
+    pub author_id: Option<String>,
+    pub body: String,
+    pub created_at: i64,
+    pub edited_at: Option<i64>,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IssueActivity {
+    pub id: String,
+    pub issue_id: String,
+    pub activity_type: String,
+    pub actor_id: Option<String>,
+    pub detail: Option<String>,
+    pub created_at: i64,
+}
+#[derive(Debug, Deserialize)]
+pub struct IssueCommentInput {
+    pub id: Option<String>,
+    pub issue_id: String,
+    pub author_id: Option<String>,
+    pub body: String,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IssueAttachment {
     pub id: String,
     pub issue_id: String,
@@ -185,6 +210,10 @@ pub struct IssueDetail {
     pub children: Vec<Issue>,
     #[serde(default)]
     pub attachments: Vec<IssueAttachment>,
+    #[serde(default)]
+    pub comments: Vec<IssueComment>,
+    #[serde(default)]
+    pub activities: Vec<IssueActivity>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,6 +433,100 @@ pub fn list_issues(
         include_archived.unwrap_or(false),
     )
 }
+fn record_activity(
+    c: &Connection,
+    issue_id: &str,
+    activity_type: &str,
+    actor_id: Option<&str>,
+    detail: Option<&str>,
+) -> Result<()> {
+    err(c.execute("INSERT INTO issue_activities(id,issue_id,activity_type,actor_id,detail) VALUES(?1,?2,?3,?4,?5)", params![new_id("issue-activity"), issue_id, activity_type, actor_id, detail]))?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_comments(issue_id: String) -> Result<Vec<IssueComment>> {
+    let c = db::conn()?;
+    let mut s = err(c.prepare("SELECT id,issue_id,author_id,body,created_at,edited_at FROM issue_comments WHERE issue_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(s.query_map([issue_id], |r| {
+        Ok(IssueComment {
+            id: r.get(0)?,
+            issue_id: r.get(1)?,
+            author_id: r.get(2)?,
+            body: r.get(3)?,
+            created_at: r.get(4)?,
+            edited_at: r.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_issue_comment(input: IssueCommentInput) -> Result<IssueComment> {
+    let body = input.body.trim().to_string();
+    if body.is_empty() {
+        return Err("Comment cannot be empty".into());
+    }
+    let c = db::conn()?;
+    let comment = IssueComment {
+        id: input.id.unwrap_or_else(|| new_id("issue-comment")),
+        issue_id: input.issue_id,
+        author_id: input.author_id,
+        body,
+        created_at: 0,
+        edited_at: None,
+    };
+    err(c.execute(
+        "INSERT INTO issue_comments(id,issue_id,author_id,body) VALUES(?1,?2,?3,?4)",
+        params![
+            comment.id,
+            comment.issue_id,
+            comment.author_id,
+            comment.body
+        ],
+    ))?;
+    record_activity(
+        &c,
+        &comment.issue_id,
+        "commented",
+        comment.author_id.as_deref(),
+        None,
+    )?;
+    let saved = err(c.query_row(
+        "SELECT id,issue_id,author_id,body,created_at,edited_at FROM issue_comments WHERE id=?1",
+        [&comment.id],
+        |r| {
+            Ok(IssueComment {
+                id: r.get(0)?,
+                issue_id: r.get(1)?,
+                author_id: r.get(2)?,
+                body: r.get(3)?,
+                created_at: r.get(4)?,
+                edited_at: r.get(5)?,
+            })
+        },
+    ))?;
+    // return the database timestamp rather than a client clock.
+    Ok(saved)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_activities(issue_id: String) -> Result<Vec<IssueActivity>> {
+    let c = db::conn()?;
+    let mut s = err(c.prepare("SELECT id,issue_id,activity_type,actor_id,detail,created_at FROM issue_activities WHERE issue_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(s.query_map([issue_id], |r| {
+        Ok(IssueActivity {
+            id: r.get(0)?,
+            issue_id: r.get(1)?,
+            activity_type: r.get(2)?,
+            actor_id: r.get(3)?,
+            detail: r.get(4)?,
+            created_at: r.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue(id: String) -> Result<Option<Issue>> {
     let c = db::conn()?;
@@ -432,6 +555,13 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
         input.assignee_ids
     };
     write_assignees(&c, &id, &people)?;
+    record_activity(
+        &c,
+        &id,
+        "created",
+        input.created_by.as_deref(),
+        Some("Issue created"),
+    )?;
     drop(c);
     let issue = get_issue(id)?.ok_or_else(|| "Created issue was not found".to_string())?;
     issue_event(crate::events::ISSUE_CREATED, &issue);
@@ -448,6 +578,13 @@ pub fn update_issue(issue: Issue) -> Result<Issue> {
         issue.assignee_ids.clone()
     };
     write_assignees(&c, &issue.id, &people)?;
+    record_activity(
+        &c,
+        &issue.id,
+        "updated",
+        issue.created_by.as_deref(),
+        Some("Issue updated"),
+    )?;
     drop(c);
     let saved = get_issue(issue.id)?.ok_or_else(|| "Issue not found".to_string())?;
     issue_event(crate::events::ISSUE_UPDATED, &saved);
@@ -460,6 +597,13 @@ pub fn archive_issue(id: String, archived: bool) -> Result<()> {
         "UPDATE issues SET archived=?2 WHERE id=?1",
         params![id, archived],
     ))?;
+    record_activity(
+        &c,
+        &id,
+        if archived { "archived" } else { "restored" },
+        None,
+        None,
+    )?;
     drop(c);
     // The command returns nothing, so the payload has to be read back for the event.
     if let Some(issue) = get_issue(id)? {
@@ -1326,6 +1470,8 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     let checklists = list_checklists(id.clone())?;
     let time_total_minutes = issue_time_total(id.clone())?;
     let attachments = list_issue_attachments(id.clone())?;
+    let comments = list_issue_comments(id.clone())?;
+    let activities = list_issue_activities(id.clone())?;
     let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
     let mut children = err(child_s.query_map([id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -1338,6 +1484,8 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
         time_total_minutes,
         children,
         attachments,
+        comments,
+        activities,
     }))
 }
 
