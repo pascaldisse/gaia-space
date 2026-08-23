@@ -1177,6 +1177,16 @@ fn codeowner_profile_ids(
         for id in rows {
             ids.insert(id.map_err(|e| e.to_string())?);
         }
+        let mut team_members = conn.prepare(
+            "SELECT DISTINCT m.profile_id FROM teams t JOIN team_memberships m ON m.team_id=t.id \
+             WHERE lower(t.name)=lower(?1) AND t.archived=0 AND m.archived=0",
+        ).map_err(|e| e.to_string())?;
+        let rows = team_members
+            .query_map(rusqlite::params![owner], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
         let mut role_members = conn.prepare(
             "SELECT DISTINCT a.profile_id FROM roles r JOIN role_assignments a ON a.role_id=r.id \
              WHERE r.name=?1 AND a.profile_id IS NOT NULL AND (a.scope_type='global' OR (a.scope_type='project' AND a.scope_id=?2))",
@@ -2254,27 +2264,37 @@ mod tests {
             "refs/heads/feature",
             Some(feature),
             "CODEOWNERS",
-            "* @reviewer1\nextra.txt @owner2\n",
+            "* @reviewer1\nextra.txt \"Release Team\"\n",
         );
         let path = dir.to_string_lossy().to_string();
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-1','reviewer1','Reviewer One',unixepoch())", []).unwrap();
         conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-2','owner2','Reviewer Two',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('team-member','teammember','Team Member',unixepoch())", []).unwrap();
+        conn.execute(
+            "INSERT INTO teams(id,name) VALUES('release-team','Release Team')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('release-membership','team-member','release-team')", []).unwrap();
         conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('r-owner','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
         conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,codeowners_required) VALUES('owners','demo-project','main',1)", []).unwrap();
         conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-1','Reviewer','accepted',0)", []).unwrap();
         let blocked = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
         assert!(!blocked.satisfied);
         assert!(blocked.reasons.iter().any(|r| r.contains("extra.txt")));
-        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-2','Reviewer','accepted',0)", []).unwrap();
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','team-member','Reviewer','accepted',0)", []).unwrap();
         let passed = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
         assert!(passed.satisfied, "{:?}", passed.reasons);
         assert!(passed
             .codeowner_paths
             .iter()
             .any(|path| path == "extra.txt"));
-        assert_eq!(passed.codeowner_approvers, vec!["reviewer-1", "reviewer-2"]);
+        assert_eq!(
+            passed.codeowner_approvers,
+            vec!["reviewer-1", "team-member"]
+        );
         drop(db_path);
         sweep(&dir);
     }
