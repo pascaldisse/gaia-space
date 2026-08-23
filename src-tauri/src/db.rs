@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 114;
+pub const SCHEMA_VERSION: i64 = 115;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -621,6 +621,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1))",
         )?;
         tx.execute_batch(SCHEMA_V114)?;
+    }
+    // V115: an unsent composer draft and a typing presence beat are per-(channel,profile)
+    // state, not history; both are table-guarded so partial fixtures upgrade cleanly.
+    if version < 115 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V115)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1494,6 +1499,29 @@ pub(crate) const SCHEMA_V114: &str = r#"
 CREATE INDEX IF NOT EXISTS messages_channel_pinned_created ON messages(channel_id, pinned, created_at DESC, id DESC) WHERE archived=0 AND pinned=1;
 "#;
 
+/// V115: drafts survive reloads per (channel, author, thread); `thread_key` uses '' for the
+/// channel root so the primary key stays NOT NULL (SQLite treats NULLs in a PK as distinct,
+/// which would silently duplicate root drafts). Typing rows are presence beats: one row per
+/// (channel, profile), overwritten on each beat and filtered by age at read time.
+pub(crate) const SCHEMA_V115: &str = r#"
+CREATE TABLE IF NOT EXISTS message_drafts (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    thread_key TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(channel_id, author_id, thread_key)
+);
+CREATE INDEX IF NOT EXISTS message_drafts_author ON message_drafts(author_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS channel_typing (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(channel_id, profile_id)
+);
+CREATE INDEX IF NOT EXISTS channel_typing_channel_time ON channel_typing(channel_id, updated_at DESC);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1904,7 +1932,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 114);
+        assert_eq!(SCHEMA_VERSION, 115);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
