@@ -50,11 +50,11 @@ pub mod organization;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod oauth;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod package_registry;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod payload_dispatch;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod personal;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod package_registry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -370,6 +370,9 @@ pub fn run() {
             meetings::create_meeting,
             meetings::update_meeting,
             meetings::archive_meeting,
+            meetings::list_meeting_rooms,
+            meetings::save_meeting_room,
+            meetings::reserve_meeting_room,
             meetings::list_meeting_participants,
             meetings::invite_meeting_participant,
             meetings::set_meeting_participant_status,

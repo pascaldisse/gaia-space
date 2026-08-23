@@ -550,6 +550,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             tx.execute_batch("CREATE INDEX IF NOT EXISTS job_runs_worker ON job_runs(worker_id);")?;
         }
     }
+    // V66: rooms are reusable locations; equipment is a separately searchable fact.
+    if version < 66 {
+        tx.execute_batch(SCHEMA_V66)?;
+    }
     // V67: durable single-tenant organization data. Multi-workspace selection is
     // client-side and therefore never cross-contaminates server records.
     if version < 67 {
@@ -579,6 +583,14 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V66: durable room inventory, equipment capabilities and a meeting reservation.
+pub(crate) const SCHEMA_V66: &str = r#"
+CREATE TABLE IF NOT EXISTS meeting_rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, location TEXT, capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity > 0), archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS meeting_room_equipment (room_id TEXT NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE, equipment TEXT NOT NULL, PRIMARY KEY(room_id, equipment));
+CREATE TABLE IF NOT EXISTS meeting_room_bookings (meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE, room_id TEXT NOT NULL REFERENCES meeting_rooms(id), UNIQUE(room_id, meeting_id));
+CREATE INDEX IF NOT EXISTS meeting_room_bookings_room ON meeting_room_bookings(room_id);
+"#;
 
 pub(crate) const SCHEMA_V3: &str = r#"
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES profiles(id), role TEXT NOT NULL CHECK(role IN ('admin','member')), active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
