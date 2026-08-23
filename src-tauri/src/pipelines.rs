@@ -534,7 +534,7 @@ fn read_worker(c: &Connection, worker_id: &str) -> Result<Worker> {
     c.query_row(
         &format!("SELECT {WORKER_COLUMNS} FROM workers WHERE id=?1"),
         params![worker_id],
-        |r| worker_from_row(r),
+        worker_from_row,
     )
     .map_err(|_| format!("unknown worker {worker_id}"))
 }
@@ -681,7 +681,7 @@ pub fn list_workers() -> Result<Vec<Worker>> {
         ))
         .map_err(|e| e.to_string())?;
     let rows = q
-        .query_map([], |r| worker_from_row(r))
+        .query_map([], worker_from_row)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
