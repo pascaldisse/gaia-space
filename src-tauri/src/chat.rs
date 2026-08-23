@@ -1329,7 +1329,7 @@ mod tests {
     fn v75_migrated_completed_attachment_accepts_its_lost_answer_retry() {
         let (c, path) = conn();
         seed_message(&c, "chan-att-v75", "msg-att-v75");
-        // Rebuild the exact V74 table shape over a real message, then let V75 stamp
+        // Rebuild the exact V74 table shape over a real message, then let V76 stamp
         // its existing row completed. A client retry after that upgrade must recover
         // the row rather than hit the attachment id's UNIQUE constraint.
         c.execute_batch(

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 75;
+pub const SCHEMA_VERSION: i64 = 76;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -590,11 +590,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
     }
-    // V75: an attachment's upload is a lifecycle, not an instant. A row can exist while its
+    // V76: an attachment's upload is a lifecycle, not an instant. A row can exist while its
     // bytes are still moving (uploading) or after the transfer failed; without a stored state
     // the client cannot tell a finished attachment from a stalled one after a reload.
     // Existing rows are complete by construction, hence DEFAULT 'completed'.
-    if version < 75 && table_exists(&tx, "message_attachments")? {
+    if version < 76 && table_exists(&tx, "message_attachments")? {
         add_column_if_missing(
             &tx,
             "message_attachments",
@@ -1428,7 +1428,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 75);
+        assert_eq!(SCHEMA_VERSION, 76);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2196,7 +2196,7 @@ mod v39_webhook_migration_tests {
     #[test]
     fn v75_adds_attachment_upload_lifecycle_columns() {
         let c = open_in_memory().unwrap();
-        // legacy shape: pre-V75 attachments table, database stamped at 74.
+        // legacy shape: pre-V76 attachments table, database stamped at 74.
         c.execute_batch(SCHEMA_V1).unwrap();
         c.execute_batch(
             "CREATE TABLE message_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, data_url TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));",
