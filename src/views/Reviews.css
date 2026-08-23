@@ -88,3 +88,5 @@
 .resolved-tag { color: var(--text-dim); font-size: 10px; text-transform: uppercase; }
 .new-discussion-form { display: flex; gap: 8px; }
 .new-discussion-form input[type="number"] { width: 70px; }
+
+.review-navigation { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; min-height: 24px; }

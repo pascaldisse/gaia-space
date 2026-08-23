@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { diffStat, parseUnifiedDiff } from "./diffModel";
 
 function classify(line: string) {
@@ -10,8 +10,16 @@ function classify(line: string) {
   return "ctx";
 }
 
-export function Diff(props: { text: string; loading: boolean }) {
+export function Diff(props: { text: string; loading: boolean; focusFile?: string | null }) {
   const lines = createMemo(() => props.text.split("\n"));
+  const fileForHeader = (line: string) => {
+    const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    return match?.[2] ?? null;
+  };
+  createEffect(() => {
+    const file = props.focusFile;
+    if (file) document.querySelector(`[data-review-file="${CSS.escape(file)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
   const [mode, setMode] = createSignal<"unified" | "side">("unified");
   const files = createMemo(() =>
     mode() === "side" ? parseUnifiedDiff(props.text) : [],
@@ -52,7 +60,7 @@ export function Diff(props: { text: string; loading: boolean }) {
               <pre class="diff-pre">
                 <For each={lines()}>
                   {(line) => (
-                    <div class={`diff-line ${classify(line)}`}>{line || " "}</div>
+                    <div class={`diff-line ${classify(line)}`} data-review-file={fileForHeader(line) ?? undefined}>{line || " "}</div>
                   )}
                 </For>
               </pre>
@@ -61,7 +69,7 @@ export function Diff(props: { text: string; loading: boolean }) {
             <div class="diff-side">
               <For each={files()}>
                 {(file) => (
-                  <div class="diff-side-file">
+                  <div class="diff-side-file" data-review-file={file.path || undefined}>
                     <div class="diff-line hdr">{file.path || "(diff)"}</div>
                     <For each={file.hunks}>
                       {(hunk) => (

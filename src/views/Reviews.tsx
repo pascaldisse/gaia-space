@@ -160,6 +160,33 @@ export default function Reviews() {
       : null;
   };
   const [diff] = createResource(diffKey, (k) => reviewApi.diff(k.p, k.s, k.t));
+  const [navigationFile, setNavigationFile] = createSignal<string | null>(null);
+  const [navigationNotice, setNavigationNotice] = createSignal("");
+  let unresolvedCursor = -1;
+  let fileCursor = -1;
+  function changedFiles() {
+    return [...new Set((diff() ?? "").split("\n").flatMap((line) => {
+      const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      return match ? [match[2]] : [];
+    }))];
+  }
+  function jumpToNextUnresolved() {
+    const open = (discussions() ?? []).filter((item) => !item.resolved);
+    if (!open.length) { setNavigationNotice("No unresolved discussions."); return; }
+    unresolvedCursor = (unresolvedCursor + 1) % open.length;
+    const item = open[unresolvedCursor];
+    setNavigationNotice(`Unresolved ${unresolvedCursor + 1}/${open.length}: ${item.file_path}${item.line_start ? `:${item.line_start}` : ""}`);
+    requestAnimationFrame(() => document.getElementById(`discussion-${item.id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  }
+  function jumpToNextFile() {
+    const files = changedFiles();
+    if (!files.length) { setNavigationNotice("No changed files in this diff."); return; }
+    fileCursor = (fileCursor + 1) % files.length;
+    const file = files[fileCursor];
+    setNavigationFile(null);
+    requestAnimationFrame(() => setNavigationFile(file));
+    setNavigationNotice(`File ${fileCursor + 1}/${files.length}: ${file}`);
+  }
 
   async function setParticipantState(profileId: string, state: string | null) {
     const id = selectedId();
@@ -984,7 +1011,12 @@ export default function Reviews() {
                 <h3>
                   Diff ({review().source_branch} → {review().target_branch})
                 </h3>
-                <Diff text={diff() ?? ""} loading={diff.loading} />
+                <div class="review-navigation">
+<button class="ghost small" type="button" onClick={jumpToNextUnresolved}>Next unresolved</button>
+<button class="ghost small" type="button" onClick={jumpToNextFile}>Next file</button>
+<span class="hint" aria-live="polite">{navigationNotice()}</span>
+</div>
+<Diff text={diff() ?? ""} loading={diff.loading} focusFile={navigationFile()} />
               </section>
 
               <section class="discussions">
@@ -992,7 +1024,7 @@ export default function Reviews() {
                 <ul>
                   <For each={discussions()}>
                     {(d) => (
-                      <li classList={{ resolved: d.resolved }}>
+                      <li id={`discussion-${d.id}`} classList={{ resolved: d.resolved }}>
                         <code>
                           {d.file_path}
                           {d.line_start ? `:${d.line_start}` : ""}
