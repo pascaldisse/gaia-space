@@ -388,13 +388,63 @@ pub fn list_rights() -> Result<Vec<Right>> {
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
+/// KB §05 §2.1 `RightGroup`. The catalog stores a group *code* per right; this is the
+/// registry that gives that code a title and a display order, so the Admin matrix does
+/// not have to invent headings from right codes.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RightGroup {
+    pub code: String,
+    pub title: String,
+    pub priority: i32,
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_right_groups() -> Result<Vec<RightGroup>> {
+    let mut groups: Vec<RightGroup> = rights::RIGHT_GROUPS
+        .iter()
+        .map(|(code, title, priority)| RightGroup {
+            code: (*code).to_string(),
+            title: (*title).to_string(),
+            priority: *priority,
+        })
+        .collect();
+    groups.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.code.cmp(&b.code)));
+    Ok(groups)
+}
 fn seed_rights_on(c: &Connection) -> Result<usize> {
     for (code, title, description, right_type, right_group) in rights::CATALOG {
         let implied_rights_json = serde_json::to_string(&rights::default_implied_rights(code))
             .map_err(|e| e.to_string())?;
         err(c.execute(
-            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group,implied_rights_json,propagation,descriptor_json) VALUES(?1,?2,?3,?4,?5,?6,?7,'NONE','{}')",
-            params![new_id("right"), code, title, description, right_type, right_group, implied_rights_json],
+            "INSERT OR IGNORE INTO rights(id,code,title,description,right_type,right_group,implied_rights_json,flags,feature_gate,propagation,descriptor_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'{}')",
+            params![
+                new_id("right"),
+                code,
+                title,
+                description,
+                right_type,
+                right_group,
+                implied_rights_json,
+                rights::default_flags(right_group),
+                rights::feature_gate_for_group(right_group),
+                rights::default_propagation(code)
+            ],
+        ))?;
+        // Descriptor columns are catalog-owned: a right that changed group, gained a
+        // feature gate or stopped propagating must not stay described by the row a
+        // previous release seeded. `implied_rights_json` is deliberately excluded —
+        // that column is the administrator's to edit.
+        err(c.execute(
+            "UPDATE rights SET title=?2,description=?3,right_type=?4,right_group=?5,flags=?6,feature_gate=?7,propagation=?8 WHERE code=?1",
+            params![
+                code,
+                title,
+                description,
+                right_type,
+                right_group,
+                rights::default_flags(right_group),
+                rights::feature_gate_for_group(right_group),
+                rights::default_propagation(code)
+            ],
         ))?;
     }
     err(c.query_row("SELECT count(*) FROM rights", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
@@ -676,15 +726,33 @@ fn check_right_on(
     }))?
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())?;
-    let mut descriptor_statement = err(c.prepare("SELECT code,implied_rights_json FROM rights"))?;
-    let descriptor_rows = err(descriptor_statement
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))))?;
-    let descriptors: std::collections::BTreeMap<String, Vec<String>> = descriptor_rows
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|(code, json)| (code, serde_json::from_str(&json).unwrap_or_default()))
+    let mut descriptor_statement =
+        err(c.prepare("SELECT code,implied_rights_json,propagation FROM rights"))?;
+    let descriptor_rows = err(descriptor_statement.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    let propagations: std::collections::BTreeMap<String, String> = descriptor_rows
+        .iter()
+        .map(|(code, _, propagation)| (code.clone(), propagation.clone()))
         .collect();
+    let descriptors: std::collections::BTreeMap<String, Vec<String>> = descriptor_rows
+        .into_iter()
+        .map(|(code, json, _)| (code, serde_json::from_str(&json).unwrap_or_default()))
+        .collect();
+    // KB §2.1 `RightPropagation`. A grant made at the organization level reaches the
+    // scopes below it only if the right says it may; a right marked `NONE` has to be
+    // granted on the very scope it is checked against. Unknown rights fall back to
+    // propagating, which is the behaviour every caller had before propagation existed.
+    let requested_propagates = propagations
+        .get(right_code)
+        .map(|propagation| propagation != rights::PROPAGATION_NONE)
+        .unwrap_or(true);
     for (assignment_scope_type, assignment_scope_id, granted_code, _) in rows {
         let mut pending = vec![granted_code.as_str()];
         let mut seen = std::collections::BTreeSet::new();
@@ -704,7 +772,7 @@ fn check_right_on(
         if !granted {
             continue;
         }
-        if assignment_scope_type == "global" {
+        if assignment_scope_type == "global" && (requested_propagates || scope_type == "global") {
             return Ok(true);
         }
         if assignment_scope_type == scope_type && assignment_scope_id.as_deref() == scope_id {
@@ -1410,6 +1478,100 @@ mod tests {
             params![role_id, right_id],
         )
         .unwrap();
+    }
+
+    /// KB §2.1 `RightPropagation`. A global grant reaches a project scope for an
+    /// ordinary right, and does not reach it for a right the catalog marks `NONE` —
+    /// the difference has to come out of the persisted column, so the test writes the
+    /// column directly instead of going through the catalog seed.
+    #[test]
+    fn a_non_propagating_right_is_not_reached_by_a_global_grant() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','p','p',unixepoch())",
+            [],
+        )
+        .unwrap();
+        insert_role_right(&c, "snoop", "Channel.ViewDirectMessages", "Channel");
+        insert_role_right(&c, "snoop", "Project.ViewProject", "Project");
+        c.execute(
+            "UPDATE rights SET propagation=?1 WHERE code='Channel.ViewDirectMessages'",
+            [rights::PROPAGATION_NONE],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE rights SET propagation=?1 WHERE code='Project.ViewProject'",
+            [rights::PROPAGATION_GLOBAL_TO_DESCENDANTS],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type) VALUES('a','snoop','p','global')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            check_right_on(&c, "p", "Project.ViewProject", "project", Some("x")).unwrap(),
+            "a propagating right descends from the global grant"
+        );
+        assert!(
+            !check_right_on(&c, "p", "Channel.ViewDirectMessages", "channel", Some("c")).unwrap(),
+            "a NONE-propagation right must be granted on the channel itself"
+        );
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('b','snoop','p','channel','c')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            check_right_on(&c, "p", "Channel.ViewDirectMessages", "channel", Some("c")).unwrap(),
+            "the exact-scope grant is what confers it"
+        );
+    }
+
+    /// Seeding is the only writer of descriptor columns, so the columns a fresh
+    /// database ends up with are asserted against the database, not against the catalog
+    /// constants that produced them.
+    #[test]
+    fn seeding_writes_the_catalog_descriptor_columns() {
+        let c = conn();
+        seed_rights_on(&c).unwrap();
+        let (group, propagation, gate, flags): (String, String, Option<String>, u32) = c
+            .query_row(
+                "SELECT right_group,propagation,feature_gate,flags FROM rights WHERE code='Project.CreateDevEnvironments'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(group, "DevEnvironments");
+        assert_eq!(propagation, rights::PROPAGATION_GLOBAL_TO_DESCENDANTS);
+        assert_eq!(gate.as_deref(), Some("dev-environments"));
+        assert_eq!(flags, 0);
+        let private: String = c
+            .query_row(
+                "SELECT propagation FROM rights WHERE code='Profile.EditCredentials'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(private, rights::PROPAGATION_NONE);
+    }
+
+    /// Every group code the catalog stores has to exist in the group registry, or the
+    /// Admin matrix renders a heading it cannot title.
+    #[test]
+    fn every_catalog_group_is_registered_and_listed() {
+        for (code, _, _, _, group) in rights::CATALOG {
+            assert!(
+                rights::is_right_group(group),
+                "{code} names unregistered group {group}"
+            );
+        }
+        let listed = list_right_groups().unwrap();
+        assert_eq!(listed.len(), rights::RIGHT_GROUPS.len());
+        assert!(
+            listed.windows(2).all(|w| w[0].priority <= w[1].priority),
+            "groups are returned in display order"
+        );
     }
 
     /// The only implication resolver is this one, and it walks persisted descriptors.

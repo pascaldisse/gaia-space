@@ -8,8 +8,12 @@ export type TeamMembership = {
   manager_id: string | null; since_date: string | null; till_date: string | null; requires_approval: boolean; archived: boolean;
 };
 export type Role = { id: string; name: string; description: string | null; parent_id: string | null; role_type: string; archived: boolean };
-export type Right = { id: string; code: string; title: string; description: string | null; right_type: string; right_group: string | null };
-export type ScopeType = "global" | "project" | "team" | "channel" | "document";
+export type Right = {
+  id: string; code: string; title: string; description: string | null; right_type: string; right_group: string | null;
+  flags: number; implied_rights: string[]; feature_gate: string | null; propagation: string; descriptor: unknown;
+};
+export type RightGroup = { code: string; title: string; priority: number };
+export type ScopeType = "global" | "project" | "team" | "profile" | "channel" | "document" | "documentFolder";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
 export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null }; 
 export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
@@ -58,6 +62,7 @@ removeMemberLocation: (id: string) => call<void>("remove_member_location", { id 
   updateRole: (role: Role) => call<Role>("update_role", { role }),
   archiveRole: (id: string, archived: boolean) => call<void>("archive_role", { id, archived }),
   rights: () => call<Right[]>("list_rights"),
+  rightGroups: () => call<RightGroup[]>("list_right_groups"),
   seedRights: () => call<number>("seed_rights"),
   roleRights: (role_id: string) => call<string[]>("list_role_rights", { roleId: role_id }),
   setRoleRights: (role_id: string, right_codes: string[]) =>
