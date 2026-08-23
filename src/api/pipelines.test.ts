@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+// `mock.module` is process-global, permanent, and live-patches already-imported
+// bindings. A stub installed inside a test therefore swallows every later test
+// file's IPC (CI's file order made that three real failures while the local order
+// hid it). So install ONE delegating stub that behaves exactly like the real
+// module unless this file has explicitly armed a recorder.
 const realCore = await import("@tauri-apps/api/core");
+let capture: ((cmd: string, args: Record<string, unknown>) => unknown) | null = null;
+mock.module("@tauri-apps/api/core", () => ({
+  ...realCore,
+  invoke: (cmd: string, args: Record<string, unknown>) =>
+    capture ? Promise.resolve(capture(cmd, args)) : realCore.invoke(cmd, args as never),
+}));
 import { editableJob, normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
 
 describe("pipeline script normalization", () => {
@@ -109,21 +120,15 @@ describe("validation parity with parse_and_validate_script", () => {
  *  Rust *variant* name. Pinned on the Rust side by
  *  `pipelines::tests::serialized_dsl_tags_are_variant_names`. */
 describe("event trigger wire contract", () => {
-  // `mock.module` is process-global and permanent: without restoring the real
-  // module every later test file that binds `@tauri-apps/api/core` would get this
-  // swallowing stub instead of its own recorder (CI file order made that a real
-  // 3-test failure while the local order hid it).
   afterEach(() => {
-    mock.module("@tauri-apps/api/core", () => realCore);
+    capture = null;
   });
   async function captureCall(call: (api: typeof import("./pipelines").pipelinesApi) => Promise<unknown>) {
     const calls: Array<{ cmd: string; args: Record<string, unknown> }> = [];
-    mock.module("@tauri-apps/api/core", () => ({
-      invoke: (cmd: string, args: Record<string, unknown>) => {
-        calls.push({ cmd, args });
-        return Promise.resolve([]);
-      },
-    }));
+    capture = (cmd, args) => {
+      calls.push({ cmd, args });
+      return [];
+    };
     const { pipelinesApi } = await import("./pipelines");
     await call(pipelinesApi);
     return calls[0];
