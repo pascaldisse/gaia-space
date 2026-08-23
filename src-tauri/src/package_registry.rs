@@ -382,6 +382,254 @@ pub fn oci_referrers(repository_id: &str, package_name: &str, digest: &str) -> R
     }))
 }
 
+// ---------- per-format typed detail models ----------
+//
+// The stored `metadata_json` is a free-form document: whatever the publisher (or the format's
+// own upload route) wrote. Reading it generically means every consumer re-guesses which key
+// holds an author, a dependency or a layer. These models do that reading once, per format,
+// and name the fields that format actually has — an unknown format keeps its raw projection
+// rather than being forced into a shape it does not own.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DetailDependency {
+    pub name: String,
+    /// The constraint as the publisher wrote it (`^1.2`, `>=3.8`, `[1.0,2.0)`) — never resolved.
+    pub requirement: String,
+}
+/// One layer/config descriptor of an OCI manifest.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OciDescriptor {
+    pub digest: String,
+    pub media_type: String,
+    pub size: i64,
+}
+/// What a version looks like once read through its own format's rules.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "format", rename_all = "lowercase")]
+pub enum PackageDetail {
+    Nuget {
+        id: String,
+        version: String,
+        authors: Option<String>,
+        description: Option<String>,
+        license: Option<String>,
+        tags: Vec<String>,
+        dependencies: Vec<DetailDependency>,
+    },
+    Pypi {
+        name: String,
+        version: String,
+        summary: Option<String>,
+        requires_python: Option<String>,
+        requires_dist: Vec<DetailDependency>,
+        files: Vec<String>,
+    },
+    Composer {
+        name: String,
+        version: String,
+        description: Option<String>,
+        package_type: Option<String>,
+        licenses: Vec<String>,
+        require: Vec<DetailDependency>,
+    },
+    Container {
+        name: String,
+        reference: String,
+        media_type: Option<String>,
+        config: Option<OciDescriptor>,
+        layers: Vec<OciDescriptor>,
+        total_size: i64,
+        subject: Option<String>,
+    },
+    /// Formats without a protocol model here (maven, npm, generic, …): the publisher's own
+    /// projection, unchanged. Inventing typed fields for them would be a guess, not a model.
+    Generic {
+        name: String,
+        version: String,
+        fields: Value,
+    },
+}
+fn text(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
+}
+/// `["a","b"]`, `"a b"` or `"a, b"` — all three spellings appear in real nuspec/composer files.
+fn string_list(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        Some(Value::String(text)) => text
+            .split([',', ' ', ';'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+/// `{"name":"req"}` or `["name >= 1.0", ...]` — object form is Composer/npm, list form is PyPI.
+fn dependencies(value: &Value, key: &str) -> Vec<DetailDependency> {
+    match value.get(key) {
+        Some(Value::Object(map)) => map
+            .iter()
+            .map(|(name, requirement)| DetailDependency {
+                name: name.clone(),
+                requirement: requirement
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| requirement.to_string()),
+            })
+            .collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| {
+                if let Some(text) = item.as_str() {
+                    // PEP 508: `flask >= 2.0` — the name is the leading identifier.
+                    let split = text
+                        .find(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')))
+                        .unwrap_or(text.len());
+                    let (name, requirement) = text.split_at(split);
+                    return Some(DetailDependency {
+                        name: name.trim().to_string(),
+                        requirement: requirement.trim().to_string(),
+                    });
+                }
+                Some(DetailDependency {
+                    name: text(item, "name")?,
+                    requirement: text(item, "version")
+                        .or_else(|| text(item, "requirement"))
+                        .unwrap_or_default(),
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+fn descriptor(value: &Value) -> Option<OciDescriptor> {
+    Some(OciDescriptor {
+        digest: text(value, "digest")?,
+        media_type: text(value, "mediaType").unwrap_or_default(),
+        size: value.get("size").and_then(Value::as_i64).unwrap_or_default(),
+    })
+}
+/// The publisher's typed projection: `formatMetadata` when present, else the document itself.
+fn format_projection(metadata_json: Option<&str>) -> Value {
+    let value: Value = metadata_json
+        .and_then(|m| serde_json::from_str(m).ok())
+        .unwrap_or_else(|| json!({}));
+    value
+        .get("formatMetadata")
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or(value)
+}
+/// Reads one stored version through its repository's format.
+pub fn package_detail(
+    format: &str,
+    package_name: &str,
+    version: &str,
+    metadata_json: Option<&str>,
+) -> PackageDetail {
+    let meta = format_projection(metadata_json);
+    match format {
+        "nuget" => PackageDetail::Nuget {
+            id: text(&meta, "id").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            authors: text(&meta, "authors"),
+            description: text(&meta, "description"),
+            license: text(&meta, "license").or_else(|| text(&meta, "licenseExpression")),
+            tags: string_list(&meta, "tags"),
+            dependencies: dependencies(&meta, "dependencies"),
+        },
+        "pypi" => PackageDetail::Pypi {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            summary: text(&meta, "summary").or_else(|| text(&meta, "description")),
+            requires_python: text(&meta, "requires_python")
+                .or_else(|| text(&meta, "requiresPython")),
+            requires_dist: dependencies(&meta, "requires_dist"),
+            files: pypi_files(metadata_json, package_name, version),
+        },
+        "composer" => PackageDetail::Composer {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            description: text(&meta, "description"),
+            package_type: text(&meta, "type"),
+            licenses: string_list(&meta, "license"),
+            require: dependencies(&meta, "require"),
+        },
+        "container" => {
+            let manifest = meta.get("ociManifest").cloned().unwrap_or_else(|| json!({}));
+            let layers: Vec<OciDescriptor> = manifest
+                .get("layers")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(descriptor).collect())
+                .unwrap_or_default();
+            let config = manifest.get("config").and_then(descriptor);
+            // Accumulated while walking the layers, not re-derived afterwards.
+            let total_size = layers.iter().map(|layer| layer.size).sum::<i64>()
+                + config.as_ref().map(|c| c.size).unwrap_or_default();
+            PackageDetail::Container {
+                name: normalized_key("container", package_name),
+                reference: version.to_string(),
+                media_type: text(&manifest, "mediaType"),
+                config,
+                layers,
+                total_size,
+                subject: meta
+                    .get("subject")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        manifest
+                            .get("subject")
+                            .and_then(|s| s.get("digest"))
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    }),
+            }
+        }
+        _ => PackageDetail::Generic {
+            name: package_name.to_string(),
+            version: version.to_string(),
+            fields: meta,
+        },
+    }
+}
+/// Typed detail of one stored version, read through the repository's declared format.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn package_version_detail(
+    repository_id: String,
+    package_name: String,
+    version: String,
+) -> Result<PackageDetail> {
+    let c = db::conn()?;
+    let format: String = c
+        .query_row(
+            "SELECT format FROM package_repositories WHERE id=?1",
+            params![repository_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "package repository not found".to_string())?;
+    let metadata: Option<String> = c
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3",
+            params![repository_id, package_name, version],
+            |r| r.get(0),
+        )
+        .map_err(|_| "package version not found".to_string())?;
+    Ok(package_detail(
+        &format,
+        &package_name,
+        &version,
+        metadata.as_deref(),
+    ))
+}
+
 // ---------- OCI content-addressed blob store ----------
 //
 // Blobs are addressed by their own content digest, so the store is a pure function of the
@@ -593,6 +841,125 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+    #[test]
+    fn each_format_reads_its_own_metadata_shape() {
+        let nuget = package_detail(
+            "nuget",
+            "Newtonsoft.Json",
+            "13.0.1",
+            Some(
+                r#"{"formatMetadata":{"id":"Newtonsoft.Json","version":"13.0.1","authors":"James Newton-King","tags":"json serializer","dependencies":{"System.Text.Json":"[6.0,)"}}}"#,
+            ),
+        );
+        let PackageDetail::Nuget {
+            authors,
+            tags,
+            dependencies,
+            ..
+        } = nuget
+        else {
+            panic!("nuget repository must yield a nuget detail");
+        };
+        assert_eq!(authors.as_deref(), Some("James Newton-King"));
+        assert_eq!(tags, vec!["json".to_string(), "serializer".to_string()]);
+        assert_eq!(
+            dependencies,
+            vec![DetailDependency {
+                name: "System.Text.Json".into(),
+                requirement: "[6.0,)".into()
+            }]
+        );
+        let pypi = package_detail(
+            "pypi",
+            "Flask-Login",
+            "0.6.3",
+            Some(r#"{"formatMetadata":{"summary":"session auth","requires_python":">=3.8","requires_dist":["flask >= 2.0","werkzeug"]}}"#),
+        );
+        let PackageDetail::Pypi {
+            summary,
+            requires_python,
+            requires_dist,
+            files,
+            ..
+        } = pypi
+        else {
+            panic!("pypi repository must yield a pypi detail");
+        };
+        assert_eq!(summary.as_deref(), Some("session auth"));
+        assert_eq!(requires_python.as_deref(), Some(">=3.8"));
+        assert_eq!(requires_dist[0].name, "flask");
+        assert_eq!(requires_dist[0].requirement, ">= 2.0");
+        assert_eq!(requires_dist[1].requirement, "");
+        assert_eq!(files, vec!["flask_login-0.6.3.tar.gz".to_string()]);
+        let composer = package_detail(
+            "composer",
+            "monolog/monolog",
+            "3.5.0",
+            Some(r#"{"formatMetadata":{"description":"logging","type":"library","license":["MIT"],"require":{"php":"^8.1"}}}"#),
+        );
+        let PackageDetail::Composer {
+            package_type,
+            licenses,
+            require,
+            ..
+        } = composer
+        else {
+            panic!("composer repository must yield a composer detail");
+        };
+        assert_eq!(package_type.as_deref(), Some("library"));
+        assert_eq!(licenses, vec!["MIT".to_string()]);
+        assert_eq!(require[0].requirement, "^8.1");
+        let container = package_detail(
+            "container",
+            "Library/Nginx",
+            "1.25",
+            Some(
+                r#"{"formatMetadata":{"ociManifest":{"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"digest":"sha256:cfg","mediaType":"application/vnd.oci.image.config.v1+json","size":7},"layers":[{"digest":"sha256:l1","mediaType":"application/vnd.oci.image.layer.v1.tar","size":100},{"digest":"sha256:l2","mediaType":"application/vnd.oci.image.layer.v1.tar","size":20}]},"subject":"sha256:deadbeef"}}"#,
+            ),
+        );
+        let PackageDetail::Container {
+            name,
+            layers,
+            total_size,
+            subject,
+            config,
+            ..
+        } = container
+        else {
+            panic!("container repository must yield a container detail");
+        };
+        assert_eq!(name, "library/nginx");
+        assert_eq!(layers.len(), 2);
+        assert_eq!(config.unwrap().digest, "sha256:cfg");
+        // Independent path: 7 + 100 + 20 written out, not re-summed by the same fold.
+        assert_eq!(total_size, 127);
+        assert_eq!(subject.as_deref(), Some("sha256:deadbeef"));
+    }
+    #[test]
+    fn a_format_without_a_model_keeps_its_raw_projection() {
+        let detail = package_detail("maven", "com.example:app", "1.0", Some(r#"{"anything":1}"#));
+        assert_eq!(
+            detail,
+            PackageDetail::Generic {
+                name: "com.example:app".into(),
+                version: "1.0".into(),
+                fields: json!({"anything": 1}),
+            }
+        );
+        // Absent/broken metadata must not panic and must not invent fields.
+        assert_eq!(
+            package_detail("nuget", "pkg", "1.0", Some("not json")),
+            PackageDetail::Nuget {
+                id: "pkg".into(),
+                version: "1.0".into(),
+                authors: None,
+                description: None,
+                license: None,
+                tags: vec![],
+                dependencies: vec![],
+            }
+        );
     }
     #[test]
     fn digests_are_parsed_strictly() {

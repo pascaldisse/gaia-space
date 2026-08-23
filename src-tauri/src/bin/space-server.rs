@@ -1572,6 +1572,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_package_version"
         | "add_package_vulnerability" => CommandPolicy::PackageRepositoryAdmin,
         "package_retention_candidates"
+        | "package_version_detail"
         | "repository_vulnerability_report"
         | "list_package_versions"
         | "list_package_repository_acl"
@@ -3719,6 +3720,7 @@ async fn cmd(
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "package_retention_candidates" => pipelines::package_retention_candidates(repository_id: String),
+    "package_version_detail" => package_registry::package_version_detail(repository_id: String, package_name: String, version: String),
     "repository_vulnerability_report" => pipelines::repository_vulnerability_report(repository_id: String, min_severity: Option<String>),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>, immutable: Option<bool>),
     "add_package_vulnerability" => pipelines::add_package_vulnerability(vulnerability: pipelines::PackageVulnerability),
