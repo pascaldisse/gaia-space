@@ -15,18 +15,19 @@ function record() {
 
 test("attachment upload state and removal cross IPC with the declared argument names", async () => {
   record();
-  await chatApi.setMessageAttachmentState("att-1", "uploading");
-  await chatApi.setMessageAttachmentState("att-1", "failed", "network down");
-  await chatApi.removeMessageAttachment("att-1");
+  await chatApi.setMessageAttachmentState("msg-1", "att-1", "uploading");
+  await chatApi.setMessageAttachmentState("msg-1", "att-1", "failed", "network down");
+  await chatApi.removeMessageAttachment("msg-1", "att-1");
   expect(seen.map((e) => e.command)).toEqual([
     "set_message_attachment_state",
     "set_message_attachment_state",
     "remove_message_attachment",
   ]);
   // an omitted error is an explicit null, not a missing key: the command signature is Option<String>
-  expect(seen[0].args).toEqual({ id: "att-1", state: "uploading", error: null });
-  expect(seen[1].args).toEqual({ id: "att-1", state: "failed", error: "network down" });
-  expect(seen[2].args).toEqual({ id: "att-1" });
+  // the owning message rides along: the backend scopes and authorizes on it
+  expect(seen[0].args).toEqual({ messageId: "msg-1", id: "att-1", state: "uploading", error: null });
+  expect(seen[1].args).toEqual({ messageId: "msg-1", id: "att-1", state: "failed", error: "network down" });
+  expect(seen[2].args).toEqual({ messageId: "msg-1", id: "att-1" });
 });
 
 test("a new attachment carries its lifecycle state to the backend", async () => {

@@ -89,9 +89,11 @@ export const chatApi = {
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),
   addMessageAttachment: (messageId: string, attachment: NewMessageAttachment) => invoke<MessageAttachment>("add_message_attachment", { messageId, attachment }),
-  setMessageAttachmentState: (id: string, state: AttachmentUploadState, error?: string | null) =>
-    invoke<MessageAttachment>("set_message_attachment_state", { id, state, error: error ?? null }),
-  removeMessageAttachment: (id: string) => invoke<void>("remove_message_attachment", { id }),
+  // The message id scopes every attachment write: the backend refuses an attachment id
+  // that does not belong to the named message, and authorizes against that message.
+  setMessageAttachmentState: (messageId: string, id: string, state: AttachmentUploadState, error?: string | null) =>
+    invoke<MessageAttachment>("set_message_attachment_state", { messageId, id, state, error: error ?? null }),
+  removeMessageAttachment: (messageId: string, id: string) => invoke<void>("remove_message_attachment", { messageId, id }),
   updateMessage: (id: string, text: string) => invoke<MessageView>("update_message", { id, text }),
   deleteMessage: (id: string) => invoke<void>("delete_message", { id }),
 

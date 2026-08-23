@@ -16,6 +16,7 @@ import {
 } from "../api/chat";
 import { applicationsApi } from "../api/applications";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
+import { canSendDraft, uploadableAttachments } from "../chatAttachments";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -219,14 +220,25 @@ export default function Chat() {
     attachments: PendingAttachment[],
     setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void,
   ): Promise<boolean> {
-    const uploadable = attachments.filter((item) => item.state !== "failed" || item.data_url);
+    // Only a readable payload can be uploaded; a chip that never produced one stays in
+    // the composer as its own failure instead of becoming an empty backend row.
+    const uploadable = uploadableAttachments(attachments);
+    if (!uploadable.length) return attachments.length === 0;
     setAttachments((items) => items.map((item) => uploadable.some((u) => u.id === item.id) ? { ...item, state: "uploading", error: undefined } : item));
     const results = await Promise.all(uploadable.map(async (attachment) => {
       try {
-        await chatApi.addMessageAttachment(messageId, { id: attachment.id, file_name: attachment.file_name, mime_type: attachment.mime_type, byte_length: attachment.byte_length, data_url: attachment.data_url, upload_state: "completed" });
+        // The row is written before the upload is claimed done, so a reload in the middle
+        // still shows the attachment as uploading/failed with its retry, rather than
+        // losing it. `completed` is asserted only once the payload is actually stored.
+        await chatApi.addMessageAttachment(messageId, { id: attachment.id, file_name: attachment.file_name, mime_type: attachment.mime_type, byte_length: attachment.byte_length, data_url: attachment.data_url, upload_state: "uploading" });
+        await chatApi.setMessageAttachmentState(messageId, attachment.id, "completed");
         return { id: attachment.id, error: null as string | null };
       } catch (e) {
-        return { id: attachment.id, error: e instanceof Error ? e.message : String(e) };
+        const message = e instanceof Error ? e.message : String(e);
+        // If the row exists, carry the failure into the database so the retry survives a
+        // reload; if the insert itself failed there is nothing to mark.
+        await chatApi.setMessageAttachmentState(messageId, attachment.id, "failed", message).catch(() => {});
+        return { id: attachment.id, error: message };
       }
     }));
     const failures = results.filter((r) => r.error);
@@ -263,7 +275,10 @@ export default function Chat() {
     const attachments = draftAttachments();
     // a half-posted message is finished, never duplicated
     if (draftMessageId()) { await retryDraftAttachments(); return; }
-    if (!ch || !p || (!text && !attachments.length)) return;
+    if (!ch || !p) return;
+    // Chips that never produced a payload are not content: an empty text carrying only
+    // failed files must not post an empty message.
+    if (!canSendDraft(text, attachments)) return;
     try {
       const message = await chatApi.createMessage({
         id: newId("msg"),
@@ -293,7 +308,8 @@ export default function Chat() {
     const text = threadDraft().trim();
     const attachments = threadAttachments();
     if (threadMessageId()) { await retryThreadAttachments(); return; }
-    if (!root || !p || (!text && !attachments.length)) return;
+    if (!root || !p) return;
+    if (!canSendDraft(text, attachments)) return;
     try {
       const message = await chatApi.createMessage({
         id: newId("msg"),
@@ -317,9 +333,9 @@ export default function Chat() {
     }
   }
 
-  async function deleteAttachment(id: string) {
+  async function deleteAttachment(messageId: string, id: string) {
     try {
-      await chatApi.removeMessageAttachment(id);
+      await chatApi.removeMessageAttachment(messageId, id);
       refetchMessages();
       refetchThread();
     } catch (e) { fail(e); }
@@ -460,7 +476,7 @@ export default function Chat() {
                   <Show when={attachment.upload_state !== "completed"}>
                     <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
                   </Show>
-                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.id)}>×</button>
+                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
                 </div>
               )}</For></div></Show>
             </>
