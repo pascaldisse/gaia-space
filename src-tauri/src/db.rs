@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 56;
+pub const SCHEMA_VERSION: i64 = 61;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -434,10 +434,22 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     // V53: to-do content kind and confidential absence availability; column-only migration.
     if version < 53 {
-        if table_exists(&tx, "todos")? { add_column_if_missing(&tx, "todos", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?; }
+        if table_exists(&tx, "todos")? {
+            add_column_if_missing(&tx, "todos", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+        }
         if table_exists(&tx, "absences")? {
-            add_column_if_missing(&tx, "absences", "reason_confidential", "INTEGER NOT NULL DEFAULT 0")?;
-            add_column_if_missing(&tx, "absences", "availability", "TEXT NOT NULL DEFAULT 'away'")?;
+            add_column_if_missing(
+                &tx,
+                "absences",
+                "reason_confidential",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            add_column_if_missing(
+                &tx,
+                "absences",
+                "availability",
+                "TEXT NOT NULL DEFAULT 'away'",
+            )?;
         }
     }
     if version < 54 {
@@ -455,6 +467,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // manifest edit silently widen a granted scope.
     if version < 56 {
         tx.execute_batch(SCHEMA_V56)?;
+    }
+    // V61: quality-gate application/role principals.  These are nullable JSON
+    // principal lists so every existing rule keeps its prior meaning.
+    if version < 61 && table_exists(&tx, "quality_gate_rules")? {
+        add_column_if_missing(&tx, "quality_gate_rules", "applications_json", "TEXT")?;
+        add_column_if_missing(&tx, "quality_gate_rules", "roles_json", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1195,7 +1213,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 56);
+        assert_eq!(SCHEMA_VERSION, 61);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

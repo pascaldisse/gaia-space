@@ -41,10 +41,16 @@ export type ReviewDiscussion = {
 };
 
 export type ProtectedBranchRule = {
-  id: string; project_id: string; branch_pattern: string; regex: boolean;
-  allow_create_json: string | null; allow_push_json: string | null;
-  allow_delete_json: string | null; allow_force_push_json: string | null;
-  allow_merge_json: string | null; linear_history: boolean;
+  id: string;
+  project_id: string;
+  branch_pattern: string;
+  regex: boolean;
+  allow_create_json: string | null;
+  allow_push_json: string | null;
+  allow_delete_json: string | null;
+  allow_force_push_json: string | null;
+  allow_merge_json: string | null;
+  linear_history: boolean;
   bypass_quality_gate_json: string | null;
 };
 
@@ -57,6 +63,8 @@ export type QualityGateRule = {
   codeowners_required: boolean;
   // JSON array of external check names the gate waits for, even before they report.
   external_checks_json: string | null;
+  applications_json: string | null;
+  roles_json: string | null;
 };
 
 export type SafeMergeRun = {
@@ -90,7 +98,14 @@ export type ExternalCheck = {
   updated_at: number;
 };
 
-export type ReviewStack = { id:string; project_id:string; repo_path:string; target_branch:string; source_branch:string; review_ids:string[] };
+export type ReviewStack = {
+  id: string;
+  project_id: string;
+  repo_path: string;
+  target_branch: string;
+  source_branch: string;
+  review_ids: string[];
+};
 export type NewReviewStack = ReviewStack;
 export type RestackStep = {
   review_id: string;
@@ -129,7 +144,8 @@ export const reviewApi = {
   list: () => invoke<Review[]>("list_reviews"),
   get: (id: string) => invoke<Review | null>("get_review", { id }),
   update: (review: Review) => invoke<void>("update_review", { review }),
-  openMergeRequest: (req: NewMergeRequest) => invoke<Review>("open_merge_request", { req }),
+  openMergeRequest: (req: NewMergeRequest) =>
+    invoke<Review>("open_merge_request", { req }),
   diff: (repoPath: string, sourceBranch: string, targetBranch: string) =>
     invoke<string>("review_diff", { repoPath, sourceBranch, targetBranch }),
 
@@ -137,8 +153,11 @@ export const reviewApi = {
     invoke<ReviewParticipant[]>("list_review_participants", { reviewId }),
   addParticipant: (participant: ReviewParticipant) =>
     invoke<void>("add_review_participant", { participant }),
-  setParticipantState: (reviewId: string, profileId: string, state: string | null) =>
-    invoke<void>("set_participant_state", { reviewId, profileId, state }),
+  setParticipantState: (
+    reviewId: string,
+    profileId: string,
+    state: string | null,
+  ) => invoke<void>("set_participant_state", { reviewId, profileId, state }),
 
   listDiscussions: (reviewId: string) =>
     invoke<ReviewDiscussion[]>("list_review_discussions", { reviewId }),
@@ -147,37 +166,96 @@ export const reviewApi = {
   setDiscussionResolved: (id: string, resolved: boolean) =>
     invoke<void>("set_discussion_resolved", { id, resolved }),
 
-  listProtectedBranchRules: (projectId: string) => invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),
-  saveProtectedBranchRule: (rule: ProtectedBranchRule) => invoke<void>("save_protected_branch_rule", { rule }),
-  deleteProtectedBranchRule: (id: string) => invoke<void>("delete_protected_branch_rule", { id }),
+  listProtectedBranchRules: (projectId: string) =>
+    invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),
+  saveProtectedBranchRule: (rule: ProtectedBranchRule) =>
+    invoke<void>("save_protected_branch_rule", { rule }),
+  deleteProtectedBranchRule: (id: string) =>
+    invoke<void>("delete_protected_branch_rule", { id }),
 
   listGateRules: (projectId: string) =>
     invoke<QualityGateRule[]>("list_quality_gate_rules", { projectId }),
-  createStack: (input: NewReviewStack) => invoke<ReviewStack>("create_review_stack", { input }),
-  listStacks: (projectId: string) => invoke<ReviewStack[]>("list_review_stacks", { projectId }),
-  listMyStacks: (profileId: string) => invoke<ReviewStack[]>("list_my_review_stacks", { profileId }),
+  createStack: (input: NewReviewStack) =>
+    invoke<ReviewStack>("create_review_stack", { input }),
+  listStacks: (projectId: string) =>
+    invoke<ReviewStack[]>("list_review_stacks", { projectId }),
+  listMyStacks: (profileId: string) =>
+    invoke<ReviewStack[]>("list_my_review_stacks", { profileId }),
   // Dissolves the stacking relation only; member merge requests and branches survive.
-  removeStack: (stackId: string) => invoke<void>("remove_review_stack", { stackId }),
+  removeStack: (stackId: string) =>
+    invoke<void>("remove_review_stack", { stackId }),
   // committer defaults to the repo's configured signature; pass null explicitly so the
   // Rust Option arms are unambiguous over the IPC boundary.
-  restackStack: (stackId: string, dryRun: boolean, committerName: string | null = null, committerEmail: string | null = null) =>
-    invoke<RestackStep[]>("restack_stack", { stackId, dryRun, committerName, committerEmail }),
-  stackCherryPick: (reviewId: string, commitOid: string, committerName: string | null = null, committerEmail: string | null = null) =>
-    invoke<RestackStep>("stack_cherry_pick", { reviewId, commitOid, committerName, committerEmail }),
-  createGateRule: (rule: QualityGateRule) => invoke<void>("create_quality_gate_rule", { rule }),
-  updateGateRule: (rule: QualityGateRule) => invoke<void>("update_quality_gate_rule", { rule }),
-  deleteGateRule: (id: string) => invoke<void>("delete_quality_gate_rule", { id }),
+  restackStack: (
+    stackId: string,
+    dryRun: boolean,
+    committerName: string | null = null,
+    committerEmail: string | null = null,
+  ) =>
+    invoke<RestackStep[]>("restack_stack", {
+      stackId,
+      dryRun,
+      committerName,
+      committerEmail,
+    }),
+  stackCherryPick: (
+    reviewId: string,
+    commitOid: string,
+    committerName: string | null = null,
+    committerEmail: string | null = null,
+  ) =>
+    invoke<RestackStep>("stack_cherry_pick", {
+      reviewId,
+      commitOid,
+      committerName,
+      committerEmail,
+    }),
+  createGateRule: (rule: QualityGateRule) =>
+    invoke<void>("create_quality_gate_rule", { rule }),
+  updateGateRule: (rule: QualityGateRule) =>
+    invoke<void>("update_quality_gate_rule", { rule }),
+  deleteGateRule: (id: string) =>
+    invoke<void>("delete_quality_gate_rule", { id }),
   evaluateGate: (reviewId: string) =>
     invoke<QualityGateEvaluation>("evaluate_quality_gate", { reviewId }),
 
-  listExternalChecks: (reviewId: string) => invoke<ExternalCheck[]>("list_external_checks", { reviewId }),
-  recordExternalCheck: (check: ExternalCheck) => invoke<void>("record_external_check", { check }),
+  listExternalChecks: (reviewId: string) =>
+    invoke<ExternalCheck[]>("list_external_checks", { reviewId }),
+  recordExternalCheck: (check: ExternalCheck) =>
+    invoke<void>("record_external_check", { check }),
   deleteExternalCheck: (reviewId: string, checkName: string) =>
     invoke<void>("delete_external_check", { reviewId, checkName }),
 
-  listMergeRuns: (reviewId: string) => invoke<SafeMergeRun[]>("list_safe_merge_runs", { reviewId }),
-  dryRunMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string) =>
-    invoke<SafeMergeRun>("dry_run_merge", { id, repoPath, reviewId, sourceBranch, targetBranch }),
-  attemptMerge: (id: string, repoPath: string, reviewId: string, sourceBranch: string, targetBranch: string, actorId: string) =>
-    invoke<SafeMergeRun>("attempt_merge", { id, repoPath, reviewId, sourceBranch, targetBranch, actorId }),
+  listMergeRuns: (reviewId: string) =>
+    invoke<SafeMergeRun[]>("list_safe_merge_runs", { reviewId }),
+  dryRunMerge: (
+    id: string,
+    repoPath: string,
+    reviewId: string,
+    sourceBranch: string,
+    targetBranch: string,
+  ) =>
+    invoke<SafeMergeRun>("dry_run_merge", {
+      id,
+      repoPath,
+      reviewId,
+      sourceBranch,
+      targetBranch,
+    }),
+  attemptMerge: (
+    id: string,
+    repoPath: string,
+    reviewId: string,
+    sourceBranch: string,
+    targetBranch: string,
+    actorId: string,
+  ) =>
+    invoke<SafeMergeRun>("attempt_merge", {
+      id,
+      repoPath,
+      reviewId,
+      sourceBranch,
+      targetBranch,
+      actorId,
+    }),
 };
