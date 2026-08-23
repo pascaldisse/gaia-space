@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 123;
+pub const SCHEMA_VERSION: i64 = 127;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -652,6 +652,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // no duplicated per-format columns can drift from a publisher's lossless envelope.
     if version < 123 {
         tx.execute_batch(SCHEMA_V123)?;
+    }
+    // V127: Advanced Team Directory keeps a durable, organization-wide membership
+    // activity stream. V125/V126 belong to other lanes and are deliberately untouched.
+    if version < 127 {
+        tx.execute_batch(SCHEMA_V127)?;
     }
     // V119: a mention may name a team, not only a person. The team target is its own
     // row set (`message_team_mentions`) rather than a `target_type` column bolted onto
@@ -1655,6 +1660,20 @@ CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(optio
 /// make schema evolution depend on publishers rather than on the protocol model.
 pub(crate) const SCHEMA_V123: &str = "SELECT 1;";
 
+/// V127: Advanced Team Directory company feed. Profile and membership lifecycle
+/// facts stay immutable so the feed survives later renames or membership removal.
+pub(crate) const SCHEMA_V127: &str = r#"
+CREATE TABLE IF NOT EXISTS directory_feed_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL CHECK(event_type IN ('member.joined','member.left','team.joined','team.left','role.changed')),
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+    role_id TEXT REFERENCES roles(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS directory_feed_events_created_at ON directory_feed_events(created_at DESC);
+"#;
+
 pub(crate) const SCHEMA_V118: &str = r#"
 CREATE TABLE IF NOT EXISTS message_links (
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -2097,7 +2116,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 123);
+        assert_eq!(SCHEMA_VERSION, 127);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

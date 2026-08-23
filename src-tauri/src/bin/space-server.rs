@@ -2391,7 +2391,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_planning_tags"
         | "list_messenger_contacts"
         | "list_principals"
-        | "list_profiles" => CommandPolicy::Session,
+        | "list_profiles"
+        | "list_directory_feed"
+        | "list_directory_calendar" => CommandPolicy::Session,
         "list_projects" => CommandPolicy::Session,
         "list_quality_gate_rules"
         | "list_dev_environments"
@@ -4684,6 +4686,12 @@ async fn cmd(
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
         };
     }
+    if name == "list_directory_calendar" {
+        return match platform::list_directory_calendar() {
+            Ok(rows) => Json(json!({"ok":true,"value":platform::redact_directory_calendar_for(rows,&user.profile_id,user.role == "GlobalAdmin")})).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
+        };
+    }
     if name == "update_absence" {
         return absence_update(&user, &body);
     }
@@ -4927,6 +4935,7 @@ async fn cmd(
     "list_messenger_contacts" => platform::list_messenger_contacts(profile_id: String),
     "list_principals" => platform::list_principals(),
     "list_profiles" => platform::list_profiles(),
+    "list_directory_feed" => platform::list_directory_feed(limit: Option<usize>),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),
     "get_merge_policy" => review::get_merge_policy(project_id: String),

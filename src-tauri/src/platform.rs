@@ -40,6 +40,123 @@ fn err<T>(value: rusqlite::Result<T>) -> Result<T> {
 // Profiles
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DirectoryFeedEvent {
+    pub id: String,
+    pub event_type: String,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub team_id: Option<String>,
+    pub team_name: Option<String>,
+    pub role_id: Option<String>,
+    pub role_name: Option<String>,
+    pub created_at: i64,
+}
+
+fn record_directory_event(
+    c: &Connection,
+    event_type: &str,
+    profile_id: &str,
+    team_id: Option<&str>,
+    role_id: Option<&str>,
+) -> Result<()> {
+    err(c.execute("INSERT INTO directory_feed_events(id,event_type,profile_id,team_id,role_id) VALUES(?1,?2,?3,?4,?5)", params![new_id("directory-event"), event_type, profile_id, team_id, role_id]))?;
+    Ok(())
+}
+
+fn read_directory_feed_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<DirectoryFeedEvent> {
+    Ok(DirectoryFeedEvent {
+        id: row.get(0)?,
+        event_type: row.get(1)?,
+        profile_id: row.get(2)?,
+        profile_name: row.get(3)?,
+        team_id: row.get(4)?,
+        team_name: row.get(5)?,
+        role_id: row.get(6)?,
+        role_name: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_directory_feed(limit: Option<usize>) -> Result<Vec<DirectoryFeedEvent>> {
+    let c = db::conn()?;
+    list_directory_feed_on(&c, limit)
+}
+
+fn list_directory_feed_on(c: &Connection, limit: Option<usize>) -> Result<Vec<DirectoryFeedEvent>> {
+    let mut statement = err(c.prepare("SELECT e.id,e.event_type,e.profile_id,p.display_name,e.team_id,t.name,e.role_id,r.name,e.created_at FROM directory_feed_events e JOIN profiles p ON p.id=e.profile_id LEFT JOIN teams t ON t.id=e.team_id LEFT JOIN roles r ON r.id=e.role_id ORDER BY e.created_at DESC,e.id DESC LIMIT ?1"))?;
+    let rows = err(statement.query_map(
+        [limit.unwrap_or(50).clamp(1, 100) as i64],
+        read_directory_feed_event,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DirectoryCalendarEntry {
+    pub id: String,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub reason_type: String,
+    pub date_from: String,
+    pub date_to: String,
+    pub availability: String,
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_directory_calendar() -> Result<Vec<DirectoryCalendarEntry>> {
+    let c = db::conn()?;
+    list_directory_calendar_on(&c)
+}
+
+fn list_directory_calendar_on(c: &Connection) -> Result<Vec<DirectoryCalendarEntry>> {
+    let mut statement = err(c.prepare("SELECT a.id,a.profile_id,p.display_name,a.reason_type,a.date_from,a.date_to,a.availability FROM absences a JOIN profiles p ON p.id=a.profile_id WHERE a.approved=1 AND p.archived=0 ORDER BY a.date_from,a.date_to,p.display_name"))?;
+    let rows = err(statement.query_map([], |row| {
+        Ok(DirectoryCalendarEntry {
+            id: row.get(0)?,
+            profile_id: row.get(1)?,
+            profile_name: row.get(2)?,
+            reason_type: row.get(3)?,
+            date_from: row.get(4)?,
+            date_to: row.get(5)?,
+            availability: row.get(6)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
+pub fn redact_directory_calendar_for(
+    mut entries: Vec<DirectoryCalendarEntry>,
+    viewer: &str,
+    admin: bool,
+) -> Vec<DirectoryCalendarEntry> {
+    if admin {
+        return entries;
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(_) => return entries,
+    };
+    for entry in &mut entries {
+        let confidential = c
+            .query_row(
+                "SELECT reason_confidential FROM absences WHERE id=?1",
+                [&entry.id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false);
+        if confidential && entry.profile_id != viewer {
+            entry.reason_type = "Private".into();
+        }
+    }
+    entries
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Profile {
     pub id: String,
@@ -182,6 +299,9 @@ pub fn get_profile(id: String) -> Result<Option<Profile>> {
 pub fn create_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
     c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
+    if !profile.archived {
+        record_directory_event(&c, "member.joined", &profile.id, None, None)?;
+    }
     c.execute(
         "INSERT OR IGNORE INTO principals(id,kind,profile_id,label) VALUES(?1,'profile',?2,?3)",
         params![
@@ -196,6 +316,11 @@ pub fn create_profile(profile: Profile) -> Result<()> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
+    let was_archived: bool = err(c.query_row(
+        "SELECT archived FROM profiles WHERE id=?1",
+        [&profile.id],
+        |row| row.get(0),
+    ))?;
     c.execute(
         "UPDATE profiles SET username=?2,display_name=?3,email=?4,archived=?5 WHERE id=?1",
         rusqlite::params![
@@ -212,6 +337,12 @@ pub fn update_profile(profile: Profile) -> Result<()> {
         params![profile.id, profile.display_name],
     )
     .map_err(|e| e.to_string())?;
+    if !was_archived && profile.archived {
+        record_directory_event(&c, "member.left", &profile.id, None, None)?;
+    }
+    if was_archived && !profile.archived {
+        record_directory_event(&c, "member.joined", &profile.id, None, None)?;
+    }
     Ok(())
 }
 
@@ -596,26 +727,59 @@ pub fn list_team_memberships(
 pub fn add_team_membership(input: TeamMembershipInput) -> Result<TeamMembership> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("membership"));
+    let event_profile_id = input.profile_id.clone();
+    let event_team_id = input.team_id.clone();
+    let event_role_id = input.role_id.clone();
     err(c.execute(
         "INSERT INTO team_memberships(id,profile_id,team_id,role_id,lead,manager_id,since_date,till_date,requires_approval) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![id, input.profile_id, input.team_id, input.role_id, input.lead.unwrap_or(false), input.manager_id, input.since_date, input.till_date, input.requires_approval.unwrap_or(false)],
     ))?;
+    record_directory_event(
+        &c,
+        "team.joined",
+        &event_profile_id,
+        Some(&event_team_id),
+        event_role_id.as_deref(),
+    )?;
     let sql = format!("SELECT {MEMBERSHIP_COLUMNS} FROM team_memberships WHERE id=?1");
     err(c.query_row(&sql, [&id], read_membership))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_team_membership(membership: TeamMembership) -> Result<()> {
     let c = db::conn()?;
+    let previous_role: Option<String> = err(c.query_row(
+        "SELECT role_id FROM team_memberships WHERE id=?1",
+        [&membership.id],
+        |row| row.get(0),
+    ))?;
     err(c.execute(
         "UPDATE team_memberships SET role_id=?2,lead=?3,manager_id=?4,since_date=?5,till_date=?6,requires_approval=?7,archived=?8 WHERE id=?1",
         params![membership.id, membership.role_id, membership.lead, membership.manager_id, membership.since_date, membership.till_date, membership.requires_approval, membership.archived],
     ))?;
+    if previous_role != membership.role_id {
+        record_directory_event(
+            &c,
+            "role.changed",
+            &membership.profile_id,
+            Some(&membership.team_id),
+            membership.role_id.as_deref(),
+        )?;
+    }
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_team_membership(id: String) -> Result<()> {
     let c = db::conn()?;
+    let sql = format!("SELECT {MEMBERSHIP_COLUMNS} FROM team_memberships WHERE id=?1");
+    let membership = err(c.query_row(&sql, [&id], read_membership))?;
     err(c.execute("DELETE FROM team_memberships WHERE id=?1", [id]))?;
+    record_directory_event(
+        &c,
+        "team.left",
+        &membership.profile_id,
+        Some(&membership.team_id),
+        membership.role_id.as_deref(),
+    )?;
     Ok(())
 }
 
@@ -2104,6 +2268,34 @@ mod tests {
         db::migrate(&c).unwrap();
         c
     }
+    #[test]
+    fn advanced_directory_feed_is_durable_and_calendar_shows_only_approved_absences() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',0),('bea','bea','Bea',0)", []).unwrap();
+        c.execute(
+            "INSERT INTO teams(id,name) VALUES('platform','Platform')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('lead','Lead')", [])
+            .unwrap();
+        record_directory_event(&c, "member.joined", "ada", None, None).unwrap();
+        record_directory_event(&c, "role.changed", "ada", Some("platform"), Some("lead")).unwrap();
+        let feed = list_directory_feed_on(&c, Some(10)).unwrap();
+        assert_eq!(feed.len(), 2);
+        assert!(feed
+            .iter()
+            .any(|event| event.event_type == "member.joined" && event.profile_name == "Ada"));
+        assert!(feed.iter().any(|event| event.event_type == "role.changed"
+            && event.team_name.as_deref() == Some("Platform")
+            && event.role_name.as_deref() == Some("Lead")));
+        c.execute("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES('approved','ada','Vacation','2030-01-02','2030-01-04',1,0,'away'),('pending','bea','Sick','2030-01-02','2030-01-03',0,0,'away')", []).unwrap();
+        let calendar = list_directory_calendar_on(&c).unwrap();
+        assert_eq!(calendar.len(), 1);
+        assert_eq!(calendar[0].profile_name, "Ada");
+        assert_eq!(calendar[0].reason_type, "Vacation");
+    }
+
     fn insert_role_right(c: &Connection, role_id: &str, right_code: &str, right_type: &str) {
         c.execute("INSERT INTO roles(id,name) VALUES(?1,?1)", [role_id])
             .ok();
