@@ -77,8 +77,13 @@ test("project tasks filters persisted issues and links to the matching board", a
     if (calls.some(call =>
       call.command === "list_issues" && (call.body as { tag_id?: string }).tag_id === "t1")) return true;
     const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement | null;
-    if (!tag || !Array.from(tag.options).some(option => option.value === "t1")) return false;
-    tag.value = "t1";
+    const index = Array.from(tag?.options ?? []).findIndex(option => option.value === "t1");
+    if (!tag || index < 0) return false;
+    // Assigning `.value` alone did not stick on CI's DOM (the select is under a
+    // reactive `value=` prop): select by index, then announce it both ways.
+    tag.selectedIndex = index;
+    tag.options[index].selected = true;
+    tag.dispatchEvent(new Event("input", { bubbles: true }));
     tag.dispatchEvent(new Event("change", { bubbles: true }));
     return false;
   });
