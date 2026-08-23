@@ -407,7 +407,11 @@ pub fn list_right_groups() -> Result<Vec<RightGroup>> {
             priority: *priority,
         })
         .collect();
-    groups.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.code.cmp(&b.code)));
+    groups.sort_by(|a, b| {
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.code.cmp(&b.code))
+    });
     Ok(groups)
 }
 fn seed_rights_on(c: &Connection) -> Result<usize> {
@@ -1493,7 +1497,12 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_role_right(&c, "gate-role", rights::Right::CreateIssue.code(), "Project");
+        insert_role_right(
+            &c,
+            "gate-role",
+            rights::Right::CreateIssue.code(),
+            "Project",
+        );
         let denied = require_right_on(
             &c,
             "gate-user",

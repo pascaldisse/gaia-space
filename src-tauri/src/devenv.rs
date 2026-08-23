@@ -369,7 +369,10 @@ mod tests {
 
         // 29 minutes of silence is still inside the 30-minute window.
         let early = hibernate_idle_dev_environments_tx(&c, start + 29 * 60).expect("sweep");
-        assert!(early.is_empty(), "29 minutes must not hibernate a 30-minute environment");
+        assert!(
+            early.is_empty(),
+            "29 minutes must not hibernate a 30-minute environment"
+        );
 
         let swept = hibernate_idle_dev_environments_tx(&c, start + 30 * 60).expect("sweep");
         assert_eq!(swept.len(), 1);
@@ -395,7 +398,10 @@ mod tests {
         assert_eq!(claimed.owner_id.as_deref(), Some("default-org"));
 
         let again = claim_standby_dev_environment_tx(&c, "demo-project", "default-org", 43);
-        assert!(again.is_err(), "the pool is empty after the only member is claimed");
+        assert!(
+            again.is_err(),
+            "the pool is empty after the only member is claimed"
+        );
     }
 
     #[test]

@@ -89,7 +89,7 @@ pub struct ReviewStack {
     pub source_branch: String,
     pub review_ids: Vec<String>,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCheck {
     pub review_id: String,
     pub check_name: String,
@@ -984,7 +984,11 @@ fn principal_allowed(json: &Option<String>, actor: &str) -> bool {
 }
 fn protection_matches(rule: &ProtectedBranchRule, branch: &str) -> bool {
     if rule.regex {
-        return false;
+        // Invalid administrator-supplied regexes must fail closed: they protect no
+        // branch operation and can never confer a bypass permission.
+        return regex::Regex::new(&rule.branch_pattern)
+            .map(|pattern| pattern.is_match(branch))
+            .unwrap_or(false);
     }
     branch_matches(&rule.branch_pattern, branch)
 }
@@ -994,9 +998,17 @@ fn bypasses_quality_gate_tx(
     branch: &str,
     actor: &str,
 ) -> Result<bool> {
-    Ok(protected_rows_tx(conn, project_id)?.iter().any(|rule| {
-        protection_matches(rule, branch) && principal_allowed(&rule.bypass_quality_gate_json, actor)
-    }))
+    let matching: Vec<ProtectedBranchRule> = protected_rows_tx(conn, project_id)?
+        .into_iter()
+        .filter(|rule| protection_matches(rule, branch))
+        .collect();
+    // Protected-branch permissions compose restrictively: a broad bypass grant
+    // cannot weaken a more specific matching protection rule. This mirrors
+    // `enforce_merge_permission_tx`, which requires every matching rule to allow.
+    Ok(!matching.is_empty()
+        && matching
+            .iter()
+            .all(|rule| principal_allowed(&rule.bypass_quality_gate_json, actor)))
 }
 fn enforce_merge_permission_tx(
     conn: &Connection,
@@ -1160,6 +1172,16 @@ fn codeowner_profile_ids(
             )
             .map_err(|e| e.to_string())?;
         let rows = profiles
+            .query_map(rusqlite::params![owner], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for id in rows {
+            ids.insert(id.map_err(|e| e.to_string())?);
+        }
+        let mut team_members = conn.prepare(
+            "SELECT DISTINCT m.profile_id FROM teams t JOIN team_memberships m ON m.team_id=t.id \
+             WHERE lower(t.name)=lower(?1) AND t.archived=0 AND m.archived=0",
+        ).map_err(|e| e.to_string())?;
+        let rows = team_members
             .query_map(rusqlite::params![owner], |r| r.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
         for id in rows {
@@ -2242,27 +2264,37 @@ mod tests {
             "refs/heads/feature",
             Some(feature),
             "CODEOWNERS",
-            "* @reviewer1\nextra.txt @owner2\n",
+            "* @reviewer1\nextra.txt \"Release Team\"\n",
         );
         let path = dir.to_string_lossy().to_string();
         let db_path = temp_db();
         let conn = db::migrate_path(&db_path).expect("migrate");
         conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-1','reviewer1','Reviewer One',unixepoch())", []).unwrap();
         conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('reviewer-2','owner2','Reviewer Two',unixepoch())", []).unwrap();
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('team-member','teammember','Team Member',unixepoch())", []).unwrap();
+        conn.execute(
+            "INSERT INTO teams(id,name) VALUES('release-team','Release Team')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('release-membership','team-member','release-team')", []).unwrap();
         conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('r-owner','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
         conn.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,codeowners_required) VALUES('owners','demo-project','main',1)", []).unwrap();
         conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-1','Reviewer','accepted',0)", []).unwrap();
         let blocked = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
         assert!(!blocked.satisfied);
         assert!(blocked.reasons.iter().any(|r| r.contains("extra.txt")));
-        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','reviewer-2','Reviewer','accepted',0)", []).unwrap();
+        conn.execute("INSERT INTO review_participants(review_id,profile_id,role,state,their_turn) VALUES('r-owner','team-member','Reviewer','accepted',0)", []).unwrap();
         let passed = evaluate_quality_gate_tx(&conn, "r-owner").unwrap();
         assert!(passed.satisfied, "{:?}", passed.reasons);
         assert!(passed
             .codeowner_paths
             .iter()
             .any(|path| path == "extra.txt"));
-        assert_eq!(passed.codeowner_approvers, vec!["reviewer-1", "reviewer-2"]);
+        assert_eq!(
+            passed.codeowner_approvers,
+            vec!["reviewer-1", "team-member"]
+        );
         drop(db_path);
         sweep(&dir);
     }
@@ -2387,6 +2419,52 @@ mod tests {
         repo.reference(&format!("refs/heads/{target_branch}"), oid, true, "merge")
             .map_err(|e| e.to_string())?;
         Ok(oid.to_string())
+    }
+
+    #[test]
+    fn protected_branch_regexes_match_and_invalid_patterns_fail_closed() {
+        let matching = ProtectedBranchRule {
+            id: "regex".into(),
+            project_id: "p".into(),
+            branch_pattern: "^release/[0-9]+$".into(),
+            regex: true,
+            allow_create_json: None,
+            allow_push_json: None,
+            allow_delete_json: None,
+            allow_force_push_json: None,
+            allow_merge_json: None,
+            linear_history: false,
+            bypass_quality_gate_json: None,
+        };
+        assert!(protection_matches(&matching, "release/42"));
+        assert!(!protection_matches(&matching, "release/candidate"));
+        let invalid = ProtectedBranchRule {
+            branch_pattern: "[".into(),
+            ..matching
+        };
+        assert!(!protection_matches(&invalid, "main"));
+    }
+
+    #[test]
+    fn quality_gate_bypass_requires_every_matching_protection_rule_to_grant_it() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute(
+            "INSERT INTO protected_branch_rules(id,project_id,branch_pattern,regex,bypass_quality_gate_json) VALUES('broad','demo-project','*',0,'[\"actor\"]')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO protected_branch_rules(id,project_id,branch_pattern,regex,bypass_quality_gate_json) VALUES('narrow','demo-project','main',0,'[\"other\"]')",
+            [],
+        ).unwrap();
+        assert!(!bypasses_quality_gate_tx(&conn, "demo-project", "main", "actor").unwrap());
+        assert!(bypasses_quality_gate_tx(&conn, "demo-project", "feature/x", "actor").unwrap());
+        conn.execute(
+            "UPDATE protected_branch_rules SET bypass_quality_gate_json='[\"actor\"]' WHERE id='narrow'",
+            [],
+        ).unwrap();
+        assert!(bypasses_quality_gate_tx(&conn, "demo-project", "main", "actor").unwrap());
+        drop(db_path);
     }
 
     #[test]

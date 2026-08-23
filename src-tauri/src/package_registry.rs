@@ -70,11 +70,7 @@ fn segments(path: &str) -> Result<Vec<&str>> {
 pub fn nuget_coordinates(path: &str) -> Result<(String, Option<String>, String)> {
     let parts = segments(path)?;
     match parts.as_slice() {
-        [id, "index.json"] => Ok((
-            normalized_key("nuget", id),
-            None,
-            "index.json".to_string(),
-        )),
+        [id, "index.json"] => Ok((normalized_key("nuget", id), None, "index.json".to_string())),
         [id, version, file] => Ok((
             normalized_key("nuget", id),
             Some(version.to_ascii_lowercase()),
@@ -113,7 +109,10 @@ pub fn composer_coordinates(path: &str) -> Result<Option<String>> {
             let name = package
                 .strip_suffix(".json")
                 .ok_or_else(|| "composer p2 path must end in .json".to_string())?;
-            Ok(Some(normalized_key("composer", &format!("{vendor}/{name}"))))
+            Ok(Some(normalized_key(
+                "composer",
+                &format!("{vendor}/{name}"),
+            )))
         }
         _ => Err("composer path must be packages.json or p2/{vendor}/{package}.json".into()),
     }
@@ -261,7 +260,11 @@ pub fn pypi_simple_project(repository_id: &str, package_name: &str) -> Result<St
     let name = pypi_normalized_name(package_name);
     let mut links = String::new();
     for row in &rows {
-        for file in pypi_files(row.metadata_json.as_deref(), &row.package_name, &row.version) {
+        for file in pypi_files(
+            row.metadata_json.as_deref(),
+            &row.package_name,
+            &row.version,
+        ) {
             links.push_str(&format!("    <a href=\"{file}\">{file}</a><br/>\n"));
         }
     }
@@ -545,7 +548,10 @@ fn descriptor(value: &Value) -> Option<OciDescriptor> {
     Some(OciDescriptor {
         digest: text(value, "digest")?,
         media_type: text(value, "mediaType").unwrap_or_default(),
-        size: value.get("size").and_then(Value::as_i64).unwrap_or_default(),
+        size: value
+            .get("size")
+            .and_then(Value::as_i64)
+            .unwrap_or_default(),
     })
 }
 /// The publisher's typed projection: `formatMetadata` when present, else the document itself.
@@ -595,7 +601,10 @@ pub fn package_detail(
             require: dependencies(&meta, "require"),
         },
         "container" => {
-            let manifest = meta.get("ociManifest").cloned().unwrap_or_else(|| json!({}));
+            let manifest = meta
+                .get("ociManifest")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let layers: Vec<OciDescriptor> = manifest
                 .get("layers")
                 .and_then(Value::as_array)
@@ -681,7 +690,11 @@ pub fn parse_digest(digest: &str) -> Result<(String, String)> {
     if algorithm != BLOB_DIGEST_ALGORITHM {
         return Err(format!("unsupported digest algorithm '{algorithm}'"));
     }
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
         return Err("sha256 digest must be 64 lower-case hex characters".into());
     }
     Ok((algorithm.to_string(), hex.to_string()))
@@ -689,7 +702,10 @@ pub fn parse_digest(digest: &str) -> Result<(String, String)> {
 /// The digest of these bytes, in the wire form clients send back.
 pub fn compute_digest(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    format!("{BLOB_DIGEST_ALGORITHM}:{}", hex::encode(Sha256::digest(bytes)))
+    format!(
+        "{BLOB_DIGEST_ALGORITHM}:{}",
+        hex::encode(Sha256::digest(bytes))
+    )
 }
 fn safe_repository(repository_id: &str) -> Result<()> {
     if repository_id.is_empty()
@@ -855,7 +871,8 @@ mod tests {
             index["resources"][0]["@id"],
             "https://space.example/api/registry/repo/nuget/"
         );
-        let composer = composer_packages_json("https://space.example/api/registry/repo/composer", "repo");
+        let composer =
+            composer_packages_json("https://space.example/api/registry/repo/composer", "repo");
         assert_eq!(
             composer["metadata-url"],
             "https://space.example/api/registry/repo/composer/p2/%package%.json"
@@ -906,7 +923,9 @@ mod tests {
             "pypi",
             "Flask-Login",
             "0.6.3",
-            Some(r#"{"formatMetadata":{"summary":"session auth","requires_python":">=3.8","requires_dist":["flask >= 2.0","werkzeug"]}}"#),
+            Some(
+                r#"{"formatMetadata":{"summary":"session auth","requires_python":">=3.8","requires_dist":["flask >= 2.0","werkzeug"]}}"#,
+            ),
         );
         let PackageDetail::Pypi {
             summary,
@@ -928,7 +947,9 @@ mod tests {
             "composer",
             "monolog/monolog",
             "3.5.0",
-            Some(r#"{"formatMetadata":{"description":"logging","type":"library","license":["MIT"],"require":{"php":"^8.1"}}}"#),
+            Some(
+                r#"{"formatMetadata":{"description":"logging","type":"library","license":["MIT"],"require":{"php":"^8.1"}}}"#,
+            ),
         );
         let PackageDetail::Composer {
             package_type,

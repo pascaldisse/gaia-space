@@ -42,7 +42,8 @@ fn declaring_a_required_right_grants_nothing_until_an_admin_approves_the_scope()
     assert_eq!(status.pending.len(), 2);
     assert!(!app_has_right(&c, "app", "project:demo-project", "Project.CreateIssues").unwrap());
 
-    let after = approve_scope_on(&c, "app", "project:demo-project", Some("admin"), "reviewed").unwrap();
+    let after =
+        approve_scope_on(&c, "app", "project:demo-project", Some("admin"), "reviewed").unwrap();
     assert_eq!(after.status, "APPROVED");
     assert!(after.pending.is_empty());
     assert!(app_has_right(&c, "app", "project:demo-project", "Project.CreateIssues").unwrap());
@@ -60,7 +61,9 @@ fn an_approval_binds_only_the_context_it_was_given_in() {
     assert!(app_has_right(&c, "app", "project:a", "Project.CreateIssues").unwrap());
     assert!(!app_has_right(&c, "app", "project:b", "Project.CreateIssues").unwrap());
     assert_eq!(
-        scope_approval_status_on(&c, "app", "project:b").unwrap().status,
+        scope_approval_status_on(&c, "app", "project:b")
+            .unwrap()
+            .status,
         "PENDING"
     );
 }
@@ -111,9 +114,11 @@ fn a_grant_that_is_no_longer_declared_is_reported_as_unrequested() {
 #[test]
 fn an_uncheckable_grant_is_refused() {
     let c = conn();
-    assert!(update_required_rights_on(&c, "app", &codes(vec!["Made.Up"]), &[], false)
-        .unwrap_err()
-        .contains("unknown right code"));
+    assert!(
+        update_required_rights_on(&c, "app", &codes(vec!["Made.Up"]), &[], false)
+            .unwrap_err()
+            .contains("unknown right code")
+    );
     assert_eq!(required_rights_on(&c, "app").unwrap(), vec![]);
     assert_eq!(
         update_authorized_rights_on(&c, "ghost", "org", &[], None, "").unwrap_err(),
