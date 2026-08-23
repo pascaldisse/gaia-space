@@ -62,6 +62,12 @@ pub struct QualityGateRule {
     /// would leave the gate green (KB §3.1 item 6).
     #[serde(default)]
     pub external_checks_json: Option<String>,
+    /// Application ids whose externally reported checks must succeed.
+    #[serde(default)]
+    pub applications_json: Option<String>,
+    /// Role ids/names whose assigned members must approve.
+    #[serde(default)]
+    pub roles_json: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SafeMergeRun {
@@ -982,6 +988,16 @@ fn protection_matches(rule: &ProtectedBranchRule, branch: &str) -> bool {
     }
     branch_matches(&rule.branch_pattern, branch)
 }
+fn bypasses_quality_gate_tx(
+    conn: &Connection,
+    project_id: &str,
+    branch: &str,
+    actor: &str,
+) -> Result<bool> {
+    Ok(protected_rows_tx(conn, project_id)?.iter().any(|rule| {
+        protection_matches(rule, branch) && principal_allowed(&rule.bypass_quality_gate_json, actor)
+    }))
+}
 fn enforce_merge_permission_tx(
     conn: &Connection,
     project_id: &str,
@@ -1007,7 +1023,7 @@ fn enforce_merge_permission_tx(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json,applications_json,roles_json FROM quality_gate_rules WHERE project_id=?1 ORDER BY branch_pattern").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![project_id], |r| {
             Ok(QualityGateRule {
@@ -1018,6 +1034,8 @@ pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule
                 required_reviewers_json: r.get(4)?,
                 codeowners_required: r.get(5)?,
                 external_checks_json: r.get(6)?,
+                applications_json: r.get(7)?,
+                roles_json: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1029,8 +1047,8 @@ pub fn list_quality_gate_rules(project_id: String) -> Result<Vec<QualityGateRule
 pub fn create_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
-        "INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        rusqlite::params![rule.id, rule.project_id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json],
+        "INSERT INTO quality_gate_rules(id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json,applications_json,roles_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![rule.id, rule.project_id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json, rule.applications_json, rule.roles_json],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1039,8 +1057,8 @@ pub fn create_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
 pub fn update_quality_gate_rule(rule: QualityGateRule) -> Result<()> {
     let c = db::conn()?;
     c.execute(
-        "UPDATE quality_gate_rules SET branch_pattern=?2,min_approvals=?3,required_reviewers_json=?4,codeowners_required=?5,external_checks_json=?6 WHERE id=?1",
-        rusqlite::params![rule.id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json],
+        "UPDATE quality_gate_rules SET branch_pattern=?2,min_approvals=?3,required_reviewers_json=?4,codeowners_required=?5,external_checks_json=?6,applications_json=?7,roles_json=?8 WHERE id=?1",
+        rusqlite::params![rule.id, rule.branch_pattern, rule.min_approvals, rule.required_reviewers_json, rule.codeowners_required, rule.external_checks_json, rule.applications_json, rule.roles_json],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1291,7 +1309,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
     let target = target_branch.unwrap_or_default();
 
     let mut s = conn
-        .prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json FROM quality_gate_rules WHERE project_id=?1")
+        .prepare("SELECT id,project_id,branch_pattern,min_approvals,required_reviewers_json,codeowners_required,external_checks_json,applications_json,roles_json FROM quality_gate_rules WHERE project_id=?1")
         .map_err(|e| e.to_string())?;
     let rules: Vec<QualityGateRule> = s
         .query_map(rusqlite::params![project_id], |r| {
@@ -1303,6 +1321,8 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
                 required_reviewers_json: r.get(4)?,
                 codeowners_required: r.get(5)?,
                 external_checks_json: r.get(6)?,
+                applications_json: r.get(7)?,
+                roles_json: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1333,6 +1353,21 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         if let Some(json) = &r.required_reviewers_json {
             if let Ok(list) = serde_json::from_str::<Vec<String>>(json) {
                 required_reviewers.extend(list);
+            }
+        }
+        if let Some(json) = &r.roles_json {
+            if let Ok(role_ids) = serde_json::from_str::<Vec<String>>(json) {
+                for role_id in role_ids {
+                    let mut members = conn.prepare("SELECT DISTINCT profile_id FROM role_assignments WHERE role_id=?1 AND profile_id IS NOT NULL AND (scope_type='global' OR (scope_type='project' AND scope_id=?2))").map_err(|e| e.to_string())?;
+                    for member in members
+                        .query_map(rusqlite::params![role_id, project_id], |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .map_err(|e| e.to_string())?
+                    {
+                        required_reviewers.insert(member.map_err(|e| e.to_string())?);
+                    }
+                }
             }
         }
     }
@@ -1411,6 +1446,24 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
                 required_checks.extend(list.into_iter().filter(|n| !n.trim().is_empty()));
             }
         }
+        if let Some(json) = &r.applications_json {
+            if let Ok(applications) = serde_json::from_str::<Vec<String>>(json) {
+                for application_id in applications {
+                    let exists: bool = conn
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM applications WHERE id=?1 AND archived=0)",
+                            rusqlite::params![application_id],
+                            |row| row.get(0),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    if exists {
+                        required_checks.insert(format!("application:{application_id}"));
+                    } else {
+                        reasons.push(format!("quality-gate application '{application_id}' does not exist or is archived"));
+                    }
+                }
+            }
+        }
     }
     let mut reported: std::collections::BTreeSet<String> = Default::default();
     let mut external = conn
@@ -1429,9 +1482,7 @@ fn evaluate_quality_gate_tx(conn: &Connection, review_id: &str) -> Result<Qualit
         }
     }
     for name in required_checks.iter().filter(|n| !reported.contains(*n)) {
-        reasons.push(format!(
-            "required external check '{name}' has not reported"
-        ));
+        reasons.push(format!("required external check '{name}' has not reported"));
     }
     Ok(QualityGateEvaluation {
         satisfied: reasons.is_empty(),
@@ -1657,6 +1708,26 @@ pub fn attempt_merge(
     let c = db::conn()?;
     let project_id = review_project_tx(&c, &review_id)?;
     enforce_merge_permission_tx(&c, &project_id, &target_branch, &actor_id)?;
+    let bypassed = bypasses_quality_gate_tx(&c, &project_id, &target_branch, &actor_id)?;
+    if !bypassed {
+        let gate = evaluate_quality_gate_tx(&c, &review_id)?;
+        if !gate.satisfied {
+            return record_merge_run_tx(
+                &c,
+                &id,
+                &review_id,
+                "RUNNING",
+                false,
+                format!(
+                    "merge waiting for quality gate: {}",
+                    gate.reasons.join("; ")
+                ),
+                Some(&source_oid),
+                Some(&target_oid),
+                None,
+            );
+        }
+    }
     let (_, ci_reasons) = ci_status_tx(&c, &project_id)?;
     if conflicted {
         return record_merge_run_tx(
@@ -1724,7 +1795,7 @@ pub fn attempt_merge(
         &review_id,
         "SUCCEEDED",
         false,
-        format!("merged as {merge_oid}; CI green; retargeted {retargeted} stacked review(s)"),
+        format!("merged as {merge_oid}; CI green; quality gate {}; retargeted {retargeted} stacked review(s)", if bypassed { "bypassed by protected-branch permission" } else { "satisfied" }),
         Some(&source_oid),
         Some(&target_oid),
         Some(&merge_oid.to_string()),
@@ -2041,7 +2112,10 @@ mod tests {
             .is_empty());
 
         remove_review_stack_tx(&conn, "st").expect("remove");
-        assert!(remove_review_stack_tx(&conn, "st").is_err(), "second removal reports the missing stack");
+        assert!(
+            remove_review_stack_tx(&conn, "st").is_err(),
+            "second removal reports the missing stack"
+        );
         let stacks: i64 = conn
             .query_row("SELECT COUNT(*) FROM review_stacks", [], |r| r.get(0))
             .unwrap();
