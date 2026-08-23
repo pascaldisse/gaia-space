@@ -161,6 +161,21 @@ struct PatchUser {
 fn err(code: StatusCode, s: &str) -> (StatusCode, Json<Value>) {
     (code, Json(json!({"ok":false,"error":s})))
 }
+#[derive(Deserialize)]
+struct PublicRoomQuery {
+    username: Option<String>,
+}
+/// Token minting remains in calls; private, disabled, and unknown rooms are indistinguishable.
+async fn public_room(
+    Path(room): Path<String>,
+    Query(query): Query<PublicRoomQuery>,
+) -> axum::response::Response {
+    match calls::join_public_meeting_call(room, query.username) {
+        Ok(join) => Json(join).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 fn hash(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
@@ -591,7 +606,7 @@ struct AppRoomInput {
     access_level: String,
 }
 fn app_native_provider() -> String {
-    "native".into()
+    "livekit".into()
 }
 fn app_scheduled_status() -> String {
     "scheduled".into()
@@ -640,10 +655,17 @@ async fn app_create_room(
         location: input.location,
         organizer_id: None,
         channel_id: Some(input.channel_id),
-        video_provider: input.video_provider,
-        video_status: input.video_status,
-        access_level: input.access_level,
+        visibility: if input.access_level == "PUBLIC" {
+            "public".into()
+        } else {
+            "private".into()
+        },
+        modification_preference: "organizer-only".into(),
         archived: false,
+        video_provider: Some(input.video_provider),
+        video_room_id: None,
+        join_url: None,
+        video_status: input.video_status,
     };
     meetings::create_meeting(room.clone())
         .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
