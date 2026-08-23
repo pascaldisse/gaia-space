@@ -42,3 +42,17 @@ test("the mentions inbox and its badge cross IPC under the declared names", asyn
   expect(seen[1].args).toEqual({ profileId: "pb", unreadOnly: null });
   expect(seen[2].args).toEqual({ profileId: "pb" });
 });
+
+test("a team target keeps the backend target_type and target_id field names", async () => {
+  record();
+  await chatApi.createMessage({
+    id: "m-team", channel_id: "ch", author_id: "pa", text: "hi @Design", created_at: 1,
+    edited_at: null, thread_of: null, archived: false,
+    mention_targets: [{ target_type: "team", target_id: "team-design" }],
+  });
+  expect(seen[0].args).toEqual({ message: {
+    id: "m-team", channel_id: "ch", author_id: "pa", text: "hi @Design", created_at: 1,
+    edited_at: null, thread_of: null, archived: false,
+    mention_targets: [{ target_type: "team", target_id: "team-design" }],
+  } });
+});
