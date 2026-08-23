@@ -24,6 +24,7 @@ export default function DevEnvironments() {
   const [name, setName] = createSignal("");
   const [idleTimeout, setIdleTimeout] = createSignal(30);
   const [standby, setStandby] = createSignal(false);
+const [poolTarget, setPoolTarget] = createSignal(0);
 
   async function run(action: () => Promise<unknown>) {
     setError(null);
@@ -75,6 +76,15 @@ export default function DevEnvironments() {
           }}
         >
           Claim standby
+        </button>
+        <button
+          class="ghost small"
+          onClick={() => {
+            const pid = projectId();
+            if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
+          }}
+        >
+          Refill standby
         </button>
       </header>
 
@@ -128,6 +138,29 @@ export default function DevEnvironments() {
           <input type="checkbox" checked={standby()} onChange={(e) => setStandby(e.currentTarget.checked)} /> standby
           pool
         </label>
+        <input
+          type="number"
+          min="0"
+          placeholder="standby target"
+          value={poolTarget()}
+          onInput={(e) => setPoolTarget(Number(e.currentTarget.value))}
+        />
+        <button
+          type="button"
+          class="ghost"
+          onClick={() => {
+            const pid = projectId();
+            if (pid)
+              run(() =>
+                devenvApi.saveStandbyPoolPolicy(
+                  { project_id: pid, ide: "IntelliJ IDEA", instance_type: "regular", target_size: poolTarget() },
+                  actor(),
+                ),
+              );
+          }}
+        >
+          Set pool target
+        </button>
         <button class="ghost">Create</button>
       </form>
     </div>

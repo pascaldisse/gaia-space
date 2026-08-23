@@ -574,6 +574,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 67 {
         tx.execute_batch(SCHEMA_V67)?;
     }
+    // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
+    if version < 74 {
+        tx.execute_batch(SCHEMA_V74)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -597,6 +601,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "TEXT NOT NULL DEFAULT 'scheduled'",
         )?;
     }
+    // V71: importer runs are durable audit facts. The stored source is the operator-selected
+    // path (never its contents); counts make partial imports visible after the toast is gone.
+    if version < 71 {
+        tx.execute_batch(SCHEMA_V71)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -614,6 +623,24 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
+/// imported document bodies and attachment payloads remain in their normal stores.
+pub(crate) const SCHEMA_V71: &str = r#"
+CREATE TABLE IF NOT EXISTS document_imports (
+    id TEXT PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    container_type TEXT NOT NULL,
+    container_id TEXT,
+    parent_folder_id TEXT,
+    created_by TEXT REFERENCES profiles(id),
+    folders_created INTEGER NOT NULL DEFAULT 0,
+    documents_created INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS document_imports_container ON document_imports(container_type, container_id, created_at DESC);
+"#;
 
 /// V66: durable room inventory, equipment capabilities and a meeting reservation.
 pub(crate) const SCHEMA_V66: &str = r#"
@@ -1005,6 +1032,19 @@ CREATE TABLE IF NOT EXISTS app_authorized_rights (
     PRIMARY KEY(application_id, context_identifier, right_code)
 );
 CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_rights(application_id, context_identifier);
+"#;
+
+/// V74: one target per project + IDE + instance type. The pool contains durable
+/// STANDBY rows; its target is configuration, not process-local scheduler state.
+pub(crate) const SCHEMA_V74: &str = r#"
+CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    ide TEXT NOT NULL,
+    instance_type TEXT NOT NULL,
+    target_size INTEGER NOT NULL CHECK(target_size >= 0),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(project_id, ide, instance_type)
+);
 "#;
 
 pub(crate) const SCHEMA_V55: &str = r#"
@@ -1530,7 +1570,7 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67] {
+        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");

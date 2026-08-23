@@ -27,6 +27,12 @@ export type DevEnvironment = {
   persisted_worktree: string | null;
 };
 
+export type StandbyPoolPolicy = {
+  project_id: string;
+  ide: string;
+  instance_type: string;
+  target_size: number;
+};
 export type NewDevEnvironment = {
   id: string;
   project_id: string;
@@ -52,6 +58,10 @@ export const devenvApi = {
     invoke<DevEnvironment>("resume_dev_environment", { id, actorId }),
   claimStandby: (projectId: string, profileId: string) =>
     invoke<DevEnvironment>("claim_standby_dev_environment", { projectId, profileId }),
+  saveStandbyPoolPolicy: (policy: StandbyPoolPolicy, actorId: string | null = null) =>
+    invoke<DevEnvironment[]>("save_standby_pool_policy", { policy, actorId }),
+  refillStandbyPool: (projectId: string, ide: string, instanceType: string) =>
+    invoke<DevEnvironment[]>("refill_standby_pool", { projectId, ide, instanceType }),
   remove: (id: string, actorId: string | null = null) =>
     invoke<void>("delete_dev_environment", { id, actorId }),
 };
