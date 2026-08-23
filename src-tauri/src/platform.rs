@@ -1480,6 +1480,40 @@ mod tests {
         .unwrap();
     }
 
+    /// Operational gates deny a configured right until its role grant reaches the caller.
+    #[test]
+    fn require_right_denies_without_a_grant_and_allows_the_granted_role() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('gate-user','gate-user','Gate user',0)",
+            [],
+        )
+        .unwrap();
+        insert_role_right(&c, "gate-role", rights::Right::CreateIssue.code(), "Project");
+        let denied = require_right_on(
+            &c,
+            "gate-user",
+            rights::Right::CreateIssue,
+            "project",
+            Some("project-1"),
+        )
+        .unwrap_err();
+        assert_eq!(denied, "missing right Project.CreateIssues");
+        c.execute(
+            "INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('gate-assignment','gate-role','gate-user','project','project-1')",
+            [],
+        )
+        .unwrap();
+        require_right_on(
+            &c,
+            "gate-user",
+            rights::Right::CreateIssue,
+            "project",
+            Some("project-1"),
+        )
+        .unwrap();
+    }
+
     /// KB §2.1 `RightPropagation`. A global grant reaches a project scope for an
     /// ordinary right, and does not reach it for a right the catalog marks `NONE` —
     /// the difference has to come out of the persisted column, so the test writes the
