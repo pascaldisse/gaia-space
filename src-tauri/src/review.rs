@@ -455,6 +455,12 @@ pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion
                 revision: r.get(5)?,
                 resolved: r.get(6)?,
                 channel_id: r.get(7)?,
+                suggestion_commit_id: r.get(8)?,
+                suggestion_status: r.get(9)?,
+                suggestion_content: r.get(10)?,
+                suggestion_has_conflicts: r.get(11)?,
+                suggestion_identical_contents: r.get(12)?,
+                suggestion_resolved_by: r.get(13)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -499,6 +505,12 @@ fn create_review_discussion_tx(
         revision: d.revision.clone(),
         resolved: false,
         channel_id: Some(d.channel_id.clone()),
+        suggestion_commit_id: d.suggestion_commit_id.clone(),
+        suggestion_status: d.suggestion_content.as_ref().map(|_| "OPEN".to_string()),
+        suggestion_content: d.suggestion_content.clone(),
+        suggestion_has_conflicts: d.suggestion_has_conflicts,
+        suggestion_identical_contents: d.suggestion_identical_contents,
+        suggestion_resolved_by: None,
     })
 }
 /// Anchored inline discussion on the real diff; backing channel row is a direct insert
