@@ -6,6 +6,8 @@ import {
   type Team,
   type TeamMembership,
   type MemberLocation,
+  type ProfileEmailStatus,
+  type MessengerContact,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -35,6 +37,9 @@ export default function Members() {
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
   );
+  const [emailStatus, { refetch: refetchEmailStatus }] = createResource(() => profileEditing()?.id, (id) => id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null));
+  const [contacts, { refetch: refetchContacts }] = createResource(() => profileEditing()?.id, (id) => id ? platformApi.messengerContacts(id) : Promise.resolve([] as MessengerContact[]));
+  const [contactDraft, setContactDraft] = createSignal({ contact_type: "", login: "", deep_link: "" });
   const [teamDraft, setTeamDraft] = createSignal(newTeam());
   const [activeTeam, setActiveTeam] = createSignal<Team | null>(null);
   const [memberId, setMemberId] = createSignal("");
@@ -158,6 +163,8 @@ export default function Members() {
     try { await platformApi.removeMemberLocation(location.id); setProblem(""); refetchLocations(); }
     catch (error) { setProblem(String(error)); }
   };
+  const setEmailVerification = async (status: ProfileEmailStatus["status"]) => { const profile = profileEditing(); if (!profile) return; try { await platformApi.setProfileEmailStatus({ profile_id: profile.id, status, verified_at: status === "verified" ? Math.floor(Date.now() / 1000) : null }); refetchEmailStatus(); setProblem(""); } catch (error) { setProblem(String(error)); } };
+  const saveContact = async () => { const profile = profileEditing(); const value = contactDraft(); if (!profile || !value.contact_type.trim() || !value.login.trim()) return; try { await platformApi.saveMessengerContact({ profile_id: profile.id, contact_type: value.contact_type.trim(), login: value.login.trim(), deep_link: value.deep_link.trim() || null }); setContactDraft({ contact_type: "", login: "", deep_link: "" }); refetchContacts(); setProblem(""); } catch (error) { setProblem(String(error)); } };
   const archiveProfile = async (profile: Profile) => {
     try {
       await platformApi.updateProfile({
@@ -309,7 +316,14 @@ export default function Members() {
             </div>
           </form>
           <div class="org-form">
-            <select aria-label="Person location" value={locationProfileId()} onChange={(event) => setLocationProfileId(event.currentTarget.value)}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></select>
+            <Show when={profileEditing()}>
+            <section class="org-form" aria-label="Profile communication">
+              <label>Email status <select value={emailStatus()?.status ?? "unverified"} onChange={(event) => setEmailVerification(event.currentTarget.value as ProfileEmailStatus["status"])}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
+              <For each={contacts() ?? []}>{(contact) => <p class="org-sub">{contact.contact_type}: {contact.deep_link ? <a href={contact.deep_link}>{contact.login}</a> : contact.login}</p>}</For>
+              <div class="org-form-inline"><input aria-label="Messenger type" placeholder="Messenger" value={contactDraft().contact_type} onInput={(event) => setContactDraft({ ...contactDraft(), contact_type: event.currentTarget.value })} /><input aria-label="Messenger login" placeholder="Login" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })} /><input aria-label="Messenger deep link" placeholder="Deep link (optional)" value={contactDraft().deep_link} onInput={(event) => setContactDraft({ ...contactDraft(), deep_link: event.currentTarget.value })} /><button type="button" class="ghost" onClick={saveContact}>Add contact</button></div>
+            </section>
+          </Show>
+          <select aria-label="Person location" value={locationProfileId()} onChange={(event) => setLocationProfileId(event.currentTarget.value)}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></select>
             <input aria-label="Location name" placeholder="Location" value={locationDraft()} onInput={(event) => setLocationDraft(event.currentTarget.value)} />
             <select aria-label="Location type" value={locationType()} onChange={(event) => setLocationType(event.currentTarget.value)}><For each={["Region", "Campus", "Building", "Floor", "Room", "ConferenceRoom"]}>{(type) => <option value={type}>{type}</option>}</For></select>
             <button type="button" class="ghost" disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</button>
