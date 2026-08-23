@@ -172,6 +172,7 @@ export default function Reviews() {
   const [discFile, setDiscFile] = createSignal("");
   const [discLine, setDiscLine] = createSignal("");
   const [discMessage, setDiscMessage] = createSignal("");
+  const [suggestionContent, setSuggestionContent] = createSignal("");
   async function addDiscussion(e: SubmitEvent) {
     e.preventDefault();
     const id = selectedId();
@@ -187,10 +188,24 @@ export default function Reviews() {
         revision: selected()?.source_branch ?? null,
         author_id: actingProfileId(),
         message: discMessage(),
+        suggestion_commit_id: selected()?.source_branch ?? null,
+        suggestion_content: suggestionContent().trim() || null,
+        suggestion_has_conflicts: false,
+        suggestion_identical_contents: null,
       });
       setDiscFile("");
       setDiscLine("");
       setDiscMessage("");
+      setSuggestionContent("");
+      refetchDiscussions();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+  async function setSuggestionStatus(d: ReviewDiscussion, status: "OPEN" | "ACCEPTED" | "REJECTED") {
+    if (!actingProfileId()) return;
+    try {
+      await reviewApi.setSuggestedEditStatus(d.id, status, actingProfileId());
       refetchDiscussions();
     } catch (err) {
       setError(String(err));
@@ -915,10 +930,17 @@ export default function Reviews() {
                         <span class="resolved-tag">
                           {d.resolved ? "resolved" : "open"}
                         </span>
-                        <button
-                          class="ghost small"
-                          onClick={() => toggleResolved(d)}
-                        >
+                        <Show when={d.suggestion_status}>
+                          <span class="hint">suggestion: {d.suggestion_status}</span>
+                          <Show when={d.suggestion_status === "OPEN"}>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "ACCEPTED")}>Accept edit</button>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "REJECTED")}>Reject edit</button>
+                          </Show>
+                          <Show when={d.suggestion_status !== "OPEN"}>
+                            <button class="ghost small" onClick={() => setSuggestionStatus(d, "OPEN")}>Reopen edit</button>
+                          </Show>
+                        </Show>
+                        <button class="ghost small" onClick={() => toggleResolved(d)}>
                           {d.resolved ? "Reopen" : "Resolve"}
                         </button>
                       </li>
@@ -942,6 +964,12 @@ export default function Reviews() {
                     placeholder="comment"
                     value={discMessage()}
                     onInput={(e) => setDiscMessage(e.currentTarget.value)}
+                  />
+                  <input
+                    class="grow"
+                    placeholder="suggested replacement (optional)"
+                    value={suggestionContent()}
+                    onInput={(e) => setSuggestionContent(e.currentTarget.value)}
                   />
                   <button class="ghost">Add discussion</button>
                 </form>
