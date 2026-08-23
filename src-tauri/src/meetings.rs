@@ -803,8 +803,8 @@ mod tests {
         )
         .unwrap();
 
-        let first =
-            record_call_room_on(&c, "m-1", "livekit", "meeting-m-1", "ws://127.0.0.1:7880").unwrap();
+        let first = record_call_room_on(&c, "m-1", "livekit", "meeting-m-1", "ws://127.0.0.1:7880")
+            .unwrap();
         let second =
             record_call_room_on(&c, "m-1", "livekit", "attacker-room", "ws://127.0.0.1:7880")
                 .unwrap();
@@ -844,18 +844,22 @@ mod tests {
             "a cancelled meeting is not ended by a stale leave"
         );
         let status: String = c
-            .query_row("SELECT video_status FROM meetings WHERE id='m-c'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT video_status FROM meetings WHERE id='m-c'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(status, "cancelled");
 
         record_call_room_on(&c, "m-c", "livekit", "meeting-m-c", "ws://127.0.0.1:7880").unwrap();
         assert!(end_call_on(&c, "m-c").unwrap());
         let status: String = c
-            .query_row("SELECT video_status FROM meetings WHERE id='m-c'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT video_status FROM meetings WHERE id='m-c'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(status, "ended");
         assert!(VIDEO_STATUSES.contains(&status.as_str()));

@@ -46,8 +46,16 @@ pub struct ChannelNotificationPreference {
     pub push_enabled: bool,
     pub thread_scope: String,
 }
-fn read_notification_preference(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelNotificationPreference> {
-    Ok(ChannelNotificationPreference { profile_id:r.get(0)?, channel_id:r.get(1)?, email_enabled:r.get(2)?, push_enabled:r.get(3)?, thread_scope:r.get(4)? })
+fn read_notification_preference(
+    r: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ChannelNotificationPreference> {
+    Ok(ChannelNotificationPreference {
+        profile_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        email_enabled: r.get(2)?,
+        push_enabled: r.get(3)?,
+        thread_scope: r.get(4)?,
+    })
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -311,8 +319,14 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     )
     .map_err(|e| e.to_string())
 }
-pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> { channel_allows_profile(&db::conn()?, channel_id, profile_id) }
-pub(crate) fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> {
+    channel_allows_profile(&db::conn()?, channel_id, profile_id)
+}
+pub(crate) fn channel_allows_profile(
+    c: &Connection,
+    channel_id: &str,
+    profile_id: &str,
+) -> Result<bool> {
     // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
     // channels stay generic/public as before; this avoids exposing a private agenda
     // merely because its discussion is implemented by the shared channel primitive.
@@ -391,18 +405,48 @@ fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<
 /// Private feeds retain the normal private-channel ACL and add a durable owner map;
 /// this avoids rebuilding the original `channels.content_type` constraint.
 pub(crate) fn ensure_private_feed_on(c: &Connection, profile_id: &str) -> Result<Channel> {
-    if profile_id.trim().is_empty() { return Err("Private feed profile is required".into()); }
-    if let Some(channel_id) = c.query_row("SELECT channel_id FROM private_feeds WHERE profile_id=?1", [profile_id], |r| r.get::<_, String>(0)).optional().map_err(|e| e.to_string())? {
-        return get_channel_impl(c, &channel_id)?.ok_or_else(|| "Private feed channel is missing".into());
+    if profile_id.trim().is_empty() {
+        return Err("Private feed profile is required".into());
     }
-    let channel = Channel { id: format!("private-feed:{profile_id}"), content_type: "private".into(), name: Some("Private feed".into()), description: Some("Your read-only notification feed".into()), project_id: None, archived: false, read_only: true };
+    if let Some(channel_id) = c
+        .query_row(
+            "SELECT channel_id FROM private_feeds WHERE profile_id=?1",
+            [profile_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        return get_channel_impl(c, &channel_id)?
+            .ok_or_else(|| "Private feed channel is missing".into());
+    }
+    let channel = Channel {
+        id: format!("private-feed:{profile_id}"),
+        content_type: "private".into(),
+        name: Some("Private feed".into()),
+        description: Some("Your read-only notification feed".into()),
+        project_id: None,
+        archived: false,
+        read_only: true,
+    };
     create_channel_impl(c, &channel, &[profile_id.to_string()])?;
-    c.execute("INSERT INTO private_feeds(profile_id,channel_id) VALUES(?1,?2)", rusqlite::params![profile_id, channel.id]).map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT INTO private_feeds(profile_id,channel_id) VALUES(?1,?2)",
+        rusqlite::params![profile_id, channel.id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(channel)
 }
-pub(crate) fn private_feed_for_on(c: &Connection, profile_id: &str) -> Result<Channel> { ensure_private_feed_on(c, profile_id) }
+pub(crate) fn private_feed_for_on(c: &Connection, profile_id: &str) -> Result<Channel> {
+    ensure_private_feed_on(c, profile_id)
+}
 fn is_read_only_channel_on(c: &Connection, channel_id: &str) -> Result<bool> {
-    c.query_row("SELECT EXISTS(SELECT 1 FROM private_feeds WHERE channel_id=?1)", [channel_id], |r| r.get(0)).map_err(|e| e.to_string())
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM private_feeds WHERE channel_id=?1)",
+        [channel_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String]) -> Result<()> {
     c.execute(
@@ -482,12 +526,30 @@ pub(crate) fn create_entity_channel_impl(
     get_channel_impl(c, &id)?.ok_or_else(|| "entity channel missing after insert".to_string())
 }
 
-fn default_message_content_kind() -> String { "text".into() }
+fn default_message_content_kind() -> String {
+    "text".into()
+}
 /// Durable system card for an absence lifecycle event. The entity-bound channel is
 /// intentionally public like other entity discussions; sensitive reasons are never put in it.
-pub(crate) fn post_absence_card_on(c: &Connection, absence_id: &str, profile_id: &str, date_from: &str, date_to: &str, availability: &str, action: &str) -> Result<()> {
-    let channel = create_entity_channel_impl(c, "absence", absence_id, Some(format!("Time off · {profile_id}")))?;
-    let id = format!("absence-card:{absence_id}:{action}:{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+pub(crate) fn post_absence_card_on(
+    c: &Connection,
+    absence_id: &str,
+    profile_id: &str,
+    date_from: &str,
+    date_to: &str,
+    availability: &str,
+    action: &str,
+) -> Result<()> {
+    let channel = create_entity_channel_impl(
+        c,
+        "absence",
+        absence_id,
+        Some(format!("Time off · {profile_id}")),
+    )?;
+    let id = format!(
+        "absence-card:{absence_id}:{action}:{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
     let payload = serde_json::json!({"absence_id":absence_id,"profile_id":profile_id,"date_from":date_from,"date_to":date_to,"availability":availability,"action":action}).to_string();
     c.execute("INSERT INTO messages(id,channel_id,author_id,text,thread_of,archived,content_kind) VALUES(?1,?2,NULL,?3,NULL,0,'absence-card')", rusqlite::params![id, channel.id, payload]).map_err(|e| e.to_string())?;
     Ok(())
@@ -644,14 +706,18 @@ const MAX_MENTION_TARGETS: usize = 100;
 
 fn validate_mention_count(mention_ids: &[String]) -> Result<()> {
     if mention_ids.len() > MAX_MENTION_TARGETS {
-        return Err(format!("at most {MAX_MENTION_TARGETS} mention targets are allowed"));
+        return Err(format!(
+            "at most {MAX_MENTION_TARGETS} mention targets are allowed"
+        ));
     }
     Ok(())
 }
 
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
     validate_mention_count(&message.mention_ids)?;
-    if is_read_only_channel_on(c, &message.channel_id)? { return Err("Private feeds are read-only".into()); }
+    if is_read_only_channel_on(c, &message.channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
     let allowed = message
         .author_id
         .as_deref()
@@ -673,7 +739,14 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         message.author_id.as_deref(),
         &message.text,
         &message.mention_ids,
-    )
+    )?;
+    crate::channel_feeds::route_message_on(
+        c,
+        &message.channel_id,
+        message.author_id.as_deref(),
+        &message.text,
+    )?;
+    Ok(())
 }
 
 /// A mention target must be a real profile that may actually read the channel, and it
@@ -745,12 +818,6 @@ fn sync_mentions_impl(
         .map_err(|e| e.to_string())?;
         c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{message_id}:{profile_id}"), profile_id, text, message_id]).map_err(|e| e.to_string())?;
     }
-    crate::channel_feeds::route_message_on(
-        c,
-        &message.channel_id,
-        message.author_id.as_deref(),
-        &message.text,
-    )?;
     Ok(())
 }
 
@@ -837,9 +904,11 @@ fn list_mentions_for_profile_impl(
             continue;
         }
         let channel_name: Option<String> = c
-            .query_row("SELECT name FROM channels WHERE id=?1", [&m.channel_id], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT name FROM channels WHERE id=?1",
+                [&m.channel_id],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|e| e.to_string())?
             .flatten();
@@ -944,19 +1013,41 @@ pub fn get_channel(id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn private_feed(profile_id: String) -> Result<Channel> { ensure_private_feed_on(&db::conn()?, &profile_id) }
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_channel_notification_preference(profile_id: String, channel_id: String) -> Result<ChannelNotificationPreference> {
-    let c=db::conn()?;
-    let row=c.query_row("SELECT profile_id,channel_id,email_enabled,push_enabled,thread_scope FROM channel_notification_preferences WHERE profile_id=?1 AND channel_id=?2", rusqlite::params![&profile_id,&channel_id], read_notification_preference).optional().map_err(|e|e.to_string())?;
-    Ok(row.unwrap_or(ChannelNotificationPreference { profile_id, channel_id, email_enabled:true, push_enabled:true, thread_scope:"all".into() }))
+pub fn private_feed(profile_id: String) -> Result<Channel> {
+    ensure_private_feed_on(&db::conn()?, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn save_channel_notification_preference(preference: ChannelNotificationPreference) -> Result<ChannelNotificationPreference> {
-    if preference.profile_id.trim().is_empty() || preference.channel_id.trim().is_empty() { return Err("Channel preference needs a profile and channel".into()); }
-    if !matches!(preference.thread_scope.as_str(), "all"|"followed"|"none") { return Err("Thread scope must be all, followed, or none".into()); }
-    let c=db::conn()?;
-    if !channel_allows_profile(&c,&preference.channel_id,&preference.profile_id)? { return Err("channel access denied".into()); }
+pub fn get_channel_notification_preference(
+    profile_id: String,
+    channel_id: String,
+) -> Result<ChannelNotificationPreference> {
+    let c = db::conn()?;
+    let row=c.query_row("SELECT profile_id,channel_id,email_enabled,push_enabled,thread_scope FROM channel_notification_preferences WHERE profile_id=?1 AND channel_id=?2", rusqlite::params![&profile_id,&channel_id], read_notification_preference).optional().map_err(|e|e.to_string())?;
+    Ok(row.unwrap_or(ChannelNotificationPreference {
+        profile_id,
+        channel_id,
+        email_enabled: true,
+        push_enabled: true,
+        thread_scope: "all".into(),
+    }))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_channel_notification_preference(
+    preference: ChannelNotificationPreference,
+) -> Result<ChannelNotificationPreference> {
+    if preference.profile_id.trim().is_empty() || preference.channel_id.trim().is_empty() {
+        return Err("Channel preference needs a profile and channel".into());
+    }
+    if !matches!(
+        preference.thread_scope.as_str(),
+        "all" | "followed" | "none"
+    ) {
+        return Err("Thread scope must be all, followed, or none".into());
+    }
+    let c = db::conn()?;
+    if !channel_allows_profile(&c, &preference.channel_id, &preference.profile_id)? {
+        return Err("channel access denied".into());
+    }
     c.execute("INSERT INTO channel_notification_preferences(profile_id,channel_id,email_enabled,push_enabled,thread_scope) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,channel_id) DO UPDATE SET email_enabled=excluded.email_enabled,push_enabled=excluded.push_enabled,thread_scope=excluded.thread_scope", rusqlite::params![preference.profile_id,preference.channel_id,preference.email_enabled,preference.push_enabled,preference.thread_scope]).map_err(|e|e.to_string())?;
     Ok(preference)
 }
@@ -1278,12 +1369,18 @@ mod tests {
                 thread_of: None,
                 archived: false,
                 mention_ids: Vec::new(),
+                content_kind: "text".into(),
             },
         )
         .unwrap();
     }
 
-    fn new_attachment(id: &str, data_url: &str, byte_length: i64, state: Option<&str>) -> NewMessageAttachment {
+    fn new_attachment(
+        id: &str,
+        data_url: &str,
+        byte_length: i64,
+        state: Option<&str>,
+    ) -> NewMessageAttachment {
         NewMessageAttachment {
             id: id.into(),
             file_name: "f.txt".into(),
@@ -1307,9 +1404,14 @@ mod tests {
         assert_eq!(stored.upload_state, "uploading");
         assert!(stored.error.is_none());
 
-        let failed =
-            set_message_attachment_state_impl(&c, "msg-att", "att-1", "failed", Some("network down"))
-                .unwrap();
+        let failed = set_message_attachment_state_impl(
+            &c,
+            "msg-att",
+            "att-1",
+            "failed",
+            Some("network down"),
+        )
+        .unwrap();
         assert_eq!(failed.upload_state, "failed");
         assert_eq!(failed.error.as_deref(), Some("network down"));
 
@@ -1327,9 +1429,12 @@ mod tests {
     fn attachment_defaults_to_completed_and_rejects_unknown_state() {
         let (c, path) = conn();
         seed_message(&c, "chan-att2", "msg-att2");
-        let stored =
-            add_message_attachment_impl(&c, "msg-att2", new_attachment("att-2", "data:,hi", 2, None))
-                .unwrap();
+        let stored = add_message_attachment_impl(
+            &c,
+            "msg-att2",
+            new_attachment("att-2", "data:,hi", 2, None),
+        )
+        .unwrap();
         assert_eq!(stored.upload_state, "completed");
         assert!(add_message_attachment_impl(
             &c,
@@ -1338,7 +1443,8 @@ mod tests {
         )
         .is_err());
         assert!(
-            set_message_attachment_state_impl(&c, "msg-att2", "att-2", "teleporting", None).is_err()
+            set_message_attachment_state_impl(&c, "msg-att2", "att-2", "teleporting", None)
+                .is_err()
         );
         drop(c);
         drop(path);
@@ -1386,6 +1492,7 @@ mod tests {
                 thread_of: None,
                 archived: false,
                 mention_ids: Vec::new(),
+                content_kind: "text".into(),
             },
         )
         .unwrap();
@@ -1491,7 +1598,13 @@ mod tests {
         }
     }
 
-    fn post(c: &Connection, channel: &str, id: &str, author: &str, mentions: &[&str]) -> Result<()> {
+    fn post(
+        c: &Connection,
+        channel: &str,
+        id: &str,
+        author: &str,
+        mentions: &[&str],
+    ) -> Result<()> {
         create_message_impl(
             c,
             &Message {
@@ -1513,9 +1626,19 @@ mod tests {
         let (c, path) = conn();
         seed_channel(&c, "chan-m1");
         seed_profiles(&c, &["alice", "bob"]);
-        post(&c, "chan-m1", "msg-m1", "alice", &["bob", "bob", "alice", "ghost"]).unwrap();
+        post(
+            &c,
+            "chan-m1",
+            "msg-m1",
+            "alice",
+            &["bob", "bob", "alice", "ghost"],
+        )
+        .unwrap();
         // duplicates collapse, the author naming themselves is dropped, an unknown id is ignored
-        assert_eq!(mentions_for_impl(&c, "msg-m1").unwrap(), vec!["bob".to_string()]);
+        assert_eq!(
+            mentions_for_impl(&c, "msg-m1").unwrap(),
+            vec!["bob".to_string()]
+        );
         let view = list_messages_impl(&c, "chan-m1", Some("alice")).unwrap();
         assert_eq!(view[0].message.mention_ids, vec!["bob".to_string()]);
         // the mention raised exactly one unread notification for bob
@@ -1552,14 +1675,18 @@ mod tests {
         post(&c, "chan-m2", "msg-m2", "alice", &["bob"]).unwrap();
         // bob cannot open the channel, so naming him neither stores a row nor alerts him
         assert!(mentions_for_impl(&c, "msg-m2").unwrap().is_empty());
-        assert!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().is_empty());
+        assert!(list_mentions_for_profile_impl(&c, "bob", false)
+            .unwrap()
+            .is_empty());
         // Leaving after a valid private mention removes the notification too: the generic
         // notifications endpoint must not retain the secret message body.
         add_channel_member_impl(&c, "chan-m2", "bob", false).unwrap();
         post(&c, "chan-m2", "msg-m2b", "alice", &["bob"]).unwrap();
         assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
         remove_channel_member_impl(&c, "chan-m2", "bob").unwrap();
-        assert!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().is_empty());
+        assert!(list_mentions_for_profile_impl(&c, "bob", false)
+            .unwrap()
+            .is_empty());
         let leaked: i64 = c.query_row(
             "SELECT COUNT(*) FROM notifications WHERE recipient_id='bob' AND event_type='chat.mention'",
             [], |r| r.get(0),
@@ -1573,14 +1700,40 @@ mod tests {
     fn mention_target_count_is_bounded_before_message_or_edit_writes() {
         let (c, path) = conn();
         seed_channel(&c, "chan-m-limit");
-        let too_many = (0..=MAX_MENTION_TARGETS).map(|n| format!("p{n}")).collect::<Vec<_>>();
-        let message = Message { id: "msg-m-limit".into(), channel_id: "chan-m-limit".into(), author_id: Some("default-org".into()), text: "flood".into(), created_at: 1, edited_at: None, thread_of: None, archived: false, mention_ids: too_many.clone() };
-        assert!(create_message_impl(&c, &message).unwrap_err().contains("at most"));
-        let stored: i64 = c.query_row("SELECT COUNT(*) FROM messages WHERE id='msg-m-limit'", [], |r| r.get(0)).unwrap();
+        let too_many = (0..=MAX_MENTION_TARGETS)
+            .map(|n| format!("p{n}"))
+            .collect::<Vec<_>>();
+        let message = Message {
+            id: "msg-m-limit".into(),
+            channel_id: "chan-m-limit".into(),
+            author_id: Some("default-org".into()),
+            text: "flood".into(),
+            created_at: 1,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            mention_ids: too_many.clone(),
+        };
+        assert!(create_message_impl(&c, &message)
+            .unwrap_err()
+            .contains("at most"));
+        let stored: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id='msg-m-limit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(stored, 0);
         post(&c, "chan-m-limit", "msg-m-limit-ok", "default-org", &[]).unwrap();
         assert!(update_message_impl(&c, "msg-m-limit-ok", "flood", Some(&too_many)).is_err());
-        let text: String = c.query_row("SELECT text FROM messages WHERE id='msg-m-limit-ok'", [], |r| r.get(0)).unwrap();
+        let text: String = c
+            .query_row(
+                "SELECT text FROM messages WHERE id='msg-m-limit-ok'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(text, "hey");
         drop(c);
         drop(path);
@@ -1598,10 +1751,16 @@ mod tests {
         .unwrap();
         // text-only edit keeps the mentions untouched
         update_message_impl(&c, "msg-m3", "typo fixed", None).unwrap();
-        assert_eq!(mentions_for_impl(&c, "msg-m3").unwrap(), vec!["bob".to_string()]);
+        assert_eq!(
+            mentions_for_impl(&c, "msg-m3").unwrap(),
+            vec!["bob".to_string()]
+        );
         // an explicit list is the whole truth: bob leaves, carol arrives
         update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()])).unwrap();
-        assert_eq!(mentions_for_impl(&c, "msg-m3").unwrap(), vec!["carol".to_string()]);
+        assert_eq!(
+            mentions_for_impl(&c, "msg-m3").unwrap(),
+            vec!["carol".to_string()]
+        );
         // bob's alert was already read, so it stays as history; carol gets a fresh one
         let bob_kept: i64 = c
             .query_row(
@@ -1627,7 +1786,12 @@ mod tests {
         seed_profiles(&c, &["alice", "bob"]);
         post(&c, "chan-m4", "msg-m4a", "alice", &["bob"]).unwrap();
         post(&c, "chan-m4", "msg-m4b", "alice", &["bob"]).unwrap();
-        assert_eq!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().len(), 2);
+        assert_eq!(
+            list_mentions_for_profile_impl(&c, "bob", false)
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 2);
         c.execute(
             "UPDATE notifications SET read_at=unixepoch() WHERE id='mention:msg-m4a:bob'",
@@ -1650,7 +1814,10 @@ mod tests {
     fn attachment_writes_require_author_or_channel_admin() {
         let (c, path) = conn();
         seed_message(&c, "chan-att9", "msg-att9");
-        for (id, username) in [("outsider", "outsider-user"), ("chan-admin", "chan-admin-user")] {
+        for (id, username) in [
+            ("outsider", "outsider-user"),
+            ("chan-admin", "chan-admin-user"),
+        ] {
             c.execute(
                 "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
                 rusqlite::params![id, username],
@@ -1660,15 +1827,15 @@ mod tests {
         add_channel_member_impl(&c, "chan-att9", "outsider", false).unwrap();
         add_channel_member_impl(&c, "chan-att9", "chan-admin", true).unwrap();
         // author of msg-att9 is "default-org" (see seed_message)
-        assert!(
-            message_attachment_writable_by_impl(&c, "msg-att9", "default-org", false).unwrap()
-        );
+        assert!(message_attachment_writable_by_impl(&c, "msg-att9", "default-org", false).unwrap());
         assert!(message_attachment_writable_by_impl(&c, "msg-att9", "chan-admin", false).unwrap());
         // a plain member of the channel is not the owner of someone else's content
         assert!(!message_attachment_writable_by_impl(&c, "msg-att9", "outsider", false).unwrap());
         // the global admin always passes; an unknown message never does
         assert!(message_attachment_writable_by_impl(&c, "msg-att9", "outsider", true).unwrap());
-        assert!(!message_attachment_writable_by_impl(&c, "msg-nope", "default-org", false).unwrap());
+        assert!(
+            !message_attachment_writable_by_impl(&c, "msg-nope", "default-org", false).unwrap()
+        );
         drop(c);
         drop(path);
     }
@@ -1677,14 +1844,20 @@ mod tests {
     fn archiving_a_message_retains_its_attachments() {
         let (c, path) = conn();
         seed_message(&c, "chan-att10", "msg-att10");
-        add_message_attachment_impl(&c, "msg-att10", new_attachment("att-10", "data:,hi", 2, None))
-            .unwrap();
+        add_message_attachment_impl(
+            &c,
+            "msg-att10",
+            new_attachment("att-10", "data:,hi", 2, None),
+        )
+        .unwrap();
         delete_message_impl(&c, "msg-att10").unwrap();
         // the soft delete hides the message but keeps the files with it
         let kept = attachments_for_impl(&c, "msg-att10").unwrap();
         assert_eq!(kept.len(), 1);
         // and removing one still answers to the author/channel-admin gate
-        assert!(message_attachment_writable_by_impl(&c, "msg-att10", "default-org", false).unwrap());
+        assert!(
+            message_attachment_writable_by_impl(&c, "msg-att10", "default-org", false).unwrap()
+        );
         assert!(!message_attachment_writable_by_impl(&c, "msg-att10", "nobody", false).unwrap());
         remove_message_attachment_impl(&c, "msg-att10", "att-10").unwrap();
         assert!(attachments_for_impl(&c, "msg-att10").unwrap().is_empty());
@@ -1709,8 +1882,9 @@ mod tests {
         let big = base64::engine::general_purpose::STANDARD.encode(vec![0u8; 11 * 1024 * 1024]);
         let url = format!("data:application/octet-stream;base64,{big}");
         // the historic hole: a zero declared length carrying an oversized payload
-        let err = add_message_attachment_impl(&c, "msg-att3", new_attachment("att-big", &url, 0, None))
-            .unwrap_err();
+        let err =
+            add_message_attachment_impl(&c, "msg-att3", new_attachment("att-big", &url, 0, None))
+                .unwrap_err();
         assert!(err.contains("too large"), "{err}");
         // an honest-looking but wrong declaration is refused too
         let err = add_message_attachment_impl(
@@ -1720,10 +1894,12 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("mismatch"), "{err}");
-        assert!(
-            add_message_attachment_impl(&c, "msg-att3", new_attachment("att-nourl", "hi", 2, None))
-                .is_err()
-        );
+        assert!(add_message_attachment_impl(
+            &c,
+            "msg-att3",
+            new_attachment("att-nourl", "hi", 2, None)
+        )
+        .is_err());
         assert!(attachments_for_impl(&c, "msg-att3").unwrap().is_empty());
         drop(c);
         drop(path);

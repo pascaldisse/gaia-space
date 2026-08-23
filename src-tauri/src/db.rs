@@ -621,15 +621,26 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V95)?;
     }
     // V96: organization locations, schedules, equipment catalog, and rooms.
-    if version < 96 { tx.execute_batch(SCHEMA_V96)?; }
+    if version < 96 {
+        tx.execute_batch(SCHEMA_V96)?;
+    }
     // V97: typed absence cards in chat.
     if version < 97 && table_exists(&tx, "messages")? {
-        add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+        add_column_if_missing(
+            &tx,
+            "messages",
+            "content_kind",
+            "TEXT NOT NULL DEFAULT 'text'",
+        )?;
     }
     // V98: profile email status and messenger contacts.
-    if version < 98 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V98)?; }
+    if version < 98 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V98)?;
+    }
     // V99: principals unify people, applications, and external identities.
-    if version < 99 && table_exists(&tx, "profiles")? { tx.execute_batch(SCHEMA_V99)?; }
+    if version < 99 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V99)?;
+    }
     // V107: KB book grants. Guarded: hand-built legacy fixtures can lack documents.
     if version < 107 && table_exists(&tx, "document_folders")? {
         tx.execute_batch(SCHEMA_V107)?;
@@ -661,13 +672,48 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
     if version < 103 && table_exists(&tx, "user_preferences")? {
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_weekends", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_issues", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_todos", "INTEGER NOT NULL DEFAULT 1")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_show_declined", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_only", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_start", "INTEGER NOT NULL DEFAULT 9")?;
-        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_end", "INTEGER NOT NULL DEFAULT 18")?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_weekends",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_issues",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_todos",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_show_declined",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_only",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_start",
+            "INTEGER NOT NULL DEFAULT 9",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "user_preferences",
+            "calendar_working_hours_end",
+            "INTEGER NOT NULL DEFAULT 18",
+        )?;
     }
     // V71: importer runs are durable audit facts. The stored source is the operator-selected
     // path (never its contents); counts make partial imports visible after the toast is gone.
@@ -686,6 +732,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "TEXT NOT NULL DEFAULT 'completed'",
         )?;
         add_column_if_missing(&tx, "message_attachments", "error", "TEXT")?;
+    }
     // V100: availability reads are derived from existing room, booking, meeting,
     // participant, and absence rows. Guard each additive index so partially
     // migrated installations do not fail when an older optional table is absent.
@@ -719,7 +766,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V109: a document/article owns one entity discussion and may bind one meeting.
     if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
         tx.execute_batch(SCHEMA_V109)?;
-
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1867,7 +1913,9 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92] {
+        for start in [
+            0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 71, 73, 74, 75, 77, 91, 92,
+        ] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");
@@ -2530,6 +2578,7 @@ mod v39_webhook_migration_tests {
             .unwrap();
         assert!(cols.contains(&"upload_state".to_string()));
         assert!(cols.contains(&"error".to_string()));
+    }
 
     #[test]
     fn v103_adds_calendar_option_columns_and_keeps_existing_preferences() {

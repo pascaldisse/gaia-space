@@ -9,9 +9,9 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db, devenv, documents,
-    events, issues, meetings, oauth, organization, package_registry, payload_dispatch, personal,
-    pipelines, platform, review,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db,
+    devenv, documents, events, issues, meetings, oauth, organization, package_registry,
+    payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -1500,7 +1500,10 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         "member" => "GlobalMember",
         other => other,
     };
-    if !matches!(role, "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
+    if !matches!(
+        role,
+        "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+    ) {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
     if role == "GlobalAdmin" && !me.account_admin {
@@ -2950,8 +2953,12 @@ fn authorize_command(
             // attachment id alone would be a capability over every message in the space.
             let message_id: String =
                 arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if chat::message_attachment_writable_by(&message_id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if chat::message_attachment_writable_by(
+                &message_id,
+                &user.profile_id,
+                user.role == "admin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -5137,16 +5144,31 @@ mod tests {
         assert_eq!(body["value"]["mention_ids"], json!(["pb"]), "{body}");
 
         // bob sees it in his inbox and in his badge
-        let (status, body) = call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await;
+        let (status, body) = call(
+            cookie("tb"),
+            "count_unread_mentions",
+            json!({"profile_id":"pb"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["value"], json!(1), "{body}");
-        let (status, body) = call(cookie("tb"), "list_mentions_for_profile", json!({"profile_id":"pb","unread_only":true})).await;
+        let (status, body) = call(
+            cookie("tb"),
+            "list_mentions_for_profile",
+            json!({"profile_id":"pb","unread_only":true}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["value"].as_array().unwrap().len(), 1, "{body}");
         assert_eq!(body["value"][0]["channel_name"], json!("Talk"));
 
         // alice asking for bob's inbox gets her own: the session binds `profile_id`
-        let (status, body) = call(cookie("ta"), "list_mentions_for_profile", json!({"profile_id":"pb"})).await;
+        let (status, body) = call(
+            cookie("ta"),
+            "list_mentions_for_profile",
+            json!({"profile_id":"pb"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert!(body["value"].as_array().unwrap().is_empty(), "{body}");
 
@@ -5159,7 +5181,13 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
-            call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await.1["value"],
+            call(
+                cookie("tb"),
+                "count_unread_mentions",
+                json!({"profile_id":"pb"})
+            )
+            .await
+            .1["value"],
             json!(1)
         );
 
@@ -5173,7 +5201,13 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["value"]["mention_ids"], json!([]));
         assert_eq!(
-            call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await.1["value"],
+            call(
+                cookie("tb"),
+                "count_unread_mentions",
+                json!({"profile_id":"pb"})
+            )
+            .await
+            .1["value"],
             json!(0)
         );
     }
