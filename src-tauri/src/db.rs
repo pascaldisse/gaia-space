@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 123;
+pub const SCHEMA_VERSION: i64 = 128;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -653,6 +653,27 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 123 {
         tx.execute_batch(SCHEMA_V123)?;
     }
+    // V128: an application carries operator-set parameters and a durable owner.
+    // Parameters are rows keyed by (application_id, name) — not a JSON blob — so a
+    // single parameter is readable/updatable without rewriting the envelope, and a
+    // secret value is markable per row. The owner is a nullable column on
+    // `applications` (ON DELETE SET NULL): deleting the owning account must not
+    // delete the application it registered.
+    if version < 128 && table_exists(&tx, "applications")? {
+        add_column_if_missing(
+            &tx,
+            "applications",
+            "owner_profile_id",
+            "TEXT REFERENCES profiles(id) ON DELETE SET NULL",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "applications",
+            "owner_application_id",
+            "TEXT REFERENCES applications(id) ON DELETE SET NULL",
+        )?;
+        tx.execute_batch(SCHEMA_V128)?;
+    }
     // V119: a mention may name a team, not only a person. The team target is its own
     // row set (`message_team_mentions`) rather than a `target_type` column bolted onto
     // `message_mentions`: that table's `profile_id` is a NOT NULL foreign key into
@@ -1039,6 +1060,20 @@ CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY R
 CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
 "#;
 /// V99: durable principal identity abstraction.
+/// V128: per-application parameters plus the owner index for the column added above.
+pub(crate) const SCHEMA_V128: &str = r#"
+CREATE TABLE IF NOT EXISTS app_parameters (
+    application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    is_secret INTEGER NOT NULL DEFAULT 0 CHECK(is_secret IN (0,1)),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(application_id, key)
+);
+CREATE INDEX IF NOT EXISTS applications_owner_profile ON applications(owner_profile_id);
+CREATE INDEX IF NOT EXISTS applications_owner_application ON applications(owner_application_id);
+"#;
+
 pub(crate) const SCHEMA_V99: &str = r#"
 CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
 INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
@@ -2052,6 +2087,46 @@ mod tests {
     }
 
     #[test]
+    fn v128_app_parameters_cascade_and_owner_survives_user_deletion() {
+        let temp = TempDb::new("gaia-space-v128-app-parameters");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p1','owner','Owner',0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO applications(id,name,application_type,client_id,owner_profile_id) VALUES('a1','App','Application','client-1','p1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO app_parameters(application_id,key,value,is_secret) VALUES('a1','base_url','https://example.test',0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM profiles WHERE id='p1'", [])
+            .unwrap();
+        let owner: Option<String> = conn
+            .query_row("SELECT owner_profile_id FROM applications WHERE id='a1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(owner, None, "deleting the owner never deletes the application");
+        conn.execute("DELETE FROM applications WHERE id='a1'", [])
+            .unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM app_parameters WHERE application_id='a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "parameters cascade with their application");
+        migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
     fn v14_adds_devfiles_and_application_extension_tables() {
         let temp = TempDb::new("gaia-space-v14-applications");
         let conn = open_at(&temp).expect("database");
@@ -2097,7 +2172,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 123);
+        assert_eq!(SCHEMA_VERSION, 128);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
