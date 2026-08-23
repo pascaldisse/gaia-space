@@ -1591,6 +1591,7 @@ enum CommandPolicy {
     ProjectWrite,
     ProjectRead,
     ProjectMemberWrite,
+    PipelineScriptWrite,
     BoardRead,
     IssueRead,
     IssueAssign,
@@ -1874,10 +1875,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_message"
         | "update_pipeline_script"
         | "update_profile" => CommandPolicy::Session,
-        // Event-driven pipeline entry points. Same session gate as the rest of the
-        // pipelines surface; without these they fall to the catch-all and 403 for
-        // every caller, admins included.
-        "trigger_pipeline_event" | "due_scheduled_runs" => CommandPolicy::Session,
+        // Event triggers operate on one repository-validated script. Its project membership
+        // is checked before dispatch; repository equality alone is not authorization.
+        "trigger_pipeline_event" => CommandPolicy::PipelineScriptWrite,
+        "due_scheduled_runs" => CommandPolicy::AppAdmin,
         "update_meeting" => CommandPolicy::MeetingWrite,
         "update_quality_gate_rule"
         | "update_review"
@@ -2278,6 +2279,29 @@ fn authorize_command(
                 Err(err(StatusCode::FORBIDDEN, "project access denied"))
             }
         }
+        CommandPolicy::PipelineScriptWrite => {
+            let script_id: String =
+                arg(body, "script_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            let project_id: Option<String> = c
+                .query_row(
+                    "SELECT project_id FROM pipeline_scripts WHERE id=?1 AND archived=0",
+                    [&script_id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if project_id
+                .as_deref()
+                .map(|project_id| project_readable(user, project_id))
+                .transpose()
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .unwrap_or(false)
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "project access denied"))
+            }
+        }
         CommandPolicy::ProjectMemberWrite => {
             let project_id = body
                 .get("input")
@@ -2308,7 +2332,7 @@ fn authorize_command(
             } else {
                 Err(err(
                     StatusCode::FORBIDDEN,
-                    "only an administrator can manage application credentials",
+                    "only an administrator can perform this command",
                 ))
             }
         }
@@ -4235,24 +4259,56 @@ const DEFAULT_WEBHOOK_TICK_BATCH: i64 = 20;
 /// each sweep runs on the blocking pool; a failing sweep is logged, never fatal.
 const DEFAULT_PIPELINE_SCHEDULE_TICK_SECS: u64 = 60;
 /// Schedule dispatch remains an opt-in server lifecycle task: an absent enable flag starts
-/// nothing, while its cadence defaults to sixty seconds and `0` disables it explicitly.
+/// nothing, its cadence defaults to sixty seconds, and zero or an invalid value disables it.
 fn pipeline_schedule_ticker_config(enabled: Option<&str>, secs: Option<&str>) -> Option<u64> {
     let enabled = enabled
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false);
-    if !enabled { return None; }
-    let secs = secs.and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS);
-    (secs > 0).then_some(secs)
+    if !enabled {
+        return None;
+    }
+    match secs {
+        None => Some(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS),
+        Some(value) => value.trim().parse::<u64>().ok().filter(|secs| *secs > 0),
+    }
 }
 /// Calls the existing poll-driven schedule entry point from the server's lifecycle only.
 /// It creates no separate daemon; deployment operators opt in with
 /// `SPACE_PIPELINE_SCHEDULE_TICK_ENABLED=1`, and may tune or disable the cadence via
-/// `SPACE_PIPELINE_SCHEDULE_TICK_SECS` (default 60; zero disables).
+/// `SPACE_PIPELINE_SCHEDULE_TICK_SECS` (default 60; zero or invalid values disable).
 fn spawn_pipeline_schedule_ticker() {
-    let Some(secs) = pipeline_schedule_ticker_config(
-        env::var("SPACE_PIPELINE_SCHEDULE_TICK_ENABLED").ok().as_deref(),
-        env::var("SPACE_PIPELINE_SCHEDULE_TICK_SECS").ok().as_deref(),
-    ) else { return; };
+    let enabled = env::var("SPACE_PIPELINE_SCHEDULE_TICK_ENABLED").ok();
+    let configured_secs = env::var("SPACE_PIPELINE_SCHEDULE_TICK_SECS").ok();
+    let Some(secs) =
+        pipeline_schedule_ticker_config(enabled.as_deref(), configured_secs.as_deref())
+    else {
+        if enabled
+            .as_deref()
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+            && configured_secs.as_deref().is_some_and(|value| {
+                value
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|secs| *secs > 0)
+                    .is_none()
+            })
+        {
+            eprintln!("pipeline schedule ticker: disabled; SPACE_PIPELINE_SCHEDULE_TICK_SECS must be a positive integer");
+        }
+        return;
+    };
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(secs));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -4396,10 +4452,26 @@ mod tests {
     #[test]
     fn pipeline_schedule_ticker_is_opt_in_and_configurable() {
         assert_eq!(pipeline_schedule_ticker_config(None, None), None);
-        assert_eq!(pipeline_schedule_ticker_config(Some("true"), None), Some(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS));
-        assert_eq!(pipeline_schedule_ticker_config(Some("1"), Some("15")), Some(15));
-        assert_eq!(pipeline_schedule_ticker_config(Some("yes"), Some("0")), None);
-        assert_eq!(pipeline_schedule_ticker_config(Some("false"), Some("15")), None);
+        assert_eq!(
+            pipeline_schedule_ticker_config(Some("true"), None),
+            Some(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS)
+        );
+        assert_eq!(
+            pipeline_schedule_ticker_config(Some("1"), Some("15")),
+            Some(15)
+        );
+        assert_eq!(
+            pipeline_schedule_ticker_config(Some("yes"), Some("0")),
+            None
+        );
+        assert_eq!(
+            pipeline_schedule_ticker_config(Some("true"), Some("abc")),
+            None
+        );
+        assert_eq!(
+            pipeline_schedule_ticker_config(Some("false"), Some("15")),
+            None
+        );
     }
 
     #[test]

@@ -166,7 +166,7 @@ describe("container step editor round-trip (defect pin)", () => {
     ]);
   });
 
-  test("scriptDefErrors does not block saving such a script, so nothing stops the downgrade", () => {
+  test("container preservation round-trip remains saveable while warning about runtime support", () => {
     const parsed = parseScriptSource(source);
     expect(scriptDefErrors({ jobs: [serializeJob(editableJob(parsed.jobs[0]))] })).toEqual([]);
     expect(parsed.warnings.length).toBeGreaterThan(0);
