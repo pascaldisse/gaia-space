@@ -44,6 +44,8 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V73 → feat/w11-auth (OAuth consent UI; implicit/ROPC intentionally excluded: KB §05 deprecated/not recommended) ☀wave11 — no schema migration required
 - V74 → feat/w11-devenv (standby pool live run) ☀wave11
 - V75 → feat/w11-calls (call recording completion) ☀wave11
+- V76 → feat/w11-chat (chat core: attachments lifecycle · mentions · pinning · drafts/typing · scheduled · polls) ☀crownA
+- V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 356 rows): done 59 · partial 178 · stub 4 · missing 115. Matrix NOT green — steering loop active.
