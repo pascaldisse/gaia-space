@@ -7,11 +7,14 @@ import {
   type TeamMembership,
   type MembershipEditRequest,
   type MemberLocation,
+  type DirectoryFeedEvent,
+  type MessengerContact,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { linkProps, useDeepLink } from "../router";
+import { profileId as sessionProfileId } from "../session";
 import "./Members.css";
 
 const newProfile = () => ({
@@ -30,13 +33,17 @@ export default function Members() {
     platformApi.teams(),
   );
   const [roles] = createResource(() => platformApi.roles());
-  const [allMemberships] = createResource(() => platformApi.memberships());
+  const [allMemberships, { refetch: refetchAllMemberships }] = createResource(() => platformApi.memberships());
   const [membershipEdits, { refetch: refetchMembershipEdits }] = createResource(() => platformApi.membershipEditRequests());
   const [locations, { refetch: refetchLocations }] = createResource(() => platformApi.memberLocations());
+  const [directoryFeed, { refetch: refetchDirectoryFeed }] = createResource(() => platformApi.directoryFeed());
+  const [directoryCalendar] = createResource(() => platformApi.directoryCalendar());
   const [profileDraft, setProfileDraft] = createSignal(newProfile());
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
   );
+  const [selectedProfile, setSelectedProfile] = createSignal<Profile | null>(null);
+  const [profileTab, setProfileTab] = createSignal<"about" | "teams" | "contacts">("about");
   const [teamDraft, setTeamDraft] = createSignal(newTeam());
   const [activeTeam, setActiveTeam] = createSignal<Team | null>(null);
   const [memberId, setMemberId] = createSignal("");
@@ -50,6 +57,19 @@ export default function Members() {
   const [locationProfileId, setLocationProfileId] = createSignal("");
   const [locationDraft, setLocationDraft] = createSignal("");
   const [locationType, setLocationType] = createSignal("Building");
+  const [profileMemberships] = createResource(
+    () => selectedProfile()?.id,
+    (id) => id ? platformApi.memberships(undefined, id) : Promise.resolve([] as TeamMembership[]),
+  );
+  const [profileContacts, { refetch: refetchProfileContacts }] = createResource(
+    () => selectedProfile()?.id,
+    (id) => id ? platformApi.messengerContacts(id) : Promise.resolve([] as MessengerContact[]),
+  );
+  const [profileEmailStatus, { refetch: refetchProfileEmailStatus }] = createResource(
+    () => selectedProfile()?.id,
+    (id) => id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null),
+  );
+  const [contactDraft, setContactDraft] = createSignal({ contact_type: "Telegram", login: "" });
   const [memberships, { refetch: refetchMemberships }] = createResource(
     () => activeTeam()?.id,
     (id) =>
@@ -105,6 +125,38 @@ export default function Members() {
     setProfileEditing(null);
     setProfileDraft(newProfile());
   };
+  const ownProfileId = () => sessionProfileId() || profiles()?.find((profile) => !profile.archived)?.id || "";
+  const isOwnProfile = () => selectedProfile()?.id === ownProfileId();
+  const selectProfile = (profile: Profile) => {
+    setSelectedProfile(profile);
+    setProfileTab("about");
+    if (profile.id === ownProfileId()) beginEdit(profile);
+  };
+  const saveEmailStatus = async (status: "unverified" | "verified" | "bounced") => {
+    const profile = selectedProfile();
+    if (!profile) return;
+    try { await platformApi.setProfileEmailStatus({ profile_id: profile.id, status, verified_at: status === "verified" ? Math.floor(Date.now() / 1000) : null }); setProblem(""); refetchProfileEmailStatus(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const saveMessengerContact = async () => {
+    const profile = selectedProfile(); const draft = contactDraft();
+    if (!profile || !draft.login.trim()) return;
+    try { await platformApi.saveMessengerContact({ profile_id: profile.id, contact_type: draft.contact_type, login: draft.login.trim(), deep_link: null }); setContactDraft({ contact_type: "Telegram", login: "" }); setProblem(""); refetchProfileContacts(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const removeMessengerContact = async (contact: MessengerContact) => {
+    if (!contact.id) return;
+    try { await platformApi.deleteMessengerContact(contact.id, contact.profile_id); setProblem(""); refetchProfileContacts(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const feedText = (event: DirectoryFeedEvent) => {
+    const team = event.team_name ? ` · ${event.team_name}` : "";
+    if (event.event_type === "member.joined") return `${event.profile_name} joined the organization`;
+    if (event.event_type === "member.left") return `${event.profile_name} left the organization`;
+    if (event.event_type === "team.joined") return `${event.profile_name} joined${team}`;
+    if (event.event_type === "team.left") return `${event.profile_name} left${team}`;
+    return `${event.profile_name} changed role${event.role_name ? ` to ${event.role_name}` : ""}${team}`;
+  };
   let linkedProfile = "";
   useDeepLink(
     "profile",
@@ -113,7 +165,7 @@ export default function Members() {
       const profile = profiles()?.find((item) => item.id === id);
       if (profile) {
         linkedProfile = id;
-        beginEdit(profile);
+        selectProfile(profile);
       }
     },
     () => {
@@ -148,6 +200,7 @@ export default function Members() {
       abandonEdit();
       setProblem("");
       refetchProfiles();
+      refetchDirectoryFeed();
     } catch (error) {
       setProblem(String(error));
     }
@@ -169,6 +222,7 @@ export default function Members() {
       });
       setProblem("");
       refetchProfiles();
+      refetchDirectoryFeed();
     } catch (error) {
       setProblem(String(error));
     }
@@ -213,6 +267,8 @@ export default function Members() {
       setRoleId("");
       setProblem("");
       refetchMemberships();
+      refetchAllMemberships();
+      refetchDirectoryFeed();
     } catch (error) {
       setProblem(String(error));
     }
@@ -222,6 +278,8 @@ export default function Members() {
       await platformApi.removeMembership(membership.id);
       setProblem("");
       refetchMemberships();
+      refetchAllMemberships();
+      refetchDirectoryFeed();
     } catch (error) {
       setProblem(String(error));
     }
@@ -265,6 +323,33 @@ export default function Members() {
           {problem()}
         </p>
       </Show>
+      <Show when={selectedProfile()}>{(profile) => (
+        <section class="org-profile-panel" aria-label="Profile detail">
+          <div class="panel-title"><Avatar name={profile().display_name || profile().username} size={34} /><div><h2>{isOwnProfile() ? "My profile" : profile().display_name}</h2><span class="org-sub"><code>@{profile().username}</code>{profile().email ? <><span class="dot">·</span>{profile().email}</> : null}</span></div><button class="ghost small" onClick={() => { setSelectedProfile(null); abandonEdit(); }}>Close</button></div>
+          <Show when={isOwnProfile()} fallback={<>
+            <div class="org-profile-tabs" role="tablist"><button classList={{ active: profileTab() === "about" }} onClick={() => setProfileTab("about")}>About</button><button classList={{ active: profileTab() === "teams" }} onClick={() => setProfileTab("teams")}>Teams</button><button classList={{ active: profileTab() === "contacts" }} onClick={() => setProfileTab("contacts")}>Contacts</button></div>
+            <Show when={profileTab() === "about"}><p class="org-profile-readonly">Username <strong>@{profile().username}</strong></p><p class="org-profile-readonly">Email <strong>{profile().email ?? "Not set"}</strong></p></Show>
+            <Show when={profileTab() === "teams"}><ul class="org-list"><For each={profileMemberships()}>{(membership) => <li><strong>{teams()?.find((team) => team.id === membership.team_id)?.name ?? membership.team_id}</strong><span class="role-pill">{roleName(membership.role_id)}</span></li>}</For></ul><Show when={(profileMemberships() ?? []).length === 0}><p class="org-hint">No team memberships.</p></Show></Show>
+            <Show when={profileTab() === "contacts"}><ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <a href={link()} target="_blank" rel="noreferrer">Open chat</a>}</Show></li>}</For></ul><Show when={(profileContacts() ?? []).length === 0}><p class="org-hint">No contact methods shared.</p></Show></Show>
+          </>}>
+            <form class="org-profile-edit" onSubmit={saveProfile} aria-label="My profile">
+              <label>Display name<input value={profileDraft().display_name} onInput={(event) => setProfileDraft({ ...profileDraft(), display_name: event.currentTarget.value })} /></label>
+              <label>Username<input value={profileDraft().username} onInput={(event) => setProfileDraft({ ...profileDraft(), username: event.currentTarget.value })} /></label>
+              <label>Email<input type="email" value={profileDraft().email} onInput={(event) => setProfileDraft({ ...profileDraft(), email: event.currentTarget.value })} /></label>
+              <button class="primary">Save my profile</button>
+            </form>
+            <section class="org-profile-settings" aria-label="Email status">
+              <label>Email status<select value={profileEmailStatus()?.status ?? "unverified"} onChange={(event) => void saveEmailStatus(event.currentTarget.value as "unverified" | "verified" | "bounced")}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
+              <span class="org-hint">{profileEmailStatus()?.verified_at ? `Verified ${new Date(profileEmailStatus()!.verified_at! * 1000).toLocaleDateString()}` : "No verified email timestamp"}</span>
+            </section>
+            <section class="org-profile-settings" aria-label="Messenger contacts">
+              <div class="panel-title"><h2>Messenger contacts</h2></div>
+              <form class="org-form-inline" onSubmit={(event) => { event.preventDefault(); void saveMessengerContact(); }}><select aria-label="Messenger type" value={contactDraft().contact_type} onChange={(event) => setContactDraft({ ...contactDraft(), contact_type: event.currentTarget.value })}><For each={["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"]}>{(type) => <option value={type}>{type}</option>}</For></select><input aria-label="Messenger login" placeholder="Username or address" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })}/><button class="ghost">Add contact</button></form>
+              <ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <a href={link()} target="_blank" rel="noreferrer">Open chat</a>}</Show><button class="ghost small" onClick={() => void removeMessengerContact(contact)}>Remove</button></li>}</For></ul>
+            </section>
+          </Show>
+        </section>
+      )}</Show>
       <div class="org-layout">
         <section class="org-panel">
           <div class="panel-title">
@@ -357,6 +442,7 @@ export default function Members() {
                           entityType: "profile",
                           entityId: profile.id,
                         })}
+                        onClick={() => selectProfile(profile)}
                       >
                         {profile.display_name}
                       </a>
@@ -370,12 +456,7 @@ export default function Members() {
                     </span>
                   </div>
                   <div class="row-buttons hover-actions">
-                    <button
-                      class="ghost small"
-                      onClick={() => beginEdit(profile)}
-                    >
-                      Edit
-                    </button>
+                    <button class="ghost small" onClick={() => selectProfile(profile)}>View profile</button>
                     <button
                       class="ghost small"
                       onClick={() => archiveProfile(profile)}
@@ -553,6 +634,10 @@ export default function Members() {
             )}
           </Show>
         </section>
+      </div>
+      <div class="org-directory-addons">
+        <section class="org-panel" aria-label="Company feed"><div class="panel-title"><h2>Company feed</h2><span class="org-hint">Member and role activity</span></div><Show when={directoryFeed.loading}><p class="org-hint">Loading activity…</p></Show><Show when={!directoryFeed.loading && (directoryFeed() ?? []).length === 0}><p class="org-hint">No directory activity yet.</p></Show><ul class="org-list"><For each={directoryFeed()}>{(event) => <li><Avatar name={event.profile_name} size={28} /><div class="org-list-text"><strong>{feedText(event)}</strong><span class="org-sub">{new Date(event.created_at * 1000).toLocaleDateString()}</span></div></li>}</For></ul></section>
+        <section class="org-panel" aria-label="Organization calendar"><div class="panel-title"><h2>Organization calendar</h2><span class="org-hint">Approved time off</span></div><Show when={directoryCalendar.loading}><p class="org-hint">Loading calendar…</p></Show><Show when={!directoryCalendar.loading && (directoryCalendar() ?? []).length === 0}><p class="org-hint">No approved absences.</p></Show><ul class="org-list"><For each={directoryCalendar()}>{(absence) => <li><Avatar name={absence.profile_name} size={28} /><div class="org-list-text"><strong>{absence.profile_name} · {absence.reason_type}</strong><span class="org-sub">{absence.date_from} – {absence.date_to} · {absence.availability}</span></div></li>}</For></ul></section>
       </div>
     </section>
   );

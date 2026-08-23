@@ -2456,7 +2456,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "dispatch_application_payload"
         | "parse_application_payload"
         | "application_payload_classes"
-        | "list_redirect_uris" => CommandPolicy::AppAdmin,
+        | "list_redirect_uris"
+        // Advanced Team Directory is an optional organization feature; its company
+        // activity and absence overview are administrator-only, never a member feed.
+        | "list_directory_feed"
+        | "list_directory_calendar" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -2490,6 +2494,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
+        | "delete_messenger_contact"
         | "remove_team_membership"
         | "request_membership_edit"
         | "decide_membership_edit"
@@ -4709,6 +4714,12 @@ async fn cmd(
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
         };
     }
+    if name == "list_directory_calendar" {
+        return match platform::list_directory_calendar() {
+            Ok(rows) => Json(json!({"ok":true,"value":platform::redact_directory_calendar_for(rows,&user.profile_id,user.role == "GlobalAdmin")})).into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
+        };
+    }
     if name == "update_absence" {
         return absence_update(&user, &body);
     }
@@ -4838,6 +4849,7 @@ async fn cmd(
     "delete_issue_status" => issues::delete_issue_status(id: String),
     "delete_issue_attachment" => issues::delete_issue_attachment(id: String),
     "delete_message" => chat::delete_message(id: String),
+    "delete_messenger_contact" => platform::delete_messenger_contact(id: String, profile_id: String),
     "delete_package_repository" => pipelines::delete_package_repository(id: String),
     "delete_package_version" => pipelines::delete_package_version(id: String),
     "delete_pipeline_script" => pipelines::delete_pipeline_script(id: String),
@@ -4953,6 +4965,7 @@ async fn cmd(
     "list_messenger_contacts" => platform::list_messenger_contacts(profile_id: String),
     "list_principals" => platform::list_principals(),
     "list_profiles" => platform::list_profiles(),
+    "list_directory_feed" => platform::list_directory_feed(limit: Option<usize>),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),
     "get_merge_policy" => review::get_merge_policy(project_id: String),
@@ -5542,6 +5555,24 @@ mod tests {
         let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
         bind_session_identity(&mut close, "me");
         assert_eq!(close["author_id"], json!("me"));
+    }
+
+    #[test]
+    fn profile_communication_writes_are_bound_to_the_session() {
+        for name in ["save_messenger_contact", "delete_messenger_contact", "set_profile_email_status"] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::Session)), "{name}");
+        }
+        let mut body = json!({"value":{"profile_id":"someone-else"},"profile_id":"someone-else"});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["value"]["profile_id"], json!("me"));
+        assert_eq!(body["profile_id"], json!("me"));
+    }
+
+    #[test]
+    fn advanced_directory_commands_are_admin_gated() {
+        for name in ["list_directory_feed", "list_directory_calendar"] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::AppAdmin)), "{name}");
+        }
     }
 
     #[test]

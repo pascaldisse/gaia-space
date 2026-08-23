@@ -59,9 +59,10 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V123 → feat/w12-registry (§03 non-CI/CD registry protocol per-format detail) ☀wave12
 - V124 → feat/w12-api (§07 non-devenv HTTP API remainder) ☀wave12
 - V126 → feat/w13-chatdocs (§04 entity mentions; migration-only slot) ☀Terra
+- V127 → feat/w13-directory (§06 Advanced Directory feed/calendar + profile separation) ☀Terra
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 359 rows): done 105 · partial 198 · stub 5 · missing 51. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 359 rows): done 109 · partial 198 · stub 3 · missing 49. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Frozen baseline revised 356→357 (2026-08-23 ruling): 133f77c split the Polls row into `done` (V117) + `missing` (stickers/saved) — legitimate row split, no freeze violation. 371 has no row source in this tree. Baseline 357→359 (2026-08-23 w12 ruling): 8428cf3 split §04 Threads row (scheduled/paging done + thread-as-channel partial) and Mentions row (team targets done + entity mentions partial) — Polls-precedent-legitimate splits, no freeze violation.
 
@@ -95,11 +96,11 @@ Progress (V119): team mention targets are durable message facts with ACL-filtere
 Worst gaps: remaining operational right enforcement · org settings/multi-workspace · SSO/SAML external modules · OAuth consent UI depth.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
-54 rows — done 21 · partial 28 · stub 3 · missing 2.
+54 rows — done 25 · partial 28 · stub 1 · missing 0.
 Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29 `subscription_scopes`, org/team/project/location/profile/entity targets, wildcard `*` event, precedence scope→setting→default) + Inbox subscription editor rail ⇒ “Subscription editor / personal feeds” stub→partial, “Whole-org/team/project/location subscription targets” missing→partial. Tests: `personal::tests::scoped_subscription_beats_event_default_and_wildcard`, `invalid_subscription_target_is_rejected`.
 Progress (feat/w7-personal ☀Kali, SCHEMA_V53): to-do bodies carry a `content_kind` (text|markdown) rendered through a token renderer that never emits HTML; `postpone_todo` rolls an overdue task over to today before shifting it and the task view groups Today/Later/No date/Done; `convert_todo_to_issue` promotes a project to-do into that project's issue, closing the to-do and anchoring it to the issue it became; absences separate a possibly confidential reason from a public availability (away|partial|available), redacted to `Private` for every reader but the person and admins at the web chokepoint. Tests: `personal::dashboard_preference_tests::{postponing_an_overdue_task_rolls_it_over_to_today_first,a_todo_body_is_text_or_markdown_and_nothing_else,a_confidential_reason_is_hidden_from_colleagues_but_the_availability_is_not,availability_is_a_closed_set,v53_columns_land_on_a_pre_v53_database_with_todays_behaviour}` + `src/markdownLite.test.ts`. UNVERIFIED: `convert_todo_to_issue` has no automated test (it needs the process-global database) — the handler path is compile-checked and wired only.
 Progress (feat/w12-personal ☀Lakshmi, SCHEMA_V122): desk assignments are now durable typed-location facts with normalized floor-map x/y coordinates, optional seat label, and since/until history; Locations renders create/list/remove controls. V96 typed locations and V98/V99 profile communication/principal backends were found already landed, so their parity rows were corrected from stale stub/missing claims.
-Worst gaps: Advanced Directory company feed/calendar · own-profile versus read-only profile tabs · dashboard personalization · subscription/feeds system.
+Worst gaps: dashboard personalization · subscription/feeds system.
 
 ## 07 Dev Env / Apps / HTTP API (audited ✓ — rows: reports/parity/07-devenv-api.md @ 539fb5f)
 42 rows — done 5 · partial 27 · stub 0 · missing 10.

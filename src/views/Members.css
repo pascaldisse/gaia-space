@@ -24,6 +24,19 @@
 .org-panel:first-child { min-height: 360px; }
 .org-panel:nth-child(3) { grid-column: 1 / -1; min-height: 250px; }
 .org-panel:nth-child(3) .org-list { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 5px 12px; }
+.org-profile-panel { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 14px; padding: 18px; margin: 0 0 16px; }
+.org-profile-panel .panel-title > div { flex: 1; min-width: 0; }
+.org-profile-tabs { display: flex; gap: 6px; margin: 12px 0; border-bottom: 1px solid var(--surface-border); }
+.org-profile-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-muted); padding: 7px 10px; }
+.org-profile-tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+.org-profile-readonly { display: grid; gap: 3px; font-size: 13px; color: var(--text-muted); }
+.org-profile-readonly strong { color: var(--text-strong); }
+.org-profile-edit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; }
+.org-profile-edit label { display: grid; gap: 4px; font-size: 11px; color: var(--text-muted); }
+.org-profile-settings { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--surface-border); }
+.org-profile-settings > label { display: grid; gap: 4px; max-width: 220px; font-size: 11px; color: var(--text-muted); }
+.org-directory-addons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.org-directory-addons .org-list { max-height: 300px; overflow: auto; }
 .panel-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .panel-title h2 { font-size: 14px; margin: 0; font-weight: 600; color: var(--text-strong); }
 .count-chip {
@@ -101,6 +114,7 @@
 .muted { font-size: 11px; color: var(--text-muted); }
 
 @media (max-width: 1000px) {
+  .org-layout, .org-directory-addons, .org-profile-edit { grid-template-columns: 1fr; }
   .org-layout { grid-template-columns: 1fr; }
   .hover-actions { opacity: 1; }
 }
