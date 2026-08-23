@@ -2247,6 +2247,15 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_message_draft"
         | "set_channel_typing"
         | "list_channel_typing" => CommandPolicy::Session,
+        // A scheduled message is caller-owned: identity binding forces `author_id` to the
+        // session, and chat.rs refuses any row authored by someone else.
+        "schedule_message"
+        | "list_scheduled_messages"
+        | "get_scheduled_message"
+        | "update_scheduled_message"
+        | "cancel_scheduled_message" => CommandPolicy::Session,
+        // Firing due intents is a server duty, not a client action.
+        "deliver_due_scheduled_messages" => CommandPolicy::AppAdmin,
         // Attachment lifecycle rides the message it belongs to: a session alone is not
         // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
@@ -3585,6 +3594,20 @@ fn authorize_command(
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
                 }
             }
+            if name == "schedule_message" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                // Postponing a message is still posting it: same right, earlier click.
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
             if name == "list_thread_replies" {
                 let thread_of: String =
                     arg(body, "thread_of").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -4754,6 +4777,8 @@ async fn cmd(
     "list_message_drafts" => chat::list_message_drafts(author_id: String),
     "get_message_draft" => chat::get_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
     "list_channel_typing" => chat::list_channel_typing(channel_id: String, acting_profile_id: Option<String>, ttl_secs: Option<i64>),
+    "list_scheduled_messages" => chat::list_scheduled_messages(author_id: String, channel_id: Option<String>, status: Option<String>),
+    "get_scheduled_message" => chat::get_scheduled_message(id: String, author_id: String),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
@@ -4884,6 +4909,10 @@ async fn cmd(
     "save_message_draft" => chat::save_message_draft(channel_id: String, author_id: String, thread_key: Option<String>, text: String),
     "delete_message_draft" => chat::delete_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
     "set_channel_typing" => chat::set_channel_typing(channel_id: String, profile_id: String, typing: bool),
+    "schedule_message" => chat::schedule_message(id: String, channel_id: String, author_id: String, text: String, thread_of: Option<String>, scheduled_at: i64),
+    "update_scheduled_message" => chat::update_scheduled_message(id: String, author_id: String, text: Option<String>, scheduled_at: Option<i64>),
+    "cancel_scheduled_message" => chat::cancel_scheduled_message(id: String, author_id: String),
+    "deliver_due_scheduled_messages" => chat::deliver_due_scheduled_messages(now: Option<i64>, limit: Option<i64>),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
@@ -5113,6 +5142,56 @@ fn spawn_pipeline_schedule_ticker() {
     });
 }
 
+const DEFAULT_CHAT_SCHEDULE_TICK_SECS: u64 = 30;
+
+/// Cadence + batch of the scheduled-message ticker. Pure so the policy is unit-testable;
+/// `None` = disabled (zero or invalid cadence), and the batch bounds one tick's work.
+fn chat_schedule_ticker_config(secs: Option<&str>, batch: Option<&str>) -> Option<(u64, i64)> {
+    let secs = match secs.map(str::trim) {
+        None | Some("") => DEFAULT_CHAT_SCHEDULE_TICK_SECS,
+        Some(raw) => raw.parse::<u64>().ok()?,
+    };
+    if secs == 0 {
+        return None;
+    }
+    let batch = match batch.map(str::trim) {
+        None | Some("") => chat::SCHEDULED_TICK_LIMIT_DEFAULT,
+        Some(raw) => raw.parse::<i64>().ok().filter(|b| *b > 0)?,
+    };
+    Some((secs, batch))
+}
+
+/// Delivers due scheduled messages in bounded batches. Each tick leases rows one by one,
+/// so a slow or failing channel costs one row, not the run.
+fn spawn_chat_schedule_ticker() {
+    let Some((secs, batch)) = chat_schedule_ticker_config(
+        env::var("SPACE_CHAT_SCHEDULE_TICK_SECS").ok().as_deref(),
+        env::var("SPACE_CHAT_SCHEDULE_TICK_BATCH").ok().as_deref(),
+    ) else {
+        eprintln!("chat schedule ticker: disabled");
+        return;
+    };
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(secs));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            match tokio::task::spawn_blocking(move || {
+                chat::deliver_due_scheduled_messages(None, Some(batch))
+            })
+            .await
+            {
+                Ok(Ok(sent)) if !sent.is_empty() => {
+                    eprintln!("chat schedule ticker: delivered {} message(s)", sent.len())
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => eprintln!("chat schedule ticker: tick failed: {e}"),
+                Err(e) => eprintln!("chat schedule ticker: task panicked: {e}"),
+            }
+        }
+    });
+}
+
 fn spawn_webhook_ticker() {
     let Some((secs, batch)) = webhook_ticker_config(
         env::var("SPACE_WEBHOOK_TICK_SECS").ok().as_deref(),
@@ -5146,6 +5225,7 @@ async fn main() {
     bootstrap();
     spawn_webhook_ticker();
     spawn_pipeline_schedule_ticker();
+    spawn_chat_schedule_ticker();
     let app = Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
@@ -5253,6 +5333,44 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_schedule_ticker_defaults_and_disables() {
+        assert_eq!(
+            chat_schedule_ticker_config(None, None),
+            Some((
+                DEFAULT_CHAT_SCHEDULE_TICK_SECS,
+                chat::SCHEDULED_TICK_LIMIT_DEFAULT
+            ))
+        );
+        assert_eq!(
+            chat_schedule_ticker_config(Some("5"), Some("7")),
+            Some((5, 7))
+        );
+        assert_eq!(chat_schedule_ticker_config(Some("0"), None), None);
+        assert_eq!(chat_schedule_ticker_config(Some("nope"), None), None);
+        assert_eq!(chat_schedule_ticker_config(None, Some("0")), None);
+    }
+
+    #[test]
+    fn scheduled_message_commands_are_session_scoped() {
+        for name in [
+            "schedule_message",
+            "list_scheduled_messages",
+            "get_scheduled_message",
+            "update_scheduled_message",
+            "cancel_scheduled_message",
+        ] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        assert!(matches!(
+            command_policy("deliver_due_scheduled_messages"),
+            Some(CommandPolicy::AppAdmin)
+        ));
+    }
 
     #[test]
     fn pipeline_schedule_ticker_is_opt_in_and_configurable() {
