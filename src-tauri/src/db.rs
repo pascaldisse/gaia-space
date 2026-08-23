@@ -590,6 +590,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V85: transcript segments are durable, source-attributed call facts. The
+    // transcriber remains external; this boundary deliberately stores no audio.
+    if version < 85 {
+        tx.execute_batch(SCHEMA_V85)?;
+    }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
@@ -1378,6 +1383,23 @@ CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_parti
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+/// V85: durable transcription substrate; captions and summaries derive from these segments.
+pub(crate) const SCHEMA_V85: &str = r#"
+CREATE TABLE IF NOT EXISTS call_transcript_segments (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker_id TEXT REFERENCES profiles(id),
+    text TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'external' CHECK(source IN ('external','manual')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK(length(trim(text)) > 0),
+    CHECK(ended_at >= started_at)
+);
+CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
