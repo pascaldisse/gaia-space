@@ -17,6 +17,7 @@ use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest;
 use std::{
     collections::HashMap,
     env,
@@ -1049,6 +1050,30 @@ fn admin(h: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     } else {
         Err(err(StatusCode::FORBIDDEN, "admin required"))
     }
+}
+async fn capabilities() -> impl IntoResponse {
+    Json(json!({"ok":true,"value":{"protocol":1,"features":{"mobile_qr_pairing":true,"project_role_templates":true,"membership_approval":true}}}))
+}
+#[derive(Deserialize)] struct PairConsume { code: String }
+async fn create_mobile_pairing(h: HeaderMap) -> impl IntoResponse {
+    let user = match user_by_token(&h) { Ok(user) => user, Err(error) => return error.into_response() };
+    let raw = token();
+    let digest = format!("{:x}", sha2::Sha256::digest(raw.as_bytes()));
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    if let Err(e) = c.execute("INSERT INTO mobile_pairings(code_hash,user_id,expires_at) VALUES(?1,?2,unixepoch()+120)", params![digest,user.id]) { return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(); }
+    Json(json!({"ok":true,"value":{"code":raw,"expires_in":120,"protocol":1}})).into_response()
+}
+async fn consume_mobile_pairing(Json(input): Json<PairConsume>) -> impl IntoResponse {
+    if input.code.len() < 32 { return err(StatusCode::BAD_REQUEST, "invalid pairing code").into_response(); }
+    let digest = format!("{:x}", sha2::Sha256::digest(input.code.as_bytes()));
+    let c = match db::conn() { Ok(c) => c, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response() };
+    let user_id: Option<String> = c.query_row("UPDATE mobile_pairings SET consumed_at=unixepoch() WHERE code_hash=?1 AND consumed_at IS NULL AND expires_at>unixepoch() RETURNING user_id", [&digest], |r| r.get(0)).optional().unwrap_or(None);
+    let Some(user_id) = user_id else { return err(StatusCode::UNAUTHORIZED, "pairing code expired or already used").into_response(); };
+    let session = token();
+    if let Err(e)=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![session,user_id]) { return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response(); }
+    let mut response=Json(json!({"ok":true,"value":{"paired":true}})).into_response();
+    let cookie=format!("space_session={session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000");
+    match HeaderValue::from_str(&cookie) { Ok(value)=>{response.headers_mut().insert(header::SET_COOKIE,value);response}, Err(_)=>err(StatusCode::INTERNAL_SERVER_ERROR,"cookie").into_response() }
 }
 async fn login(
     State(app): State<App>,
@@ -4509,7 +4534,10 @@ async fn main() {
                 .put(caldav_put_event)
                 .delete(caldav_delete_event),
         )
-        .route("/api/auth/login", post(login))
+        .route("/api/capabilities", get(capabilities))
+.route("/api/auth/mobile-pairings", post(create_mobile_pairing))
+.route("/api/auth/mobile-pairings/consume", post(consume_mobile_pairing))
+.route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))

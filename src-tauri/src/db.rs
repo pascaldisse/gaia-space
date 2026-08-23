@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 93;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V92: project role templates/team bindings and reviewable membership edits.
+    if version < 92 {
+        tx.execute_batch(SCHEMA_V92)?;
+    }
+    // V93: short-lived, single-use mobile pairing grants store only a hash.
+    if version < 93 {
+        tx.execute_batch(SCHEMA_V93)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -610,6 +618,18 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
+pub(crate) const SCHEMA_V92: &str = r#"
+CREATE TABLE IF NOT EXISTS project_role_templates (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT, role_kind TEXT NOT NULL CHECK(role_kind IN ('ADMIN','MEMBER','CUSTOM','EXTERNAL')), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS project_roles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, template_id TEXT REFERENCES project_role_templates(id), name TEXT NOT NULL, role_kind TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, UNIQUE(project_id,name));
+CREATE TABLE IF NOT EXISTS project_team_roles (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE, project_role_id TEXT NOT NULL REFERENCES project_roles(id) ON DELETE CASCADE, PRIMARY KEY(project_id,team_id,project_role_id));
+CREATE TABLE IF NOT EXISTS membership_edit_requests (id TEXT PRIMARY KEY, membership_id TEXT NOT NULL REFERENCES team_memberships(id) ON DELETE CASCADE, requested_by TEXT NOT NULL REFERENCES profiles(id), patch_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('PENDING','APPROVED','REJECTED')) DEFAULT 'PENDING', approver_id TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), decided_at INTEGER);
+CREATE INDEX IF NOT EXISTS membership_edit_requests_membership ON membership_edit_requests(membership_id,status);
+"#;
+pub(crate) const SCHEMA_V93: &str = r#"
+CREATE TABLE IF NOT EXISTS mobile_pairings (code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE INDEX IF NOT EXISTS mobile_pairings_expiry ON mobile_pairings(expires_at);
+"#;
+
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,
@@ -1415,7 +1435,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 93);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

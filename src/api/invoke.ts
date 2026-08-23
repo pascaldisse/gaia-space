@@ -22,16 +22,26 @@ type CmdResponse<T> = CmdOk<T> | CmdErr;
 
 declare global {
   interface Window {
-    __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+    __TAURI_INTERNALS__?: {
+      invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+    };
   }
 }
 
-const isTauri = () => typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
+const isTauri = () =>
+  typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
 // A remote page inside the mobile shell has Tauri available, but must call its
 // selected server over HTTP rather than the shell's intentionally empty IPC API.
-const isMobileServer = () => isTauri() && window.__GAIA_SPACE_MOBILE__ === true && window.location.hostname !== "tauri.localhost" && window.location.protocol !== "tauri:";
+const isMobileServer = () =>
+  isTauri() &&
+  window.__GAIA_SPACE_MOBILE__ === true &&
+  window.location.hostname !== "tauri.localhost" &&
+  window.location.protocol !== "tauri:";
 
-export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function invoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (isTauri() && !isMobileServer()) {
     return window.__TAURI_INTERNALS__!.invoke(cmd, args) as Promise<T>;
   }
@@ -49,5 +59,23 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     throw new Error(`${cmd}: bad response (HTTP ${res.status})`);
   }
   if (!body.ok) throw new Error(body.error);
+  return body.value;
+}
+
+export type ServerCapabilities = {
+  protocol: number;
+  features: Record<string, boolean>;
+};
+/** Server handshake precedes mobile navigation; callers must gate optional surfaces on it. */
+export async function serverCapabilities(
+  base = import.meta.env.BASE_URL,
+): Promise<ServerCapabilities> {
+  const response = await fetch(`${base}api/capabilities`, {
+    credentials: "include",
+  });
+  const body = (await response.json()) as CmdResponse<ServerCapabilities>;
+  if (!response.ok || !body.ok)
+    throw new Error(!body.ok ? body.error : "capability negotiation failed");
+  if (body.value.protocol !== 1) throw new Error("Unsupported server protocol");
   return body.value;
 }
