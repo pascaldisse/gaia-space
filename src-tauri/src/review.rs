@@ -30,6 +30,19 @@ pub struct Review {
     pub channel_id: Option<String>,
     pub repo_path: Option<String>,
 }
+/// KB §1 `CodeReviewAggregatedStatus`: one list badge derived from persisted review facts.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewAggregatedStatus {
+    Merged,
+    Closed,
+    Accepted,
+    NeedsMyReview,
+    NeedsMyAttention,
+    WaitingForReview,
+    WaitingForUpdates,
+    Opened,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewParticipant {
     pub review_id: String,
@@ -278,6 +291,41 @@ pub fn list_review_file_states(
 pub fn save_review_file_state(state: ReviewFileState) -> Result<()> {
     db::conn()?.execute("INSERT INTO review_file_states(review_id,profile_id,file_path,viewed,collapsed) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(review_id,profile_id,file_path) DO UPDATE SET viewed=excluded.viewed,collapsed=excluded.collapsed", rusqlite::params![state.review_id,state.profile_id,state.file_path,state.viewed,state.collapsed]).map_err(|e|e.to_string())?;
     Ok(())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn review_aggregated_status(
+    review_id: String,
+    profile_id: String,
+) -> Result<ReviewAggregatedStatus> {
+    let c = db::conn()?;
+    let review =
+        get_review(review_id.clone())?.ok_or_else(|| format!("review '{review_id}' not found"))?;
+    match review.state.as_str() {
+        "Merged" => return Ok(ReviewAggregatedStatus::Merged),
+        "Closed" | "Deleted" => return Ok(ReviewAggregatedStatus::Closed),
+        _ => {}
+    }
+    let mine: Option<(String, Option<String>, bool)> = c.query_row("SELECT role,state,their_turn FROM review_participants WHERE review_id=?1 AND profile_id=?2", rusqlite::params![review_id,profile_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).ok();
+    if let Some((role, state, their_turn)) = mine {
+        if role == "Reviewer" && their_turn {
+            return Ok(ReviewAggregatedStatus::NeedsMyReview);
+        }
+        if role == "Author" && their_turn {
+            return Ok(ReviewAggregatedStatus::NeedsMyAttention);
+        }
+        if state.as_deref() == Some("accepted") {
+            return Ok(ReviewAggregatedStatus::Accepted);
+        }
+    }
+    let reviewers_waiting: i64 = c.query_row("SELECT COUNT(*) FROM review_participants WHERE review_id=?1 AND role='Reviewer' AND (state IS NULL OR state='waiting')", rusqlite::params![review_id], |r|r.get(0)).map_err(|e|e.to_string())?;
+    Ok(if reviewers_waiting > 0 {
+        ReviewAggregatedStatus::WaitingForReview
+    } else if review.turn_based {
+        ReviewAggregatedStatus::WaitingForUpdates
+    } else {
+        ReviewAggregatedStatus::Opened
+    })
 }
 
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------

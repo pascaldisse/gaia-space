@@ -4168,6 +4168,7 @@ async fn cmd(
     "list_review_discussions" => review::list_review_discussions(review_id: String),
     "set_suggested_edit_status" => review::set_suggested_edit_status(id: String, status: String, actor_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
+    "review_aggregated_status" => review::review_aggregated_status(review_id: String, profile_id: String),
     "list_review_file_states" => review::list_review_file_states(review_id: String, profile_id: String),
     "save_review_file_state" => review::save_review_file_state(state: review::ReviewFileState),
     "list_reviews" => review::list_reviews(),
