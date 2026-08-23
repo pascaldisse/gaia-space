@@ -984,7 +984,11 @@ fn principal_allowed(json: &Option<String>, actor: &str) -> bool {
 }
 fn protection_matches(rule: &ProtectedBranchRule, branch: &str) -> bool {
     if rule.regex {
-        return false;
+        // Invalid administrator-supplied regexes must fail closed: they protect no
+        // branch operation and can never confer a bypass permission.
+        return regex::Regex::new(&rule.branch_pattern)
+            .map(|pattern| pattern.is_match(branch))
+            .unwrap_or(false);
     }
     branch_matches(&rule.branch_pattern, branch)
 }
@@ -994,9 +998,17 @@ fn bypasses_quality_gate_tx(
     branch: &str,
     actor: &str,
 ) -> Result<bool> {
-    Ok(protected_rows_tx(conn, project_id)?.iter().any(|rule| {
-        protection_matches(rule, branch) && principal_allowed(&rule.bypass_quality_gate_json, actor)
-    }))
+    let matching: Vec<ProtectedBranchRule> = protected_rows_tx(conn, project_id)?
+        .into_iter()
+        .filter(|rule| protection_matches(rule, branch))
+        .collect();
+    // Protected-branch permissions compose restrictively: a broad bypass grant
+    // cannot weaken a more specific matching protection rule. This mirrors
+    // `enforce_merge_permission_tx`, which requires every matching rule to allow.
+    Ok(!matching.is_empty()
+        && matching
+            .iter()
+            .all(|rule| principal_allowed(&rule.bypass_quality_gate_json, actor)))
 }
 fn enforce_merge_permission_tx(
     conn: &Connection,
@@ -2387,6 +2399,52 @@ mod tests {
         repo.reference(&format!("refs/heads/{target_branch}"), oid, true, "merge")
             .map_err(|e| e.to_string())?;
         Ok(oid.to_string())
+    }
+
+    #[test]
+    fn protected_branch_regexes_match_and_invalid_patterns_fail_closed() {
+        let matching = ProtectedBranchRule {
+            id: "regex".into(),
+            project_id: "p".into(),
+            branch_pattern: "^release/[0-9]+$".into(),
+            regex: true,
+            allow_create_json: None,
+            allow_push_json: None,
+            allow_delete_json: None,
+            allow_force_push_json: None,
+            allow_merge_json: None,
+            linear_history: false,
+            bypass_quality_gate_json: None,
+        };
+        assert!(protection_matches(&matching, "release/42"));
+        assert!(!protection_matches(&matching, "release/candidate"));
+        let invalid = ProtectedBranchRule {
+            branch_pattern: "[".into(),
+            ..matching
+        };
+        assert!(!protection_matches(&invalid, "main"));
+    }
+
+    #[test]
+    fn quality_gate_bypass_requires_every_matching_protection_rule_to_grant_it() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute(
+            "INSERT INTO protected_branch_rules(id,project_id,branch_pattern,regex,bypass_quality_gate_json) VALUES('broad','demo-project','*',0,'[\"actor\"]')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO protected_branch_rules(id,project_id,branch_pattern,regex,bypass_quality_gate_json) VALUES('narrow','demo-project','main',0,'[\"other\"]')",
+            [],
+        ).unwrap();
+        assert!(!bypasses_quality_gate_tx(&conn, "demo-project", "main", "actor").unwrap());
+        assert!(bypasses_quality_gate_tx(&conn, "demo-project", "feature/x", "actor").unwrap());
+        conn.execute(
+            "UPDATE protected_branch_rules SET bypass_quality_gate_json='[\"actor\"]' WHERE id='narrow'",
+            [],
+        ).unwrap();
+        assert!(bypasses_quality_gate_tx(&conn, "demo-project", "main", "actor").unwrap());
+        drop(db_path);
     }
 
     #[test]
