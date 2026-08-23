@@ -15,6 +15,7 @@ import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { linkProps, useDeepLink } from "../router";
+import { profileId } from "../session";
 import "./Members.css";
 
 const newProfile = () => ({
@@ -41,13 +42,19 @@ export default function Members() {
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
   );
+  const [selectedProfile, setSelectedProfile] = createSignal<Profile | null>(
+    null,
+  );
+  const [profileTab, setProfileTab] = createSignal<
+    "profile" | "contact" | "calendar"
+  >("profile");
   const [emailStatus, { refetch: refetchEmailStatus }] = createResource(
-    () => profileEditing()?.id,
+    () => selectedProfile()?.id ?? profileEditing()?.id,
     (id) =>
       id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null),
   );
   const [contacts, { refetch: refetchContacts }] = createResource(
-    () => profileEditing()?.id,
+    () => selectedProfile()?.id ?? profileEditing()?.id,
     (id) =>
       id
         ? platformApi.messengerContacts(id)
@@ -77,7 +84,7 @@ export default function Members() {
     (teamId) => blogsApi.list(teamId ? { team_id: teamId } : {}),
   );
   const [profileCalendar] = createResource(
-    () => profileEditing()?.id,
+    () => selectedProfile()?.id ?? profileEditing()?.id,
     (id) => {
       if (!id) return Promise.resolve([] as CalendarItem[]);
       const start = Math.floor(Date.now() / 1000);
@@ -178,6 +185,7 @@ export default function Members() {
       : "No role";
 
   const beginEdit = (profile: Profile) => {
+    setSelectedProfile(profile);
     setProfileEditing(profile);
     setProfileDraft({
       id: profile.id,
@@ -198,7 +206,7 @@ export default function Members() {
       const profile = profiles()?.find((item) => item.id === id);
       if (profile) {
         linkedProfile = id;
-        beginEdit(profile);
+        openProfile(profile);
       }
     },
     () => {
@@ -207,6 +215,10 @@ export default function Members() {
     },
   );
 
+  const openProfile = (profile: Profile) => {
+    setSelectedProfile(profile);
+    setProfileTab("profile");
+  };
   const saveProfile = async (event: SubmitEvent) => {
     event.preventDefault();
     const value = profileDraft();
@@ -639,6 +651,97 @@ export default function Members() {
               </p>
             </div>
           </Show>
+          <Show when={selectedProfile()}>
+            {(profile) => (
+              <section class="org-form" aria-label="Profile viewer">
+                <div class="panel-title">
+                  <h3>{profile().display_name}</h3>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    onClick={() => setSelectedProfile(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div class="row-buttons">
+                  <button
+                    type="button"
+                    class="ghost small"
+                    classList={{ active: profileTab() === "profile" }}
+                    onClick={() => setProfileTab("profile")}
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    classList={{ active: profileTab() === "contact" }}
+                    onClick={() => setProfileTab("contact")}
+                  >
+                    Contact
+                  </button>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    classList={{ active: profileTab() === "calendar" }}
+                    onClick={() => setProfileTab("calendar")}
+                  >
+                    Calendar
+                  </button>
+                  <Show when={profile().id === profileId()}>
+                    <button
+                      type="button"
+                      class="primary small"
+                      onClick={() => beginEdit(profile())}
+                    >
+                      Edit my profile
+                    </button>
+                  </Show>
+                </div>
+                <Show when={profileTab() === "profile"}>
+                  <p class="org-sub">
+                    <code>@{profile().username}</code>
+                    <Show when={profile().email}>
+                      <span class="dot">·</span>
+                      {profile().email}
+                    </Show>
+                  </p>
+                </Show>
+                <Show when={profileTab() === "contact"}>
+                  <p class="org-sub">
+                    Email status: {emailStatus()?.status ?? "unverified"}
+                  </p>
+                  <For each={contacts() ?? []}>
+                    {(contact) => (
+                      <p class="org-sub">
+                        {contact.contact_type}:{" "}
+                        {contact.deep_link ? (
+                          <a href={contact.deep_link}>{contact.login}</a>
+                        ) : (
+                          contact.login
+                        )}
+                      </p>
+                    )}
+                  </For>
+                </Show>
+                <Show when={profileTab() === "calendar"}>
+                  <For each={profileCalendar() ?? []}>
+                    {(item) => (
+                      <p class="org-sub">
+                        {stamp(item.starts_at)} · {item.kind} · {item.title}
+                      </p>
+                    )}
+                  </For>
+                  <Show when={(profileCalendar() ?? []).length === 0}>
+                    <p class="org-sub">
+                      No calendar items in the next 14 days.
+                    </p>
+                  </Show>
+                </Show>
+              </section>
+            )}
+          </Show>
           <ul class="org-list">
             <For each={listedProfiles()}>
               {(profile) => (
@@ -655,6 +758,7 @@ export default function Members() {
                           entityType: "profile",
                           entityId: profile.id,
                         })}
+                        onClick={() => openProfile(profile)}
                       >
                         {profile.display_name}
                       </a>
