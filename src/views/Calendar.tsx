@@ -32,13 +32,15 @@ const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
 const [calendarFilter,setCalendarFilter] = createSignal("all");
+const [targetProfile,setTargetProfile] = createSignal("");
+const [targetLocation,setTargetLocation] = createSignal("");
 const [notice,setNotice] = createSignal("");
 const [invitee,setInvitee] = createSignal("");
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
-const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
-  ([profile,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key) : Promise.resolve([]));
+const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), targetProfile(), targetLocation(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
+  ([profile,target_profile,target_location,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key,target_profile||undefined,target_location||undefined) : Promise.resolve([]));
 const [meetings,{refetch:reloadMeetings}] = createResource(() => profileId(), profile => profile ? meetingsApi.list(profile) : Promise.resolve([]));
 const [projects] = createResource(() => platformApi.projects());
 const [calendars] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
@@ -127,7 +129,7 @@ return <section class="calendar-view">
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
-<Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show>
+<div class="calendar-filters"><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">

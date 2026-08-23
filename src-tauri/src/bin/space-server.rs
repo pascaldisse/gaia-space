@@ -4193,7 +4193,7 @@ async fn cmd(
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
-    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>),
+    "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>, target_profile_id: Option<String>, target_location: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
     "list_calendars" => calendar_feeds::list_calendars(profile_id: String),
     "save_calendar" => calendar_feeds::save_calendar(input: calendar_feeds::CalendarInput),

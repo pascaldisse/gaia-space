@@ -1131,16 +1131,39 @@ pub fn calendar_aggregate(
     range_end: i64,
     range_start_date: Option<String>,
     range_end_date: Option<String>,
+    target_profile_id: Option<String>,
+    target_location: Option<String>,
 ) -> Result<Vec<CalendarItem>> {
     let c = db::conn()?;
-    calendar_aggregate_on(
+    let target_profile_id = target_profile_id.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or(&profile_id);
+    let mut items = calendar_aggregate_on(
         &c,
-        &profile_id,
+        target_profile_id,
         range_start,
         range_end,
         range_start_date.as_deref(),
         range_end_date.as_deref(),
-    )
+    )?;
+    if let Some(location) = target_location.as_deref().filter(|value| !value.trim().is_empty()) {
+        let mut statement = err(c.prepare("SELECT id FROM meetings WHERE archived=0 AND location=?1"))?;
+        let meeting_ids = err(statement.query_map([location], |row| row.get::<_, String>(0)))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        items.retain(|item| item.kind == "meeting" && meeting_ids.contains(&item.source_id));
+    }
+    // A calendar owner sees their details. Other profiles receive availability only:
+    // the aggregate still uses each source's existing read scope before redaction.
+    if target_profile_id != profile_id {
+        for item in &mut items {
+            // IDs can be deep links; never return a target-owned identifier to a viewer.
+            item.id = format!("busy-{}", item.starts_at);
+            item.source_id.clear();
+            item.title = "Busy".into();
+            item.project_id = None;
+            item.calendar_id = None;
+        }
+    }
+    Ok(items)
 }
 /// Date-only calendar values (`todos.due_date`, `projects.deadline`) are calendar dates,
 /// not instants: they are compared as `YYYY-MM-DD` strings against the day window the
