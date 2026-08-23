@@ -15,6 +15,89 @@ export const KEY_LENGTH = 5;
 export const deriveKey = (name: string, length = KEY_LENGTH) =>
   name.replace(/[^a-zA-Z0-9]/g, "").slice(0, length).toUpperCase();
 const todayISO = () => new Date().toISOString().slice(0, 10);
+// Project roles: the per-project half of the role model (V92). A role is either
+// minted from an organization template (inheriting its name+kind) or named here;
+// a team binding gives a whole team that role. Every refusal the server can raise
+// (foreign project, archived role, missing right) lands in this panel's own error
+// line, so it can never be mistaken for a failure of the project card above it.
+function ProjectRoles(props: { projectId: string }) {
+  const [panelError, setPanelError] = createSignal("");
+  const [templates] = createResource(platformApi.projectRoleTemplates);
+  const [teams] = createResource(platformApi.teams);
+  const [roles, rolesResource] = createResource(() => props.projectId, id => platformApi.projectRoles(id));
+  const [bindings, bindingsResource] = createResource(() => props.projectId, id => platformApi.projectTeamRoles(id));
+  const [templateId, setTemplateId] = createSignal("");
+  const [roleName, setRoleName] = createSignal("");
+  const [teamId, setTeamId] = createSignal("");
+  const [bindRoleId, setBindRoleId] = createSignal("");
+  const liveRoles = createMemo(() => (roles() ?? []).filter(role => !role.archived));
+  const liveTemplates = createMemo(() => (templates() ?? []).filter(template => !template.archived));
+  const roleName_ = (id: string) => (roles() ?? []).find(role => role.id === id)?.name ?? id;
+  const teamName = (id: string) => (teams() ?? []).find(team => team.id === id)?.name ?? id;
+  const guard = async (work: () => Promise<unknown>) => {
+    setPanelError("");
+    try { await work(); } catch (reason) { setPanelError(humanError(reason)); }
+  };
+  const addRole = (event: SubmitEvent) => {
+    event.preventDefault();
+    // Name is optional only when a template supplies one — the same rule the server keeps.
+    void guard(async () => {
+      const template = templateId() || null;
+      const name = roleName().trim();
+      if (!template && !name) throw new Error("Pick a template or name the role.");
+      await platformApi.createProjectRole({ project_id: props.projectId, template_id: template, name: name || null });
+      setRoleName(""); setTemplateId("");
+      await rolesResource.refetch();
+    });
+  };
+  const bind = (event: SubmitEvent) => {
+    event.preventDefault();
+    void guard(async () => {
+      if (!teamId() || !bindRoleId()) throw new Error("Pick a team and a role.");
+      await platformApi.assignProjectTeamRole(props.projectId, teamId(), bindRoleId());
+      await bindingsResource.refetch();
+    });
+  };
+  return <section class="project-roles">
+    <h3>Roles</h3>
+    <Show when={panelError()}><p class="error" role="alert">{panelError()}</p></Show>
+    <form class="project-role-form" onSubmit={addRole}>
+      <label>Template <select value={templateId()} onChange={e=>setTemplateId(e.currentTarget.value)}>
+        <option value="">None (name it below)</option>
+        <For each={liveTemplates()}>{template=><option value={template.id}>{template.name} ({template.role_kind})</option>}</For>
+      </select></label>
+      <input placeholder="Role name (optional with a template)" aria-label="Project role name" value={roleName()} onInput={e=>setRoleName(e.currentTarget.value)}/>
+      <button class="primary">Add role</button>
+    </form>
+    <ul class="project-role-list"><For each={roles()} fallback={<li class="hint">No roles yet.</li>}>{role=>
+      <li classList={{ archived: role.archived }}>
+        <strong>{role.name}</strong> <code>{role.role_kind}</code>
+        <Show when={role.template_id}><span class="hint"> from template</span></Show>
+        <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.archiveProjectRole(role.id, !role.archived); await rolesResource.refetch(); })}>
+          {role.archived ? "Restore" : "Archive"}
+        </button>
+      </li>
+    }</For></ul>
+    <h3>Team bindings</h3>
+    <form class="project-role-form" onSubmit={bind}>
+      <label>Team <select value={teamId()} onChange={e=>setTeamId(e.currentTarget.value)}>
+        <option value="">Select a team</option>
+        <For each={(teams() ?? []).filter(team=>!team.archived)}>{team=><option value={team.id}>{team.name}</option>}</For>
+      </select></label>
+      <label>Role <select value={bindRoleId()} onChange={e=>setBindRoleId(e.currentTarget.value)}>
+        <option value="">Select a role</option>
+        <For each={liveRoles()}>{role=><option value={role.id}>{role.name}</option>}</For>
+      </select></label>
+      <button class="primary">Bind team</button>
+    </form>
+    <ul class="project-role-list"><For each={bindings()} fallback={<li class="hint">No team carries a role in this project.</li>}>{binding=>
+      <li>
+        <strong>{teamName(binding.team_id)}</strong> → {roleName_(binding.project_role_id)}
+        <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.removeProjectTeamRole(binding.project_id, binding.team_id, binding.project_role_id); await bindingsResource.refetch(); })}>Remove</button>
+      </li>
+    }</For></ul>
+  </section>;
+}
 export default function Projects() {
   // One destination: the project list IS the entry point, and an opened project
   // shows its boards (whose cards are its issues). No separate Issues/Boards tabs.
@@ -171,6 +254,7 @@ export default function Projects() {
     <Show when={route().entityId && !openProject()}><p class="error" role="alert">This project does not exist or is unavailable.</p></Show><Show when={openProject()}>{project=>
       <section class="project-open">
         <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><a {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</a></header>
+        <ProjectRoles projectId={project().id}/>
         <Boards/>
       </section>
     }</Show>

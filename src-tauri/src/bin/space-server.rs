@@ -17,6 +17,7 @@ use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest;
 use std::{
     collections::HashMap,
     env,
@@ -1063,6 +1064,64 @@ fn admin(h: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
         Err(err(StatusCode::FORBIDDEN, "admin required"))
     }
 }
+async fn capabilities() -> impl IntoResponse {
+    Json(
+        json!({"ok":true,"value":{"protocol":1,"features":{"mobile_qr_pairing":true,"project_role_templates":true,"membership_approval":true}}}),
+    )
+}
+#[derive(Deserialize)]
+struct PairConsume {
+    code: String,
+}
+async fn create_mobile_pairing(h: HeaderMap) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    let raw = token();
+    let digest = format!("{:x}", sha2::Sha256::digest(raw.as_bytes()));
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    if let Err(e) = c.execute(
+        "INSERT INTO mobile_pairings(code_hash,user_id,expires_at) VALUES(?1,?2,unixepoch()+120)",
+        params![digest, user.id],
+    ) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+    }
+    Json(json!({"ok":true,"value":{"code":raw,"expires_in":120,"protocol":1}})).into_response()
+}
+async fn consume_mobile_pairing(Json(input): Json<PairConsume>) -> impl IntoResponse {
+    if input.code.len() < 32 {
+        return err(StatusCode::BAD_REQUEST, "invalid pairing code").into_response();
+    }
+    let digest = format!("{:x}", sha2::Sha256::digest(input.code.as_bytes()));
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let user_id: Option<String> = c.query_row("UPDATE mobile_pairings SET consumed_at=unixepoch() WHERE code_hash=?1 AND consumed_at IS NULL AND expires_at>unixepoch() RETURNING user_id", [&digest], |r| r.get(0)).optional().unwrap_or(None);
+    let Some(user_id) = user_id else {
+        return err(
+            StatusCode::UNAUTHORIZED,
+            "pairing code expired or already used",
+        )
+        .into_response();
+    };
+    let session = token();
+    if let Err(e)=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![session,user_id]) { return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response(); }
+    let mut response = Json(json!({"ok":true,"value":{"paired":true}})).into_response();
+    let cookie =
+        format!("space_session={session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000");
+    match HeaderValue::from_str(&cookie) {
+        Ok(value) => {
+            response.headers_mut().insert(header::SET_COOKIE, value);
+            response
+        }
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "cookie").into_response(),
+    }
+}
 async fn login(
     State(app): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -1890,6 +1949,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
+        // Reading the role catalog is a logged-in read; every *write* below also
+        // passes RIGHTS_ADMIN_COMMANDS (EditRoles), so Session alone never grants one.
+        "list_project_role_templates" | "list_project_roles" | "list_project_team_roles"
+        | "create_project_role_template" | "archive_project_role_template"
+        | "create_project_role" | "archive_project_role"
+        | "assign_project_team_role" | "remove_project_team_role" => CommandPolicy::Session,
         "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
         | "get_organization" | "get_org_settings" | "update_organization" | "update_org_settings" => CommandPolicy::Session,
         "create_cf_definition"
@@ -2056,6 +2121,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "remove_issue_link"
         | "remove_reaction"
         | "remove_team_membership"
+        | "request_membership_edit"
+        | "decide_membership_edit"
         | "save_board_column" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
@@ -2381,6 +2448,32 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
         gaia_space_lib::rights::Right::EditRoles,
     ),
     ("seed_rights", gaia_space_lib::rights::Right::EditRoles),
+    // Project role templates/roles/team bindings are the project-scoped half of the
+    // same role model: minting one hands out access, so it costs the same right.
+    (
+        "create_project_role_template",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "archive_project_role_template",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "create_project_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "archive_project_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "assign_project_team_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "remove_project_team_role",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
 ];
 fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
     let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
@@ -4273,6 +4366,9 @@ async fn cmd(
     "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
     "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
+    "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
+    "request_membership_edit" => platform::request_membership_edit(membership: platform::TeamMembership, requested_by: String),
+    "decide_membership_edit" => platform::decide_membership_edit(id: String, approver_id: String, approve: bool),
     "list_channel_members" => chat::list_channel_members(channel_id: String),
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
@@ -4334,6 +4430,15 @@ async fn cmd(
     "list_role_assignments" => platform::list_role_assignments(profile_id: Option<String>, team_id: Option<String>),
     "list_role_rights" => platform::list_role_rights(role_id: String),
     "list_roles" => platform::list_roles(),
+    "list_project_role_templates" => platform::list_project_role_templates(),
+    "create_project_role_template" => platform::create_project_role_template(input: platform::ProjectRoleTemplateInput),
+    "archive_project_role_template" => platform::archive_project_role_template(id: String, archived: bool),
+    "list_project_roles" => platform::list_project_roles(project_id: Option<String>),
+    "create_project_role" => platform::create_project_role(input: platform::ProjectRoleInput),
+    "archive_project_role" => platform::archive_project_role(id: String, archived: bool),
+    "list_project_team_roles" => platform::list_project_team_roles(project_id: Option<String>),
+    "assign_project_team_role" => platform::assign_project_team_role(project_id: String, team_id: String, project_role_id: String),
+    "remove_project_team_role" => platform::remove_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
     "list_sprints" => issues::list_sprints(board_id: Option<String>),
     "list_app_installs" => applications::list_app_installs(),
@@ -4671,6 +4776,12 @@ async fn main() {
             get(caldav_get_event)
                 .put(caldav_put_event)
                 .delete(caldav_delete_event),
+        )
+        .route("/api/capabilities", get(capabilities))
+        .route("/api/auth/mobile-pairings", post(create_mobile_pairing))
+        .route(
+            "/api/auth/mobile-pairings/consume",
+            post(consume_mobile_pairing),
         )
         .route("/api/auth/login", post(login))
         .route("/api/auth/register", post(register))
