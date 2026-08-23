@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 export type VideoStatus = "scheduled"|"live"|"ended"|"cancelled";
 export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
-export type MeetingRoom = { id:string; name:string; location:string|null; capacity:number; archived:boolean; equipment:string[] };
 export type MeetingAvailability = { rooms: Array<MeetingRoom & { available:boolean }>; conflicts: Array<{ kind:"room"|"meeting"|"absence"; profile_id:string|null; meeting_id:string|null; room_id:string|null; message:string }>; suggestions: MeetingRoom[] };
 export type MeetingOccurrence = { id:string; meeting_id:string; title:string; starts_at:number; ends_at:number; location:string|null };
 export type MeetingRoom = { id:string; name:string; location:string|null; capacity:number; archived:boolean; equipment:string[] };
