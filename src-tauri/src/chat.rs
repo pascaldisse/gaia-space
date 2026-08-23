@@ -602,6 +602,13 @@ fn update_message_impl(c: &Connection, id: &str, text: &str) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// Deletion is soft, and attachments are retained on purpose: the message can be
+/// restored with its files, and the record of what was posted survives the hiding of
+/// the post. A payload leaves only through an explicit `remove_message_attachment`,
+/// which answers to the same author/channel-admin gate as every other attachment write
+/// (see `message_attachment_writable_by`) — archiving a message must never become a
+/// side door for stripping files off it. Documented in
+/// docs/space-knowledge-base/04-collaboration.md.
 fn delete_message_impl(c: &Connection, id: &str) -> Result<()> {
     c.execute(
         "UPDATE messages SET archived=1 WHERE id=?1",
@@ -1164,6 +1171,25 @@ mod tests {
         // the global admin always passes; an unknown message never does
         assert!(message_attachment_writable_by_impl(&c, "msg-att9", "outsider", true).unwrap());
         assert!(!message_attachment_writable_by_impl(&c, "msg-nope", "default-org", false).unwrap());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn archiving_a_message_retains_its_attachments() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att10", "msg-att10");
+        add_message_attachment_impl(&c, "msg-att10", new_attachment("att-10", "data:,hi", 2, None))
+            .unwrap();
+        delete_message_impl(&c, "msg-att10").unwrap();
+        // the soft delete hides the message but keeps the files with it
+        let kept = attachments_for_impl(&c, "msg-att10").unwrap();
+        assert_eq!(kept.len(), 1);
+        // and removing one still answers to the author/channel-admin gate
+        assert!(message_attachment_writable_by_impl(&c, "msg-att10", "default-org", false).unwrap());
+        assert!(!message_attachment_writable_by_impl(&c, "msg-att10", "nobody", false).unwrap());
+        remove_message_attachment_impl(&c, "msg-att10", "att-10").unwrap();
+        assert!(attachments_for_impl(&c, "msg-att10").unwrap().is_empty());
         drop(c);
         drop(path);
     }
