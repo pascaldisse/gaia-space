@@ -7,8 +7,11 @@ import "./Login.css";
 export default function Login() {
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
-const [displayName, setDisplayName] = createSignal("");
-const [registering, setRegistering] = createSignal(false);
+// No register form is wired up yet, so nothing ever flips these: the register
+// branch below is currently unreachable. Kept (read-only) so the call survives
+// until the sign-up UI lands.
+  const [displayName] = createSignal("");
+  const [registering] = createSignal(false);
   const [totpCode, setTotpCode] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
