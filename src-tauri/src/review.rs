@@ -733,7 +733,13 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
         rusqlite::params![id, resolved],
     )
     .map_err(|e| e.to_string())?;
-    let review_id: String = c.query_row("SELECT review_id FROM review_discussions WHERE id=?1", rusqlite::params![id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    let review_id: String = c
+        .query_row(
+            "SELECT review_id FROM review_discussions WHERE id=?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     review_event_by_id(crate::events::REVIEW_DISCUSSION_UPDATED, &review_id);
     Ok(())
 }
@@ -762,7 +768,13 @@ rusqlite::params![&id], |r| r.get(0),
 "UPDATE review_discussions SET suggestion_status=?2, suggestion_resolved_by=CASE WHEN ?2='OPEN' THEN NULL ELSE ?3 END WHERE id=?1",
 rusqlite::params![id, status, actor_id],
     ).map_err(|e| e.to_string())?;
-    let review_id: String = c.query_row("SELECT review_id FROM review_discussions WHERE id=?1", rusqlite::params![id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    let review_id: String = c
+        .query_row(
+            "SELECT review_id FROM review_discussions WHERE id=?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     review_event_by_id(crate::events::REVIEW_SUGGESTION_UPDATED, &review_id);
     Ok(())
 }

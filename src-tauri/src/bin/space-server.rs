@@ -9,9 +9,9 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db, devenv, documents,
-    events, issues, meetings, oauth, organization, package_registry, payload_dispatch, personal,
-    pipelines, platform, review,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db,
+    devenv, documents, events, issues, meetings, oauth, organization, package_registry,
+    payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -498,7 +498,10 @@ fn app_room_project_id(
 
 /// Lists must skip unscoped rooms rather than fail the entire authorized result set.
 #[allow(clippy::result_large_err)]
-fn app_room_project_id_if_scoped(c: &rusqlite::Connection, room_id: &str) -> Result<Option<String>, axum::response::Response> {
+fn app_room_project_id_if_scoped(
+    c: &rusqlite::Connection,
+    room_id: &str,
+) -> Result<Option<String>, axum::response::Response> {
     c.query_row(
         "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
         [room_id],
@@ -1711,7 +1714,10 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         "member" => "GlobalMember",
         other => other,
     };
-    if !matches!(role, "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
+    if !matches!(
+        role,
+        "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+    ) {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
     if role == "GlobalAdmin" && !me.account_admin {

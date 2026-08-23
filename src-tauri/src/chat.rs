@@ -46,8 +46,16 @@ pub struct ChannelNotificationPreference {
     pub push_enabled: bool,
     pub thread_scope: String,
 }
-fn read_notification_preference(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelNotificationPreference> {
-    Ok(ChannelNotificationPreference { profile_id:r.get(0)?, channel_id:r.get(1)?, email_enabled:r.get(2)?, push_enabled:r.get(3)?, thread_scope:r.get(4)? })
+fn read_notification_preference(
+    r: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ChannelNotificationPreference> {
+    Ok(ChannelNotificationPreference {
+        profile_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        email_enabled: r.get(2)?,
+        push_enabled: r.get(3)?,
+        thread_scope: r.get(4)?,
+    })
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -156,8 +164,14 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     )
     .map_err(|e| e.to_string())
 }
-pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> { channel_allows_profile(&db::conn()?, channel_id, profile_id) }
-pub(crate) fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> {
+    channel_allows_profile(&db::conn()?, channel_id, profile_id)
+}
+pub(crate) fn channel_allows_profile(
+    c: &Connection,
+    channel_id: &str,
+    profile_id: &str,
+) -> Result<bool> {
     // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
     // channels stay generic/public as before; this avoids exposing a private agenda
     // merely because its discussion is implemented by the shared channel primitive.
@@ -236,18 +250,48 @@ fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<
 /// Private feeds retain the normal private-channel ACL and add a durable owner map;
 /// this avoids rebuilding the original `channels.content_type` constraint.
 pub(crate) fn ensure_private_feed_on(c: &Connection, profile_id: &str) -> Result<Channel> {
-    if profile_id.trim().is_empty() { return Err("Private feed profile is required".into()); }
-    if let Some(channel_id) = c.query_row("SELECT channel_id FROM private_feeds WHERE profile_id=?1", [profile_id], |r| r.get::<_, String>(0)).optional().map_err(|e| e.to_string())? {
-        return get_channel_impl(c, &channel_id)?.ok_or_else(|| "Private feed channel is missing".into());
+    if profile_id.trim().is_empty() {
+        return Err("Private feed profile is required".into());
     }
-    let channel = Channel { id: format!("private-feed:{profile_id}"), content_type: "private".into(), name: Some("Private feed".into()), description: Some("Your read-only notification feed".into()), project_id: None, archived: false, read_only: true };
+    if let Some(channel_id) = c
+        .query_row(
+            "SELECT channel_id FROM private_feeds WHERE profile_id=?1",
+            [profile_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        return get_channel_impl(c, &channel_id)?
+            .ok_or_else(|| "Private feed channel is missing".into());
+    }
+    let channel = Channel {
+        id: format!("private-feed:{profile_id}"),
+        content_type: "private".into(),
+        name: Some("Private feed".into()),
+        description: Some("Your read-only notification feed".into()),
+        project_id: None,
+        archived: false,
+        read_only: true,
+    };
     create_channel_impl(c, &channel, &[profile_id.to_string()])?;
-    c.execute("INSERT INTO private_feeds(profile_id,channel_id) VALUES(?1,?2)", rusqlite::params![profile_id, channel.id]).map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT INTO private_feeds(profile_id,channel_id) VALUES(?1,?2)",
+        rusqlite::params![profile_id, channel.id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(channel)
 }
-pub(crate) fn private_feed_for_on(c: &Connection, profile_id: &str) -> Result<Channel> { ensure_private_feed_on(c, profile_id) }
+pub(crate) fn private_feed_for_on(c: &Connection, profile_id: &str) -> Result<Channel> {
+    ensure_private_feed_on(c, profile_id)
+}
 fn is_read_only_channel_on(c: &Connection, channel_id: &str) -> Result<bool> {
-    c.query_row("SELECT EXISTS(SELECT 1 FROM private_feeds WHERE channel_id=?1)", [channel_id], |r| r.get(0)).map_err(|e| e.to_string())
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM private_feeds WHERE channel_id=?1)",
+        [channel_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String]) -> Result<()> {
     c.execute(
@@ -318,12 +362,30 @@ pub(crate) fn create_entity_channel_impl(
     get_channel_impl(c, &id)?.ok_or_else(|| "entity channel missing after insert".to_string())
 }
 
-fn default_message_content_kind() -> String { "text".into() }
+fn default_message_content_kind() -> String {
+    "text".into()
+}
 /// Durable system card for an absence lifecycle event. The entity-bound channel is
 /// intentionally public like other entity discussions; sensitive reasons are never put in it.
-pub(crate) fn post_absence_card_on(c: &Connection, absence_id: &str, profile_id: &str, date_from: &str, date_to: &str, availability: &str, action: &str) -> Result<()> {
-    let channel = create_entity_channel_impl(c, "absence", absence_id, Some(format!("Time off · {profile_id}")))?;
-    let id = format!("absence-card:{absence_id}:{action}:{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+pub(crate) fn post_absence_card_on(
+    c: &Connection,
+    absence_id: &str,
+    profile_id: &str,
+    date_from: &str,
+    date_to: &str,
+    availability: &str,
+    action: &str,
+) -> Result<()> {
+    let channel = create_entity_channel_impl(
+        c,
+        "absence",
+        absence_id,
+        Some(format!("Time off · {profile_id}")),
+    )?;
+    let id = format!(
+        "absence-card:{absence_id}:{action}:{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
     let payload = serde_json::json!({"absence_id":absence_id,"profile_id":profile_id,"date_from":date_from,"date_to":date_to,"availability":availability,"action":action}).to_string();
     c.execute("INSERT INTO messages(id,channel_id,author_id,text,thread_of,archived,content_kind) VALUES(?1,?2,NULL,?3,NULL,0,'absence-card')", rusqlite::params![id, channel.id, payload]).map_err(|e| e.to_string())?;
     Ok(())
@@ -458,7 +520,9 @@ fn list_thread_replies_impl(
         .collect()
 }
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
-    if is_read_only_channel_on(c, &message.channel_id)? { return Err("Private feeds are read-only".into()); }
+    if is_read_only_channel_on(c, &message.channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
     let allowed = message
         .author_id
         .as_deref()
@@ -591,19 +655,41 @@ pub fn get_channel(id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn private_feed(profile_id: String) -> Result<Channel> { ensure_private_feed_on(&db::conn()?, &profile_id) }
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_channel_notification_preference(profile_id: String, channel_id: String) -> Result<ChannelNotificationPreference> {
-    let c=db::conn()?;
-    let row=c.query_row("SELECT profile_id,channel_id,email_enabled,push_enabled,thread_scope FROM channel_notification_preferences WHERE profile_id=?1 AND channel_id=?2", rusqlite::params![&profile_id,&channel_id], read_notification_preference).optional().map_err(|e|e.to_string())?;
-    Ok(row.unwrap_or(ChannelNotificationPreference { profile_id, channel_id, email_enabled:true, push_enabled:true, thread_scope:"all".into() }))
+pub fn private_feed(profile_id: String) -> Result<Channel> {
+    ensure_private_feed_on(&db::conn()?, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn save_channel_notification_preference(preference: ChannelNotificationPreference) -> Result<ChannelNotificationPreference> {
-    if preference.profile_id.trim().is_empty() || preference.channel_id.trim().is_empty() { return Err("Channel preference needs a profile and channel".into()); }
-    if !matches!(preference.thread_scope.as_str(), "all"|"followed"|"none") { return Err("Thread scope must be all, followed, or none".into()); }
-    let c=db::conn()?;
-    if !channel_allows_profile(&c,&preference.channel_id,&preference.profile_id)? { return Err("channel access denied".into()); }
+pub fn get_channel_notification_preference(
+    profile_id: String,
+    channel_id: String,
+) -> Result<ChannelNotificationPreference> {
+    let c = db::conn()?;
+    let row=c.query_row("SELECT profile_id,channel_id,email_enabled,push_enabled,thread_scope FROM channel_notification_preferences WHERE profile_id=?1 AND channel_id=?2", rusqlite::params![&profile_id,&channel_id], read_notification_preference).optional().map_err(|e|e.to_string())?;
+    Ok(row.unwrap_or(ChannelNotificationPreference {
+        profile_id,
+        channel_id,
+        email_enabled: true,
+        push_enabled: true,
+        thread_scope: "all".into(),
+    }))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_channel_notification_preference(
+    preference: ChannelNotificationPreference,
+) -> Result<ChannelNotificationPreference> {
+    if preference.profile_id.trim().is_empty() || preference.channel_id.trim().is_empty() {
+        return Err("Channel preference needs a profile and channel".into());
+    }
+    if !matches!(
+        preference.thread_scope.as_str(),
+        "all" | "followed" | "none"
+    ) {
+        return Err("Thread scope must be all, followed, or none".into());
+    }
+    let c = db::conn()?;
+    if !channel_allows_profile(&c, &preference.channel_id, &preference.profile_id)? {
+        return Err("channel access denied".into());
+    }
     c.execute("INSERT INTO channel_notification_preferences(profile_id,channel_id,email_enabled,push_enabled,thread_scope) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,channel_id) DO UPDATE SET email_enabled=excluded.email_enabled,push_enabled=excluded.push_enabled,thread_scope=excluded.thread_scope", rusqlite::params![preference.profile_id,preference.channel_id,preference.email_enabled,preference.push_enabled,preference.thread_scope]).map_err(|e|e.to_string())?;
     Ok(preference)
 }
