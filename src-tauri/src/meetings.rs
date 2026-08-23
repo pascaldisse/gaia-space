@@ -100,7 +100,7 @@ fn visible_meetings_sql(extra: &str) -> String {
     format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE {MEETING_READ_SCOPE} {extra} ORDER BY m.starts_at")
 }
 
-const MEETING_WRITE_SCOPE: &str = "(m.organizer_id=?1 OR ?2=1 OR (m.modification_preference='participants' AND EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1)))";
+const MEETING_WRITE_SCOPE: &str = "(m.organizer_id=?1 OR ?2=1 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND p.created_by=?1) OR (m.modification_preference='participants' AND EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1)))";
 
 pub fn meeting_readable_on(c: &rusqlite::Connection, id: &str, profile_id: &str) -> Result<bool> {
     c.query_row(
@@ -199,8 +199,9 @@ fn notify_meeting_change_on(c: &rusqlite::Connection, meeting: &Meeting, event_t
             body: meeting.description.as_deref(),
             entity_type: "meeting",
             entity_id: &meeting.id,
-            target_type: meeting.channel_id.as_deref().map(|_| "channel"),
-            target_id: meeting.channel_id.as_deref(),
+            // Subscription kinds are domain entities; the linked channel is navigation only.
+            target_type: Some("entity"),
+            target_id: Some(&meeting.id),
         },
     ) {
         eprintln!("meeting notification fan-out for {event_type} failed: {error}");
@@ -338,8 +339,9 @@ pub fn invite_meeting_participant(meeting_id: String, profile_id: String) -> Res
             body: meeting.description.as_deref(),
             entity_type: "meeting",
             entity_id: &meeting.id,
-            target_type: meeting.channel_id.as_deref().map(|_| "channel"),
-            target_id: meeting.channel_id.as_deref(),
+            // Subscription kinds are domain entities; the linked channel is navigation only.
+            target_type: Some("entity"),
+            target_id: Some(&meeting.id),
         },
     ) {
         eprintln!("meeting invitation notification failed: {error}");
