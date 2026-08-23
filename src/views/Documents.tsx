@@ -1,5 +1,6 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
 import { marked } from "marked";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
@@ -74,11 +75,25 @@ export default function Documents() {
   // root-level folders sit directly under the container, except in KB where the book
   // itself is a container_id-self-referencing folder row and everything else nests
   // under its own id.
-  const rootParentId = () => (activeContainer() === "kb" ? selectedBookId() : null);
+  const rootParentId = () => {
+    if (activeContainer() === "kb") return selectedBookId();
+    if (activeContainer() === "project") return projectRoot()?.id ?? null;
+    return null;
+  };
 
   const [allFolders, { refetch: refetchFolders }] = createResource(() => documentsApi.listDocumentFolders());
   const [allDocuments, { refetch: refetchDocuments }] = createResource(() => documentsApi.listDocuments());
+  // The backend creates this canonical root atomically and reparents legacy direct rows.
+  const [projectRoot, { refetch: refetchProjectRoot }] = createResource(
+    () => activeContainer() === "project" ? selectedProjectId() : null,
+    (id) => id ? documentsApi.ensureProjectDocumentRoot(id) : Promise.resolve(null),
+  );
 
+  createEffect((previousRootId: string | null | undefined) => {
+    const rootId = projectRoot()?.id ?? null;
+    if (rootId && rootId !== previousRootId) void Promise.all([refetchFolders(), refetchDocuments()]);
+    return rootId;
+  }, null);
   const books = () => (allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
   createEffect(() => {
     if (activeContainer() === "kb" && !selectedBookId() && books().length) setSelectedBookId(books()[0].id);
@@ -91,7 +106,7 @@ export default function Documents() {
     const e = allFolders.error ?? allDocuments.error;
     return e ? `Documents could not be loaded: ${String(e)}` : null;
   };
-  const isEmpty = () => !treeLoading() && !loadFailure() && scopedFolders().length === 0 && scopedDocuments().length === 0;
+  const isEmpty = () => !treeLoading() && !loadFailure() && displayFolders().length === 0 && scopedDocuments().length === 0;
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -109,6 +124,8 @@ export default function Documents() {
         (showArchived() || !d.archived),
     );
 
+  const displayFolders = () => scopedFolders().filter((f) => f.id !== rootParentId());
+  const projectReady = () => activeContainer() !== "project" || !!projectRoot();
   const [selectedFolderId, setSelectedFolderId] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   function toggleExpand(id: string) {
@@ -123,6 +140,15 @@ export default function Documents() {
   const [importPath, setImportPath] = createSignal("");
   const [importing, setImporting] = createSignal(false);
   const [importSummary, setImportSummary] = createSignal<DocumentImportSummary | null>(null);
+  async function chooseImportFolder() {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false, title: "Import document folder" });
+      if (typeof selected === "string") setImportPath(selected);
+    } catch (e) {
+      // Browser/server mode has no native picker; the path field remains usable there.
+      setError(`Folder picker unavailable: ${String(e)}`);
+    }
+  }
   async function runImport() {
     const path = importPath().trim();
     const cid = containerId();
@@ -139,7 +165,7 @@ export default function Documents() {
       });
       setImportSummary(summary);
       setImportPath("");
-      await Promise.all([refetchFolders(), refetchDocuments()]);
+      await Promise.all([refetchProjectRoot(), refetchFolders(), refetchDocuments()]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -508,7 +534,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const cid = containerId();
     if (!doc || !cid) return;
     try {
-      await documentsApi.moveDocument(doc.id, doc.container_type, cid, folderId === "" ? null : folderId);
+      await documentsApi.moveDocument(doc.id, doc.container_type, cid, folderId === "" ? (activeContainer() === "project" ? rootParentId() : null) : folderId);
       await refetchDocuments();
     } catch (e) {
       fail(e);
@@ -710,7 +736,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
 
   function FolderRow(props: { folder: DocumentFolder; depth: number }) {
     const f = () => props.folder;
-    const childFolders = () => scopedFolders().filter((c) => c.parent_id === f().id);
+    const childFolders = () => displayFolders().filter((c) => c.parent_id === f().id);
     const childDocs = () => scopedDocuments().filter((d) => d.folder_id === f().id);
     const isOpen = () => expanded().has(f().id);
     return (
@@ -767,7 +793,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             >
               <option value="">move…</option>
               <option value="">root</option>
-              <For each={scopedFolders().filter((o) => o.id !== f().id)}>
+              <For each={displayFolders().filter((o) => o.id !== f().id)}>
                 {(o) => <option value={o.id}>{o.name}</option>}
               </For>
             </select>
@@ -878,7 +904,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             onInput={(e) => setImportPath(e.currentTarget.value)}
           />
         </label>
-        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId()}>
+        <button class="ghost small" onClick={chooseImportFolder}>Choose folder…</button>
+        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
           {importing() ? "Importing…" : "Import"}
         </button>
         <Show when={importSummary()}>
@@ -912,7 +939,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
               classList={{ active: selectedFolderId() === null }}
               onClick={() => setSelectedFolderId(null)}
             >
-              (root)
+              {activeContainer() === "project" ? "Documents" : "(root)"}
             </button>
             <ul class="folder-tree" role="tree" aria-label="Document folders">
               <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
@@ -930,7 +957,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </li>
                 )}
               </For>
-              <For each={scopedFolders().filter((f) => f.parent_id === rootParentId())}>
+              <For each={displayFolders().filter((f) => f.parent_id === rootParentId())}>
                 {(f) => <FolderRow folder={f} depth={0} />}
               </For>
             </ul>
@@ -940,7 +967,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <div class="new-item-forms">
               <div class="new-item-row">
                 <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
-                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim()}>
+                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim() || !projectReady()}>
                   + Folder
                 </button>
               </div>
@@ -949,7 +976,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <select aria-label="Document body type" value={newDocBodyFormat()} onChange={(e) => setNewDocBodyFormat(e.currentTarget.value as DocumentBodyFormat)}>
                   <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
                 </select>
-                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim()}>
+                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim() || !projectReady()}>
                   + Document
                 </button>
               </div>
@@ -960,7 +987,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   value={uploadPath()}
                   onInput={(e) => setUploadPath(e.currentTarget.value)}
                 />
-                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim()}>
+                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
                   {uploading() ? "Uploading…" : "↑ Upload"}
                 </button>
               </div>
@@ -992,8 +1019,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     {showPreview() ? "hide preview" : "show preview"}
                   </button>
                   <select value={doc().folder_id ?? ""} onChange={(e) => moveDocumentTo(e.currentTarget.value)}>
-                    <option value="">(root)</option>
-                    <For each={scopedFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
+                    <option value={activeContainer() === "project" ? rootParentId() ?? "" : ""}>{activeContainer() === "project" ? "Documents" : "(root)"}</option>
+                    <For each={displayFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
                   </select>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}

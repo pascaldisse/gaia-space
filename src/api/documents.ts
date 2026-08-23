@@ -121,6 +121,7 @@ export type DocumentFilePreview = {
 
 export const documentsApi = {
   // documents
+  ensureProjectDocumentRoot: (projectId: string) => invoke<DocumentFolder>("ensure_project_document_root", { projectId }),
   listDocuments: () => invoke<Document[]>("list_documents"),
   getDocument: (id: string) => invoke<Document | null>("get_document", { id }),
   createDocument: (document: Document) => invoke<void>("create_document", { document }),
