@@ -45,6 +45,11 @@ export default function Meetings() {
     () => [selected()?.id, profileId()] as const,
     ([meetingId, personId]) => meetingId && personId ? meetingsApi.participants(meetingId, personId) : Promise.resolve([]),
   );
+  const availabilityProfiles = createMemo(() => [...new Set([selected()?.organizer_id, ...((participants() ?? []).filter((participant) => participant.status !== "declined").map((participant) => participant.profile_id))].filter((id): id is string => Boolean(id)))]);
+  const [availability, { refetch: reloadAvailability }] = createResource(
+    () => [selected()?.starts_at, selected()?.ends_at, selected()?.id, availabilityProfiles()] as const,
+    ([startsAt, endsAt, meetingId, people]) => startsAt && endsAt ? meetingsApi.availability(startsAt, endsAt, people, meetingId) : Promise.resolve(undefined),
+  );
   const visibleMeetings = createMemo(() => {
     const needle = query().trim().toLocaleLowerCase();
     const now = Math.floor(Date.now() / 1000);
@@ -152,11 +157,26 @@ export default function Meetings() {
     try {
       await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status);
       await reloadParticipants();
+      await reloadAvailability();
     } catch (reason) {
       setError(humanError(reason));
     }
   };
 
+  const reserveRoom = async (roomId: string) => {
+    const meeting = selected();
+    if (!meeting) return;
+    setError("");
+    try {
+      await meetingsApi.reserveRoom(meeting.id, roomId);
+      setMeetingField("location", availability()?.rooms.find((room) => room.id === roomId)?.name ?? null);
+      setNotice("Room reserved.");
+      await reloadAvailability();
+      await refetch();
+    } catch (reason) {
+      setError(humanError(reason));
+    }
+  };
   useDeepLink("meeting", (id) => {
     const found = meetings()?.find((meeting) => meeting.id === id);
     if (found) selectMeeting(found);
@@ -203,6 +223,7 @@ export default function Meetings() {
             <label>RRULE<input placeholder="FREQ=WEEKLY;COUNT=4" value={meeting().rrule ?? ""} onInput={(event) => setMeetingField("rrule", event.currentTarget.value || null)}/></label>
             <section class="rsvp"><div class="section-heading"><div><h3>Room booking</h3><p>Filter by equipment; overlaps are rejected.</p></div></div><input aria-label="Required equipment" placeholder="Projector, Whiteboard" value={equipmentFilter()} onInput={event => setEquipmentFilter(event.currentTarget.value)}/><div class="inline-form"><select aria-label="Meeting room" value={roomId()} onChange={event => setRoomId(event.currentTarget.value)}><option value="">Select room</option><For each={filteredRooms()}>{room => <option value={room.id}>{room.name} · {room.equipment.join(", ") || "No equipment"}</option>}</For></select><button type="button" onClick={reserveRoom}>Reserve</button></div></section>
             <section class="rsvp"><div class="section-heading"><div><h3>Participants</h3><p>Invite people and record their response.</p></div></div><div class="inline-form"><ProfilePicker label="Participant" value={invitee()} onChange={setInvitee}/><button type="button" onClick={invite}>Invite</button></div><Show when={participants.loading}><p class="meeting-empty">Loading participants…</p></Show><For each={participants()}>{(participant) => <div class="participant"><span>{participant.profile_id}</span><select aria-label={`RSVP for ${participant.profile_id}`} value={participant.status} onChange={(event) => rsvp(participant, event.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For></section>
+            <section class="meeting-availability"><div class="section-heading"><div><h3>Availability</h3><p>Room and attendee conflicts for this meeting time.</p></div><button type="button" onClick={() => reloadAvailability()}>Refresh</button></div><Show when={availability.loading}><p class="meeting-empty">Checking availability…</p></Show><For each={availability()?.conflicts ?? []}>{(conflict) => <p class="availability-conflict">{conflict.message}</p>}</For><Show when={!availability.loading && !((availability()?.conflicts ?? []).length)}><p class="availability-clear">No room, meeting, or absence conflicts.</p></Show><div class="room-suggestions"><For each={availability()?.suggestions ?? []}>{(room) => <button type="button" class="room-suggestion" onClick={() => reserveRoom(room.id)}>{room.name}<small>{room.location || "Room"}{room.equipment.length ? ` · ${room.equipment.join(", ")}` : ""}</small></button>}</For></div><Show when={!availability.loading && !((availability()?.suggestions ?? []).length)}><p class="meeting-empty">No available rooms to suggest.</p></Show></section>
             <Show when={!isWeb()}><CallPanel meeting={meeting()} identity={profileId()} displayName={profileId()}/></Show>
           </>}
         </Show>

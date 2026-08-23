@@ -13,6 +13,8 @@ pub mod app_rights;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod availability;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod blogs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
@@ -401,10 +403,14 @@ pub fn run() {
             meetings::list_meeting_rooms,
             meetings::save_meeting_room,
             meetings::reserve_meeting_room,
+            meetings::meeting_availability,
             meetings::list_meeting_participants,
             meetings::invite_meeting_participant,
             meetings::set_meeting_participant_status,
             meetings::expand_meeting_occurrences,
+            availability::list_busy_blocks,
+            availability::check_meeting_conflicts,
+            availability::suggest_meeting_slots,
             calls::start_livekit_server,
             calls::livekit_server_status,
             calls::join_meeting_call,

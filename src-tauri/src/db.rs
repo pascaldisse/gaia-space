@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 99;
+pub const SCHEMA_VERSION: i64 = 100;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -645,6 +645,20 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
     }
+    // V100: availability reads are derived from existing room, booking, meeting,
+    // participant, and absence rows. Guard each additive index so partially
+    // migrated installations do not fail when an older optional table is absent.
+    if version < 100 {
+        if table_exists(&tx, "meeting_room_bookings")? {
+            tx.execute_batch(SCHEMA_V100_ROOM_BOOKINGS)?;
+        }
+        if table_exists(&tx, "meeting_participants")? {
+            tx.execute_batch(SCHEMA_V100_PARTICIPANTS)?;
+        }
+        if table_exists(&tx, "absences")? {
+            tx.execute_batch(SCHEMA_V100_ABSENCES)?;
+        }
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -775,6 +789,18 @@ CREATE INDEX IF NOT EXISTS document_imports_container ON document_imports(contai
 "#;
 
 /// V66: durable room inventory, equipment capabilities and a meeting reservation.
+/// V100: indexes for room and attendee availability checks. Each statement is
+/// called only after its table guard in `migrate`.
+pub(crate) const SCHEMA_V100_ROOM_BOOKINGS: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_room_bookings_room_meeting ON meeting_room_bookings(room_id, meeting_id);
+"#;
+pub(crate) const SCHEMA_V100_PARTICIPANTS: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_participants(profile_id, meeting_id);
+"#;
+pub(crate) const SCHEMA_V100_ABSENCES: &str = r#"
+CREATE INDEX IF NOT EXISTS absences_approved_dates_profile ON absences(approved, date_from, date_to, profile_id);
+"#;
+
 pub(crate) const SCHEMA_V66: &str = r#"
 CREATE TABLE IF NOT EXISTS meeting_rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, location TEXT, capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity > 0), archived INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS meeting_room_equipment (room_id TEXT NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE, equipment TEXT NOT NULL, PRIMARY KEY(room_id, equipment));
@@ -1578,7 +1604,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 99);
+        assert_eq!(SCHEMA_VERSION, 100);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
