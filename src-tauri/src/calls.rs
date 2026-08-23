@@ -529,6 +529,9 @@ pub(crate) fn join_meeting_call_with_config(
     if meeting.archived {
         return Err("Cannot join an archived meeting".into());
     }
+    if meeting.video_provider != "native" {
+        return Err("External Meet rooms are not configured; select Native LiveKit or configure the external room API".into());
+    }
     let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection
         .query_row(
