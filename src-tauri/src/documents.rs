@@ -64,6 +64,12 @@ pub struct DocumentAccessRecipient {
     pub access_level: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DocumentSearchResult {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+}
 fn default_body_format() -> String {
     "text".into()
 }
@@ -156,6 +162,30 @@ pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
     rows
 }
 
+/// Searches titles and bodies inside exactly one KB book. The caller supplies a book
+/// id, never a free container scope, so result navigation cannot escape the book.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn search_book_documents(book_id: String, query: String) -> Result<Vec<DocumentSearchResult>> {
+    let term = query.trim();
+    if term.is_empty() {
+        return Ok(Vec::new());
+    }
+    let c = db::conn()?;
+    let pattern = format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
+    let mut s = c.prepare("SELECT id,title,substr(coalesce(body,''),1,180) FROM documents WHERE container_type='kb' AND container_id=?1 AND archived=0 AND (title LIKE ?2 ESCAPE '\\' OR coalesce(body,'') LIKE ?2 ESCAPE '\\') ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(rusqlite::params![book_id, pattern], |r| {
+            Ok(DocumentSearchResult {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                snippet: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
     let c = db::conn()?;
     c.query_row(

@@ -84,7 +84,27 @@ export default function Documents() {
     if (activeContainer() === "kb" && !selectedBookId() && books().length) setSelectedBookId(books()[0].id);
   });
 
-  const [showArchived, setShowArchived] = createSignal(false);
+  const [bookQuery, setBookQuery] = createSignal("");
+const [bookSearch] = createResource(
+() => ({ bookId: selectedBookId(), query: bookQuery().trim() }),
+({ bookId, query }) => bookId && query ? documentsApi.searchBookDocuments(bookId, query) : Promise.resolve([]),
+);
+const [bookAccess, { refetch: refetchBookAccess }] = createResource(selectedBookId, (id) =>
+id ? documentsApi.listBookAccess(id) : Promise.resolve([]),
+);
+const [showBookAccess, setShowBookAccess] = createSignal(false);
+async function addBookAccessRecipient() {
+const bookId = selectedBookId(); const recipientId = shareRecipientId();
+if (!bookId || !recipientId) return;
+const next = (bookAccess() ?? []).filter((entry) => entry.recipient_type !== shareRecipientType() || entry.recipient_id !== recipientId);
+next.push({ recipient_type: shareRecipientType(), recipient_id: recipientId, access_level: shareAccessLevel() });
+try { await documentsApi.updateBookAccess(bookId, next); await refetchBookAccess(); setShareRecipientId(""); } catch (e) { fail(e); }
+}
+async function removeBookAccessRecipient(permission: DocumentAccessRecipient) {
+const bookId = selectedBookId(); if (!bookId) return;
+try { await documentsApi.updateBookAccess(bookId, (bookAccess() ?? []).filter((entry) => entry.recipient_type !== permission.recipient_type || entry.recipient_id !== permission.recipient_id)); await refetchBookAccess(); } catch (e) { fail(e); }
+}
+const [showArchived, setShowArchived] = createSignal(false);
 
   const treeLoading = () => allFolders.loading || allDocuments.loading;
   const loadFailure = () => {
@@ -868,6 +888,10 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           <button class="ghost small" onClick={createBook} disabled={!newBookName().trim()}>
             + Book
           </button>
+          <Show when={selectedBookId()}>
+            <button class="ghost small" aria-expanded={showBookAccess()} onClick={() => setShowBookAccess((open) => !open)}>{showBookAccess() ? "hide book access" : "Book access"}</button>
+            <input aria-label="Search this book" placeholder="Search this book…" value={bookQuery()} onInput={(e) => setBookQuery(e.currentTarget.value)} />
+          </Show>
         </Show>
 
         <label class="import-folder">
@@ -914,7 +938,15 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             >
               (root)
             </button>
-            <ul class="folder-tree" role="tree" aria-label="Document folders">
+            <Show when={activeContainer() === "kb" && bookQuery().trim()}>
+<div class="book-search-results" role="list" aria-label="Book search results">
+<Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
+<For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
+<Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
+</Show>
+</div>
+</Show>
+<ul class="folder-tree" role="tree" aria-label="Document folders">
               <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
                 {(d) => (
                   <li style={{ "padding-left": "0.4em" }}>
@@ -1057,8 +1089,20 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </Show>
         </section>
 
-        <Show when={selectedDocument()}>
+        <Show when={selectedDocument() || (activeContainer() === "kb" && showBookAccess())}>
           <aside class="documents-history">
+            <Show when={activeContainer() === "kb" && showBookAccess()}>
+              <section class="document-sharing" aria-label="Book access">
+                <div class="sharing-head"><div class="section-label">Book access</div><span class="sharing-note">People and editor teams</span></div>
+                <div class="sharing-add">
+                  <select value={shareRecipientType()} onChange={(e) => { setShareRecipientType(e.currentTarget.value as "profile" | "team"); setShareRecipientId(""); }}><option value="profile">Person</option><option value="team">Team</option></select>
+                  <select value={shareRecipientId()} onChange={(e) => setShareRecipientId(e.currentTarget.value)}><option value="">Select recipient…</option><Show when={shareRecipientType() === "profile"}><For each={profiles()?.filter((p) => !p.archived && p.id !== actingProfileId())}>{(p) => <option value={p.id}>{p.display_name}</option>}</For></Show><Show when={shareRecipientType() === "team"}><For each={teams()?.filter((t) => !t.archived)}>{(t) => <option value={t.id}>{t.name}</option>}</For></Show></select>
+                  <select value={shareAccessLevel()} onChange={(e) => setShareAccessLevel(e.currentTarget.value as "viewer" | "editor")}><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
+                  <button class="primary small" disabled={!shareRecipientId()} onClick={addBookAccessRecipient}>Add</button>
+                </div>
+                <ul class="sharing-list"><For each={bookAccess()}>{(permission) => <li><span class="sharing-recipient">{recipientName(permission)}</span><span class="sharing-kind">{permission.recipient_type}</span><span class="sharing-level">{permission.access_level}</span><button class="ghost small" onClick={() => removeBookAccessRecipient(permission)}>Remove</button></li>}</For></ul>
+              </section>
+            </Show>
             <Show when={canManageAccess() && showSharing()}>
               <section class="document-sharing" aria-label="Document sharing">
                 <div class="sharing-head">
