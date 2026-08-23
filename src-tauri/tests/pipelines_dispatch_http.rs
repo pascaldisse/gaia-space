@@ -149,6 +149,34 @@ fn start_server_with(extra_sql: &[&str]) -> Server {
         [],
     )
     .expect("seed member membership");
+    conn.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-owner','owner','Owner',1)",
+        [],
+    )
+    .expect("seed owner profile");
+    conn.execute(
+        "INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) \
+         VALUES('u-owner','owner','x','Owner','p-owner','member',1,1)",
+        [],
+    )
+    .expect("seed owner user");
+    conn.execute(
+        "INSERT INTO sessions(token,user_id,created_at,expires_at) \
+         VALUES('test-owner-session','u-owner',unixepoch(),unixepoch()+3600)",
+        [],
+    )
+    .expect("seed owner session");
+    conn.execute(
+        "INSERT INTO projects(id,name,key,description,created_by,archived,created_at) \
+         VALUES('p-exec','Exec','EXEC',NULL,'p-owner',0,1)",
+        [],
+    )
+    .expect("seed executable project");
+    conn.execute(
+        "INSERT INTO project_members(project_id,profile_id) VALUES('p-exec','p-member')",
+        [],
+    )
+    .expect("seed read-tier executable-project member");
     for sql in extra_sql {
         conn.execute_batch(sql)
             .unwrap_or_else(|e| panic!("extra seed SQL failed: {e}\n{sql}"));
@@ -701,12 +729,13 @@ fn a_read_tier_project_member_reaches_arbitrary_shell_execution() {
     let _ = std::fs::remove_file(&marker);
     let server = start_server();
 
-    // Authored by the admin inside the project the member merely *belongs to*.
-    let (status, value) = server.call(
+    // Authored by a non-admin owner inside the project the member merely reads.
+    let (status, value) = server.call_as(
+        "test-owner-session",
         "create_pipeline_script",
         script_body_in(
             "s-readtier",
-            "p-own",
+            "p-exec",
             json!({"jobs":[{"name":"exec","trigger_type":"MANUAL","timeout_secs":null,
                             "steps":[{"type":"Shell",
                                       "script": format!("printf owned > {}", marker.display())}]}]}),
@@ -715,25 +744,33 @@ fn a_read_tier_project_member_reaches_arbitrary_shell_execution() {
     assert_eq!(status, 200, "create_pipeline_script: {value}");
 
     let (status, value) = server.call_as(
+        "test-owner-session",
+        "trigger_pipeline_event",
+        json!({"scriptId":"s-readtier","event":{"type":"Manual"}}),
+    );
+    assert_eq!(status, 200, "the non-admin project owner was refused: {value}");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !marker.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(marker.exists(), "the project owner's event never reached its shell step");
+    let _ = std::fs::remove_file(&marker);
+
+    let (status, value) = server.call_as(
         "test-member-session",
         "trigger_pipeline_event",
         json!({"scriptId":"s-readtier","event":{"type":"Manual"}}),
     );
     assert_eq!(
-        status, 200,
-        "precondition changed: the read-tier member can no longer fire at all ({status}): {value}"
+        status, 403,
+        "a read-tier member reached the shell-capable pipeline runner: {value}"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !marker.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    std::thread::sleep(Duration::from_millis(100));
     let executed = marker.exists();
     let _ = std::fs::remove_file(&marker);
     assert!(
         !executed,
-        "a caller with only project READ access executed an arbitrary shell command on the \
-         server host (marker file was created): firing a pipeline needs a write/execute-tier \
-         predicate, not `project_readable`"
+        "a caller with only project READ access executed an arbitrary shell command on the server host"
     );
 }
