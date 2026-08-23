@@ -91,7 +91,13 @@ describe("validation parity with parse_and_validate_script", () => {
     expect(scriptDefErrors({ jobs: [job({ triggers: [{ type: "Schedule", cron: "31 2 *" }] })] } as never)[0]).toContain("cron");
     expect(scriptDefErrors({ jobs: [job({ triggers: [{ type: "Schedule", cron: "0 0 30 2 *" }] })] } as never)).toEqual([]);
   });
-  test("warns that container steps never execute in this build", () => {
-    expect(scriptDefErrors({ jobs: [job({ steps: [{ type: "Container", image: "ubuntu", script: "echo" }] })] } as never)[0]).toContain("container");
+  test("accepts container steps because the server accepts their script definition", () => {
+    expect(scriptDefErrors({ jobs: [job({ steps: [{ type: "Container", image: "ubuntu", script: "echo" }] })] } as never)).toEqual([]);
+  });
+  test("rejects JSON shapes Rust serde rejects before validation", () => {
+    expect(scriptDefErrors({ jobs: [job({ timeout_secs: -1 })] } as never)[0]).toContain("timeout_secs");
+    expect(scriptDefErrors({ jobs: [job({ timeout_secs: 1.5 })] } as never)[0]).toContain("timeout_secs");
+    expect(scriptDefErrors({ jobs: [job({ steps: [{ type: "Unknown", script: "echo" }] })] } as never)[0]).toContain("unknown step type");
+    expect(scriptDefErrors({ jobs: [job({ triggers: [{ type: "Unknown" }] })] } as never)[0]).toContain("unknown trigger type");
   });
 });

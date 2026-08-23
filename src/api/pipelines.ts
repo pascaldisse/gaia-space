@@ -203,12 +203,14 @@ export function scriptDefErrors(def: ScriptDef): string[] {
     seen.add(job.name);
     if (!job.steps?.length) errors.push(`job '${job.name}' needs at least one step`);
     else if (job.steps.length > MAX_STEPS_PER_JOB) errors.push(`job '${job.name}' exceeds max ${MAX_STEPS_PER_JOB} steps/job (has ${job.steps.length})`);
-    if (job.timeout_secs != null && (job.timeout_secs === 0 || job.timeout_secs > MAX_JOB_TIMEOUT_SECS)) errors.push(`job '${job.name}' timeout_secs must be in 1..=${MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)`);
+    if (job.timeout_secs != null && (!Number.isInteger(job.timeout_secs) || job.timeout_secs < 1 || job.timeout_secs > MAX_JOB_TIMEOUT_SECS)) errors.push(`job '${job.name}' timeout_secs must be in 1..=${MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)`);
     for (const step of job.steps ?? []) {
+      if (step.type !== "Shell" && step.type !== "Container") {
+        errors.push(`job '${job.name}': unknown step type '${String(step.type)}'`);
+        continue;
+      }
       if (!step.script?.trim()) errors.push(`job '${job.name}' has a step with an empty script`);
-      // pipelines.rs run_job refuses container steps: this build has no container runtime,
-      // so a "successful" save would still produce a failed run. Say so before saving.
-      if (step.type === "Container") errors.push(`job '${job.name}': container steps are not executed by this build (image '${step.image}') — the run will fail`);
+      if (step.type === "Container" && typeof step.image !== "string") errors.push(`job '${job.name}': container step needs an image`);
     }
     const triggers = job.triggers?.length ? job.triggers : null;
     if (!triggers) {
@@ -217,8 +219,12 @@ export function scriptDefErrors(def: ScriptDef): string[] {
       else if (!LEGACY_TRIGGER_TYPES[legacy]) errors.push(`job '${job.name}': unknown trigger type '${legacy}'`);
     } else {
       for (const trigger of triggers) {
+        if (!Object.hasOwn(TRIGGER_TAGS, trigger.type)) {
+          errors.push(`job '${job.name}': unknown trigger type '${String(trigger.type)}'`);
+          continue;
+        }
         if (trigger.type !== "Schedule") continue;
-        const err = cronError(trigger.cron);
+        const err = typeof trigger.cron === "string" ? cronError(trigger.cron) : "schedule trigger needs a cron expression";
         if (err) errors.push(`job '${job.name}': ${err}`);
       }
     }
