@@ -40,3 +40,7 @@ test("typed edit reconciliation removes a deleted team mention", () => {
   expect(survivingMentions("hi @Design", mentions, targets)).toEqual([{ kind: "team", id: "td" }]);
   expect(survivingMentions("nobody now", [{ kind: "team", id: "td" }], targets)).toEqual([]);
 });
+
+test("typed entity refs survive a text-only edit", () => {
+  expect(survivingMentions("edited wording", [{ kind: "issue", id: "issue-7" }], [])).toEqual([{ kind: "issue", id: "issue-7" }]);
+});

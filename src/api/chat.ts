@@ -20,6 +20,8 @@ export type ChannelSummary = Channel & {
   unread_count: number;
   last_message_at: number | null;
 };
+// A thread is its own channel; its root stays in `parent_channel_id` and is not repeated.
+export type ThreadChannel = Channel & { root_message_id: string; parent_channel_id: string; skip_first_message: boolean; title: string | null; always_show: boolean; };
 
 export type ChannelNotificationPreference = { profile_id:string; channel_id:string; email_enabled:boolean; push_enabled:boolean; thread_scope:"all"|"followed"|"none"; };
 export type ChannelMember = {
@@ -86,7 +88,7 @@ export type ScheduledMessage = {
   updated_at: number;
 };
 // UNVERIFIED: V119 currently creates team rows; chat command serialization must accept this wire shape.
-export type MentionPayload = { target_type: "profile" | "team"; target_id: string };
+export type MentionPayload = { target_type: "profile" | "team" | "issue" | "document"; target_id: string };
 export type Message = {
   id: string;
   channel_id: string;
@@ -167,6 +169,9 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<Channel>("create_entity_channel", { entityType, entityId, name: name ?? null }),
   getChannelByEntity: (entityType: string, entityId: string) =>
     invoke<Channel | null>("get_channel_by_entity", { entityType, entityId }),
+  // Idempotent: opening a root creates its backing channel once, guarded by the parent ACL.
+  ensureThreadChannel: (rootMessageId: string, title?: string | null, actingProfileId?: string | null) =>
+    invoke<ThreadChannel>("ensure_thread_channel", { rootMessageId, title: title ?? null, actingProfileId: actingProfileId ?? null }),
 
   // messages
   listMessages: (channelId: string, actingProfileId?: string | null) =>

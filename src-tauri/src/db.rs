@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 125;
+pub const SCHEMA_VERSION: i64 = 126;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -176,6 +176,11 @@ pub fn connection(app: &AppHandle) -> Result<Connection, String> {
 pub fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version >= SCHEMA_VERSION {
+        // V126 is intentionally extensible within this worktree. Replay its idempotent
+        // DDL so a database already stamped 126 receives newly added V126 tables too.
+        if version == 126 && table_exists(conn, "messages")? {
+            conn.execute_batch(SCHEMA_V126)?;
+        }
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
@@ -662,6 +667,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "suggestion_applied_commit_id",
             "TEXT",
         )?;
+    }
+    // V126: entity mentions are durable facts, distinct from profile/team recipients.
+    if version < 126 && table_exists(&tx, "messages")? {
+        tx.execute_batch(SCHEMA_V126)?;
     }
     // V119: a mention may name a team, not only a person. The team target is its own
     // row set (`message_team_mentions`) rather than a `target_type` column bolted onto
@@ -1663,6 +1672,35 @@ CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(optio
 /// V123 deliberately has no DDL: `format_metadata_json` (V32) is the single durable,
 /// versioned projection for every registry protocol; adding one column per ecosystem would
 /// make schema evolution depend on publishers rather than on the protocol model.
+/// V126: `EntityMention` targets records such as an issue or document. They are not
+/// profile recipients, therefore they never belong in `message_mentions`; a polymorphic
+/// pair avoids pretending an issue/document has a profile foreign key.
+pub(crate) const SCHEMA_V126: &str = r#"
+CREATE TABLE IF NOT EXISTS message_entity_mentions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL CHECK(entity_type IN ('issue','document')),
+    entity_id TEXT NOT NULL,
+    PRIMARY KEY(message_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS message_entity_mentions_entity ON message_entity_mentions(entity_type, entity_id);
+-- A content thread is a first-class channel. The root remains in its parent channel;
+-- the thread channel holds only replies and inherits its parent's access boundary.
+CREATE TABLE IF NOT EXISTS thread_channels (
+    root_message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+    parent_channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    title TEXT,
+    always_show INTEGER NOT NULL DEFAULT 0 CHECK(always_show IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS thread_channels_parent ON thread_channels(parent_channel_id);
+-- Book ownership is separate from editor grants: editors may change content but cannot
+-- grant their team wider access. The creator owns a new book until ownership changes.
+CREATE TABLE IF NOT EXISTS kb_book_owners (
+    book_id TEXT PRIMARY KEY REFERENCES document_folders(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS kb_book_owners_profile ON kb_book_owners(profile_id);
+"#;
 pub(crate) const SCHEMA_V123: &str = "SELECT 1;";
 
 pub(crate) const SCHEMA_V118: &str = r#"
@@ -2107,7 +2145,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 125);
+        assert_eq!(SCHEMA_VERSION, 126);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2366,6 +2404,17 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v126_extension_repairs_an_already_stamped_database() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        conn.execute("DROP TABLE thread_channels", []).expect("simulate pre-extension V126");
+        conn.pragma_update(None, "user_version", 126).expect("V126 stamp");
+        migrate(&conn).expect("replay idempotent V126 extension");
+        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='thread_channels'", [], |row| row.get(0)).unwrap();
+        assert_eq!(exists, 1);
     }
 
     #[test]

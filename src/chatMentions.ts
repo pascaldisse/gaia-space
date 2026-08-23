@@ -2,14 +2,16 @@
 // without a DOM. The text only carries a spelling of a target name, which is why the
 // selected targets have to be reconciled explicitly on every edit.
 export type MentionProfile = { id: string; username: string; display_name: string; archived?: boolean };
+export type MentionTargetKind = "profile" | "team" | "issue" | "document";
 export type MentionTarget = {
+  // Composer candidates remain people/teams; entity refs arrive from persisted messages.
   kind: "profile" | "team";
   id: string;
   name: string;
   secondary?: string;
   archived?: boolean;
 };
-export type MentionTargetRef = Pick<MentionTarget, "kind" | "id">;
+export type MentionTargetRef = { kind: MentionTargetKind; id: string };
 
 function targetOf(profile: MentionProfile): MentionTarget {
   return { kind: "profile", id: profile.id, name: profile.display_name, secondary: profile.username, archived: profile.archived };
@@ -54,6 +56,9 @@ export function survivingMentions(text: string, mentions: (string | MentionTarge
   const legacy = typeof mentions[0] === "string";
   const targets = items.map((item) => "kind" in item ? item : targetOf(item));
   return mentions.filter((mention) => {
+    // Entity targets have no @display-name candidate in this composer yet. Preserve their
+    // durable reference through a text-only edit instead of silently deleting it.
+    if (!legacy && ["issue", "document"].includes((mention as MentionTargetRef).kind)) return true;
     const target = legacy
       ? targets.find((candidate) => candidate.kind === "profile" && candidate.id === mention)
       : targets.find((candidate) => candidate.id === (mention as MentionTargetRef).id && candidate.kind === (mention as MentionTargetRef).kind);

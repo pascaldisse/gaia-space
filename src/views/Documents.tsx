@@ -212,7 +212,7 @@ const [showArchived, setShowArchived] = createSignal(false);
       archived: false,
     };
     try {
-      await documentsApi.createDocumentFolder(folder);
+      await documentsApi.createDocumentFolder(folder, actingProfileId());
       setNewFolderName("");
       await refetchFolders();
     } catch (e) {
@@ -233,7 +233,7 @@ const [showArchived, setShowArchived] = createSignal(false);
       archived: false,
     };
     try {
-      await documentsApi.createDocumentFolder(folder);
+      await documentsApi.createDocumentFolder(folder, actingProfileId());
       setNewBookName("");
       await refetchFolders();
       setSelectedBookId(id);

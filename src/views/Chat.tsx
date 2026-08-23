@@ -195,12 +195,20 @@ export default function Chat() {
     const id = threadRootId();
     return id ? { id, p: actingProfileId() } : null;
   };
+  // A content thread is a real channel, linked to its root message. The root stays
+  // in the parent pane (`skip_first_message`), while this resource owns only replies.
+  const [threadChannel] = createResource(threadKey, (k) =>
+    chatApi.ensureThreadChannel(k.id, null, k.p),
+  );
+  const threadPageKey = () => {
+    const k = threadKey(); const thread = threadChannel();
+    return k && thread ? { ...k, channelId: thread.id } : null;
+  };
   // Threads use the same cursor protocol as channel history, avoiding an
   // unbounded side-pane query for long discussions.
-  const [threadPage, { refetch: refetchThread }] = createResource(threadKey, (k) => {
-    const root = threadRoot();
-    return root ? chatApi.listMessagesPage({ channelId: root.channel_id, threadOf: k.id, limit: PAGE_SIZE, actingProfileId: k.p }) : Promise.resolve(null);
-  });
+  const [threadPage, { refetch: refetchThread }] = createResource(threadPageKey, (k) =>
+    chatApi.listMessagesPage({ channelId: k.channelId, limit: PAGE_SIZE, actingProfileId: k.p }),
+  );
   const [threadPaging, setThreadPaging] = createSignal(initialPaging());
   createEffect(() => {
     threadKey();
@@ -210,15 +218,14 @@ export default function Chat() {
   const olderThreadCursor = () => threadPaging().cursor ?? threadPage()?.next_cursor ?? null;
   const canLoadOlderThread = () => threadPaging().hasMore && olderThreadCursor() !== null;
   const loadOlderThread = async () => {
-    const key = threadKey();
-    const root = threadRoot();
+    const key = threadPageKey();
     const cursor = olderThreadCursor();
-    if (!key || !root || !cursor) return;
+    if (!key || !cursor) return;
     const started = beginLoad(threadPaging());
     if (!started.started) return;
     setThreadPaging(started.state);
     try {
-      const page = await chatApi.listMessagesPage({ channelId: root.channel_id, threadOf: key.id, cursor, limit: PAGE_SIZE, actingProfileId: key.p });
+      const page = await chatApi.listMessagesPage({ channelId: key.channelId, cursor, limit: PAGE_SIZE, actingProfileId: key.p });
       setThreadPaging((state) => applyPage(state, started.ticket, page));
     } catch (e) {
       setThreadPaging((state) => failLoad(state, started.ticket, e));
@@ -680,21 +687,22 @@ export default function Chat() {
   const [threadDraft, setThreadDraft] = createSignal("");
   async function sendThreadReply() {
     const root = threadRoot();
+    const thread = threadChannel();
     const p = actingProfileId();
     const text = threadDraft().trim();
     const attachments = threadAttachments();
     if (threadMessageId()) { await retryThreadAttachments(); return; }
-    if (!root || !p) return;
+    if (!root || !thread || !p) return;
     if (!canSendDraft(text, attachments)) return;
     try {
       const message = await chatApi.createMessage({
         id: newId("msg"),
-        channel_id: root.channel_id,
+        channel_id: thread.id,
         author_id: p,
         text,
         created_at: Math.floor(Date.now() / 1000),
         edited_at: null,
-        thread_of: root.id,
+        thread_of: null,
         archived: false,
         mention_targets: mentionPayload(threadMentionIds()),
       });
@@ -1342,7 +1350,7 @@ export default function Chat() {
               }}
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
-            <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
+            <button class="primary" onClick={sendThreadReply} disabled={!threadChannel() || (!threadDraft().trim() && !threadAttachments().length)}>Reply</button>
             <button type="button" class="schedule-button" title="Schedule reply" onClick={() => { setScheduleThreadOf(threadRoot()!.id); setScheduleOpen(true); }}>🕒</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={threadAttachments().length}><div class="pending-attachments">
