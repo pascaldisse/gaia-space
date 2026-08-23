@@ -159,7 +159,7 @@ pub fn conflicts_in(
     let conflicts: Vec<BusyBlock> = blocks
         .iter()
         .filter(|b| overlaps(b.starts_at, b.ends_at, starts_at, ends_at))
-        .filter(|b| profiles.iter().any(|p| *p == b.profile_id))
+        .filter(|b| profiles.contains(&b.profile_id))
         .cloned()
         .collect();
     let free = profiles

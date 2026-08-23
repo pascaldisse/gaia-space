@@ -873,7 +873,7 @@ fn list_mentions_for_profile_impl(
 ) -> Result<Vec<MentionView>> {
     let mut s = c
         .prepare(
-            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived \
+            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived,m.content_kind \
              FROM message_mentions mm JOIN messages m ON m.id=mm.message_id \
              WHERE mm.profile_id=?1 AND m.archived=0 ORDER BY m.created_at DESC",
         )
@@ -1617,6 +1617,7 @@ mod tests {
                 thread_of: None,
                 archived: false,
                 mention_ids: mentions.iter().map(|s| s.to_string()).collect(),
+                content_kind: "text".into(),
             },
         )
     }
@@ -1667,6 +1668,7 @@ mod tests {
                 description: None,
                 project_id: None,
                 archived: false,
+                read_only: false,
             },
             &["alice".to_string()],
         )
@@ -1713,6 +1715,7 @@ mod tests {
             thread_of: None,
             archived: false,
             mention_ids: too_many.clone(),
+            content_kind: "text".into(),
         };
         assert!(create_message_impl(&c, &message)
             .unwrap_err()
