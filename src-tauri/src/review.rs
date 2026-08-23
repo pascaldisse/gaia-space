@@ -874,7 +874,7 @@ fn apply_suggested_edit_tx(
     let base_text = std::str::from_utf8(base_blob.content())
         .map_err(|_| "suggested edit base blob is not UTF-8".to_string())?;
     let edited = replace_suggestion_lines(base_text, start, end, content.as_deref().unwrap())?;
-    let mut index = git2::Index::new().map_err(|e| e.to_string())?;
+    let mut index = repo.index().map_err(|e| e.to_string())?;
     index.read_tree(&current_tree).map_err(|e| e.to_string())?;
     let entry = index
         .get_path(safe_path, 0)
@@ -3016,6 +3016,75 @@ mod tests {
             "merged tree must keep main's file"
         );
 
+        sweep(&dir);
+    }
+    fn suggestion_fixture(name: &str) -> (db::TempDb, PathBuf, Repository, Connection, String) {
+        let (dir, repo) = clean_repo(name);
+        let path = dir.to_string_lossy().to_string();
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('suggestion','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
+        let base = branch_commit(&repo, "feature").unwrap().id().to_string();
+        (db_path, dir, repo, conn, base)
+    }
+
+    fn insert_open_suggestion(conn: &Connection, base: &str) {
+        conn.execute("INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,suggestion_status,suggestion_content,suggestion_has_conflicts) VALUES('suggestion-disc','suggestion','extra.txt',1,1,?1,'OPEN','changed',0)", rusqlite::params![base]).unwrap();
+    }
+
+    #[test]
+    fn suggested_edit_apply_creates_a_source_branch_commit() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-apply");
+        insert_open_suggestion(&conn, &base);
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let applied =
+            apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").expect("apply");
+        let tip = branch_commit(&repo, "feature").unwrap();
+        assert_ne!(tip.id(), before);
+        assert_eq!(tip.id().to_string(), applied.commit_id);
+        let entry = tip
+            .tree()
+            .unwrap()
+            .get_path(Path::new("extra.txt"))
+            .unwrap();
+        assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"changed\n");
+        let recorded: (String, String) = conn.query_row("SELECT suggestion_status,suggestion_applied_commit_id FROM review_discussions WHERE id='suggestion-disc'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(recorded, ("ACCEPTED".into(), applied.commit_id));
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn suggested_edit_apply_refuses_a_changed_target_blob() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-conflict");
+        insert_open_suggestion(&conn, &base);
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(branch_commit(&repo, "feature").unwrap().id()),
+            "extra.txt",
+            "someone else\n",
+        );
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let err = apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").unwrap_err();
+        assert!(err.contains("conflicts"));
+        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before);
+        let conflicted: bool = conn.query_row("SELECT suggestion_has_conflicts FROM review_discussions WHERE id='suggestion-disc'", [], |r| r.get(0)).unwrap();
+        assert!(conflicted);
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn suggested_edit_apply_refuses_an_unauthorized_actor() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-permission");
+        insert_open_suggestion(&conn, &base);
+        conn.execute("INSERT INTO protected_branch_rules(id,project_id,branch_pattern,allow_merge_json) VALUES('lock','demo-project','feature','[\"other\"]')", []).unwrap();
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let err = apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").unwrap_err();
+        assert!(err.contains("not allowed"));
+        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before);
+        drop(db_path);
         sweep(&dir);
     }
 }
