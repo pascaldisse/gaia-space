@@ -8,6 +8,7 @@ import {
   isTerminalRun,
   allowedDeploymentTransitions,
   JOB_TRIGGER_TYPES,
+  droppedContainerSteps,
   scriptDefErrors,
   scriptDefWarnings,
   serializeJob,
@@ -139,6 +140,13 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (!s) return;
     props.setError(null);
     try {
+      // A container step whose command line was edited away cannot be re-emitted; saving would
+      // silently move that command from its image onto the worker host. Block, don't warn.
+      const dropped = jobs.flatMap((job) => droppedContainerSteps(job).map((image) => `job '${job.name}': container step (image '${image}') was edited or removed; saving would run its command on the worker host instead. Restore the original command line or delete the step deliberately in the source view.`));
+      if (dropped.length) {
+        props.setError(dropped.join("; "));
+        return;
+      }
       const def = { jobs: jobs.map(fromEditJob) };
       // Refuse locally exactly what parse_and_validate_script would refuse, so "Save script"
       // never reports success for a script the server dropped.

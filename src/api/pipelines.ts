@@ -141,7 +141,7 @@ export function parseScriptSource(source: string): ParsedScriptDef {
       }
       const value = raw as Record<string, unknown>;
       if (Array.isArray(value.steps) && job.steps.length < value.steps.length) warnings.push(`job '${job.name}' has ${value.steps.length - job.steps.length} unsupported or malformed step(s) not loaded`);
-      if (job.steps.some((step) => step.type === "Container")) warnings.push(`job '${job.name}' has container step(s): this build cannot execute them, and the shell-only editor will not preserve their container settings on save`);
+      if (job.steps.some((step) => step.type === "Container")) warnings.push(`job '${job.name}' has container step(s): this build cannot execute them; the editor preserves their image and env, but editing such a step's command line will drop it`);
       if (Array.isArray(value.triggers) && (job.triggers?.length ?? 0) < value.triggers.length) warnings.push(`job '${job.name}' has ${value.triggers.length - (job.triggers?.length ?? 0)} unsupported or malformed trigger(s) not loaded`);
       return [job];
     });
@@ -152,16 +152,47 @@ export function parseScriptSource(source: string): ParsedScriptDef {
 }
 
 /** Editor shape: steps are edited as one script per line. */
-export type EditableJob = { name: string; trigger_type: string; timeout_secs: number | null; stepsText: string; triggers?: TriggerDef[] };
-/** Editor → wire. Emits the singular-`script` shape the server accepts; one step per line. */
+export type EditableJob = {
+  name: string;
+  trigger_type: string;
+  timeout_secs: number | null;
+  stepsText: string;
+  triggers?: TriggerDef[];
+  /** Container steps loaded from the wire, kept verbatim so the shell-only editor cannot
+   * silently downgrade isolated execution to a host shell. Matched back by command text. */
+  containerSteps?: StepDef[];
+};
+/** Editor → wire. Emits the singular-`script` shape the server accepts; one step per line.
+ * A line whose command still matches a loaded container step is re-emitted as that container
+ * step (image and env intact); only genuinely new lines become Shell steps. */
 export function serializeJob(job: EditableJob): ScriptJobDef {
-  const steps: StepDef[] = job.stepsText.split("\n").map((s) => s.trim()).filter(Boolean).map((script) => ({ type: "Shell", script }));
+  const pending = (job.containerSteps ?? []).filter((step) => step.type === "Container").slice();
+  const steps: StepDef[] = job.stepsText.split("\n").map((s) => s.trim()).filter(Boolean).map((script) => {
+    const index = pending.findIndex((step) => step.script.trim() === script);
+    if (index === -1) return { type: "Shell", script } as StepDef;
+    return pending.splice(index, 1)[0];
+  });
   return { name: job.name, trigger_type: job.trigger_type, timeout_secs: job.timeout_secs, steps, ...(job.triggers?.length ? { triggers: job.triggers } : {}) };
 }
 /** Wire → editor. */
 export function editableJob(job: ScriptJobDef): EditableJob {
   const { steps, ...rest } = job;
-  return { ...rest, stepsText: steps.map((step) => step.script).join("\n") };
+  const containerSteps = steps.filter((step) => step.type === "Container");
+  return { ...rest, stepsText: steps.map((step) => step.script).join("\n"), ...(containerSteps.length ? { containerSteps } : {}) };
+}
+/** Container steps whose command line was edited or deleted, so they can no longer be restored.
+ * Saving such a job would move the command from an image to the worker host: callers must block
+ * the save, not warn. */
+export function droppedContainerSteps(job: EditableJob): string[] {
+  const lines = job.stepsText.split("\n").map((s) => s.trim()).filter(Boolean);
+  const remaining = lines.slice();
+  const dropped: string[] = [];
+  for (const step of (job.containerSteps ?? []).filter((s) => s.type === "Container")) {
+    const index = remaining.indexOf(step.script.trim());
+    if (index === -1) dropped.push(step.type === "Container" ? step.image : "");
+    else remaining.splice(index, 1);
+  }
+  return dropped;
 }
 
 // ---------- validation parity with pipelines.rs::parse_and_validate_script ----------

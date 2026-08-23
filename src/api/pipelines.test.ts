@@ -159,18 +159,7 @@ describe("container step editor round-trip (defect pin)", () => {
              steps: [{ type: "Container", image: "alpine", script: "rm -rf /workspace" }] }],
   });
 
-  test("round-tripping a container step downgrades it to a host shell step", () => {
-    const job = parseScriptSource(source).jobs[0];
-    const saved = serializeJob(editableJob(job));
-    // Current behaviour: the isolation is dropped, the command survives.
-    expect(saved.steps).toEqual([{ type: "Shell", script: "rm -rf /workspace" }]);
-    expect(JSON.stringify(saved)).not.toContain("alpine");
-  });
-
-  // DEFECT (for the pipelines.ts owner): downgrading to Shell changes *where* the command runs.
-  // Either the container step must survive the round-trip, or the editor must refuse to save a
-  // script it cannot represent — a warning is not enough for a change of execution context.
-  test.failing("a container step should survive the editor round-trip", () => {
+  test("a container step survives the editor round-trip", () => {
     const job = parseScriptSource(source).jobs[0];
     expect(serializeJob(editableJob(job)).steps).toEqual([
       { type: "Container", image: "alpine", script: "rm -rf /workspace" },
