@@ -3029,7 +3029,7 @@ async fn registry_composer_get(
             let base = registry_base_url(&headers, &repository_id, "composer");
             (
                 StatusCode::OK,
-                Json(package_registry::composer_packages_json(&base)),
+                Json(package_registry::composer_packages_json(&base, &repository_id)),
             )
                 .into_response()
         }

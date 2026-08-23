@@ -292,6 +292,17 @@ fn pypi_files(metadata: Option<&str>, package_name: &str, version: &str) -> Vec<
                 .or_else(|| file.get("name").and_then(Value::as_str).map(str::to_owned))
         })
         .collect();
+    // Assets uploaded through the generic route rewrite `metadata_json` into a `_files` map;
+    // those names are what storage actually holds, so they outrank the PEP 625 guess.
+    let names = if names.is_empty() {
+        metadata
+            .and_then(|m| serde_json::from_str::<Value>(m).ok())
+            .and_then(|value| value.get("_files").and_then(Value::as_object).cloned())
+            .map(|files| files.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    } else {
+        names
+    };
     if names.is_empty() {
         vec![format!(
             "{}-{version}.tar.gz",
@@ -303,13 +314,34 @@ fn pypi_files(metadata: Option<&str>, package_name: &str, version: &str) -> Vec<
 }
 
 /// Composer root service document: points clients at the `p2` metadata layout.
-pub fn composer_packages_json(registry_base: &str) -> Value {
+/// `available-packages` names what this repository actually holds; a client that reads an empty
+/// list concludes the repository is empty, so the list is built from storage, not left blank.
+pub fn composer_packages_json(registry_base: &str, repository_id: &str) -> Value {
     let base = registry_base.trim_end_matches('/');
+    let mut names: Vec<String> = composer_package_names(repository_id).unwrap_or_default();
+    names.sort();
+    names.dedup();
     json!({
         "metadata-url": format!("{base}/p2/%package%.json"),
         "providers-api": format!("{base}/p2/%package%.json"),
-        "available-packages": Value::Array(vec![]),
+        "available-packages": names,
     })
+}
+
+fn composer_package_names(repository_id: &str) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let mut statement = c
+        .prepare("SELECT DISTINCT package_name FROM package_versions WHERE repository_id=?1")
+        .map_err(|e| e.to_string())?;
+    let names = statement
+        .query_map(params![repository_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(names
+        .into_iter()
+        .map(|name| normalized_key("composer", &name))
+        .collect())
 }
 
 /// Composer `p2/{vendor}/{package}.json`: one entry per stored version, carrying the
@@ -823,7 +855,7 @@ mod tests {
             index["resources"][0]["@id"],
             "https://space.example/api/registry/repo/nuget/"
         );
-        let composer = composer_packages_json("https://space.example/api/registry/repo/composer");
+        let composer = composer_packages_json("https://space.example/api/registry/repo/composer", "repo");
         assert_eq!(
             composer["metadata-url"],
             "https://space.example/api/registry/repo/composer/p2/%package%.json"
