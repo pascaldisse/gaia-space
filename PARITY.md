@@ -46,7 +46,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V75 → feat/w11-calls (call recording completion) ☀wave11
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 59 · partial 178 · stub 4 · missing 115. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 59 · partial 179 · stub 4 · missing 114. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -95,7 +95,7 @@ Progress (feat/w7-chatbot ☀Vishnu-II): chatbot slash-command callback `src-tau
 
 Progress (feat/w8-apps ☀Vishnu-VIII): the two-stage rights model is now *consumed*, which was its only open UNVERIFIED — `app_rights::app_has_right_anywhere` (project grant, else org-wide) gates the external application API: `/api/app/projects` answers with only the projects the app was authorized to view, and the first external write `POST /api/app/projects/{project_id}/issues` refuses without `Project.CreateIssues` even with a `write` token (OAuth scope ≠ authorization). No migration. Test: `space-server::tests::the_app_api_shows_and_writes_only_what_the_rights_model_authorized` ⇒ "Two-stage app required-rights…" partial→done. Chat composer slash menu landed (`src/chatCommands.ts`, `src/views/Chat.tsx`): typing `/` asks every registered chatbot endpoint for its commands, debounced and prefix-filtered, same-named commands stay per-bot, a live answer beats that bot's declared fallback (`src/chatCommands.test.ts`); row stays partial because typed menu parameter forms are still absent. Tauri CLI 死枝: the reported "bun tauri missing" premise is false — `@tauri-apps/cli` 2.11.4 is already a devDependency and the invocation is `bun run tauri` (`bun run tauri info` reports a complete toolchain, desktop feature compiles under `cargo clippy --all-targets`). Desktop window startup itself stays MANUAL-ONLY UNVERIFIED (owner's eyes).
 ## 08 Video Calls / Meet (audited ✓ — rows: reports/parity/08-video-calls.md @ 963dd13)
-35 rows — done 10 · partial 15 · missing 10.
+35 rows — done 10 · partial 16 · missing 9.
 Worst gaps: recording/egress · lobby/admission · remote audio playback · persistent video_provider · call lifecycle model.
 Note: lane reported 1 dashboard test fail; independent re-run (crown) = 99 pass/0 fail — not reproduced.
 
