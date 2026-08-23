@@ -59,7 +59,7 @@ Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining 
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
 59 rows — done 10 · partial 30 · missing 19.
-Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV write-back+multi-calendar exposure (Day/Schedule views landed).
+Progress: CalDAV named-calendar discovery + VEVENT PUT/DELETE write-back landed (V60); Google exposure remains absent. · document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
 32 rows — done 4 · partial 16 · missing 12.

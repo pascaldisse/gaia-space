@@ -468,6 +468,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 56 {
         tx.execute_batch(SCHEMA_V56)?;
     }
+    // V60: CalDAV-owned VEVENTs are durable and separate from read-only feed cache.
+    if version < 60 {
+        tx.execute_batch(SCHEMA_V60)?;
+    }
     // V61: quality-gate application/role principals.  These are nullable JSON
     // principal lists so every existing rule keeps its prior meaning.
     if version < 61 && table_exists(&tx, "quality_gate_rules")? {
@@ -833,6 +837,22 @@ CREATE TABLE IF NOT EXISTS app_ssh_keys (application_id TEXT NOT NULL REFERENCES
 CREATE TABLE IF NOT EXISTS app_gpg_keys (application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(application_id, fingerprint));
 "#;
 
+/// V60: events created by CalDAV clients. Feed events stay projections and are never
+/// modified by a remote PUT, while these rows are owned by their named calendar.
+pub(crate) const SCHEMA_V60: &str = r#"
+CREATE TABLE IF NOT EXISTS calendar_caldav_events (
+ calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+ href TEXT NOT NULL,
+ uid TEXT NOT NULL,
+ title TEXT NOT NULL,
+ starts_at INTEGER NOT NULL,
+ ends_at INTEGER,
+ all_day_date TEXT,
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ PRIMARY KEY(calendar_id, href)
+);
+CREATE INDEX IF NOT EXISTS calendar_caldav_events_range ON calendar_caldav_events(calendar_id, starts_at);
+"#;
 pub(crate) const SCHEMA_V56: &str = r#"
 CREATE TABLE IF NOT EXISTS app_required_rights (
     application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
@@ -1255,6 +1275,19 @@ mod tests {
         );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
+    fn v60_adds_caldav_events_to_a_v59_database() {
+        let temp = TempDb::new("gaia-space-v60-caldav");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        conn.execute("DROP TABLE calendar_caldav_events", []).unwrap();
+        conn.pragma_update(None, "user_version", 59).unwrap();
+        migrate(&conn).expect("V60 migration");
+        let columns: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('calendar_caldav_events') WHERE name='calendar_id'", [], |row| row.get(0)).unwrap();
+        assert_eq!(columns, 1);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 60);
     }
 
     /// The integration lane merged three schema-touching branches into one serial
