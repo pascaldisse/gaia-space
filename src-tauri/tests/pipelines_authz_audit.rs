@@ -12,7 +12,7 @@
 
 use std::io::ErrorKind;
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -114,7 +114,7 @@ impl Server {
         self.scratch.join(format!("marker-{name}"))
     }
 
-    fn wait_for(&self, path: &PathBuf) -> bool {
+    fn wait_for(&self, path: &Path) -> bool {
         let deadline = Instant::now() + effect_timeout();
         while Instant::now() < deadline {
             if path.exists() {

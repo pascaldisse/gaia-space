@@ -2172,11 +2172,10 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
     ),
     ("seed_rights", gaia_space_lib::rights::Right::EditRoles),
 ];
-fn require_rights_administration(
-    user: &User,
-    name: &str,
-) -> Result<(), (StatusCode, Json<Value>)> {
-    let Some((_, right)) = RIGHTS_ADMIN_COMMANDS.iter().find(|(command, _)| *command == name)
+fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
+    let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
+        .iter()
+        .find(|(command, _)| *command == name)
     else {
         return Ok(());
     };
@@ -2287,25 +2286,62 @@ fn authorize_command(
         }
         CommandPolicy::PipelineScriptWrite => {
             let payload = body.get("script");
-            let payload_project = payload.and_then(|script| script.get("project_id").or_else(|| script.get("projectId"))).and_then(Value::as_str);
-            let payload_id = payload.and_then(|script| script.get("id")).and_then(Value::as_str);
-            let script_id = arg::<Option<String>>(body, "script_id").ok().flatten().or_else(|| arg::<Option<String>>(body, "id").ok().flatten()).or_else(|| payload_id.map(str::to_owned));
+            let payload_project = payload
+                .and_then(|script| script.get("project_id").or_else(|| script.get("projectId")))
+                .and_then(Value::as_str);
+            let payload_id = payload
+                .and_then(|script| script.get("id"))
+                .and_then(Value::as_str);
+            let script_id = arg::<Option<String>>(body, "script_id")
+                .ok()
+                .flatten()
+                .or_else(|| arg::<Option<String>>(body, "id").ok().flatten())
+                .or_else(|| payload_id.map(str::to_owned));
             let mut project_ids = Vec::new();
             if name == "create_pipeline_script" {
-                project_ids.push(payload_project.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script.project_id is required"))?.to_owned());
+                project_ids.push(
+                    payload_project
+                        .ok_or_else(|| {
+                            err(StatusCode::BAD_REQUEST, "script.project_id is required")
+                        })?
+                        .to_owned(),
+                );
             } else {
-                let script_id = script_id.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script id is required"))?;
+                let script_id = script_id
+                    .ok_or_else(|| err(StatusCode::BAD_REQUEST, "script id is required"))?;
                 let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-                let stored: String = c.query_row("SELECT project_id FROM pipeline_scripts WHERE id=?1 AND archived=0", [&script_id], |row| row.get(0)).map_err(|_| err(StatusCode::FORBIDDEN, "project access denied"))?;
+                let stored: String = c
+                    .query_row(
+                        "SELECT project_id FROM pipeline_scripts WHERE id=?1 AND archived=0",
+                        [&script_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| err(StatusCode::FORBIDDEN, "project access denied"))?;
                 project_ids.push(stored);
                 if name == "update_pipeline_script" {
-                    project_ids.push(payload_project.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script.project_id is required"))?.to_owned());
+                    project_ids.push(
+                        payload_project
+                            .ok_or_else(|| {
+                                err(StatusCode::BAD_REQUEST, "script.project_id is required")
+                            })?
+                            .to_owned(),
+                    );
                 }
             }
             // Authoring is execution deferred: whoever writes a script body runs it later,
             // so writes take the execute-tier predicate (owner|admin), not `project_readable`.
-            let allowed = project_ids.iter().map(|project_id| project_pipeline_executable(user, project_id)).collect::<Result<Vec<_>, _>>().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.into_iter().all(|allowed| allowed);
-            if allowed { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "project access denied")) }
+            let allowed = project_ids
+                .iter()
+                .map(|project_id| project_pipeline_executable(user, project_id))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .into_iter()
+                .all(|allowed| allowed);
+            if allowed {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "project access denied"))
+            }
         }
         CommandPolicy::PipelineScriptExecute => {
             let script_id = arg::<Option<String>>(body, "script_id")
@@ -2952,7 +2988,10 @@ fn authorize_command(
                     None,
                 )?;
             }
-            if matches!(name, "update_channel" | "add_channel_member" | "remove_channel_member") {
+            if matches!(
+                name,
+                "update_channel" | "add_channel_member" | "remove_channel_member"
+            ) {
                 let channel_id: String = if name == "update_channel" {
                     body.get("channel")
                         .and_then(|channel| arg(channel, "id").ok())
@@ -3413,7 +3452,10 @@ async fn registry_composer_get(
             let base = registry_base_url(&headers, &repository_id, "composer");
             (
                 StatusCode::OK,
-                Json(package_registry::composer_packages_json(&base, &repository_id)),
+                Json(package_registry::composer_packages_json(
+                    &base,
+                    &repository_id,
+                )),
             )
                 .into_response()
         }
@@ -3554,10 +3596,7 @@ async fn registry_oci_get(
                 Ok(bytes) => (
                     StatusCode::OK,
                     [
-                        (
-                            header::CONTENT_TYPE,
-                            "application/octet-stream".to_string(),
-                        ),
+                        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
                         (DOCKER_CONTENT_DIGEST, digest.clone()),
                     ],
                     bytes,
@@ -3591,7 +3630,8 @@ async fn registry_oci_put(
     };
     if matches!(
         target,
-        package_registry::OciTarget::BlobUpload { .. } | package_registry::OciTarget::BlobUploadStart
+        package_registry::OciTarget::BlobUpload { .. }
+            | package_registry::OciTarget::BlobUploadStart
     ) {
         let Some(digest) = query.get("digest") else {
             return err(
@@ -4342,11 +4382,17 @@ fn spawn_pipeline_schedule_ticker() {
         loop {
             tick.tick().await;
             match tokio::task::spawn_blocking(|| {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|error| error.to_string())?.as_secs() as i64;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|error| error.to_string())?
+                    .as_secs() as i64;
                 pipelines::due_scheduled_runs(now)
-            }).await {
-                Ok(Ok(runs)) if !runs.is_empty() => eprintln!("pipeline schedule ticker: started {} run(s)", runs.len()),
+            })
+            .await
+            {
+                Ok(Ok(runs)) if !runs.is_empty() => {
+                    eprintln!("pipeline schedule ticker: started {} run(s)", runs.len())
+                }
                 Ok(Ok(_)) => {}
                 Ok(Err(error)) => eprintln!("pipeline schedule ticker: tick failed: {error}"),
                 Err(error) => eprintln!("pipeline schedule ticker: task panicked: {error}"),
@@ -5160,7 +5206,10 @@ mod tests {
         .await;
         assert_eq!(fetched.status(), StatusCode::OK);
         assert_eq!(
-            to_bytes(fetched.into_body(), 1 << 20).await.unwrap().to_vec(),
+            to_bytes(fetched.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
             layer
         );
         // Session start hands out a Location the client PUTs the blob to.

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 64;
+pub const SCHEMA_VERSION: i64 = 68;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -526,12 +526,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 62 {
         tx.execute_batch(SCHEMA_V62)?;
     }
-    // V64: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
-    // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
-    if version < 64 && table_exists(&tx, "job_runs")? {
-        add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
-        tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
-    }
     // V63: self-hosted worker lifecycle (KB §03 §2.3 `WorkerDTO`, §1.2 worker pools).
     // Three facts the previous `workers` row could not carry:
     //   * `suspended` — an admin disabling a worker is NOT the same fact as the worker
@@ -555,6 +549,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             )?;
             tx.execute_batch("CREATE INDEX IF NOT EXISTS job_runs_worker ON job_runs(worker_id);")?;
         }
+    }
+    // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
+    // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
+    // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
+    if version < 68 && table_exists(&tx, "job_runs")? {
+        add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
+        tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1322,7 +1323,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 64);
+        assert_eq!(SCHEMA_VERSION, 68);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -1347,12 +1348,112 @@ mod tests {
         let temp = TempDb::new("gaia-space-v60-caldav");
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
-        conn.execute("DROP TABLE calendar_caldav_events", []).unwrap();
+        conn.execute("DROP TABLE calendar_caldav_events", [])
+            .unwrap();
         conn.pragma_update(None, "user_version", 59).unwrap();
         migrate(&conn).expect("V60 migration");
         let columns: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('calendar_caldav_events') WHERE name='calendar_id'", [], |row| row.get(0)).unwrap();
         assert_eq!(columns, 1);
-        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+    }
+
+    /// V68 is this lane's rung and it is the ladder's head, so every wave-10 database
+    /// (stamped 63..=67 by a sibling branch) must climb to it and end up with both the
+    /// `fired_minute` column and the partial unique index the schedule claim depends on.
+    #[test]
+    fn v68_schedule_claim_reaches_every_wave10_start_version() {
+        for start in [63i64, 64, 65, 66, 67] {
+            let temp = TempDb::new(&format!("gaia-space-v68-from-{start}"));
+            let conn = open_at(&temp).expect("database");
+            migrate(&conn).expect("first climb to head");
+            // Remove the V68 artifacts and rewind: the rung must rebuild them.
+            conn.execute_batch("DROP INDEX IF EXISTS job_runs_scheduled_once;")
+                .unwrap();
+            conn.pragma_update(None, "user_version", start).unwrap();
+            migrate(&conn).expect("replay from a wave-10 sibling version");
+            // Second climb from the same start: the rung must be idempotent per start,
+            // not merely idempotent from the default head.
+            conn.pragma_update(None, "user_version", start).unwrap();
+            migrate(&conn).expect("replaying the same start version twice");
+            migrate(&conn).expect("replaying an already-head database");
+
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                version, SCHEMA_VERSION,
+                "a database stamped v{start} lands on head"
+            );
+            let column: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info('job_runs') WHERE name='fired_minute'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(column, 1, "v{start} replay leaves job_runs.fired_minute");
+            let index: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='job_runs_scheduled_once'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                index, 1,
+                "v{start} replay restores the claim index exactly once"
+            );
+            let column_count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info('job_runs') WHERE name='fired_minute'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                column_count, 1,
+                "v{start} double replay never duplicates fired_minute"
+            );
+        }
+    }
+
+    /// Re-running the head migration must not error and must not leave a second index
+    /// behind — the claim index is what makes a cron fire exactly-once.
+    #[test]
+    fn v68_schedule_claim_is_idempotent_on_a_second_migrate() {
+        let temp = TempDb::new("gaia-space-v68-idempotent");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        migrate(&conn).expect("migrating an already-head database is a no-op");
+        conn.pragma_update(None, "user_version", 67).unwrap();
+        migrate(&conn).expect("replaying the V68 rung");
+        migrate(&conn).expect("replaying the V68 rung twice");
+
+        let indexes: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='job_runs_scheduled_once'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 1, "the claim index exists exactly once");
+        let columns: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('job_runs') WHERE name='fired_minute'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 1, "fired_minute is added once, never duplicated");
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     /// The integration lane merged three schema-touching branches into one serial
@@ -1361,7 +1462,7 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44] {
+        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");

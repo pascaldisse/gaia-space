@@ -749,12 +749,18 @@ fn a_read_tier_project_member_reaches_arbitrary_shell_execution() {
         "trigger_pipeline_event",
         json!({"scriptId":"s-readtier","event":{"type":"Manual"}}),
     );
-    assert_eq!(status, 200, "the non-admin project owner was refused: {value}");
+    assert_eq!(
+        status, 200,
+        "the non-admin project owner was refused: {value}"
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     while !marker.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
     }
-    assert!(marker.exists(), "the project owner's event never reached its shell step");
+    assert!(
+        marker.exists(),
+        "the project owner's event never reached its shell step"
+    );
     let _ = std::fs::remove_file(&marker);
 
     let (status, value) = server.call_as(
