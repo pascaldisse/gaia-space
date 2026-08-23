@@ -335,7 +335,14 @@ async function togglePinned(v: PackageVersion) {
                             </dl>
                           )}
                         </Match>
-                        <Match when={d().format === "generic" ? (d() as Extract<PackageDetail, { format: "generic" }>) : null}>
+                        <Match when={["maven", "npm", "dart", "file"].includes(d().format) ? d() : null}>
+{(x) => (
+<dl class="detail-list">
+<dt>Typed protocol detail</dt><dd><pre>{JSON.stringify(x(), null, 2)}</pre></dd>
+</dl>
+)}
+</Match>
+<Match when={d().format === "generic" ? (d() as Extract<PackageDetail, { format: "generic" }>) : null}>
                           {(g) => (
                             <>
                               <p class="hint pad">No protocol model for this format — the publisher's own projection, unchanged.</p>

@@ -441,6 +441,29 @@ pub struct OciDescriptor {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "format", rename_all = "lowercase")]
 pub enum PackageDetail {
+    Maven {
+        group_id: String,
+        artifact_id: String,
+        version: String,
+        packaging: Option<String>,
+        description: Option<String>,
+        licenses: Vec<String>,
+        scm_url: Option<String>,
+        dependencies: Vec<DetailDependency>,
+        snapshot: bool,
+    },
+    Npm {
+        name: String,
+        version: String,
+        description: Option<String>,
+        dependencies: Vec<DetailDependency>,
+        keywords: Vec<String>,
+        license: Option<String>,
+        project_url: Option<String>,
+        repository_url: Option<String>,
+        repository_revision: Option<String>,
+        unity_version: Option<String>,
+    },
     Nuget {
         id: String,
         version: String,
@@ -458,6 +481,20 @@ pub enum PackageDetail {
         requires_dist: Vec<DetailDependency>,
         files: Vec<String>,
     },
+    Dart {
+        name: String,
+        version: String,
+        description: Option<String>,
+        home_page: Option<String>,
+        repository_url: Option<String>,
+        issue_tracker: Option<String>,
+        documentation: Option<String>,
+        license: Option<String>,
+        dependencies: Vec<DetailDependency>,
+        dev_dependencies: Vec<DetailDependency>,
+        dependency_overrides: Vec<DetailDependency>,
+        environment: Value,
+    },
     Composer {
         name: String,
         version: String,
@@ -469,20 +506,29 @@ pub enum PackageDetail {
     Container {
         name: String,
         reference: String,
+        schema_version: Option<i64>,
         media_type: Option<String>,
+        manifest_type: Option<String>,
         config: Option<OciDescriptor>,
         layers: Vec<OciDescriptor>,
         total_size: i64,
         subject: Option<String>,
+        annotations: Value,
     },
-    /// Formats without a protocol model here (maven, npm, generic, …): the publisher's own
-    /// projection, unchanged. Inventing typed fields for them would be a guess, not a model.
+    File {
+        name: String,
+        version: String,
+        files: Vec<String>,
+        content_type: Option<String>,
+    },
+    /// Unknown formats remain raw; Cargo/crates is explicitly planned-but-unshipped in KB §03.
     Generic {
         name: String,
         version: String,
         fields: Value,
     },
 }
+
 fn text(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -573,7 +619,47 @@ pub fn package_detail(
     metadata_json: Option<&str>,
 ) -> PackageDetail {
     let meta = format_projection(metadata_json);
+    let repository = meta.get("repository").cloned().unwrap_or(Value::Null);
     match format {
+        "maven" => PackageDetail::Maven {
+            group_id: text(&meta, "groupId").unwrap_or_else(|| {
+                package_name
+                    .split(':')
+                    .next()
+                    .unwrap_or(package_name)
+                    .to_string()
+            }),
+            artifact_id: text(&meta, "artifactId").unwrap_or_else(|| {
+                package_name
+                    .rsplit(':')
+                    .next()
+                    .unwrap_or(package_name)
+                    .to_string()
+            }),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            packaging: text(&meta, "packaging"),
+            description: text(&meta, "description"),
+            licenses: string_list(&meta, "licenses"),
+            scm_url: text(&meta, "scmUrl"),
+            dependencies: dependencies(&meta, "dependencies"),
+            snapshot: meta
+                .get("snapshot")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| version.ends_with("-SNAPSHOT")),
+        },
+        "npm" => PackageDetail::Npm {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            description: text(&meta, "description"),
+            dependencies: dependencies(&meta, "dependencies"),
+            keywords: string_list(&meta, "keywords"),
+            license: text(&meta, "license"),
+            project_url: text(&meta, "projectUrl").or_else(|| text(&meta, "homepage")),
+            repository_url: text(&repository, "url").or_else(|| text(&meta, "repositoryUrl")),
+            repository_revision: text(&repository, "revision")
+                .or_else(|| text(&meta, "repositoryRevision")),
+            unity_version: text(&meta, "unityVersion"),
+        },
         "nuget" => PackageDetail::Nuget {
             id: text(&meta, "id").unwrap_or_else(|| package_name.to_string()),
             version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
@@ -591,6 +677,23 @@ pub fn package_detail(
                 .or_else(|| text(&meta, "requiresPython")),
             requires_dist: dependencies(&meta, "requires_dist"),
             files: pypi_files(metadata_json, package_name, version),
+        },
+        "dart" => PackageDetail::Dart {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            description: text(&meta, "description"),
+            home_page: text(&meta, "homePage"),
+            repository_url: text(&meta, "repositoryUrl"),
+            issue_tracker: text(&meta, "issueTracker"),
+            documentation: text(&meta, "documentation"),
+            license: text(&meta, "license"),
+            dependencies: dependencies(&meta, "dependencies"),
+            dev_dependencies: dependencies(&meta, "devDependencies"),
+            dependency_overrides: dependencies(&meta, "dependencyOverrides"),
+            environment: meta
+                .get("environment")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
         },
         "composer" => PackageDetail::Composer {
             name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
@@ -611,13 +714,14 @@ pub fn package_detail(
                 .map(|items| items.iter().filter_map(descriptor).collect())
                 .unwrap_or_default();
             let config = manifest.get("config").and_then(descriptor);
-            // Accumulated while walking the layers, not re-derived afterwards.
             let total_size = layers.iter().map(|layer| layer.size).sum::<i64>()
                 + config.as_ref().map(|c| c.size).unwrap_or_default();
             PackageDetail::Container {
                 name: normalized_key("container", package_name),
                 reference: version.to_string(),
+                schema_version: manifest.get("schemaVersion").and_then(Value::as_i64),
                 media_type: text(&manifest, "mediaType"),
+                manifest_type: text(&meta, "manifestType"),
                 config,
                 layers,
                 total_size,
@@ -632,8 +736,22 @@ pub fn package_detail(
                             .and_then(Value::as_str)
                             .map(str::to_owned)
                     }),
+                annotations: manifest
+                    .get("annotations")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
             }
         }
+        "file" => PackageDetail::File {
+            name: package_name.to_string(),
+            version: version.to_string(),
+            files: meta
+                .get("_files")
+                .and_then(Value::as_object)
+                .map(|files| files.keys().cloned().collect())
+                .unwrap_or_default(),
+            content_type: text(&meta, "contentType"),
+        },
         _ => PackageDetail::Generic {
             name: package_name.to_string(),
             version: version.to_string(),
@@ -641,6 +759,7 @@ pub fn package_detail(
         },
     }
 }
+
 /// Typed detail of one stored version, read through the repository's declared format.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn package_version_detail(
@@ -990,30 +1109,97 @@ mod tests {
         assert_eq!(subject.as_deref(), Some("sha256:deadbeef"));
     }
     #[test]
-    fn a_format_without_a_model_keeps_its_raw_projection() {
-        let detail = package_detail("maven", "com.example:app", "1.0", Some(r#"{"anything":1}"#));
-        assert_eq!(
-            detail,
-            PackageDetail::Generic {
-                name: "com.example:app".into(),
-                version: "1.0".into(),
-                fields: json!({"anything": 1}),
-            }
+    fn every_shipped_format_has_a_typed_detail_and_crates_stays_unshipped() {
+        let maven = package_detail(
+            "maven",
+            "com.example:app",
+            "1.0-SNAPSHOT",
+            Some(
+                r#"{"formatMetadata":{"packaging":"jar","licenses":["Apache-2.0"],"dependencies":{"org.slf4j:slf4j-api":"2.0"}}}"#,
+            ),
         );
-        // Absent/broken metadata must not panic and must not invent fields.
+        let PackageDetail::Maven {
+            group_id,
+            artifact_id,
+            snapshot,
+            dependencies,
+            ..
+        } = maven
+        else {
+            panic!("maven must be typed")
+        };
         assert_eq!(
-            package_detail("nuget", "pkg", "1.0", Some("not json")),
-            PackageDetail::Nuget {
-                id: "pkg".into(),
-                version: "1.0".into(),
-                authors: None,
-                description: None,
-                license: None,
-                tags: vec![],
-                dependencies: vec![],
-            }
+            (group_id, artifact_id, snapshot),
+            ("com.example".into(), "app".into(), true)
         );
+        assert_eq!(dependencies[0].name, "org.slf4j:slf4j-api");
+        let npm = package_detail(
+            "npm",
+            "@scope/pkg",
+            "2.0.0",
+            Some(
+                r#"{"formatMetadata":{"description":"typed","dependencies":{"solid-js":"^1.0"},"repository":{"url":"https://example.test/repo","revision":"abc"},"unityVersion":"2022"}}"#,
+            ),
+        );
+        let PackageDetail::Npm {
+            dependencies,
+            repository_revision,
+            unity_version,
+            ..
+        } = npm
+        else {
+            panic!("npm must be typed")
+        };
+        assert_eq!(dependencies[0].requirement, "^1.0");
+        assert_eq!(repository_revision.as_deref(), Some("abc"));
+        assert_eq!(unity_version.as_deref(), Some("2022"));
+        let dart = package_detail(
+            "dart",
+            "collection",
+            "1.0.0",
+            Some(
+                r#"{"formatMetadata":{"dependencies":{"meta":"^1.0"},"devDependencies":{"test":"^1.0"},"environment":{"sdk":">=3.0"}}}"#,
+            ),
+        );
+        let PackageDetail::Dart {
+            dependencies,
+            dev_dependencies,
+            environment,
+            ..
+        } = dart
+        else {
+            panic!("dart must be typed")
+        };
+        assert_eq!(
+            (
+                dependencies[0].name.as_str(),
+                dev_dependencies[0].name.as_str()
+            ),
+            ("meta", "test")
+        );
+        assert_eq!(environment["sdk"], ">=3.0");
+        let file = package_detail(
+            "file",
+            "manual",
+            "1",
+            Some(r#"{"_files":{"manual.pdf":{"size":3}},"contentType":"application/pdf"}"#),
+        );
+        let PackageDetail::File {
+            files,
+            content_type,
+            ..
+        } = file
+        else {
+            panic!("file must be typed")
+        };
+        assert_eq!(files, vec!["manual.pdf"]);
+        assert_eq!(content_type.as_deref(), Some("application/pdf"));
+        assert!(matches!(
+            package_detail("crates", "x", "1", Some(r#"{"anything":1}"#)),
+            PackageDetail::Generic { .. }
+        ));
     }
+
     #[test]
     fn digests_are_parsed_strictly() {
         assert!(parse_digest(&format!("sha256:{}", "a".repeat(64))).is_ok());

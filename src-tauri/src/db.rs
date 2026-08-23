@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 118;
+pub const SCHEMA_VERSION: i64 = 123;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -646,6 +646,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // preview is only ever readable through the channel ACL of the message that owns it.
     if version < 118 && table_exists(&tx, "messages")? {
         tx.execute_batch(SCHEMA_V118)?;
+    }
+    // V123: registry typed details remain projections in V32's validated JSON column.
+    // This reserved registry-only migration records that invariant in the upgrade sequence;
+    // no duplicated per-format columns can drift from a publisher's lossless envelope.
+    if version < 123 {
+        tx.execute_batch(SCHEMA_V123)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1614,6 +1620,11 @@ CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(optio
 /// through the message that carries it, i.e. through that channel's ACL: a global cache
 /// would let anybody confirm which URLs private channels talk about. `status` records the
 /// outcome so a refused (SSRF-guarded) or failed fetch is not retried on every read.
+/// V123 deliberately has no DDL: `format_metadata_json` (V32) is the single durable,
+/// versioned projection for every registry protocol; adding one column per ecosystem would
+/// make schema evolution depend on publishers rather than on the protocol model.
+pub(crate) const SCHEMA_V123: &str = "SELECT 1;";
+
 pub(crate) const SCHEMA_V118: &str = r#"
 CREATE TABLE IF NOT EXISTS message_links (
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -2043,7 +2054,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 118);
+        assert_eq!(SCHEMA_VERSION, 123);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
