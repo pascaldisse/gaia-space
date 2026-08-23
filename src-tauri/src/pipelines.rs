@@ -25,7 +25,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -282,16 +282,487 @@ impl VulnerabilityScanner for NoopVulnerabilityScanner {
 }
 
 // ---------- script JSON model (the ".space.kts equivalent") ----------
+// ---------- trigger DSL ----------
+
+/// Typed job trigger. Mirrors Space's `JobTriggerType` enum + its per-type DTOs
+/// (`GitPushTriggerDTO{repository, branch}`, `GitBranchDeletedTriggerDTO{branches}`, ...).
+///
+/// Wire format is serde-tagged (`{"type":"GitPush","branches":["main"]}`) but a bare legacy
+/// string (`"GIT_PUSH"`) still deserializes — existing scripts written against the old
+/// `trigger_type` field must keep parsing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type")]
+pub enum TriggerDef {
+    Manual,
+    GitPush {
+        /// Branch globs (`main`, `release/*`, `*`). Empty = every branch.
+        branches: Vec<String>,
+        /// Optional repository restriction; `None` = the script's own repository.
+        repository: Option<String>,
+    },
+    Schedule {
+        cron: String,
+    },
+    GitBranchDeleted {
+        branches: Vec<String>,
+    },
+    CodeReviewOpened,
+    CodeReviewClosed,
+    SafeMerge,
+}
+
+/// Deserialization-only mirror of [`TriggerDef`]: defaults + legacy tag aliases live here so
+/// the public enum stays free of serde attributes that would leak into its serialized form.
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum TriggerRepr {
+    #[serde(alias = "MANUAL", alias = "manual")]
+    Manual,
+    #[serde(alias = "GIT_PUSH", alias = "gitPush", alias = "git_push")]
+    GitPush {
+        #[serde(default)]
+        branches: Vec<String>,
+        #[serde(default)]
+        repository: Option<String>,
+    },
+    #[serde(alias = "SCHEDULE", alias = "schedule")]
+    Schedule { cron: String },
+    #[serde(alias = "GIT_BRANCH_DELETED", alias = "git_branch_deleted")]
+    GitBranchDeleted {
+        #[serde(default)]
+        branches: Vec<String>,
+    },
+    #[serde(alias = "CODE_REVIEW_OPENED", alias = "code_review_opened")]
+    CodeReviewOpened,
+    #[serde(alias = "CODE_REVIEW_CLOSED", alias = "code_review_closed")]
+    CodeReviewClosed,
+    #[serde(alias = "SAFE_MERGE", alias = "safe_merge")]
+    SafeMerge,
+}
+
+impl From<TriggerRepr> for TriggerDef {
+    fn from(r: TriggerRepr) -> Self {
+        match r {
+            TriggerRepr::Manual => TriggerDef::Manual,
+            TriggerRepr::GitPush {
+                branches,
+                repository,
+            } => TriggerDef::GitPush {
+                branches,
+                repository,
+            },
+            TriggerRepr::Schedule { cron } => TriggerDef::Schedule { cron },
+            TriggerRepr::GitBranchDeleted { branches } => TriggerDef::GitBranchDeleted { branches },
+            TriggerRepr::CodeReviewOpened => TriggerDef::CodeReviewOpened,
+            TriggerRepr::CodeReviewClosed => TriggerDef::CodeReviewClosed,
+            TriggerRepr::SafeMerge => TriggerDef::SafeMerge,
+        }
+    }
+}
+
+impl TriggerDef {
+    /// Legacy `trigger_type` string → typed trigger (unrestricted variants).
+    pub fn from_legacy(name: &str) -> Result<Self> {
+        match name.trim().to_ascii_uppercase().as_str() {
+            "MANUAL" => Ok(TriggerDef::Manual),
+            "GIT_PUSH" | "GITPUSH" => Ok(TriggerDef::GitPush {
+                branches: Vec::new(),
+                repository: None,
+            }),
+            "SCHEDULE" => Err("legacy SCHEDULE trigger needs an explicit cron expression".into()),
+            "GIT_BRANCH_DELETED" => Ok(TriggerDef::GitBranchDeleted {
+                branches: Vec::new(),
+            }),
+            "CODE_REVIEW_OPENED" => Ok(TriggerDef::CodeReviewOpened),
+            "CODE_REVIEW_CLOSED" => Ok(TriggerDef::CodeReviewClosed),
+            "SAFE_MERGE" => Ok(TriggerDef::SafeMerge),
+            other => Err(format!("unknown trigger type '{other}'")),
+        }
+    }
+
+    /// The legacy `jobs.trigger_type` column value for this trigger.
+    pub fn legacy_name(&self) -> &'static str {
+        match self {
+            TriggerDef::Manual => "MANUAL",
+            TriggerDef::GitPush { .. } => "GIT_PUSH",
+            TriggerDef::Schedule { .. } => "SCHEDULE",
+            TriggerDef::GitBranchDeleted { .. } => "GIT_BRANCH_DELETED",
+            TriggerDef::CodeReviewOpened => "CODE_REVIEW_OPENED",
+            TriggerDef::CodeReviewClosed => "CODE_REVIEW_CLOSED",
+            TriggerDef::SafeMerge => "SAFE_MERGE",
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        match self {
+            TriggerDef::Schedule { cron } => CronSpec::parse(cron).map(|_| ()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Does this trigger fire for `event`?
+    pub fn matches(&self, event: &TriggerEvent) -> bool {
+        match (self, event) {
+            (TriggerDef::Manual, TriggerEvent::Manual) => true,
+            (
+                TriggerDef::GitPush {
+                    branches,
+                    repository,
+                },
+                TriggerEvent::Push {
+                    repository: repo,
+                    branch,
+                },
+            ) => {
+                repository.as_deref().is_none_or(|r| r == repo)
+                    && branch_matches_any(branches, branch)
+            }
+            (
+                TriggerDef::GitBranchDeleted { branches },
+                TriggerEvent::BranchDeleted { branch, .. },
+            ) => branch_matches_any(branches, branch),
+            (TriggerDef::CodeReviewOpened, TriggerEvent::CodeReviewOpened { .. }) => true,
+            (TriggerDef::CodeReviewClosed, TriggerEvent::CodeReviewClosed { .. }) => true,
+            (TriggerDef::SafeMerge, TriggerEvent::SafeMerge { .. }) => true,
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TriggerDef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        match value {
+            Value::String(s) => TriggerDef::from_legacy(&s).map_err(serde::de::Error::custom),
+            other => TriggerRepr::deserialize(other)
+                .map(TriggerDef::from)
+                .map_err(serde::de::Error::custom),
+        }
+    }
+}
+
+/// A concrete event offered to a script's triggers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum TriggerEvent {
+    Manual,
+    Push { repository: String, branch: String },
+    BranchDeleted { repository: String, branch: String },
+    CodeReviewOpened { review_id: String },
+    CodeReviewClosed { review_id: String },
+    SafeMerge { review_id: String },
+}
+
+/// Empty pattern list = every branch; otherwise any glob may match.
+fn branch_matches_any(patterns: &[String], branch: &str) -> bool {
+    patterns.is_empty() || patterns.iter().any(|p| glob_match(p, branch))
+}
+
+/// Minimal glob matcher for branch patterns: `*` = any run of characters (including `/`),
+/// `?` = exactly one character. Iterative with backtracking — no recursion, no crate.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star, mut star_t) = (usize::MAX, 0usize);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = pi;
+            star_t = ti;
+            pi += 1;
+        } else if star != usize::MAX {
+            pi = star + 1;
+            star_t += 1;
+            ti = star_t;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+// ---------- cron (5 fields, no crate) ----------
+
+/// One parsed cron field: the set of allowed values in its range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CronField {
+    allowed: Vec<bool>,
+    restricted: bool,
+}
+
+impl CronField {
+    fn parse(spec: &str, min: u32, max: u32) -> Result<Self> {
+        let len = (max - min + 1) as usize;
+        let mut allowed = vec![false; len];
+        let mut restricted = true;
+        for part in spec.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                return Err(format!("empty cron field element in '{spec}'"));
+            }
+            let (range, step) = match part.split_once('/') {
+                Some((r, s)) => (
+                    r,
+                    s.parse::<u32>()
+                        .map_err(|_| format!("invalid cron step '{s}'"))?,
+                ),
+                None => (part, 1),
+            };
+            if step == 0 {
+                return Err(format!("cron step must be >0 in '{part}'"));
+            }
+            let (lo, hi) = if range == "*" {
+                if step == 1 {
+                    restricted = false;
+                }
+                (min, max)
+            } else if let Some((a, b)) = range.split_once('-') {
+                (parse_cron_num(a, min, max)?, parse_cron_num(b, min, max)?)
+            } else {
+                let v = parse_cron_num(range, min, max)?;
+                (v, v)
+            };
+            if lo > hi {
+                return Err(format!("cron range '{range}' is inverted"));
+            }
+            let mut v = lo;
+            while v <= hi {
+                allowed[(v - min) as usize] = true;
+                v += step;
+            }
+        }
+        if !allowed.iter().any(|a| *a) {
+            return Err(format!("cron field '{spec}' matches nothing"));
+        }
+        Ok(CronField {
+            allowed,
+            restricted,
+        })
+    }
+
+    fn contains(&self, value: u32, min: u32) -> bool {
+        self.allowed
+            .get(value.saturating_sub(min) as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+}
+
+fn parse_cron_num(raw: &str, min: u32, max: u32) -> Result<u32> {
+    let v: u32 = raw
+        .trim()
+        .parse()
+        .map_err(|_| format!("invalid cron value '{raw}'"))?;
+    // cron allows 7 = Sunday in the day-of-week field
+    let v = if max == 6 && v == 7 { 0 } else { v };
+    if v < min || v > max {
+        return Err(format!("cron value '{raw}' out of range {min}..={max}"));
+    }
+    Ok(v)
+}
+
+/// A 5-field cron expression: `minute hour day-of-month month day-of-week`, evaluated in UTC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CronSpec {
+    minute: CronField,
+    hour: CronField,
+    dom: CronField,
+    month: CronField,
+    dow: CronField,
+}
+
+impl CronSpec {
+    pub fn parse(expr: &str) -> Result<Self> {
+        let fields: Vec<&str> = expr.split_whitespace().collect();
+        if fields.len() != 5 {
+            return Err(format!(
+                "cron expression needs exactly 5 fields (min hour dom mon dow), got {}",
+                fields.len()
+            ));
+        }
+        Ok(CronSpec {
+            minute: CronField::parse(fields[0], 0, 59)?,
+            hour: CronField::parse(fields[1], 0, 23)?,
+            dom: CronField::parse(fields[2], 1, 31)?,
+            month: CronField::parse(fields[3], 1, 12)?,
+            dow: CronField::parse(fields[4], 0, 6)?,
+        })
+    }
+
+    /// Does this spec fire at the minute containing `ts` (unix seconds, UTC)?
+    pub fn matches(&self, ts: i64) -> bool {
+        let (_y, mo, d, h, mi) = civil_from_unix(ts);
+        let dow = weekday_from_unix(ts);
+        if !self.minute.contains(mi, 0) || !self.hour.contains(h, 0) || !self.month.contains(mo, 1)
+        {
+            return false;
+        }
+        // POSIX rule: if both day fields are restricted the match is their union.
+        let dom_ok = self.dom.contains(d, 1);
+        let dow_ok = self.dow.contains(dow, 0);
+        match (self.dom.restricted, self.dow.restricted) {
+            (true, true) => dom_ok || dow_ok,
+            _ => dom_ok && dow_ok,
+        }
+    }
+
+    /// First firing time strictly after `ts` (unix seconds, UTC), searching up to ~4 years.
+    pub fn next_after(&self, ts: i64) -> Option<i64> {
+        let mut t = (ts.div_euclid(60) + 1) * 60;
+        let limit = 366 * 4 * 24 * 60;
+        for _ in 0..limit {
+            if self.matches(t) {
+                return Some(t);
+            }
+            t += 60;
+        }
+        None
+    }
+}
+
+/// (year, month, day, hour, minute) in UTC for a unix timestamp — Hinnant's civil_from_days.
+fn civil_from_unix(ts: i64) -> (i64, u32, u32, u32, u32) {
+    let days = ts.div_euclid(86_400);
+    let secs = ts.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, (secs / 3600) as u32, ((secs % 3600) / 60) as u32)
+}
+
+/// 0 = Sunday .. 6 = Saturday (1970-01-01 was a Thursday).
+fn weekday_from_unix(ts: i64) -> u32 {
+    (ts.div_euclid(86_400) + 4).rem_euclid(7) as u32
+}
+
+// ---------- step DSL ----------
+
+/// One job step. `Shell` runs on the host worker (current executor); `Container` mirrors
+/// Space's container step and is parsed but **not executed** by this build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type")]
+pub enum StepDef {
+    Shell {
+        script: String,
+        env: BTreeMap<String, String>,
+    },
+    Container {
+        image: String,
+        script: String,
+        env: BTreeMap<String, String>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum StepRepr {
+    #[serde(alias = "shell", alias = "Host", alias = "host", alias = "SHELL")]
+    Shell {
+        script: String,
+        #[serde(default)]
+        env: BTreeMap<String, String>,
+    },
+    #[serde(alias = "container", alias = "CONTAINER")]
+    Container {
+        image: String,
+        script: String,
+        #[serde(default)]
+        env: BTreeMap<String, String>,
+    },
+}
+
+impl From<StepRepr> for StepDef {
+    fn from(r: StepRepr) -> Self {
+        match r {
+            StepRepr::Shell { script, env } => StepDef::Shell { script, env },
+            StepRepr::Container { image, script, env } => StepDef::Container { image, script, env },
+        }
+    }
+}
+
+impl StepDef {
+    /// Legacy plain-string step (`"echo hi"`) → host shell step.
+    pub fn shell(script: impl Into<String>) -> Self {
+        StepDef::Shell {
+            script: script.into(),
+            env: BTreeMap::new(),
+        }
+    }
+
+    pub fn script(&self) -> &str {
+        match self {
+            StepDef::Shell { script, .. } | StepDef::Container { script, .. } => script,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StepDef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        match value {
+            Value::String(s) => Ok(StepDef::shell(s)),
+            other => StepRepr::deserialize(other)
+                .map(StepDef::from)
+                .map_err(serde::de::Error::custom),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScriptJobDef {
     pub name: String,
+    /// Legacy single-trigger field, kept for backward compatibility and for the
+    /// `jobs.trigger_type` index column. Ignored when `triggers` is non-empty.
     #[serde(default = "default_trigger_type")]
     pub trigger_type: String,
+    /// Typed triggers (the DSL going forward). Empty = derive from `trigger_type`.
+    #[serde(default)]
+    pub triggers: Vec<TriggerDef>,
     #[serde(default)]
     pub timeout_secs: Option<u64>,
     #[serde(default)]
-    pub steps: Vec<String>,
+    pub steps: Vec<StepDef>,
 }
+
+impl ScriptJobDef {
+    /// Triggers actually in force: explicit list, else the legacy string.
+    pub fn effective_triggers(&self) -> Result<Vec<TriggerDef>> {
+        if self.triggers.is_empty() {
+            Ok(vec![TriggerDef::from_legacy(&self.trigger_type)?])
+        } else {
+            Ok(self.triggers.clone())
+        }
+    }
+
+    /// Value written to the `jobs.trigger_type` index column (first effective trigger).
+    fn index_trigger_type(&self) -> String {
+        self.effective_triggers()
+            .ok()
+            .and_then(|ts| ts.first().map(|t| t.legacy_name().to_string()))
+            .unwrap_or_else(|| self.trigger_type.clone())
+    }
+
+    /// Does any of this job's triggers fire for `event`?
+    pub fn fires_for(&self, event: &TriggerEvent) -> bool {
+        self.effective_triggers()
+            .map(|ts| ts.iter().any(|t| t.matches(event)))
+            .unwrap_or(false)
+    }
+}
+
 fn default_trigger_type() -> String {
     "MANUAL".into()
 }
@@ -334,6 +805,23 @@ pub fn parse_and_validate_script(source: &str) -> Result<ScriptDef> {
                 return Err(format!("job '{}' timeout_secs must be in 1..={MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)", job.name));
             }
         }
+        for step in &job.steps {
+            if step.script().trim().is_empty() {
+                return Err(format!(
+                    "job '{}' has a step with an empty script",
+                    job.name
+                ));
+            }
+        }
+        // Triggers: legacy string or typed list, cron syntax validated up front.
+        for trigger in job
+            .effective_triggers()
+            .map_err(|e| format!("job '{}': {e}", job.name))?
+        {
+            trigger
+                .validate()
+                .map_err(|e| format!("job '{}': {e}", job.name))?;
+        }
     }
     Ok(def)
 }
@@ -360,7 +848,7 @@ fn sync_jobs_tx(conn: &Connection, script_id: &str, def: &ScriptDef) -> Result<(
         conn.execute(
             "INSERT INTO jobs(id,script_id,name,trigger_type,archived) VALUES(?1,?2,?3,?4,0)
              ON CONFLICT(id) DO UPDATE SET name=excluded.name, trigger_type=excluded.trigger_type, archived=0",
-            params![id, script_id, job.name, job.trigger_type],
+            params![id, script_id, job.name, job.index_trigger_type()],
         )
         .map_err(|e| e.to_string())?;
         kept.insert(id);
@@ -570,7 +1058,11 @@ pub fn expire_stale_workers_conn(c: &Connection, now: i64, timeout_secs: i64) ->
     .map_err(|e| e.to_string())
 }
 
-pub fn set_worker_suspended_conn(c: &Connection, worker_id: &str, suspended: bool) -> Result<Worker> {
+pub fn set_worker_suspended_conn(
+    c: &Connection,
+    worker_id: &str,
+    suspended: bool,
+) -> Result<Worker> {
     read_worker(c, worker_id)?;
     c.execute(
         "UPDATE workers SET suspended=?2 WHERE id=?1",
@@ -709,8 +1201,12 @@ pub fn create_job_artifact(input: JobArtifactInput) -> Result<JobArtifact> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn download_job_artifact(id: String) -> Result<Vec<u8>> {
     let c = db::conn()?;
-    c.query_row("SELECT content FROM job_artifacts WHERE id=?1", params![id], |r| r.get(0))
-        .map_err(|_| "artifact not found".to_string())
+    c.query_row(
+        "SELECT content FROM job_artifacts WHERE id=?1",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(|_| "artifact not found".to_string())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -909,11 +1405,17 @@ pub fn list_test_reports(job_run_id: String) -> Result<Vec<TestReport>> {
 /// Std-lib only: reader threads drain the piped streams while the main thread polls
 /// `try_wait`, so a hung/long step can still be killed at the deadline without deadlocking on
 /// a full pipe buffer.
-fn run_step(cmd: &str, cwd: &Path, deadline: Instant) -> Result<(bool, String)> {
+fn run_step(
+    cmd: &str,
+    env: &BTreeMap<String, String>,
+    cwd: &Path,
+    deadline: Instant,
+) -> Result<(bool, String)> {
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(cmd)
         .current_dir(cwd)
+        .envs(env)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -988,7 +1490,7 @@ fn execute_job_run(
     conn: Arc<Mutex<Connection>>,
     run_dir: PathBuf,
     run_id: String,
-    steps: Vec<String>,
+    steps: Vec<StepDef>,
     timeout_secs: u64,
 ) {
     let _ = fs::create_dir_all(&run_dir);
@@ -997,13 +1499,26 @@ fn execute_job_run(
     let mut log = String::new();
     let mut failed = false;
     for step in &steps {
+        let script = step.script();
         if Instant::now() >= deadline {
-            log.push_str(&format!("$ {step}\n[skipped: job timed out]\n"));
+            log.push_str(&format!("$ {script}\n[skipped: job timed out]\n"));
             failed = true;
             break;
         }
-        log.push_str(&format!("$ {step}\n"));
-        match run_step(step, &run_dir, deadline) {
+        // Container steps are typed in the DSL but this build has no container runtime:
+        // refuse them loudly instead of silently running the script on the host.
+        let env = match step {
+            StepDef::Shell { env, .. } => env,
+            StepDef::Container { image, .. } => {
+                log.push_str(&format!(
+                    "$ {script}\n[container steps are not executed by this build (image '{image}')]\n"
+                ));
+                failed = true;
+                break;
+            }
+        };
+        log.push_str(&format!("$ {script}\n"));
+        match run_step(script, env, &run_dir, deadline) {
             Ok((success, output)) => {
                 log.push_str(&output);
                 if !output.ends_with('\n') {
@@ -1040,7 +1555,7 @@ fn spawn_script_jobs(
     conn: Arc<Mutex<Connection>>,
     workdir_root: PathBuf,
     script_id: &str,
-    required_trigger: Option<&str>,
+    selector: &dyn Fn(&ScriptJobDef) -> bool,
 ) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
     let def = {
         let c = conn
@@ -1057,11 +1572,7 @@ fn spawn_script_jobs(
     };
     let mut runs = Vec::new();
     let mut handles = Vec::new();
-    for job in def
-        .jobs
-        .iter()
-        .filter(|job| required_trigger.is_none_or(|trigger| job.trigger_type == trigger))
-    {
+    for job in def.jobs.iter().filter(|job| selector(job)) {
         let job_id = job_id_for(script_id, &job.name);
         let run_id = format!("{job_id}::run-{}", now_nanos());
         let triggered_at = now_secs();
@@ -1108,7 +1619,135 @@ pub fn trigger_pipeline_script(script_id: String) -> Result<Vec<JobRun>> {
         .map_err(|e| e.to_string())?;
     let workdir_root = std::env::temp_dir().join("pipeline-runs");
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, None)?;
+    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, &|_| true)?;
+    Ok(runs)
+}
+
+/// Default workdir root for triggered runs (overridable, never hard-coded to a temp path).
+fn pipeline_workdir_root() -> PathBuf {
+    std::env::var_os("SPACE_PIPELINE_WORKDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("gaia-space")
+                .join("pipeline-runs")
+        })
+}
+
+/// Single entry point for every event-driven trigger type (push, branch deleted, code review
+/// opened/closed, safe merge). Schedules every job of `script_id` whose triggers match `event`.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn trigger_pipeline_event(script_id: String, event: TriggerEvent) -> Result<Vec<JobRun>> {
+    let conn = db::conn()?;
+    // Repository-scoped events must belong to the script's repository.
+    let event_repo = match &event {
+        TriggerEvent::Push {
+            repository, branch, ..
+        }
+        | TriggerEvent::BranchDeleted {
+            repository, branch, ..
+        } => {
+            if repository.trim().is_empty() || branch.trim().is_empty() {
+                return Err("event repository and branch are required".into());
+            }
+            Some(repository.clone())
+        }
+        _ => None,
+    };
+    if let Some(repo) = event_repo {
+        let configured: Option<String> = conn
+            .query_row(
+                "SELECT repository FROM pipeline_scripts WHERE id=?1",
+                params![script_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| "pipeline script not found".to_string())?;
+        if configured.as_deref() != Some(repo.as_str()) {
+            return Err("event repository does not match pipeline script".into());
+        }
+    }
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    let shared = Arc::new(Mutex::new(conn));
+    let (runs, _handles) =
+        spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
+            job.fires_for(&event)
+        })?;
+    Ok(runs)
+}
+
+/// Cron tick: starts every `Schedule` job whose cron expression fired since its last run.
+/// Poll-driven on purpose — the caller decides the cadence, no resident daemon is introduced.
+/// The watermark per job is its last run's `triggered_at` (falling back to one minute back),
+/// so a missed tick fires once on the next call rather than silently disappearing.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
+    let conn = db::conn()?;
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    let scripts: Vec<(String, String)> = {
+        let mut s = conn
+            .prepare("SELECT id,source FROM pipeline_scripts WHERE archived=0")
+            .map_err(|e| e.to_string())?;
+        let rows = s
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    let mut due: Vec<(String, String)> = Vec::new(); // (script_id, job name)
+    for (script_id, source) in &scripts {
+        let Ok(def) = parse_and_validate_script(source) else {
+            continue; // a broken script must not stop the whole tick
+        };
+        for job in &def.jobs {
+            let crons: Vec<String> = job
+                .effective_triggers()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|t| match t {
+                    TriggerDef::Schedule { cron } => Some(cron),
+                    _ => None,
+                })
+                .collect();
+            if crons.is_empty() {
+                continue;
+            }
+            let job_id = job_id_for(script_id, &job.name);
+            let last: Option<i64> = conn
+                .query_row(
+                    "SELECT MAX(triggered_at) FROM job_runs WHERE job_id=?1",
+                    params![job_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(None);
+            let since = last.unwrap_or(now - 60);
+            let fired = crons.iter().any(|c| {
+                CronSpec::parse(c)
+                    .ok()
+                    .and_then(|spec| spec.next_after(since))
+                    .is_some_and(|next| next <= now)
+            });
+            if fired {
+                due.push((script_id.clone(), job.name.clone()));
+            }
+        }
+    }
+    drop(conn);
+    let mut runs = Vec::new();
+    for (script_id, job_name) in due {
+        let conn = db::conn()?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+        let shared = Arc::new(Mutex::new(conn));
+        let (mut spawned, _handles) =
+            spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
+                job.name == job_name
+            })?;
+        runs.append(&mut spawned);
+    }
     Ok(runs)
 }
 /// Repository push entry point. The caller supplies the repository + branch rather than a
@@ -1135,16 +1774,12 @@ pub fn trigger_pipeline_on_push(
     }
     conn.busy_timeout(Duration::from_secs(5))
         .map_err(|e| e.to_string())?;
-    let workdir_root = std::env::var_os("SPACE_PIPELINE_WORKDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("gaia-space")
-                .join("pipeline-runs")
-        });
+    let event = TriggerEvent::Push { repository, branch };
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, Some("GIT_PUSH"))?;
+    let (runs, _handles) =
+        spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
+            job.fires_for(&event)
+        })?;
     Ok(runs)
 }
 
@@ -1354,6 +1989,7 @@ pub fn transition_deployment(id: String, status: String) -> Result<Deployment> {
         )
         .map_err(|e| e.to_string())?;
     // Promotion can implicitly change the prior CURRENT deployment to OBSOLETE.
+    // Capture its id before the write so it receives its own status notification.
     let superseded_id: Option<String> = if status == "CURRENT" {
         c.query_row(
             "SELECT id FROM deployments WHERE target_id=?1 AND status='CURRENT'",
@@ -2683,8 +3319,11 @@ mod tests {
         );
 
         // DISABLED is likewise administrative and a heartbeat must not clear it.
-        conn.execute("UPDATE workers SET status='DISABLED',suspended=0 WHERE id='w-hb'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE workers SET status='DISABLED',suspended=0 WHERE id='w-hb'",
+            [],
+        )
+        .unwrap();
         let disabled = worker_heartbeat_conn(&conn, "w-hb", now + 2).unwrap();
         assert_eq!(disabled.status, "DISABLED");
         assert_eq!(
@@ -2765,7 +3404,9 @@ mod tests {
             .unwrap()
             .expect("gpu run");
         assert_eq!(gpu.id, "run-gpu");
-        assert!(assign_job_run_conn(&conn, "w-gpu", now, 120).unwrap().is_none());
+        assert!(assign_job_run_conn(&conn, "w-gpu", now, 120)
+            .unwrap()
+            .is_none());
 
         // Independent check: exactly three runs are owned, each by one worker.
         let owned: i64 = conn
@@ -2819,8 +3460,9 @@ mod tests {
             .map(|(name, steps)| ScriptJobDef {
                 name: name.to_string(),
                 trigger_type: "MANUAL".into(),
+                triggers: Vec::new(),
                 timeout_secs: None,
-                steps: steps.iter().map(|s| s.to_string()).collect(),
+                steps: steps.iter().map(|s| StepDef::shell(*s)).collect(),
             })
             .collect();
         serde_json::to_string(&ScriptDef { jobs: defs }).unwrap()
@@ -2837,7 +3479,8 @@ mod tests {
         let workdir = temp_dir("runs-a");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a", None).expect("spawn");
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a", &|_| true)
+                .expect("spawn");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "SCHEDULED");
         for h in handles {
@@ -2876,7 +3519,8 @@ mod tests {
         let workdir = temp_dir("runs-b");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b", None).expect("spawn");
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b", &|_| true)
+                .expect("spawn");
         assert_eq!(runs.len(), 2);
         for h in handles {
             h.join().unwrap();
@@ -2943,6 +3587,29 @@ mod tests {
     }
 
     #[test]
+    fn deployment_status_event_has_filterable_transition_envelope() {
+        let deployment = Deployment {
+            id: "deploy-1".into(),
+            target_id: "target-1".into(),
+            version: "1.0.0".into(),
+            status: "CURRENT".into(),
+            description: None,
+            job_run_id: None,
+            scheduled_at: Some(1),
+            started_at: Some(2),
+            finished_at: None,
+        };
+        let payload = json!({
+            "event": crate::events::DEPLOYMENT_STATUS_CHANGED,
+            "previous_status": "DEPLOYING",
+            "deployment": deployment,
+        });
+        assert_eq!(payload["event"], "deployment.status_changed");
+        assert_eq!(payload["previous_status"], "DEPLOYING");
+        assert_eq!(payload["deployment"]["status"], "CURRENT");
+    }
+
+    #[test]
     fn deployment_status_changes_enqueue_scheduled_and_all_transition_events() {
         let _serial = db::test_serial();
         let temp = db::TempDb::new("deployment-webhook");
@@ -2958,6 +3625,7 @@ mod tests {
         c.execute("INSERT INTO webhook_subscriptions(id,application_id,event_type,endpoint_uri) VALUES('hook-1','app-1','deployment.status_changed','https://example.test/hook')", []).unwrap();
         c.execute("INSERT INTO deploy_targets(id,project_id,name,target_key) VALUES('target-1','project-1','Staging','staging')", []).unwrap();
         drop(c);
+
         schedule_deployment(ScheduleDeploymentRequest {
             id: "deploy-1".into(),
             target_id: "target-1".into(),
@@ -2978,6 +3646,7 @@ mod tests {
             transition_deployment(id.into(), "DEPLOYING".into()).unwrap();
             transition_deployment(id.into(), terminal.into()).unwrap();
         }
+        // A second successful deployment supersedes deploy-1, yielding OBSOLETE.
         schedule_deployment(ScheduleDeploymentRequest {
             id: "deploy-4".into(),
             target_id: "target-1".into(),
@@ -2996,11 +3665,19 @@ mod tests {
             .collect::<std::result::Result<_, _>>()
             .unwrap();
         assert_eq!(payloads.len(), 13);
-        let events: Vec<Value> = payloads
+        let scheduled: Value = serde_json::from_str(&payloads[0]).unwrap();
+        assert_eq!(scheduled["event"], crate::events::DEPLOYMENT_STATUS_CHANGED);
+        assert!(scheduled["previous_status"].is_null());
+        assert_eq!(scheduled["deployment"]["status"], "SCHEDULED");
+        let statuses: Vec<String> = payloads
             .into_iter()
-            .map(|p| serde_json::from_str(&p).unwrap())
+            .map(|body| {
+                serde_json::from_str::<Value>(&body).unwrap()["deployment"]["status"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
             .collect();
-        assert!(events[0]["previous_status"].is_null());
         for status in [
             "SCHEDULED",
             "DEPLOYING",
@@ -3010,10 +3687,8 @@ mod tests {
             "OBSOLETE",
         ] {
             assert!(
-                events
-                    .iter()
-                    .any(|event| event["deployment"]["status"] == status),
-                "missing {status}"
+                statuses.iter().any(|actual| actual == status),
+                "missing {status}: {statuses:?}"
             );
         }
     }
@@ -3468,5 +4143,251 @@ mod tests {
         }
         sweep(&db_path);
         sweep(&base_dir);
+    }
+
+    // ---------- trigger + step DSL (atom1a) ----------
+
+    /// Old scripts (string `trigger_type`, plain-string steps) must keep parsing unchanged.
+    #[test]
+    fn legacy_script_shape_still_parses() {
+        let src = r#"{"jobs":[{"name":"build","trigger_type":"GIT_PUSH","steps":["echo hi"]}]}"#;
+        let def = parse_and_validate_script(src).expect("legacy script parses");
+        let job = &def.jobs[0];
+        assert_eq!(job.steps, vec![StepDef::shell("echo hi")]);
+        assert_eq!(
+            job.effective_triggers().unwrap(),
+            vec![TriggerDef::GitPush {
+                branches: vec![],
+                repository: None
+            }]
+        );
+        assert_eq!(job.index_trigger_type(), "GIT_PUSH");
+        // unrestricted legacy push trigger fires for any repo/branch
+        assert!(job.fires_for(&TriggerEvent::Push {
+            repository: "repo".into(),
+            branch: "anything".into()
+        }));
+    }
+
+    /// Typed triggers: tagged objects, legacy strings inside the list, and branch globs.
+    #[test]
+    fn typed_triggers_parse_and_filter_by_branch_glob() {
+        let src = r#"{"jobs":[{"name":"release","triggers":[
+            {"type":"GitPush","branches":["main","release/*"],"repository":"core"},
+            "CODE_REVIEW_OPENED",
+            {"type":"Schedule","cron":"*/15 * * * *"}
+        ],"steps":[{"type":"Shell","script":"echo go","env":{"K":"V"}}]}]}"#;
+        let def = parse_and_validate_script(src).expect("typed script parses");
+        let job = &def.jobs[0];
+        assert_eq!(job.effective_triggers().unwrap().len(), 3);
+        assert_eq!(
+            job.steps[0],
+            StepDef::Shell {
+                script: "echo go".into(),
+                env: BTreeMap::from([("K".to_string(), "V".to_string())])
+            }
+        );
+        let push = |repo: &str, branch: &str| TriggerEvent::Push {
+            repository: repo.into(),
+            branch: branch.into(),
+        };
+        assert!(job.fires_for(&push("core", "main")));
+        assert!(job.fires_for(&push("core", "release/2.1")));
+        assert!(
+            !job.fires_for(&push("core", "feature/x")),
+            "glob must not match"
+        );
+        assert!(
+            !job.fires_for(&push("other", "main")),
+            "repository is restricted"
+        );
+        assert!(job.fires_for(&TriggerEvent::CodeReviewOpened {
+            review_id: "r1".into()
+        }));
+        assert!(!job.fires_for(&TriggerEvent::CodeReviewClosed {
+            review_id: "r1".into()
+        }));
+        assert!(!job.fires_for(&TriggerEvent::Manual));
+    }
+
+    #[test]
+    fn glob_matcher_handles_stars_and_question_marks() {
+        for (pat, text, want) in [
+            ("main", "main", true),
+            ("main", "maint", false),
+            ("*", "any/branch", true),
+            ("release/*", "release/1.0", true),
+            ("release/*", "release", false),
+            ("*/hotfix", "team/hotfix", true),
+            ("v?.0", "v1.0", true),
+            ("v?.0", "v10.0", false),
+            ("a*b*c", "axxbyyc", true),
+            ("a*b*c", "axxbyy", false),
+        ] {
+            assert_eq!(glob_match(pat, text), want, "glob {pat:?} vs {text:?}");
+        }
+    }
+
+    #[test]
+    fn cron_parses_five_fields_and_rejects_junk() {
+        assert!(CronSpec::parse("0 3 * * *").is_ok());
+        assert!(CronSpec::parse("*/15 * * * *").is_ok());
+        assert!(
+            CronSpec::parse("0,30 9-17 1 1 MON").is_err(),
+            "names unsupported"
+        );
+        assert!(CronSpec::parse("0 3 * *").is_err(), "4 fields");
+        assert!(
+            CronSpec::parse("60 3 * * *").is_err(),
+            "minute out of range"
+        );
+        assert!(CronSpec::parse("0 3 * * */0").is_err(), "zero step");
+    }
+
+    /// Verified against independently known UTC instants (not by re-running the same math):
+    /// 2026-01-01T00:00:00Z = 1767225600 (a Thursday).
+    #[test]
+    fn cron_next_after_computes_utc_instants() {
+        let new_year = 1_767_225_600i64; // 2026-01-01T00:00:00Z
+        let daily = CronSpec::parse("0 3 * * *").unwrap();
+        assert_eq!(daily.next_after(new_year), Some(new_year + 3 * 3600));
+        // from 03:00 the next fire is the following day
+        assert_eq!(
+            daily.next_after(new_year + 3 * 3600),
+            Some(new_year + 86_400 + 3 * 3600)
+        );
+        let quarter = CronSpec::parse("*/15 * * * *").unwrap();
+        assert_eq!(quarter.next_after(new_year), Some(new_year + 15 * 60));
+        assert_eq!(quarter.next_after(new_year + 60), Some(new_year + 15 * 60));
+        // day-of-week: 2026-01-01 is a Thursday (dow 4)
+        let thursday = CronSpec::parse("0 0 * * 4").unwrap();
+        assert!(thursday.matches(new_year));
+        assert_eq!(thursday.next_after(new_year), Some(new_year + 7 * 86_400));
+        // dom + dow both restricted = union (POSIX)
+        let union = CronSpec::parse("0 0 1 * 0").unwrap();
+        assert!(union.matches(new_year), "1st of month matches via dom");
+        // 2026-01-04 is a Sunday
+        assert!(
+            union.matches(new_year + 3 * 86_400),
+            "Sunday matches via dow"
+        );
+        assert!(!union.matches(new_year + 86_400));
+    }
+
+    #[test]
+    fn schedule_trigger_requires_valid_cron() {
+        let bad = r#"{"jobs":[{"name":"nightly","triggers":[{"type":"Schedule","cron":"nope"}],"steps":["echo x"]}]}"#;
+        let err = parse_and_validate_script(bad).unwrap_err();
+        assert!(err.contains("cron"), "unexpected error: {err}");
+        let legacy_schedule =
+            r#"{"jobs":[{"name":"n","trigger_type":"SCHEDULE","steps":["echo x"]}]}"#;
+        assert!(parse_and_validate_script(legacy_schedule).is_err());
+    }
+
+    /// Container steps parse, but this build has no container runtime: the run must fail
+    /// loudly rather than silently executing the script on the host.
+    #[test]
+    fn container_step_is_parsed_but_refused_at_runtime() {
+        let src = r#"{"jobs":[{"name":"boxed","steps":[{"type":"Container","image":"ubuntu:latest","script":"echo must-not-run-on-host"}]}]}"#;
+        let def = parse_and_validate_script(src).expect("container step parses");
+        assert!(matches!(def.jobs[0].steps[0], StepDef::Container { .. }));
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script-c','demo-project',?1)", params![src]).unwrap();
+        sync_jobs_tx(&conn, "script-c", &def).unwrap();
+        let workdir = temp_dir("runs-container");
+        let shared = Arc::new(Mutex::new(conn));
+        let (runs, handles) =
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-c", &|_| true)
+                .expect("spawn");
+        for h in handles {
+            h.join().unwrap();
+        }
+        let c = shared.lock().unwrap();
+        let (status, log): (String, Option<String>) = c
+            .query_row(
+                "SELECT status,log FROM job_runs WHERE id=?1",
+                params![runs[0].id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "FAILED");
+        let log = log.unwrap();
+        assert!(
+            log.contains("container steps are not executed"),
+            "log: {log}"
+        );
+        drop(c);
+        sweep(&db_path);
+        sweep(&workdir);
+    }
+
+    /// Shell step env vars reach the process.
+    #[test]
+    fn shell_step_env_is_passed_to_the_process() {
+        let src = r#"{"jobs":[{"name":"envy","steps":[{"type":"Shell","script":"echo marker=$MY_VAR","env":{"MY_VAR":"from-dsl"}}]}]}"#;
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('script-e','demo-project',?1)", params![src]).unwrap();
+        sync_jobs_tx(&conn, "script-e", &parse_and_validate_script(src).unwrap()).unwrap();
+        let workdir = temp_dir("runs-env");
+        let shared = Arc::new(Mutex::new(conn));
+        let (runs, handles) =
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-e", &|_| true)
+                .expect("spawn");
+        for h in handles {
+            h.join().unwrap();
+        }
+        let c = shared.lock().unwrap();
+        let log: Option<String> = c
+            .query_row(
+                "SELECT log FROM job_runs WHERE id=?1",
+                params![runs[0].id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(log.unwrap().contains("marker=from-dsl"));
+        drop(c);
+        sweep(&db_path);
+        sweep(&workdir);
+    }
+
+    /// `trigger_pipeline_event` selects jobs per event type across one script.
+    #[test]
+    fn event_selector_picks_only_matching_jobs() {
+        let src = r#"{"jobs":[
+            {"name":"on-push","triggers":[{"type":"GitPush","branches":["main"]}],"steps":["true"]},
+            {"name":"on-delete","triggers":[{"type":"GitBranchDeleted","branches":["feature/*"]}],"steps":["true"]},
+            {"name":"on-merge","triggers":["SAFE_MERGE"],"steps":["true"]}
+        ]}"#;
+        let def = parse_and_validate_script(src).unwrap();
+        let names = |event: TriggerEvent| -> Vec<String> {
+            def.jobs
+                .iter()
+                .filter(|j| j.fires_for(&event))
+                .map(|j| j.name.clone())
+                .collect()
+        };
+        assert_eq!(
+            names(TriggerEvent::Push {
+                repository: "core".into(),
+                branch: "main".into()
+            }),
+            vec!["on-push".to_string()]
+        );
+        assert_eq!(
+            names(TriggerEvent::BranchDeleted {
+                repository: "core".into(),
+                branch: "feature/x".into()
+            }),
+            vec!["on-delete".to_string()]
+        );
+        assert_eq!(
+            names(TriggerEvent::SafeMerge {
+                review_id: "r9".into()
+            }),
+            vec!["on-merge".to_string()]
+        );
+        assert!(names(TriggerEvent::Manual).is_empty());
     }
 }
