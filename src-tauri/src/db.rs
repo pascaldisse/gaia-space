@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 63;
+pub const SCHEMA_VERSION: i64 = 64;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -525,6 +525,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // approves or denies one right at a time.
     if version < 62 {
         tx.execute_batch(SCHEMA_V62)?;
+    }
+    // V64: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
+    // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
+    if version < 64 && table_exists(&tx, "job_runs")? {
+        add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
+        tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
     // V63: self-hosted worker lifecycle (KB §03 §2.3 `WorkerDTO`, §1.2 worker pools).
     // Three facts the previous `workers` row could not carry:
@@ -1316,7 +1322,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 63);
+        assert_eq!(SCHEMA_VERSION, 64);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

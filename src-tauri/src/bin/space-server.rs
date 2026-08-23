@@ -1691,7 +1691,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_job_artifact"
         | "create_message"
         | "create_package_repository"
-        | "create_pipeline_script"
         | "register_worker"
         | "save_test_report"
         | "ingest_teamcity_test_messages" => CommandPolicy::Session,
@@ -1712,8 +1711,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_deploy_target"
         | "delete_issue_status"
         | "delete_message" => CommandPolicy::Session,
-        "delete_pipeline_script"
-        | "delete_planning_tag"
+        "delete_planning_tag"
         | "delete_quality_gate_rule"
         | "delete_role_assignment"
         | "delete_sprint" => CommandPolicy::Session,
@@ -1873,8 +1871,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_document_folder" => CommandPolicy::DocumentFolderWrite,
         "update_issue_status"
         | "update_message"
-        | "update_pipeline_script"
         | "update_profile" => CommandPolicy::Session,
+        "create_pipeline_script" | "update_pipeline_script" | "delete_pipeline_script" => CommandPolicy::PipelineScriptWrite,
         // Event triggers operate on one repository-validated script. Its project membership
         // is checked before dispatch; repository equality alone is not authorization.
         "trigger_pipeline_event" => CommandPolicy::PipelineScriptWrite,
@@ -2280,27 +2278,24 @@ fn authorize_command(
             }
         }
         CommandPolicy::PipelineScriptWrite => {
-            let script_id: String =
-                arg(body, "script_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-            let project_id: Option<String> = c
-                .query_row(
-                    "SELECT project_id FROM pipeline_scripts WHERE id=?1 AND archived=0",
-                    [&script_id],
-                    |row| row.get(0),
-                )
-                .ok();
-            if project_id
-                .as_deref()
-                .map(|project_id| project_readable(user, project_id))
-                .transpose()
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
-                .unwrap_or(false)
-            {
-                Ok(())
+            let payload = body.get("script");
+            let payload_project = payload.and_then(|script| script.get("project_id").or_else(|| script.get("projectId"))).and_then(Value::as_str);
+            let payload_id = payload.and_then(|script| script.get("id")).and_then(Value::as_str);
+            let script_id = arg::<Option<String>>(body, "script_id").ok().flatten().or_else(|| arg::<Option<String>>(body, "id").ok().flatten()).or_else(|| payload_id.map(str::to_owned));
+            let mut project_ids = Vec::new();
+            if name == "create_pipeline_script" {
+                project_ids.push(payload_project.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script.project_id is required"))?.to_owned());
             } else {
-                Err(err(StatusCode::FORBIDDEN, "project access denied"))
+                let script_id = script_id.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script id is required"))?;
+                let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                let stored: String = c.query_row("SELECT project_id FROM pipeline_scripts WHERE id=?1 AND archived=0", [&script_id], |row| row.get(0)).map_err(|_| err(StatusCode::FORBIDDEN, "project access denied"))?;
+                project_ids.push(stored);
+                if name == "update_pipeline_script" {
+                    project_ids.push(payload_project.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script.project_id is required"))?.to_owned());
+                }
             }
+            let allowed = project_ids.iter().map(|project_id| project_readable(user, project_id)).collect::<Result<Vec<_>, _>>().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.into_iter().all(|allowed| allowed);
+            if allowed { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "project access denied")) }
         }
         CommandPolicy::ProjectMemberWrite => {
             let project_id = body

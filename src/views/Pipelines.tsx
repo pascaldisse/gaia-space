@@ -1,6 +1,7 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { api } from "../api";
+import { currentUser } from "../session";
 import {
   pipelinesApi,
   newId,
@@ -299,7 +300,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                   />
                 </Show>
                 <button class="ghost" disabled={triggering()} onClick={fireEvent}>Fire event</button>
-                <button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button>
+                <Show when={currentUser()?.role === "admin"}><button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button></Show>
               </div>
 
               <section class="jobs-editor">

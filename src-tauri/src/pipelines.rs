@@ -1556,6 +1556,7 @@ fn spawn_script_jobs(
     workdir_root: PathBuf,
     script_id: &str,
     selector: &dyn Fn(&ScriptJobDef) -> bool,
+    fired_minute: Option<i64>,
 ) -> Result<(Vec<JobRun>, Vec<thread::JoinHandle<()>>)> {
     let def = {
         let c = conn
@@ -1580,11 +1581,13 @@ fn spawn_script_jobs(
             let c = conn
                 .lock()
                 .map_err(|_| "pipeline db lock poisoned".to_string())?;
-            c.execute(
-                "INSERT INTO job_runs(id,job_id,status,log,triggered_at) VALUES(?1,?2,'SCHEDULED',NULL,?3)",
-                params![run_id, job_id, triggered_at],
-            )
-            .map_err(|e| e.to_string())?;
+            let inserted = c.execute(
+                "INSERT OR IGNORE INTO job_runs(id,job_id,status,log,triggered_at,fired_minute) VALUES(?1,?2,'SCHEDULED',NULL,?3,?4)",
+                params![run_id, job_id, triggered_at, fired_minute],
+            ).map_err(|e| e.to_string())?;
+            if inserted == 0 {
+                continue; // another concurrent schedule tick claimed this job+minute
+            }
         }
         runs.push(JobRun {
             id: run_id.clone(),
@@ -1619,7 +1622,7 @@ pub fn trigger_pipeline_script(script_id: String) -> Result<Vec<JobRun>> {
         .map_err(|e| e.to_string())?;
     let workdir_root = std::env::temp_dir().join("pipeline-runs");
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, &|_| true)?;
+    let (runs, _handles) = spawn_script_jobs(shared, workdir_root, &script_id, &|_| true, None)?;
     Ok(runs)
 }
 
@@ -1673,7 +1676,7 @@ pub fn trigger_pipeline_event(script_id: String, event: TriggerEvent) -> Result<
     let (runs, _handles) =
         spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
             job.fires_for(&event)
-        })?;
+        }, None)?;
     Ok(runs)
 }
 
@@ -1739,7 +1742,7 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
         let (mut spawned, _handles) =
             spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
                 job.name == job_name
-            })?;
+            }, Some(now.div_euclid(60) * 60))?;
         runs.append(&mut spawned);
     }
     Ok(runs)
@@ -1786,7 +1789,7 @@ pub fn trigger_pipeline_on_push(
     let (runs, _handles) =
         spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
             job.fires_for(&event)
-        })?;
+        }, None)?;
     Ok(runs)
 }
 
@@ -3486,7 +3489,7 @@ mod tests {
         let workdir = temp_dir("runs-a");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a", &|_| true)
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-a", &|_| true, None)
                 .expect("spawn");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "SCHEDULED");
@@ -3526,7 +3529,7 @@ mod tests {
         let workdir = temp_dir("runs-b");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b", &|_| true)
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-b", &|_| true, None)
                 .expect("spawn");
         assert_eq!(runs.len(), 2);
         for h in handles {
@@ -4305,7 +4308,7 @@ mod tests {
         let workdir = temp_dir("runs-container");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-c", &|_| true)
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-c", &|_| true, None)
                 .expect("spawn");
         for h in handles {
             h.join().unwrap();
@@ -4340,7 +4343,7 @@ mod tests {
         let workdir = temp_dir("runs-env");
         let shared = Arc::new(Mutex::new(conn));
         let (runs, handles) =
-            spawn_script_jobs(shared.clone(), workdir.clone(), "script-e", &|_| true)
+            spawn_script_jobs(shared.clone(), workdir.clone(), "script-e", &|_| true, None)
                 .expect("spawn");
         for h in handles {
             h.join().unwrap();
