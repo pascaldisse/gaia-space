@@ -15,7 +15,21 @@ import {
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
+  type ScheduledMessage,
+  type PollView,
 } from "../api/chat";
+// Rows per history page. One knob, used by both the live window and "load older";
+// the server clamps it anyway, so this is a preference, never a trusted limit.
+const PAGE_SIZE = 50;
+import {
+  applyPage,
+  beginLoad,
+  failLoad,
+  initialPaging,
+  resetPaging,
+  visibleMessages,
+} from "../messagePaging";
+import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
@@ -109,9 +123,58 @@ export default function Chat() {
     const ch = activeChannelId();
     return ch ? { ch, p: actingProfileId() } : null;
   };
-  const [messages, { refetch: refetchMessages }] = createResource(messageKey, (k) =>
-    chatApi.listMessages(k.ch, k.p),
+  // The live window is the newest page, not the whole channel: a long history must not
+  // be one unbounded query, and paging older is the same call with a cursor.
+  const [messagePage, { refetch: refetchMessages }] = createResource(messageKey, (k) =>
+    chatApi.listMessagesPage({ channelId: k.ch, limit: PAGE_SIZE, actingProfileId: k.p }),
   );
+  const messages = Object.assign(() => messagePage()?.messages, {
+    get loading() {
+      return messagePage.loading;
+    },
+  });
+  // History paging: `messages()` is the live newest window; older pages accumulate in
+  // `paging` and are merged for display (ordered, de-duplicated, race-guarded — see
+  // src/messagePaging.ts). Switching channel/profile resets it, which also invalidates
+  // any page still in flight for the channel we just left.
+  const [paging, setPaging] = createSignal(initialPaging());
+  createEffect(() => {
+    messageKey();
+    setPaging((state) => resetPaging(state));
+  });
+  const shownMessages = () => visibleMessages(paging(), messages());
+  // Before any older page is pulled, the continuation point is the live page's own
+  // cursor — one order, one cursor space, no second source of truth.
+  const olderCursor = () => paging().cursor ?? messagePage()?.next_cursor ?? null;
+  const canLoadOlder = () => paging().hasMore && olderCursor() !== null;
+  const loadOlder = async () => {
+    const key = messageKey();
+    if (!key) return;
+    const cursor = olderCursor();
+    if (!cursor) return;
+    const started = beginLoad(paging());
+    if (!started.started) return;
+    setPaging(started.state);
+    try {
+      const pageResult = await chatApi.listMessagesPage({
+        channelId: key.ch,
+        cursor,
+        limit: PAGE_SIZE,
+        actingProfileId: key.p,
+      });
+      setPaging((state) => applyPage(state, started.ticket, pageResult));
+    } catch (e) {
+      setPaging((state) => failLoad(state, started.ticket, e));
+    }
+  };
+  const unfurlLinks = async (messageId: string) => {
+    try {
+      await chatApi.unfurlMessageLinks(messageId, actingProfileId());
+      await refetchMessages();
+    } catch (e) {
+      fail(e);
+    }
+  };
   const [pinnedMessages, { refetch: refetchPinnedMessages }] = createResource(messageKey, (k) =>
     chatApi.listPinnedMessages(k.ch, k.p),
   );
@@ -124,7 +187,7 @@ export default function Chat() {
   const threadRoot = () => {
     const id = threadRootId();
     if (!id) return null;
-    return messages()?.find((m) => m.id === id) ?? null;
+    return shownMessages().find((m) => m.id === id) ?? null;
   };
   const threadKey = () => {
     const id = threadRootId();
@@ -179,6 +242,241 @@ export default function Chat() {
   type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
+
+  // ---- draft persistence + typing presence ----
+  // Intervals are tunable, not baked in: a slower poll trades freshness for load.
+  const DRAFT_SAVE_DELAY_MS = Number(import.meta.env.VITE_CHAT_DRAFT_SAVE_MS ?? 600);
+  const TYPING_POLL_MS = Number(import.meta.env.VITE_CHAT_TYPING_POLL_MS ?? 3000);
+  // Re-beat well inside the server TTL so a live typist never flickers off.
+  const TYPING_BEAT_MS = Number(import.meta.env.VITE_CHAT_TYPING_BEAT_MS ?? 4000);
+  let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastBeatAt = 0;
+  // Guards the load→save race: restoring a draft into the box must not be echoed back
+  // as a save, and a channel switch must not write the old body into the new channel.
+  let restoring = false;
+
+  // Restore the persisted body whenever the (channel, profile) pair changes.
+  createEffect(() => {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) return;
+    restoring = true;
+    setDraft("");
+    chatApi
+      .getMessageDraft(ch, p)
+      .then((stored) => {
+        if (activeChannelId() === ch && actingProfileId() === p) setDraft(stored?.text ?? "");
+      })
+      .catch(fail)
+      .finally(() => { restoring = false; });
+  });
+
+  function onDraftInput(value: string) {
+    setDraft(value);
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p || restoring) return;
+    // Debounced: one write per pause, not one per keystroke.
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => {
+      chatApi.saveMessageDraft(ch, p, value).catch(fail);
+    }, DRAFT_SAVE_DELAY_MS);
+    const now = Date.now();
+    if (now - lastBeatAt >= TYPING_BEAT_MS) {
+      lastBeatAt = now;
+      chatApi.setChannelTyping(ch, p, true).catch(fail);
+    }
+  }
+
+  // Sent or cleared: drop the stored draft and retract the beat at once, so nobody
+  // sees "typing…" from someone who already pressed Send.
+  function clearDraftState() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    lastBeatAt = 0;
+    if (!ch || !p) return;
+    chatApi.deleteMessageDraft(ch, p).catch(fail);
+    chatApi.setChannelTyping(ch, p, false).catch(fail);
+  }
+
+  // ---- polls ----
+  // A poll is the content of the message that carries it, so the list is keyed by
+  // message id and the card renders inside that message row.
+  const [polls, setPolls] = createSignal<PollView[]>([]);
+  const [pollOpen, setPollOpen] = createSignal(false);
+  const [pollQuestion, setPollQuestion] = createSignal("");
+  const [pollOptions, setPollOptions] = createSignal<string[]>(["", ""]);
+  const [pollMultiple, setPollMultiple] = createSignal(false);
+  const [pollAnonymous, setPollAnonymous] = createSignal(false);
+  const pollFor = (messageId: string) => polls().find((p) => p.message_id === messageId);
+
+  function refreshPolls() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch) { setPolls([]); return; }
+    chatApi
+      .listChannelPolls(ch, p)
+      .then((rows) => { if (activeChannelId() === ch) setPolls(rows); })
+      .catch(fail);
+  }
+  createEffect(() => { activeChannelId(); actingProfileId(); refreshPolls(); });
+
+  function resetPollForm() {
+    setPollOpen(false);
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setPollMultiple(false);
+    setPollAnonymous(false);
+  }
+  async function submitPoll() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) return;
+    const problem = pollDraftError(pollQuestion(), pollOptions());
+    if (problem) { setError(problem); return; }
+    try {
+      await chatApi.createPoll({
+        id: newId("poll"),
+        channelId: ch,
+        authorId: p,
+        question: pollQuestion().trim(),
+        options: pollOptions().map((o) => o.trim()).filter(Boolean),
+        multipleChoice: pollMultiple(),
+        anonymous: pollAnonymous(),
+      });
+      resetPollForm();
+      refreshPolls();
+      refetchMessages();
+    } catch (e) { fail(e); }
+  }
+  // The click decides the whole ballot (single choice replaces, multiple toggles); the
+  // server answers with the new tally, so the card never guesses the count locally.
+  async function clickPollOption(poll: PollView, optionId: string) {
+    const p = actingProfileId();
+    if (!p || !pollIsOpen(poll)) return;
+    try {
+      const updated = await chatApi.votePoll(poll.id, p, ballotAfterClick(poll, optionId));
+      setPolls((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (e) { fail(e); }
+  }
+  async function closePoll(poll: PollView) {
+    const p = actingProfileId();
+    if (!p) return;
+    try {
+      const updated = await chatApi.closePoll(poll.id, p);
+      setPolls((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (e) { fail(e); }
+  }
+
+  // ---- scheduled messages ----
+  // The picker speaks local wall clock (that is what a human schedules in); the wire
+  // carries UTC epoch seconds only, so the conversion happens exactly here.
+  const [scheduleAt, setScheduleAt] = createSignal("");
+  const [scheduleOpen, setScheduleOpen] = createSignal(false);
+  const [scheduleEditId, setScheduleEditId] = createSignal<string | null>(null);
+  const [scheduled, setScheduled] = createSignal<ScheduledMessage[]>([]);
+
+  function localToEpochSecs(value: string): number | null {
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  function epochToLocalInput(secs: number): string {
+    const d = new Date(secs * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const scheduledLabel = (row: ScheduledMessage) =>
+    new Date(row.scheduled_at * 1000).toLocaleString();
+
+  function refreshScheduled() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) { setScheduled([]); return; }
+    chatApi
+      .listScheduledMessages(p, ch, "pending")
+      .then((rows) => {
+        if (activeChannelId() === ch && actingProfileId() === p) setScheduled(rows);
+      })
+      .catch(fail);
+  }
+  createEffect(() => { activeChannelId(); actingProfileId(); refreshScheduled(); });
+
+  function resetScheduleForm() {
+    setScheduleOpen(false);
+    setScheduleEditId(null);
+    setScheduleAt("");
+  }
+
+  // One button, two meanings: with an edit target it reschedules/rewrites that intent,
+  // otherwise it postpones whatever is in the composer.
+  async function submitSchedule() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    const when = localToEpochSecs(scheduleAt());
+    if (!ch || !p || when === null) return;
+    const editing = scheduleEditId();
+    const text = draft().trim();
+    try {
+      if (editing) {
+        await chatApi.updateScheduledMessage(editing, p, text ? text : null, when);
+      } else {
+        if (!text) return;
+        await chatApi.scheduleMessage({ id: newId("sched"), channelId: ch, authorId: p, text, scheduledAt: when });
+      }
+      setDraft("");
+      clearDraftState();
+      resetScheduleForm();
+      refreshScheduled();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  function editScheduled(row: ScheduledMessage) {
+    setDraft(row.text);
+    setScheduleAt(epochToLocalInput(row.scheduled_at));
+    setScheduleEditId(row.id);
+    setScheduleOpen(true);
+  }
+
+  async function cancelScheduled(row: ScheduledMessage) {
+    const p = actingProfileId();
+    if (!p) return;
+    try {
+      await chatApi.cancelScheduledMessage(row.id, p);
+      if (scheduleEditId() === row.id) resetScheduleForm();
+      refreshScheduled();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  const [typingUsers, setTypingUsers] = createSignal<string[]>([]);
+  createEffect(() => {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    setTypingUsers([]);
+    if (!ch || !p) return;
+    const poll = () =>
+      chatApi
+        .listChannelTyping(ch, p)
+        .then((rows) => {
+          if (activeChannelId() === ch && actingProfileId() === p)
+            setTypingUsers(rows.map((r) => r.profile_id));
+        })
+        .catch(() => {});
+    void poll();
+    const timer = setInterval(poll, TYPING_POLL_MS);
+    onCleanup(() => clearInterval(timer));
+  });
+  const typingLabel = () => {
+    const names = typingUsers().map((id) => profileName(id));
+    if (!names.length) return "";
+    if (names.length === 1) return `${names[0]} is typing…`;
+    if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+    return `${names.length} people are typing…`;
+  };
   const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
   const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
   const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
@@ -331,6 +629,7 @@ export default function Chat() {
       const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
       setDraftMessageId(ok ? null : message.id);
       setDraft(""); setDraftMentionIds([]);
+      clearDraftState();
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -524,9 +823,55 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
+              <Show when={m.content_kind === "poll" && pollFor(m.id)}>
+                {(poll) => (
+                  <div class="poll-card">
+                    <div class="poll-question">
+                      📊 {poll().question}
+                      <Show when={poll().multiple_choice}><span class="hint"> · pick several</span></Show>
+                      <Show when={poll().anonymous}><span class="hint"> · anonymous</span></Show>
+                      <Show when={!pollIsOpen(poll())}><span class="hint"> · closed</span></Show>
+                    </div>
+                    <For each={poll().options}>{(option) => (
+                      <button
+                        type="button"
+                        class={`poll-option${option.me_voted ? " mine" : ""}`}
+                        aria-pressed={option.me_voted}
+                        disabled={!pollIsOpen(poll())}
+                        onClick={() => clickPollOption(poll(), option.id)}
+                      >
+                        <span class="poll-bar" style={{ width: `${optionShare(option, poll().voter_count)}%` }} />
+                        <span class="poll-option-text">{option.text}</span>
+                        <span class="poll-option-count">{option.vote_count}</span>
+                      </button>
+                    )}</For>
+                    <div class="poll-foot">
+                      <span class="hint">{poll().voter_count} voted</span>
+                      <Show when={pollIsOpen(poll()) && poll().author_id === actingProfileId()}>
+                        <button type="button" class="ghost small" onClick={() => closePoll(poll())}>Close poll</button>
+                      </Show>
+                    </div>
+                  </div>
+                )}
+              </Show>
+              <Show when={m.content_kind !== "poll"}>
               <Show when={card()} fallback={<div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>}>
                 {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
               </Show>
+              </Show>
+              <Show when={(m.links ?? []).length}><div class="message-links"><For each={m.links ?? []}>{(link) => (
+                <div class={`link-card status-${link.status}`}>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer nofollow">{link.title ?? link.url}</a>
+                  <Show when={link.site_name}><span class="hint"> · {link.site_name}</span></Show>
+                  <Show when={link.description}><div class="link-description">{link.description}</div></Show>
+                  <Show when={link.status === "pending"}>
+                    <button type="button" class="ghost small" onClick={() => unfurlLinks(m.id)}>Show preview</button>
+                  </Show>
+                  <Show when={link.status !== "pending" && link.status !== "ok"}>
+                    <span class="hint">No preview ({link.error ?? link.status})</span>
+                  </Show>
+                </div>
+              )}</For></div></Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
@@ -756,18 +1101,96 @@ export default function Chat() {
 
         <div class="message-pane">
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
-            <Show when={messages()?.length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
-              <For each={messages()}>{(m) => renderMessage(m, false)}</For>
+            <Show when={shownMessages().length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
+              <Show when={canLoadOlder() || paging().error}>
+                <div class="history-pager">
+                  <Show when={paging().error}>
+                    <span class="hint" role="alert">Could not load older messages: {paging().error}</span>
+                  </Show>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    disabled={paging().loading}
+                    onClick={loadOlder}
+                  >
+                    {paging().loading ? "Loading…" : paging().error ? "Retry" : "Load older messages"}
+                  </button>
+                </div>
+              </Show>
+              <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
             </Show>
           </Show>
         </div>
 
         <Show when={activeChannelId() && !activeChannel()?.read_only} fallback={<Show when={activeChannelId() && activeChannel()?.read_only}><p class="hint pad">This private feed is read-only. Notifications arrive here automatically.</p></Show>}>
+          <Show when={typingLabel()}>
+            <div class="typing-indicator" aria-live="polite">{typingLabel()}</div>
+          </Show>
+          <Show when={scheduled().length}>
+            <div class="scheduled-panel">
+              <span class="hint">Scheduled ({scheduled().length})</span>
+              <For each={scheduled()}>{(row) => (
+                <div class="scheduled-row">
+                  <span class="scheduled-when">{scheduledLabel(row)}</span>
+                  <span class="scheduled-text">{row.text}</span>
+                  <Show when={row.error}><span class="scheduled-error" title={row.error ?? ""}>⚠</span></Show>
+                  <button type="button" onClick={() => editScheduled(row)}>Edit</button>
+                  <button type="button" onClick={() => cancelScheduled(row)}>Cancel</button>
+                </div>
+              )}</For>
+            </div>
+          </Show>
+          <Show when={pollOpen()}>
+            <div class="poll-form">
+              <input
+                type="text"
+                aria-label="Poll question"
+                placeholder="Ask something…"
+                value={pollQuestion()}
+                onInput={(e) => setPollQuestion(e.currentTarget.value)}
+              />
+              <For each={pollOptions()}>{(option, index) => (
+                <div class="poll-form-option">
+                  <input
+                    type="text"
+                    aria-label={`Option ${index() + 1}`}
+                    placeholder={`Option ${index() + 1}`}
+                    value={option}
+                    onInput={(e) => { const v = e.currentTarget.value; setPollOptions((os) => os.map((o, i) => (i === index() ? v : o))); }}
+                  />
+                  <Show when={pollOptions().length > POLL_MIN_OPTIONS}>
+                    <button type="button" onClick={() => setPollOptions((os) => os.filter((_, i) => i !== index()))}>×</button>
+                  </Show>
+                </div>
+              )}</For>
+              <div class="poll-form-actions">
+                <button type="button" onClick={() => setPollOptions((os) => [...os, ""])}>Add option</button>
+                <label><input type="checkbox" checked={pollMultiple()} onChange={(e) => setPollMultiple(e.currentTarget.checked)} /> Multiple choice</label>
+                <label><input type="checkbox" checked={pollAnonymous()} onChange={(e) => setPollAnonymous(e.currentTarget.checked)} /> Anonymous</label>
+                <button type="button" class="primary" onClick={submitPoll} disabled={!!pollDraftError(pollQuestion(), pollOptions())}>Create poll</button>
+                <button type="button" onClick={resetPollForm}>Dismiss</button>
+              </div>
+            </div>
+          </Show>
+          <Show when={scheduleOpen()}>
+            <div class="schedule-form">
+              <input
+                type="datetime-local"
+                aria-label="Send at"
+                value={scheduleAt()}
+                onInput={(e) => setScheduleAt(e.currentTarget.value)}
+              />
+              <button type="button" class="primary" onClick={submitSchedule} disabled={!scheduleAt()}>
+                {scheduleEditId() ? "Reschedule" : "Schedule"}
+              </button>
+              <button type="button" onClick={resetScheduleForm}>Dismiss</button>
+            </div>
+          </Show>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"
               value={draft()}
-              onInput={(e) => setDraft(e.currentTarget.value)}
+              onInput={(e) => onDraftInput(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -777,6 +1200,8 @@ export default function Chat() {
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
+            <button type="button" class="schedule-button" title="Send later" onClick={() => setScheduleOpen((v) => !v)}>🕒</button>
+            <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">

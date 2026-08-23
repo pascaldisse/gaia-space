@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 114;
+pub const SCHEMA_VERSION: i64 = 118;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -621,6 +621,31 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1))",
         )?;
         tx.execute_batch(SCHEMA_V114)?;
+    }
+    // V115: an unsent composer draft and a typing presence beat are per-(channel,profile)
+    // state, not history; both are table-guarded so partial fixtures upgrade cleanly.
+    if version < 115 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V115)?;
+    }
+    // V116: a postponed message is a pending intent, not history — it lives outside
+    // `messages` until its delivery run inserts the real row.
+    if version < 116 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V116)?;
+    }
+    // V117: a poll is content of the message that carries it — it cascades with that
+    // message, and its options are rows so votes reference them by key, not by index.
+    if version < 117
+        && table_exists(&tx, "messages")?
+        && table_exists(&tx, "channels")?
+        && table_exists(&tx, "profiles")?
+    {
+        tx.execute_batch(SCHEMA_V117)?;
+    }
+    // V118: the URLs a message carries are extracted once at write time (rows, not a
+    // re-parse at read time) and their unfurled metadata is cached per message, so a
+    // preview is only ever readable through the channel ACL of the message that owns it.
+    if version < 118 && table_exists(&tx, "messages")? {
+        tx.execute_batch(SCHEMA_V118)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1494,6 +1519,120 @@ pub(crate) const SCHEMA_V114: &str = r#"
 CREATE INDEX IF NOT EXISTS messages_channel_pinned_created ON messages(channel_id, pinned, created_at DESC, id DESC) WHERE archived=0 AND pinned=1;
 "#;
 
+/// V115: drafts survive reloads per (channel, author, thread); `thread_key` uses '' for the
+/// channel root so the primary key stays NOT NULL (SQLite treats NULLs in a PK as distinct,
+/// which would silently duplicate root drafts). Typing rows are presence beats: one row per
+/// (channel, profile), overwritten on each beat and filtered by age at read time.
+pub(crate) const SCHEMA_V115: &str = r#"
+CREATE TABLE IF NOT EXISTS message_drafts (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    thread_key TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(channel_id, author_id, thread_key)
+);
+CREATE INDEX IF NOT EXISTS message_drafts_author ON message_drafts(author_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS channel_typing (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(channel_id, profile_id)
+);
+CREATE INDEX IF NOT EXISTS channel_typing_channel_time ON channel_typing(channel_id, updated_at DESC);
+"#;
+
+/// V116: a scheduled ("postponed") message is an unsent intent with its own lifecycle:
+/// `pending` until a delivery run inserts the real `messages` row (`sent`, carrying
+/// `sent_message_id`), or `cancelled` by its author. Delivery is idempotent because the
+/// due query only ever selects `pending` rows and the state moves in one UPDATE.
+pub(crate) const SCHEMA_V116: &str = r#"
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    -- A postponed reply survives deletion of its root: the intent stays, it just
+    -- becomes a channel-root message instead of dangling at a vanished thread.
+    thread_of TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    scheduled_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','cancelled')),
+    -- UNIQUE: one delivery may never be claimed by two rows, so a replayed run
+    -- cannot attach the same message to a second intent.
+    sent_message_id TEXT UNIQUE,
+    error TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS scheduled_messages_due ON scheduled_messages(scheduled_at, id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS scheduled_messages_channel ON scheduled_messages(channel_id, scheduled_at, id);
+CREATE INDEX IF NOT EXISTS scheduled_messages_author ON scheduled_messages(author_id, scheduled_at, id);
+"#;
+
+/// V117: a poll is channel content, so it hangs off the message that carries it
+/// (`message_id` UNIQUE: one message never shows two polls) and dies with it. Options
+/// are rows, not a serialized blob, so a vote can reference one by foreign key instead
+/// of an index that a later edit would silently repoint. A vote is one row per
+/// (poll, voter, option): single-choice polls are enforced in code by deleting the
+/// voter's other rows in the same transaction, multi-choice keep them.
+pub(crate) const SCHEMA_V117: &str = r#"
+CREATE TABLE IF NOT EXISTS message_polls (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    multiple_choice INTEGER NOT NULL DEFAULT 0 CHECK(multiple_choice IN (0,1)),
+    anonymous INTEGER NOT NULL DEFAULT 0 CHECK(anonymous IN (0,1)),
+    closed_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS message_polls_channel ON message_polls(channel_id, created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS message_poll_options (
+    id TEXT PRIMARY KEY,
+    poll_id TEXT NOT NULL REFERENCES message_polls(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    UNIQUE(poll_id, position)
+);
+CREATE INDEX IF NOT EXISTS message_poll_options_poll ON message_poll_options(poll_id, position);
+CREATE TABLE IF NOT EXISTS message_poll_votes (
+    poll_id TEXT NOT NULL REFERENCES message_polls(id) ON DELETE CASCADE,
+    option_id TEXT NOT NULL REFERENCES message_poll_options(id) ON DELETE CASCADE,
+    voter_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(poll_id, voter_id, option_id)
+);
+CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(option_id);
+"#;
+
+/// V118: history paging needs a stable total order, and unfurling needs somewhere to put
+/// what it fetched. `message_links` is the extracted link set of a message — position
+/// keeps the text order, the row dies with the message. Preview metadata lives on the
+/// same row (not in a global url→preview table) so that a fetched title is reachable only
+/// through the message that carries it, i.e. through that channel's ACL: a global cache
+/// would let anybody confirm which URLs private channels talk about. `status` records the
+/// outcome so a refused (SSRF-guarded) or failed fetch is not retried on every read.
+pub(crate) const SCHEMA_V118: &str = r#"
+CREATE TABLE IF NOT EXISTS message_links (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','ok','refused','failed')),
+    title TEXT,
+    description TEXT,
+    site_name TEXT,
+    error TEXT,
+    fetched_at INTEGER,
+    PRIMARY KEY(message_id, position)
+);
+CREATE INDEX IF NOT EXISTS message_links_message ON message_links(message_id, position);
+-- Keyset paging reads (channel, created_at DESC, id DESC) for roots and per thread.
+CREATE INDEX IF NOT EXISTS messages_channel_page ON messages(channel_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS messages_thread_page ON messages(thread_of, created_at DESC, id DESC);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1904,7 +2043,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 114);
+        assert_eq!(SCHEMA_VERSION, 118);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

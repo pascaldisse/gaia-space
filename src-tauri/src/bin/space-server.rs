@@ -2064,6 +2064,18 @@ fn chat_message_channel(message_id: &str) -> Option<String> {
         )
         .ok()
 }
+/// The channel a poll lives in — the web chokepoint resolves it server-side instead of
+/// trusting a `channel_id` the caller could pair with somebody else's poll.
+fn chat_poll_channel(poll_id: &str) -> Option<String> {
+    db::conn()
+        .ok()?
+        .query_row(
+            "SELECT channel_id FROM message_polls WHERE id=?1",
+            [poll_id],
+            |r| r.get(0),
+        )
+        .ok()
+}
 fn chat_message_owned(profile_id: &str, message_id: &str) -> bool {
     let Ok(c) = db::conn() else { return false };
     c.query_row(
@@ -2239,6 +2251,29 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_deploy_target"
         | "delete_issue_status"
         | "delete_message" | "set_message_pinned" => CommandPolicy::Session,
+        // Drafts and typing beats are caller-scoped: `bind_session_identity` rewrites
+        // `author_id`/`profile_id`, and the channel ACL check below still applies.
+        "save_message_draft"
+        | "get_message_draft"
+        | "list_message_drafts"
+        | "delete_message_draft"
+        | "set_channel_typing"
+        | "list_channel_typing" => CommandPolicy::Session,
+        // A scheduled message is caller-owned: identity binding forces `author_id` to the
+        // session, and chat.rs refuses any row authored by someone else.
+        "schedule_message"
+        | "list_scheduled_messages"
+        | "get_scheduled_message"
+        | "update_scheduled_message"
+        | "cancel_scheduled_message" => CommandPolicy::Session,
+        // Firing due intents is a server duty, not a client action.
+        "deliver_due_scheduled_messages" => CommandPolicy::AppAdmin,
+        // A poll is channel content: identity binding forces `author_id`/`voter_id` to
+        // the session, the channel ACL check below applies, and creating one also needs
+        // the right to post (the poll IS a message).
+        "create_poll" | "get_poll" | "list_channel_polls" | "vote_poll" | "close_poll" => {
+            CommandPolicy::Session
+        }
         // Attachment lifecycle rides the message it belongs to: a session alone is not
         // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
@@ -2285,6 +2320,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_pinned_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
+        // Paging is reading: same policy as `list_messages`, and the channel ACL check
+        // below runs on every page — a cursor is a position, never a capability.
+        "list_messages_page" => CommandPolicy::Session,
+        // Unfurling makes this server fetch a URL, so it is gated by the read ACL of the
+        // channel the message lives in (resolved server-side from `message_id`).
+        "unfurl_message_links" => CommandPolicy::Session,
         // Both are scoped to the caller by `bind_session_identity` rewriting `profile_id`,
         // so one session can never read another profile's mentions inbox or badge.
         "list_mentions_for_profile" | "count_unread_mentions" => CommandPolicy::Session,
@@ -2512,6 +2553,10 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
                         | "authorId"
                         | "acting_profile_id"
                         | "actingProfileId"
+                        // Only polls carry `voter_id`: a ballot is always cast by the
+                        // session that sends it, never on somebody else's behalf.
+                        | "voter_id"
+                        | "voterId"
                         | "recipient_id"
                         | "recipientId"
                         | "organizer_id"
@@ -3554,7 +3599,13 @@ fn authorize_command(
             if matches!(
                 name,
                 "list_messages"
+                    | "list_messages_page"
                     | "list_pinned_messages"
+                    | "save_message_draft"
+                    | "get_message_draft"
+                    | "delete_message_draft"
+                    | "set_channel_typing"
+                    | "list_channel_typing"
                     | "list_channel_members"
                     | "get_channel"
                     | "mark_channel_read"
@@ -3569,6 +3620,64 @@ fn authorize_command(
                 let channel_id: String =
                     arg(body, key).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
                 if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if name == "schedule_message" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                // Postponing a message is still posting it: same right, earlier click.
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
+            if name == "create_poll" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                // A poll is posted as a message, so it needs the posting right.
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
+            if name == "list_channel_polls" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if matches!(name, "vote_poll" | "close_poll" | "get_poll") {
+                let key = if name == "get_poll" { "id" } else { "poll_id" };
+                let poll_id: String =
+                    arg(body, key).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                // A poll is readable/votable only from inside its channel; chat.rs still
+                // owns the author-only close and the closed/ownership rules.
+                if !chat_poll_channel(&poll_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if name == "unfurl_message_links" {
+                let message_id: String =
+                    arg(body, "message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                // The caller's `channel_id` is never consulted: the channel is whatever
+                // the message actually belongs to.
+                if !chat_message_channel(&message_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
                 }
             }
@@ -4738,6 +4847,14 @@ async fn cmd(
     "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_pinned_messages" => chat::list_pinned_messages(channel_id: String, acting_profile_id: Option<String>),
+    "list_messages_page" => chat::list_messages_page(channel_id: String, thread_of: Option<String>, cursor: Option<String>, limit: Option<i64>, acting_profile_id: Option<String>),
+    "list_message_drafts" => chat::list_message_drafts(author_id: String),
+    "get_message_draft" => chat::get_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
+    "list_channel_typing" => chat::list_channel_typing(channel_id: String, acting_profile_id: Option<String>, ttl_secs: Option<i64>),
+    "list_scheduled_messages" => chat::list_scheduled_messages(author_id: String, channel_id: Option<String>, status: Option<String>),
+    "get_scheduled_message" => chat::get_scheduled_message(id: String, author_id: String),
+    "get_poll" => chat::get_poll(id: String, acting_profile_id: Option<String>),
+    "list_channel_polls" => chat::list_channel_polls(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
@@ -4865,6 +4982,17 @@ async fn cmd(
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
     "set_message_pinned" => chat::set_message_pinned(id: String, pinned: bool),
+    "save_message_draft" => chat::save_message_draft(channel_id: String, author_id: String, thread_key: Option<String>, text: String),
+    "delete_message_draft" => chat::delete_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
+    "set_channel_typing" => chat::set_channel_typing(channel_id: String, profile_id: String, typing: bool),
+    "schedule_message" => chat::schedule_message(id: String, channel_id: String, author_id: String, text: String, thread_of: Option<String>, scheduled_at: i64),
+    "update_scheduled_message" => chat::update_scheduled_message(id: String, author_id: String, text: Option<String>, scheduled_at: Option<i64>),
+    "cancel_scheduled_message" => chat::cancel_scheduled_message(id: String, author_id: String),
+    "deliver_due_scheduled_messages" => chat::deliver_due_scheduled_messages(now: Option<i64>, limit: Option<i64>),
+    "create_poll" => chat::create_poll(id: String, channel_id: String, author_id: String, question: String, options: Vec<String>, multiple_choice: Option<bool>, anonymous: Option<bool>),
+    "vote_poll" => chat::vote_poll(poll_id: String, voter_id: String, option_ids: Vec<String>),
+    "close_poll" => chat::close_poll(poll_id: String, author_id: String),
+    "unfurl_message_links" => chat::unfurl_message_links(message_id: String, acting_profile_id: Option<String>),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
@@ -5094,6 +5222,56 @@ fn spawn_pipeline_schedule_ticker() {
     });
 }
 
+const DEFAULT_CHAT_SCHEDULE_TICK_SECS: u64 = 30;
+
+/// Cadence + batch of the scheduled-message ticker. Pure so the policy is unit-testable;
+/// `None` = disabled (zero or invalid cadence), and the batch bounds one tick's work.
+fn chat_schedule_ticker_config(secs: Option<&str>, batch: Option<&str>) -> Option<(u64, i64)> {
+    let secs = match secs.map(str::trim) {
+        None | Some("") => DEFAULT_CHAT_SCHEDULE_TICK_SECS,
+        Some(raw) => raw.parse::<u64>().ok()?,
+    };
+    if secs == 0 {
+        return None;
+    }
+    let batch = match batch.map(str::trim) {
+        None | Some("") => chat::SCHEDULED_TICK_LIMIT_DEFAULT,
+        Some(raw) => raw.parse::<i64>().ok().filter(|b| *b > 0)?,
+    };
+    Some((secs, batch))
+}
+
+/// Delivers due scheduled messages in bounded batches. Each tick leases rows one by one,
+/// so a slow or failing channel costs one row, not the run.
+fn spawn_chat_schedule_ticker() {
+    let Some((secs, batch)) = chat_schedule_ticker_config(
+        env::var("SPACE_CHAT_SCHEDULE_TICK_SECS").ok().as_deref(),
+        env::var("SPACE_CHAT_SCHEDULE_TICK_BATCH").ok().as_deref(),
+    ) else {
+        eprintln!("chat schedule ticker: disabled");
+        return;
+    };
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(secs));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            match tokio::task::spawn_blocking(move || {
+                chat::deliver_due_scheduled_messages(None, Some(batch))
+            })
+            .await
+            {
+                Ok(Ok(sent)) if !sent.is_empty() => {
+                    eprintln!("chat schedule ticker: delivered {} message(s)", sent.len())
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => eprintln!("chat schedule ticker: tick failed: {e}"),
+                Err(e) => eprintln!("chat schedule ticker: task panicked: {e}"),
+            }
+        }
+    });
+}
+
 fn spawn_webhook_ticker() {
     let Some((secs, batch)) = webhook_ticker_config(
         env::var("SPACE_WEBHOOK_TICK_SECS").ok().as_deref(),
@@ -5127,6 +5305,7 @@ async fn main() {
     bootstrap();
     spawn_webhook_ticker();
     spawn_pipeline_schedule_ticker();
+    spawn_chat_schedule_ticker();
     let app = Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
@@ -5234,6 +5413,85 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_schedule_ticker_defaults_and_disables() {
+        assert_eq!(
+            chat_schedule_ticker_config(None, None),
+            Some((
+                DEFAULT_CHAT_SCHEDULE_TICK_SECS,
+                chat::SCHEDULED_TICK_LIMIT_DEFAULT
+            ))
+        );
+        assert_eq!(
+            chat_schedule_ticker_config(Some("5"), Some("7")),
+            Some((5, 7))
+        );
+        assert_eq!(chat_schedule_ticker_config(Some("0"), None), None);
+        assert_eq!(chat_schedule_ticker_config(Some("nope"), None), None);
+        assert_eq!(chat_schedule_ticker_config(None, Some("0")), None);
+    }
+
+    #[test]
+    fn poll_commands_are_session_scoped_and_a_ballot_is_bound_to_its_sender() {
+        for name in [
+            "create_poll",
+            "get_poll",
+            "list_channel_polls",
+            "vote_poll",
+            "close_poll",
+        ] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        // A client naming another voter/author is rewritten to the session identity, so
+        // no ballot can be cast — and no poll closed — on somebody else's behalf.
+        let mut body = json!({"poll_id": "p-1", "voter_id": "someone-else", "option_ids": ["p-1-o0"]});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["voter_id"], json!("me"));
+        let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
+        bind_session_identity(&mut close, "me");
+        assert_eq!(close["author_id"], json!("me"));
+    }
+
+    #[test]
+    fn paging_and_unfurl_are_session_scoped_and_read_as_the_session() {
+        for name in ["list_messages_page", "unfurl_message_links"] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        // The reader is always the session: a client cannot page or unfurl "as" someone
+        // whose channel membership it does not have.
+        let mut body = json!({"channel_id": "c-1", "cursor": "abc", "acting_profile_id": "someone-else"});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["acting_profile_id"], json!("me"));
+        // The cursor is untouched data, never an identity.
+        assert_eq!(body["cursor"], json!("abc"));
+    }
+
+    #[test]
+    fn scheduled_message_commands_are_session_scoped() {
+        for name in [
+            "schedule_message",
+            "list_scheduled_messages",
+            "get_scheduled_message",
+            "update_scheduled_message",
+            "cancel_scheduled_message",
+        ] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        assert!(matches!(
+            command_policy("deliver_due_scheduled_messages"),
+            Some(CommandPolicy::AppAdmin)
+        ));
+    }
 
     #[test]
     fn pipeline_schedule_ticker_is_opt_in_and_configurable() {

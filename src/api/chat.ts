@@ -30,6 +30,61 @@ export type ChannelMember = {
 
 export type Reaction = { emoji: string; count: number; mine: boolean };
 
+// A poll option carries its tally and whether *I* picked it — never who else did.
+export type PollOptionResult = {
+  id: string;
+  position: number;
+  text: string;
+  vote_count: number;
+  me_voted: boolean;
+};
+export type PollView = {
+  id: string;
+  message_id: string;
+  channel_id: string;
+  author_id: string;
+  question: string;
+  multiple_choice: boolean;
+  anonymous: boolean;
+  closed_at: number | null;
+  created_at: number;
+  updated_at: number;
+  options: PollOptionResult[];
+  // Distinct people, not ballots: a multi-choice poll never reports turnout > electorate.
+  voter_count: number;
+};
+
+// `thread_key` is "" for the channel-root composer, else the root message id.
+export type MessageDraft = {
+  channel_id: string;
+  author_id: string;
+  thread_key: string;
+  text: string;
+  updated_at: number;
+};
+
+export type TypingParticipant = {
+  channel_id: string;
+  profile_id: string;
+  updated_at: number;
+};
+
+// A scheduled message is an unsent intent: it lives outside the message list until its
+// delivery run posts it. `scheduled_at` is UTC epoch seconds, never a local wall clock.
+export type ScheduledStatus = "pending" | "sent" | "cancelled";
+export type ScheduledMessage = {
+  id: string;
+  channel_id: string;
+  author_id: string;
+  text: string;
+  thread_of: string | null;
+  scheduled_at: number;
+  status: ScheduledStatus;
+  sent_message_id: string | null;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
 export type Message = {
   id: string;
   channel_id: string;
@@ -40,7 +95,9 @@ export type Message = {
   thread_of: string | null;
   archived: boolean;
   pinned?: boolean;
-  content_kind?: "text" | "absence-card";
+  // "poll" marks the message that carries a poll: its text is the question, and the
+  // tally lives in `message_polls` (fetched separately, never inlined here).
+  content_kind?: "text" | "absence-card" | "poll";
   mention_ids?: string[];
 };
 // Upload lifecycle (KB §04 collaboration): a row can exist before its bytes are stored,
@@ -48,7 +105,24 @@ export type Message = {
 export type AttachmentUploadState = "loading" | "uploading" | "completed" | "failed";
 export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string; upload_state: AttachmentUploadState; error: string | null };
 export type NewMessageAttachment = Omit<MessageAttachment, "message_id" | "upload_state" | "error"> & { upload_state?: AttachmentUploadState };
-export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; };
+// A link the backend extracted from the message text, plus whatever unfurling learned.
+// Text only — no image/thumbnail URL crosses this seam, so nothing external is ever
+// loaded by the client on behalf of a message.
+export type MessageLinkStatus = "pending" | "ok" | "refused" | "failed";
+export type MessageLink = {
+  url: string;
+  position: number;
+  status: MessageLinkStatus;
+  title: string | null;
+  description: string | null;
+  site_name: string | null;
+  error: string | null;
+  fetched_at: number | null;
+};
+export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; links?: MessageLink[]; };
+// One page of history, newest-first. `next_cursor` is opaque: it is a position handed
+// back verbatim, never parsed or built by the client.
+export type MessagePage = { messages: MessageView[]; next_cursor: string | null; has_more: boolean };
 export type MentionView = MessageView & { channel_name: string | null; notification_id: string; read: boolean };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
@@ -93,10 +167,87 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   // messages
   listMessages: (channelId: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_messages", { channelId, actingProfileId: actingProfileId ?? null }),
-  listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
+  // Paged history: omit `cursor` for the newest page, then pass back `next_cursor`.
+// `limit` is clamped server-side, so asking for more than the ceiling is not an error.
+listMessagesPage: (
+input: { channelId: string; threadOf?: string | null; cursor?: string | null; limit?: number | null; actingProfileId?: string | null },
+) =>
+invoke<MessagePage>("list_messages_page", {
+channelId: input.channelId,
+threadOf: input.threadOf ?? null,
+cursor: input.cursor ?? null,
+limit: input.limit ?? null,
+actingProfileId: input.actingProfileId ?? null,
+}),
+// Explicit unfurl of a message's pending links. The server fetches, guarded; the client
+// never requests a third-party URL itself.
+unfurlMessageLinks: (messageId: string, actingProfileId?: string | null) =>
+invoke<MessageLink[]>("unfurl_message_links", { messageId, actingProfileId: actingProfileId ?? null }),
+listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_pinned_messages", { channelId, actingProfileId: actingProfileId ?? null }),
   setMessagePinned: (id: string, pinned: boolean) =>
     invoke<MessageView>("set_message_pinned", { id, pinned }),
+
+  // drafts: one unsent body per (channel, author, thread); saving "" clears it
+  saveMessageDraft: (channelId: string, authorId: string, text: string, threadKey?: string | null) =>
+    invoke<MessageDraft | null>("save_message_draft", { channelId, authorId, text, threadKey: threadKey ?? "" }),
+  getMessageDraft: (channelId: string, authorId: string, threadKey?: string | null) =>
+    invoke<MessageDraft | null>("get_message_draft", { channelId, authorId, threadKey: threadKey ?? "" }),
+  listMessageDrafts: (authorId: string) =>
+    invoke<MessageDraft[]>("list_message_drafts", { authorId }),
+  deleteMessageDraft: (channelId: string, authorId: string, threadKey?: string | null) =>
+    invoke<boolean>("delete_message_draft", { channelId, authorId, threadKey: threadKey ?? "" }),
+
+  // typing presence: beats expire server-side, so a dead client cannot stick
+  setChannelTyping: (channelId: string, profileId: string, typing: boolean) =>
+    invoke<void>("set_channel_typing", { channelId, profileId, typing }),
+  listChannelTyping: (channelId: string, actingProfileId?: string | null, ttlSecs?: number | null) =>
+    invoke<TypingParticipant[]>("list_channel_typing", { channelId, actingProfileId: actingProfileId ?? null, ttlSecs: ttlSecs ?? null }),
+  // scheduled messages: create/list/edit/cancel are author-scoped; delivery is the server's
+  scheduleMessage: (
+    input: { id: string; channelId: string; authorId: string; text: string; scheduledAt: number; threadOf?: string | null },
+  ) =>
+    invoke<ScheduledMessage>("schedule_message", {
+      id: input.id,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      text: input.text,
+      threadOf: input.threadOf ?? null,
+      scheduledAt: input.scheduledAt,
+    }),
+  listScheduledMessages: (authorId: string, channelId?: string | null, status?: ScheduledStatus | null) =>
+    invoke<ScheduledMessage[]>("list_scheduled_messages", { authorId, channelId: channelId ?? null, status: status ?? null }),
+  getScheduledMessage: (id: string, authorId: string) =>
+    invoke<ScheduledMessage>("get_scheduled_message", { id, authorId }),
+  // `null` on a field means "leave it alone" — text and time move independently.
+  updateScheduledMessage: (id: string, authorId: string, text?: string | null, scheduledAt?: number | null) =>
+    invoke<ScheduledMessage>("update_scheduled_message", { id, authorId, text: text ?? null, scheduledAt: scheduledAt ?? null }),
+  cancelScheduledMessage: (id: string, authorId: string) =>
+    invoke<ScheduledMessage>("cancel_scheduled_message", { id, authorId }),
+
+  // polls: a poll is the content of the message that carries it. The read model is an
+  // aggregate (counts + my own picks) — individual ballots never cross this seam.
+  createPoll: (
+    input: { id: string; channelId: string; authorId: string; question: string; options: string[]; multipleChoice?: boolean; anonymous?: boolean },
+  ) =>
+    invoke<PollView>("create_poll", {
+      id: input.id,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      question: input.question,
+      options: input.options,
+      multipleChoice: input.multipleChoice ?? null,
+      anonymous: input.anonymous ?? null,
+    }),
+  getPoll: (id: string, actingProfileId?: string | null) =>
+    invoke<PollView>("get_poll", { id, actingProfileId: actingProfileId ?? null }),
+  listChannelPolls: (channelId: string, actingProfileId?: string | null) =>
+    invoke<PollView[]>("list_channel_polls", { channelId, actingProfileId: actingProfileId ?? null }),
+  // An empty `optionIds` withdraws the ballot; a single-choice poll refuses more than one.
+  votePoll: (pollId: string, voterId: string, optionIds: string[]) =>
+    invoke<PollView>("vote_poll", { pollId, voterId, optionIds }),
+  closePoll: (pollId: string, authorId: string) =>
+    invoke<PollView>("close_poll", { pollId, authorId }),
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),

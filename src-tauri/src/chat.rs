@@ -259,6 +259,50 @@ pub struct MessageView {
     pub reply_count: i64,
     pub reactions: Vec<ReactionSummary>,
     pub attachments: Vec<MessageAttachment>,
+    /// Links extracted from the text at write time, with any preview already unfurled.
+    /// Never fetched on this path — reading history must not make outbound requests.
+    #[serde(default)]
+    pub links: Vec<crate::chat_links::MessageLink>,
+}
+
+/// One page of channel history, newest-first, plus the cursor that continues it.
+/// `next_cursor` is `None` exactly when the page reached the beginning of history, so a
+/// client never has to guess from a short page whether more exists.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessagePage {
+    pub messages: Vec<MessageView>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+/// Default page size when a caller does not state one, and the hard ceiling it may ask
+/// for. Both are constants here, never a literal at a call site.
+pub const DEFAULT_PAGE_LIMIT: i64 = 50;
+pub const MAX_PAGE_LIMIT: i64 = 100;
+
+/// A cursor is the (created_at, id) pair of the last row already delivered, base64'd so
+/// no client parses or forges its parts — it is a position, not a query. The pair, not
+/// the timestamp alone: imported messages share timestamps and a timestamp-only cursor
+/// would silently drop or repeat every tie.
+fn encode_cursor(created_at: i64, id: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{created_at}:{id}"))
+}
+
+fn decode_cursor(cursor: &str) -> Result<(i64, String)> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor.as_bytes())
+        .map_err(|_| "invalid cursor".to_string())?;
+    let raw = String::from_utf8(raw).map_err(|_| "invalid cursor".to_string())?;
+    let (ts, id) = raw
+        .split_once(':')
+        .ok_or_else(|| "invalid cursor".to_string())?;
+    let ts: i64 = ts.parse().map_err(|_| "invalid cursor".to_string())?;
+    if id.is_empty() {
+        return Err("invalid cursor".to_string());
+    }
+    Ok((ts, id.to_string()))
 }
 
 fn entity_channel_id(entity_type: &str, entity_id: &str) -> String {
@@ -643,12 +687,113 @@ fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Resul
     let attachments = attachments_for_impl(c, &m.id)?;
     let mut m = m;
     m.mention_ids = mentions_for_impl(c, &m.id)?;
+    let links = crate::chat_links::links_for(c, &m.id)?;
     Ok(MessageView {
         message: m,
         reply_count,
         reactions,
         attachments,
+        links,
     })
+}
+
+/// Keyset page of a channel's history (roots when `thread_of` is None, one thread's
+/// replies otherwise), newest first, continuing strictly before `cursor`.
+///
+/// Keyset, not OFFSET: history grows while a reader pages, and an offset would make every
+/// new message shift the window and duplicate a row. The ACL is checked here, on every
+/// page — a cursor is not a capability and must never stand in for channel membership.
+fn list_messages_page_impl(
+    c: &Connection,
+    channel_id: &str,
+    thread_of: Option<&str>,
+    cursor: Option<&str>,
+    limit: Option<i64>,
+    acting_profile_id: Option<&str>,
+) -> Result<MessagePage> {
+    if !channel_allows_actor(c, channel_id, acting_profile_id)? {
+        return Err("channel access denied".to_string());
+    }
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+    if let Some(root) = thread_of {
+        // A thread is addressed by its root, but the root's channel is what the ACL was
+        // checked against: refuse a root from some other channel instead of paging it.
+        let root_channel: Option<String> = c
+            .query_row("SELECT channel_id FROM messages WHERE id=?1", [root], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if root_channel.as_deref() != Some(channel_id) {
+            return Err("thread does not belong to this channel".to_string());
+        }
+    }
+    let (cursor_ts, cursor_id) = match cursor {
+        Some(raw) => decode_cursor(raw)?,
+        None => (i64::MAX, String::new()),
+    };
+    // Fetch one extra row: presence of row `limit+1` is what proves more history exists,
+    // without a second COUNT query that could disagree with this one.
+    let sql = format!(
+        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind \
+         FROM messages WHERE channel_id=?1 AND archived=0 AND {} \
+         AND (created_at < ?2 OR (created_at = ?2 AND id < ?3)) \
+         ORDER BY created_at DESC, id DESC LIMIT ?4",
+        if thread_of.is_some() {
+            "thread_of = ?5"
+        } else {
+            "thread_of IS NULL AND ?5 IS NULL"
+        }
+    );
+    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut msgs: Vec<Message> = s
+        .query_map(
+            rusqlite::params![channel_id, cursor_ts, cursor_id, limit + 1, thread_of],
+            message_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let has_more = msgs.len() as i64 > limit;
+    msgs.truncate(limit as usize);
+    let next_cursor = if has_more {
+        msgs.last().map(|m| encode_cursor(m.created_at, &m.id))
+    } else {
+        None
+    };
+    let messages = msgs
+        .into_iter()
+        .map(|m| to_view(c, m, acting_profile_id))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(MessagePage {
+        messages,
+        next_cursor,
+        has_more,
+    })
+}
+
+/// Unfurl the pending links of one message. The read ACL of the owning channel gates it —
+/// otherwise anyone could make the server fetch on behalf of a channel they cannot read,
+/// and learn the answer.
+fn unfurl_message_links_impl(
+    c: &Connection,
+    message_id: &str,
+    acting_profile_id: Option<&str>,
+    fetch: &dyn Fn(&str) -> Result<crate::chat_links::FetchedDoc>,
+) -> Result<Vec<crate::chat_links::MessageLink>> {
+    let channel_id: String = c
+        .query_row(
+            "SELECT channel_id FROM messages WHERE id=?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "message not found".to_string())?;
+    if !channel_allows_actor(c, &channel_id, acting_profile_id)? {
+        return Err("channel access denied".to_string());
+    }
+    crate::chat_links::unfurl_links_with(c, message_id, fetch)
 }
 fn list_messages_impl(
     c: &Connection,
@@ -694,6 +839,783 @@ fn list_pinned_messages_impl(
         .into_iter()
         .map(|m| to_view(c, m, acting_profile_id))
         .collect()
+}
+
+/// Default lifetime of a typing beat. Clients re-beat well inside it; a crashed or
+/// backgrounded client's row simply ages out instead of showing a stuck "typing…".
+/// Callers may override it, so the window is policy, not a constant baked into queries.
+pub const TYPING_TTL_SECS_DEFAULT: i64 = 8;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageDraft {
+    pub channel_id: String,
+    pub author_id: String,
+    /// `""` = channel root composer; otherwise the root message id being replied to.
+    #[serde(default)]
+    pub thread_key: String,
+    pub text: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TypingParticipant {
+    pub channel_id: String,
+    pub profile_id: String,
+    pub updated_at: i64,
+}
+
+fn draft_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDraft> {
+    Ok(MessageDraft {
+        channel_id: r.get(0)?,
+        author_id: r.get(1)?,
+        thread_key: r.get(2)?,
+        text: r.get(3)?,
+        updated_at: r.get(4)?,
+    })
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Saving a draft is an upsert, not an append: the composer holds exactly one unsent body
+/// per (channel, author, thread). An empty/whitespace body means "nothing unsent" and
+/// deletes the row, so a cleared composer never resurrects text on the next reload.
+fn save_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+    text: &str,
+) -> Result<Option<MessageDraft>> {
+    if !channel_allows_actor(c, channel_id, Some(author_id))? {
+        return Err("channel access denied".into());
+    }
+    if text.trim().is_empty() {
+        delete_draft_impl(c, channel_id, author_id, thread_key)?;
+        return Ok(None);
+    }
+    let now = now_secs();
+    c.execute(
+        "INSERT INTO message_drafts(channel_id,author_id,thread_key,text,updated_at) VALUES(?1,?2,?3,?4,?5) \
+         ON CONFLICT(channel_id,author_id,thread_key) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at",
+        rusqlite::params![channel_id, author_id, thread_key, text, now],
+    )
+    .map_err(|e| e.to_string())?;
+    get_draft_impl(c, channel_id, author_id, thread_key)
+}
+
+fn get_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+) -> Result<Option<MessageDraft>> {
+    c.query_row(
+        "SELECT channel_id,author_id,thread_key,text,updated_at FROM message_drafts WHERE channel_id=?1 AND author_id=?2 AND thread_key=?3",
+        rusqlite::params![channel_id, author_id, thread_key],
+        draft_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Newest-first so a client can render "unsent elsewhere" without a second sort.
+fn list_drafts_impl(c: &Connection, author_id: &str) -> Result<Vec<MessageDraft>> {
+    let mut s = c
+        .prepare(
+            "SELECT channel_id,author_id,thread_key,text,updated_at FROM message_drafts WHERE author_id=?1 ORDER BY updated_at DESC, channel_id, thread_key",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([author_id], draft_row)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Idempotent: deleting an absent draft is success, so send-then-clear can be retried.
+fn delete_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+) -> Result<bool> {
+    let changed = c
+        .execute(
+            "DELETE FROM message_drafts WHERE channel_id=?1 AND author_id=?2 AND thread_key=?3",
+            rusqlite::params![channel_id, author_id, thread_key],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed > 0)
+}
+
+/// A typing beat overwrites the profile's previous beat. `typing=false` retracts it
+/// immediately (message sent / composer cleared) rather than waiting for the TTL.
+fn set_typing_impl(c: &Connection, channel_id: &str, profile_id: &str, typing: bool) -> Result<()> {
+    if !channel_allows_actor(c, channel_id, Some(profile_id))? {
+        return Err("channel access denied".into());
+    }
+    if !typing {
+        c.execute(
+            "DELETE FROM channel_typing WHERE channel_id=?1 AND profile_id=?2",
+            rusqlite::params![channel_id, profile_id],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    c.execute(
+        "INSERT INTO channel_typing(channel_id,profile_id,updated_at) VALUES(?1,?2,?3) \
+         ON CONFLICT(channel_id,profile_id) DO UPDATE SET updated_at=excluded.updated_at",
+        rusqlite::params![channel_id, profile_id, now_secs()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Readers see everyone but themselves, and only beats inside the TTL window. Expired rows
+/// are swept here so the table cannot grow without a background job.
+fn list_typing_impl(
+    c: &Connection,
+    channel_id: &str,
+    acting_profile_id: Option<&str>,
+    ttl_secs: i64,
+) -> Result<Vec<TypingParticipant>> {
+    if !channel_allows_actor(c, channel_id, acting_profile_id)? {
+        return Err("channel access denied".into());
+    }
+    let ttl = ttl_secs.max(1);
+    let cutoff = now_secs() - ttl;
+    c.execute("DELETE FROM channel_typing WHERE updated_at < ?1", [cutoff])
+        .map_err(|e| e.to_string())?;
+    let mut s = c
+        .prepare(
+            "SELECT channel_id,profile_id,updated_at FROM channel_typing WHERE channel_id=?1 AND updated_at >= ?2 AND profile_id IS NOT ?3 ORDER BY updated_at DESC, profile_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(
+            rusqlite::params![channel_id, cutoff, acting_profile_id],
+            |r| {
+                Ok(TypingParticipant {
+                    channel_id: r.get(0)?,
+                    profile_id: r.get(1)?,
+                    updated_at: r.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// How many due intents one delivery run may claim. A tick is bounded so a backlog
+/// (server down over a weekend) drains across ticks instead of holding the write lock.
+pub const SCHEDULED_TICK_LIMIT_DEFAULT: i64 = 100;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduledMessage {
+    pub id: String,
+    pub channel_id: String,
+    pub author_id: String,
+    pub text: String,
+    pub thread_of: Option<String>,
+    /// UTC epoch seconds — the wire never carries a local wall clock.
+    pub scheduled_at: i64,
+    pub status: String,
+    pub sent_message_id: Option<String>,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn scheduled_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledMessage> {
+    Ok(ScheduledMessage {
+        id: r.get(0)?,
+        channel_id: r.get(1)?,
+        author_id: r.get(2)?,
+        text: r.get(3)?,
+        thread_of: r.get(4)?,
+        scheduled_at: r.get(5)?,
+        status: r.get(6)?,
+        sent_message_id: r.get(7)?,
+        error: r.get(8)?,
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
+    })
+}
+
+const SCHEDULED_COLS: &str = "id,channel_id,author_id,text,thread_of,scheduled_at,status,sent_message_id,error,created_at,updated_at";
+
+/// The delivered message id is derived from the intent id, never random: a replayed
+/// delivery hits the messages primary key instead of posting the text twice.
+fn scheduled_message_id(id: &str) -> String {
+    format!("sched-{id}")
+}
+
+/// A thread target must live in the same channel and still exist — otherwise the reply
+/// would surface in a conversation its author never chose.
+fn validate_scheduled_thread(
+    c: &Connection,
+    channel_id: &str,
+    thread_of: Option<&str>,
+) -> Result<()> {
+    let Some(thread_of) = thread_of else {
+        return Ok(());
+    };
+    let root_channel: Option<String> = c
+        .query_row(
+            "SELECT channel_id FROM messages WHERE id=?1 AND archived=0",
+            [thread_of],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match root_channel.as_deref() {
+        Some(found) if found == channel_id => Ok(()),
+        Some(_) => Err("thread root belongs to another channel".into()),
+        None => Err("thread root not found".into()),
+    }
+}
+
+/// Scheduling is a future act by definition: a past (or now) timestamp would fire on the
+/// very next tick, which is a plain send wearing a scheduling costume.
+fn validate_future(scheduled_at: i64, now: i64) -> Result<()> {
+    if scheduled_at <= now {
+        return Err("scheduled_at must be in the future".into());
+    }
+    Ok(())
+}
+
+fn scheduled_write_guard(c: &Connection, channel_id: &str, author_id: &str) -> Result<()> {
+    if is_read_only_channel_on(c, channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
+    if !channel_allows_profile(c, channel_id, author_id)? {
+        return Err("channel access denied".into());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn schedule_message_impl(
+    c: &Connection,
+    id: &str,
+    channel_id: &str,
+    author_id: &str,
+    text: &str,
+    thread_of: Option<&str>,
+    scheduled_at: i64,
+) -> Result<ScheduledMessage> {
+    if text.trim().is_empty() {
+        return Err("scheduled message text is required".into());
+    }
+    scheduled_write_guard(c, channel_id, author_id)?;
+    validate_future(scheduled_at, now_secs())?;
+    validate_scheduled_thread(c, channel_id, thread_of)?;
+    let now = now_secs();
+    c.execute(
+        "INSERT INTO scheduled_messages(id,channel_id,author_id,text,thread_of,scheduled_at,status,created_at,updated_at) \
+         VALUES(?1,?2,?3,?4,?5,?6,'pending',?7,?7)",
+        rusqlite::params![id, channel_id, author_id, text, thread_of, scheduled_at, now],
+    )
+    .map_err(|e| e.to_string())?;
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+fn get_scheduled_impl(c: &Connection, id: &str) -> Result<Option<ScheduledMessage>> {
+    c.query_row(
+        &format!("SELECT {SCHEDULED_COLS} FROM scheduled_messages WHERE id=?1"),
+        [id],
+        scheduled_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Only the author may see or steer their own unsent intents — a pending message is not
+/// channel content yet, so channel membership alone grants nothing.
+fn owned_scheduled(c: &Connection, id: &str, actor_id: &str) -> Result<ScheduledMessage> {
+    let row =
+        get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())?;
+    if row.author_id != actor_id {
+        return Err("scheduled message belongs to another author".into());
+    }
+    Ok(row)
+}
+
+fn list_scheduled_impl(
+    c: &Connection,
+    author_id: &str,
+    channel_id: Option<&str>,
+    status: Option<&str>,
+) -> Result<Vec<ScheduledMessage>> {
+    if let Some(status) = status {
+        if !matches!(status, "pending" | "sent" | "cancelled") {
+            return Err(format!("invalid scheduled status: {status}"));
+        }
+    }
+    let mut s = c
+        .prepare(&format!(
+            "SELECT {SCHEDULED_COLS} FROM scheduled_messages \
+             WHERE author_id=?1 AND (?2 IS NULL OR channel_id=?2) AND (?3 IS NULL OR status=?3) \
+             ORDER BY scheduled_at, id"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(
+            rusqlite::params![author_id, channel_id, status],
+            scheduled_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Editing is CAS on `status='pending'`: an intent that already fired (or was cancelled)
+/// is history and cannot be rewritten by a client that raced the ticker.
+fn update_scheduled_impl(
+    c: &Connection,
+    id: &str,
+    actor_id: &str,
+    text: Option<&str>,
+    scheduled_at: Option<i64>,
+) -> Result<ScheduledMessage> {
+    let current = owned_scheduled(c, id, actor_id)?;
+    if current.status != "pending" {
+        return Err(format!("scheduled message is {}", current.status));
+    }
+    let text = text.unwrap_or(&current.text);
+    if text.trim().is_empty() {
+        return Err("scheduled message text is required".into());
+    }
+    let when = scheduled_at.unwrap_or(current.scheduled_at);
+    validate_future(when, now_secs())?;
+    scheduled_write_guard(c, &current.channel_id, actor_id)?;
+    let changed = c
+        .execute(
+            "UPDATE scheduled_messages SET text=?2, scheduled_at=?3, updated_at=?4 WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, text, when, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("scheduled message is no longer pending".into());
+    }
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+/// Cancelling is the same CAS; it never deletes the row, so the author keeps the record
+/// of what they called off.
+fn cancel_scheduled_impl(c: &Connection, id: &str, actor_id: &str) -> Result<ScheduledMessage> {
+    let current = owned_scheduled(c, id, actor_id)?;
+    if current.status == "cancelled" {
+        return Ok(current); // idempotent retry
+    }
+    let changed = c
+        .execute(
+            "UPDATE scheduled_messages SET status='cancelled', updated_at=?2 WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("scheduled message already delivered".into());
+    }
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+/// One delivery step: *lease* a single due row with a conditional UPDATE (`status='pending'`
+/// -> `sent` in the same statement that names the message id), then insert the message.
+/// Two concurrent ticks cannot both win that UPDATE, so nobody posts twice; a crash after
+/// the lease leaves a `sent` row whose derived message id is reinserted idempotently on the
+/// next run. A failed insert releases the lease and records `error` for the author.
+fn deliver_one_scheduled(c: &Connection, id: &str) -> Result<Option<ScheduledMessage>> {
+    let message_id = scheduled_message_id(id);
+    let leased = c
+        .execute(
+            "UPDATE scheduled_messages SET status='sent', sent_message_id=?2, error=NULL, updated_at=?3 \
+             WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, message_id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if leased == 0 {
+        return Ok(None);
+    }
+    let row =
+        get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())?;
+    let message = Message {
+        id: message_id,
+        channel_id: row.channel_id.clone(),
+        author_id: Some(row.author_id.clone()),
+        text: row.text.clone(),
+        created_at: row.scheduled_at,
+        edited_at: None,
+        thread_of: row.thread_of.clone(),
+        archived: false,
+        pinned: false,
+        content_kind: default_message_content_kind(),
+        mention_ids: Vec::new(),
+    };
+    match create_message_impl(c, &message) {
+        Ok(()) => Ok(Some(row)),
+        Err(e) => {
+            c.execute(
+                "UPDATE scheduled_messages SET status='pending', sent_message_id=NULL, error=?2, updated_at=?3 WHERE id=?1",
+                rusqlite::params![id, e, now_secs()],
+            )
+            .map_err(|e| e.to_string())?;
+            Err(e)
+        }
+    }
+}
+
+/// Bounded tick: claim at most `limit` due intents, oldest first. Failures are recorded
+/// on their row and do not abort the run — one broken channel must not block the rest.
+fn deliver_due_scheduled_impl(
+    c: &Connection,
+    now: i64,
+    limit: i64,
+) -> Result<Vec<ScheduledMessage>> {
+    let limit = limit.clamp(1, 1000);
+    let mut s = c
+        .prepare(
+            "SELECT id FROM scheduled_messages WHERE status='pending' AND scheduled_at <= ?1 ORDER BY scheduled_at, id LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = s
+        .query_map(rusqlite::params![now, limit], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let mut delivered = Vec::new();
+    for id in ids {
+        match deliver_one_scheduled(c, &id) {
+            Ok(Some(row)) => delivered.push(row),
+            Ok(None) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(delivered)
+}
+
+// ---------------------------------------------------------------------------
+// Polls (V117) — KB §04 §1.1 `M2PollContent`: a poll IS a message's content.
+// ---------------------------------------------------------------------------
+
+/// A poll needs at least a choice between two things; one option is an announcement.
+pub const POLL_MIN_OPTIONS: usize = 2;
+/// Bound taken from the composer: an unbounded option list is a write amplifier.
+pub const POLL_MAX_OPTIONS: usize = 20;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollOptionResult {
+    pub id: String,
+    pub position: i64,
+    pub text: String,
+    pub vote_count: i64,
+    /// Whether the *reading* profile picked this option. Never other people's ballots.
+    pub me_voted: bool,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollView {
+    pub id: String,
+    pub message_id: String,
+    pub channel_id: String,
+    pub author_id: String,
+    pub question: String,
+    pub multiple_choice: bool,
+    pub anonymous: bool,
+    pub closed_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub options: Vec<PollOptionResult>,
+    /// Distinct voters, not ballots: a multi-choice poll must not report turnout
+    /// larger than its electorate.
+    pub voter_count: i64,
+}
+
+fn poll_message_id(poll_id: &str) -> String {
+    format!("poll-{poll_id}")
+}
+fn poll_option_id(poll_id: &str, position: usize) -> String {
+    format!("{poll_id}-o{position}")
+}
+
+fn validate_poll_options(options: &[String]) -> Result<Vec<String>> {
+    let cleaned: Vec<String> = options.iter().map(|o| o.trim().to_string()).collect();
+    if cleaned.iter().any(|o| o.is_empty()) {
+        return Err("poll options must not be empty".into());
+    }
+    if cleaned.len() < POLL_MIN_OPTIONS {
+        return Err(format!("a poll needs at least {POLL_MIN_OPTIONS} options"));
+    }
+    if cleaned.len() > POLL_MAX_OPTIONS {
+        return Err(format!("a poll accepts at most {POLL_MAX_OPTIONS} options"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for o in &cleaned {
+        if !seen.insert(o.to_lowercase()) {
+            return Err("poll options must be distinct".into());
+        }
+    }
+    Ok(cleaned)
+}
+
+/// Creating a poll writes the carrying message and the poll in ONE transaction: a
+/// half-written poll would show as an empty message nobody can vote on, and a poll row
+/// without its message would be unreachable content.
+#[allow(clippy::too_many_arguments)]
+fn create_poll_impl(
+    c: &Connection,
+    id: &str,
+    channel_id: &str,
+    author_id: &str,
+    question: &str,
+    options: &[String],
+    multiple_choice: bool,
+    anonymous: bool,
+) -> Result<PollView> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("poll question is required".into());
+    }
+    let options = validate_poll_options(options)?;
+    let message_id = poll_message_id(id);
+    let now = now_secs();
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    // The message carries the channel ACL / read-only checks for us.
+    create_message_impl(
+        &tx,
+        &Message {
+            id: message_id.clone(),
+            channel_id: channel_id.to_string(),
+            author_id: Some(author_id.to_string()),
+            text: question.to_string(),
+            created_at: now,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            pinned: false,
+            content_kind: "poll".into(),
+            mention_ids: Vec::new(),
+        },
+    )?;
+    tx.execute(
+        "INSERT INTO message_polls(id,message_id,channel_id,author_id,question,multiple_choice,anonymous,created_at,updated_at) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",
+        rusqlite::params![id, message_id, channel_id, author_id, question, multiple_choice, anonymous, now],
+    )
+    .map_err(|e| e.to_string())?;
+    for (position, text) in options.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO message_poll_options(id,poll_id,position,text) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![poll_option_id(id, position), id, position as i64, text],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    get_poll_impl(c, id, Some(author_id))?.ok_or_else(|| "poll not found".to_string())
+}
+
+/// The read model is an aggregate: counts plus the reader's own ballot. Individual
+/// ballots are never returned, so an anonymous poll cannot be de-anonymized by reading
+/// the API, and a public one still does not leak who voted for what through this seam.
+fn get_poll_impl(
+    c: &Connection,
+    id: &str,
+    acting_profile_id: Option<&str>,
+) -> Result<Option<PollView>> {
+    let head = c
+        .query_row(
+            "SELECT id,message_id,channel_id,author_id,question,multiple_choice,anonymous,closed_at,created_at,updated_at \
+             FROM message_polls WHERE id=?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, bool>(5)?,
+                    r.get::<_, bool>(6)?,
+                    r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, i64>(8)?,
+                    r.get::<_, i64>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(head) = head else {
+        return Ok(None);
+    };
+    let mut s = c
+        .prepare(
+            "SELECT o.id,o.position,o.text, \
+                    (SELECT COUNT(*) FROM message_poll_votes v WHERE v.option_id=o.id), \
+                    (SELECT COUNT(*) FROM message_poll_votes v WHERE v.option_id=o.id AND v.voter_id=?2) \
+             FROM message_poll_options o WHERE o.poll_id=?1 ORDER BY o.position",
+        )
+        .map_err(|e| e.to_string())?;
+    let options = s
+        .query_map(rusqlite::params![id, acting_profile_id], |r| {
+            Ok(PollOptionResult {
+                id: r.get(0)?,
+                position: r.get(1)?,
+                text: r.get(2)?,
+                vote_count: r.get(3)?,
+                me_voted: r.get::<_, i64>(4)? > 0,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let voter_count: i64 = c
+        .query_row(
+            "SELECT COUNT(DISTINCT voter_id) FROM message_poll_votes WHERE poll_id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(Some(PollView {
+        id: head.0,
+        message_id: head.1,
+        channel_id: head.2,
+        author_id: head.3,
+        question: head.4,
+        multiple_choice: head.5,
+        anonymous: head.6,
+        closed_at: head.7,
+        created_at: head.8,
+        updated_at: head.9,
+        options,
+        voter_count,
+    }))
+}
+
+fn poll_head(c: &Connection, id: &str) -> Result<(String, String, Option<i64>, bool, String)> {
+    c.query_row(
+        "SELECT channel_id,author_id,closed_at,multiple_choice,message_id FROM message_polls WHERE id=?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "poll not found".to_string())
+}
+
+fn list_channel_polls_impl(
+    c: &Connection,
+    channel_id: &str,
+    acting_profile_id: Option<&str>,
+) -> Result<Vec<PollView>> {
+    if let Some(profile_id) = acting_profile_id {
+        if !channel_allows_profile(c, channel_id, profile_id)? {
+            return Err("channel access denied".into());
+        }
+    }
+    let mut s = c
+        .prepare("SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC")
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = s
+        .query_map([channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let mut out = Vec::new();
+    for id in ids {
+        if let Some(view) = get_poll_impl(c, &id, acting_profile_id)? {
+            out.push(view);
+        }
+    }
+    Ok(out)
+}
+
+/// Casting a ballot replaces the voter's previous one in the same transaction, so a
+/// single-choice poll can never hold two rows for one voter, and the option is checked
+/// to belong to THIS poll — otherwise a hand-written call could add a vote to another
+/// poll's tally through a poll the caller may read.
+fn vote_poll_impl(
+    c: &Connection,
+    poll_id: &str,
+    voter_id: &str,
+    option_ids: &[String],
+) -> Result<PollView> {
+    let (channel_id, _author, closed_at, multiple_choice, _message_id) = poll_head(c, poll_id)?;
+    if closed_at.is_some() {
+        return Err("poll is closed".into());
+    }
+    if is_read_only_channel_on(c, &channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
+    if !channel_allows_profile(c, &channel_id, voter_id)? {
+        return Err("channel access denied".into());
+    }
+    if !multiple_choice && option_ids.len() > 1 {
+        return Err("poll accepts a single choice".into());
+    }
+    let mut unique = std::collections::HashSet::new();
+    for option_id in option_ids {
+        if !unique.insert(option_id.as_str()) {
+            return Err("duplicate option in ballot".into());
+        }
+        let owner: Option<String> = c
+            .query_row(
+                "SELECT poll_id FROM message_poll_options WHERE id=?1",
+                [option_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        match owner.as_deref() {
+            Some(found) if found == poll_id => {}
+            Some(_) => return Err("option belongs to another poll".into()),
+            None => return Err("poll option not found".into()),
+        }
+    }
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    // Retract first: an empty ballot is a valid "withdraw my vote".
+    tx.execute(
+        "DELETE FROM message_poll_votes WHERE poll_id=?1 AND voter_id=?2",
+        rusqlite::params![poll_id, voter_id],
+    )
+    .map_err(|e| e.to_string())?;
+    for option_id in option_ids {
+        tx.execute(
+            "INSERT INTO message_poll_votes(poll_id,option_id,voter_id,created_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![poll_id, option_id, voter_id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    get_poll_impl(c, poll_id, Some(voter_id))?.ok_or_else(|| "poll not found".to_string())
+}
+
+/// Closing is CAS on `closed_at IS NULL` and author-scoped: a closed tally is final, and
+/// a second close cannot move the closing time (a retry is a no-op, not a rewrite).
+fn close_poll_impl(c: &Connection, poll_id: &str, actor_id: &str) -> Result<PollView> {
+    let (_channel_id, author_id, closed_at, _multi, _message_id) = poll_head(c, poll_id)?;
+    if author_id != actor_id {
+        return Err("only the poll author may close it".into());
+    }
+    if closed_at.is_none() {
+        let now = now_secs();
+        c.execute(
+            "UPDATE message_polls SET closed_at=?2, updated_at=?2 WHERE id=?1 AND closed_at IS NULL",
+            rusqlite::params![poll_id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    get_poll_impl(c, poll_id, Some(actor_id))?.ok_or_else(|| "poll not found".to_string())
 }
 
 /// Pinning is idempotent; a caller may retry a lost response without changing history.
@@ -780,6 +1702,7 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         &message.text,
         &message.mention_ids,
     )?;
+    crate::chat_links::sync_links_on(c, &message.id, &message.text)?;
     crate::channel_feeds::route_message_on(
         c,
         &message.channel_id,
@@ -879,6 +1802,10 @@ fn update_message_impl(
     if changed == 0 {
         return Err("message not found".to_string());
     }
+    // An edit re-derives the link set: a URL that survives keeps its preview, one that
+    // left loses it, one that arrived is `pending` — an edit must never become an
+    // outbound request.
+    crate::chat_links::sync_links_on(c, id, text)?;
     // Omitting `mention_ids` leaves the mentions untouched: an old client that only
     // knows how to edit text must not silently strip everyone off the message.
     if let Some(mention_ids) = mention_ids {
@@ -1150,6 +2077,41 @@ pub fn list_messages(
 ) -> Result<Vec<MessageView>> {
     list_messages_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
 }
+/// Paged history. `cursor` continues a previous page; `limit` is clamped to
+/// `MAX_PAGE_LIMIT` server-side, so a client asking for a million rows gets one page.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_messages_page(
+    channel_id: String,
+    thread_of: Option<String>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+    acting_profile_id: Option<String>,
+) -> Result<MessagePage> {
+    list_messages_page_impl(
+        &db::conn()?,
+        &channel_id,
+        thread_of.as_deref(),
+        cursor.as_deref(),
+        limit,
+        acting_profile_id.as_deref(),
+    )
+}
+
+/// Fetch previews for a message's still-unfurled links. Explicit, server-side, ACL-gated,
+/// and never invoked from a read path.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn unfurl_message_links(
+    message_id: String,
+    acting_profile_id: Option<String>,
+) -> Result<Vec<crate::chat_links::MessageLink>> {
+    unfurl_message_links_impl(
+        &db::conn()?,
+        &message_id,
+        acting_profile_id.as_deref(),
+        &crate::chat_links::fetch_url,
+    )
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_pinned_messages(
     channel_id: String,
@@ -1160,6 +2122,176 @@ pub fn list_pinned_messages(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_message_pinned(id: String, pinned: bool) -> Result<MessageView> {
     set_message_pinned_impl(&db::conn()?, &id, pinned)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+    text: String,
+) -> Result<Option<MessageDraft>> {
+    save_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+        &text,
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+) -> Result<Option<MessageDraft>> {
+    get_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_message_drafts(author_id: String) -> Result<Vec<MessageDraft>> {
+    list_drafts_impl(&db::conn()?, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+) -> Result<bool> {
+    delete_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[allow(clippy::too_many_arguments)]
+pub fn schedule_message(
+    id: String,
+    channel_id: String,
+    author_id: String,
+    text: String,
+    thread_of: Option<String>,
+    scheduled_at: i64,
+) -> Result<ScheduledMessage> {
+    schedule_message_impl(
+        &db::conn()?,
+        &id,
+        &channel_id,
+        &author_id,
+        &text,
+        thread_of.as_deref(),
+        scheduled_at,
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_scheduled_messages(
+    author_id: String,
+    channel_id: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<ScheduledMessage>> {
+    list_scheduled_impl(
+        &db::conn()?,
+        &author_id,
+        channel_id.as_deref(),
+        status.as_deref(),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_scheduled_message(id: String, author_id: String) -> Result<ScheduledMessage> {
+    owned_scheduled(&db::conn()?, &id, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_scheduled_message(
+    id: String,
+    author_id: String,
+    text: Option<String>,
+    scheduled_at: Option<i64>,
+) -> Result<ScheduledMessage> {
+    update_scheduled_impl(&db::conn()?, &id, &author_id, text.as_deref(), scheduled_at)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn cancel_scheduled_message(id: String, author_id: String) -> Result<ScheduledMessage> {
+    cancel_scheduled_impl(&db::conn()?, &id, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn deliver_due_scheduled_messages(
+    now: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<ScheduledMessage>> {
+    let c = db::conn()?;
+    deliver_due_scheduled_impl(
+        &c,
+        now.unwrap_or_else(now_secs),
+        limit.unwrap_or(SCHEDULED_TICK_LIMIT_DEFAULT),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[allow(clippy::too_many_arguments)]
+pub fn create_poll(
+    id: String,
+    channel_id: String,
+    author_id: String,
+    question: String,
+    options: Vec<String>,
+    multiple_choice: Option<bool>,
+    anonymous: Option<bool>,
+) -> Result<PollView> {
+    create_poll_impl(
+        &db::conn()?,
+        &id,
+        &channel_id,
+        &author_id,
+        &question,
+        &options,
+        multiple_choice.unwrap_or(false),
+        anonymous.unwrap_or(false),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_poll(id: String, acting_profile_id: Option<String>) -> Result<PollView> {
+    get_poll_impl(&db::conn()?, &id, acting_profile_id.as_deref())?
+        .ok_or_else(|| "poll not found".to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channel_polls(
+    channel_id: String,
+    acting_profile_id: Option<String>,
+) -> Result<Vec<PollView>> {
+    list_channel_polls_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn vote_poll(
+    poll_id: String,
+    voter_id: String,
+    option_ids: Vec<String>,
+) -> Result<PollView> {
+    vote_poll_impl(&db::conn()?, &poll_id, &voter_id, &option_ids)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn close_poll(poll_id: String, author_id: String) -> Result<PollView> {
+    close_poll_impl(&db::conn()?, &poll_id, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_channel_typing(channel_id: String, profile_id: String, typing: bool) -> Result<()> {
+    set_typing_impl(&db::conn()?, &channel_id, &profile_id, typing)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channel_typing(
+    channel_id: String,
+    acting_profile_id: Option<String>,
+    ttl_secs: Option<i64>,
+) -> Result<Vec<TypingParticipant>> {
+    list_typing_impl(
+        &db::conn()?,
+        &channel_id,
+        acting_profile_id.as_deref(),
+        ttl_secs.unwrap_or(TYPING_TTL_SECS_DEFAULT),
+    )
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
@@ -1404,6 +2536,425 @@ mod tests {
             &["default-org".to_string()],
         )
         .unwrap();
+    }
+
+    fn seed_scheduler(c: &Connection, channel: &str) {
+        seed_channel(c, channel);
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('default-org','org','Org',unixepoch())",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn seed_poll_voters(c: &Connection, channel: &str) {
+        seed_scheduler(c, channel);
+        for (id, name) in [("voter-a", "A"), ("voter-b", "B")] {
+            c.execute(
+                "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?2,unixepoch())",
+                rusqlite::params![id, name],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_single_choice_ballot_replaces_itself_and_never_stacks() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll");
+
+        assert!(
+            create_poll_impl(
+                &c,
+                "p-thin",
+                "chan-poll",
+                "default-org",
+                "lunch?",
+                &["only".into()],
+                false,
+                false
+            )
+            .is_err(),
+            "one option is an announcement, not a poll"
+        );
+        assert!(create_poll_impl(
+            &c,
+            "p-dup",
+            "chan-poll",
+            "default-org",
+            "lunch?",
+            &["Pizza".into(), "pizza".into()],
+            false,
+            false
+        )
+        .is_err());
+
+        let poll = create_poll_impl(
+            &c,
+            "p-1",
+            "chan-poll",
+            "default-org",
+            "lunch?",
+            &["pizza".into(), "sushi".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(poll.options.len(), 2);
+        // The poll is real channel content: its message exists and names the question.
+        let carrier = get_message_impl(&c, &poll.message_id).unwrap().unwrap();
+        assert_eq!(carrier.content_kind, "poll");
+        assert_eq!(carrier.text, "lunch?");
+
+        let pizza = poll.options[0].id.clone();
+        let sushi = poll.options[1].id.clone();
+        assert!(
+            vote_poll_impl(&c, "p-1", "voter-a", &[pizza.clone(), sushi.clone()]).is_err(),
+            "a single-choice poll refuses a two-option ballot"
+        );
+        vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&pizza)).unwrap();
+        let after = vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&sushi)).unwrap();
+        assert_eq!(after.options[0].vote_count, 0, "the old ballot is retracted");
+        assert_eq!(after.options[1].vote_count, 1);
+        assert_eq!(after.voter_count, 1);
+        assert!(after.options[1].me_voted);
+
+        // An empty ballot withdraws the vote entirely.
+        let withdrawn = vote_poll_impl(&c, "p-1", "voter-a", &[]).unwrap();
+        assert_eq!(withdrawn.voter_count, 0);
+        assert!(!withdrawn.options[1].me_voted);
+        drop(path);
+    }
+
+    #[test]
+    fn a_tally_counts_distinct_voters_and_leaks_no_other_ballot() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll2");
+        let poll = create_poll_impl(
+            &c,
+            "p-multi",
+            "chan-poll2",
+            "default-org",
+            "which days?",
+            &["mon".into(), "tue".into()],
+            true,
+            true,
+        )
+        .unwrap();
+        let other = create_poll_impl(
+            &c,
+            "p-other",
+            "chan-poll2",
+            "default-org",
+            "other",
+            &["x".into(), "y".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let (mon, tue) = (poll.options[0].id.clone(), poll.options[1].id.clone());
+
+        assert!(
+            vote_poll_impl(&c, "p-multi", "voter-a", &[other.options[0].id.clone()]).is_err(),
+            "an option from another poll may never enter this tally"
+        );
+        assert!(vote_poll_impl(&c, "p-multi", "voter-a", &[mon.clone(), mon.clone()]).is_err());
+
+        vote_poll_impl(&c, "p-multi", "voter-a", &[mon.clone(), tue.clone()]).unwrap();
+        let view = vote_poll_impl(&c, "p-multi", "voter-b", std::slice::from_ref(&mon)).unwrap();
+        assert_eq!(view.options[0].vote_count, 2);
+        assert_eq!(view.options[1].vote_count, 1);
+        assert_eq!(
+            view.voter_count, 2,
+            "turnout counts people, not ballots"
+        );
+        // Voter B reads B's own picks only; A's second choice is never attributed.
+        assert!(view.options[0].me_voted && !view.options[1].me_voted);
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(
+            !json.contains("voter-a"),
+            "the read model carries counts, never voter identities: {json}"
+        );
+        drop(path);
+    }
+
+    #[test]
+    fn only_the_author_closes_a_poll_and_a_closed_poll_takes_no_more_votes() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll3");
+        let poll = create_poll_impl(
+            &c,
+            "p-close",
+            "chan-poll3",
+            "default-org",
+            "ship it?",
+            &["yes".into(), "no".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let yes = poll.options[0].id.clone();
+        vote_poll_impl(&c, "p-close", "voter-a", std::slice::from_ref(&yes)).unwrap();
+
+        assert!(close_poll_impl(&c, "p-close", "voter-a").is_err());
+        let closed = close_poll_impl(&c, "p-close", "default-org").unwrap();
+        let at = closed.closed_at.expect("closed");
+        let again = close_poll_impl(&c, "p-close", "default-org").unwrap();
+        assert_eq!(
+            again.closed_at,
+            Some(at),
+            "a retried close never moves the closing time"
+        );
+        assert!(vote_poll_impl(&c, "p-close", "voter-b", &[yes]).is_err());
+        assert_eq!(again.options[0].vote_count, 1, "the tally is final");
+
+        let listed = list_channel_polls_impl(&c, "chan-poll3", Some("voter-b")).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "p-close");
+        drop(path);
+    }
+
+    #[test]
+    fn scheduling_requires_future_time_and_owner_may_edit_and_cancel() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-sched");
+        let future = now_secs() + 600;
+
+        assert!(
+            schedule_message_impl(
+                &c,
+                "s-past",
+                "chan-sched",
+                "default-org",
+                "x",
+                None,
+                now_secs()
+            )
+            .is_err(),
+            "a past timestamp is a plain send, not a schedule"
+        );
+        assert!(schedule_message_impl(
+            &c,
+            "s-empty",
+            "chan-sched",
+            "default-org",
+            "   ",
+            None,
+            future
+        )
+        .is_err());
+
+        let row = schedule_message_impl(
+            &c,
+            "s-1",
+            "chan-sched",
+            "default-org",
+            "later",
+            None,
+            future,
+        )
+        .unwrap();
+        assert_eq!(row.status, "pending");
+
+        assert!(
+            owned_scheduled(&c, "s-1", "someone-else").is_err(),
+            "an unsent intent is private to its author"
+        );
+        assert!(update_scheduled_impl(&c, "s-1", "someone-else", Some("hack"), None).is_err());
+
+        let edited =
+            update_scheduled_impl(&c, "s-1", "default-org", Some("later, edited"), None).unwrap();
+        assert_eq!(edited.text, "later, edited");
+
+        let cancelled = cancel_scheduled_impl(&c, "s-1", "default-org").unwrap();
+        assert_eq!(cancelled.status, "cancelled");
+        // cancel is idempotent, and a cancelled intent can no longer be rewritten
+        assert_eq!(
+            cancel_scheduled_impl(&c, "s-1", "default-org")
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+        assert!(update_scheduled_impl(&c, "s-1", "default-org", Some("zombie"), None).is_err());
+
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn delivery_is_bounded_idempotent_and_skips_cancelled() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-deliver");
+        let future = now_secs() + 60;
+        for id in ["d-1", "d-2", "d-3"] {
+            schedule_message_impl(&c, id, "chan-deliver", "default-org", id, None, future).unwrap();
+        }
+        cancel_scheduled_impl(&c, "d-3", "default-org").unwrap();
+
+        // not due yet
+        assert!(deliver_due_scheduled_impl(&c, future - 1, 10)
+            .unwrap()
+            .is_empty());
+
+        // bounded tick: one per run
+        let first = deliver_due_scheduled_impl(&c, future, 1).unwrap();
+        assert_eq!(first.len(), 1);
+        let second = deliver_due_scheduled_impl(&c, future, 10).unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "remaining pending intent, cancelled one skipped"
+        );
+        assert!(deliver_due_scheduled_impl(&c, future, 10)
+            .unwrap()
+            .is_empty());
+
+        let sent = get_scheduled_impl(&c, "d-1").unwrap().unwrap();
+        assert_eq!(sent.status, "sent");
+        assert_eq!(sent.sent_message_id.as_deref(), Some("sched-d-1"));
+        let posted: i64 = c
+            .query_row(
+                "SELECT count(*) FROM messages WHERE channel_id='chan-deliver'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(posted, 2, "exactly one message per delivered intent");
+
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn thread_target_must_live_in_the_same_channel() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-a");
+        seed_channel(&c, "chan-b");
+        create_message_impl(
+            &c,
+            &Message {
+                id: "root-b".to_string(),
+                channel_id: "chan-b".to_string(),
+                author_id: Some("default-org".to_string()),
+                text: "root".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: default_message_content_kind(),
+                mention_ids: Vec::new(),
+            },
+        )
+        .unwrap();
+        let future = now_secs() + 60;
+        assert!(schedule_message_impl(
+            &c,
+            "s-x",
+            "chan-a",
+            "default-org",
+            "cross",
+            Some("root-b"),
+            future
+        )
+        .is_err());
+        assert!(schedule_message_impl(
+            &c,
+            "s-y",
+            "chan-a",
+            "default-org",
+            "ghost",
+            Some("nope"),
+            future
+        )
+        .is_err());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn draft_upserts_per_thread_and_clearing_removes_it() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-draft");
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('default-org','org','Org',unixepoch())",
+            [],
+        )
+        .unwrap();
+
+        let first = save_draft_impl(&c, "chan-draft", "default-org", "", "hello")
+            .unwrap()
+            .expect("draft stored");
+        assert_eq!(first.text, "hello");
+        // a second save is an update, not a second row
+        save_draft_impl(&c, "chan-draft", "default-org", "", "hello there").unwrap();
+        // a thread draft is independent of the channel-root draft
+        save_draft_impl(&c, "chan-draft", "default-org", "root-1", "reply body").unwrap();
+
+        let drafts = list_drafts_impl(&c, "default-org").unwrap();
+        assert_eq!(drafts.len(), 2, "root + thread draft, no duplicates");
+        assert_eq!(
+            get_draft_impl(&c, "chan-draft", "default-org", "")
+                .unwrap()
+                .map(|d| d.text),
+            Some("hello there".into())
+        );
+
+        // clearing the composer must not resurrect the old body on reload
+        assert_eq!(
+            save_draft_impl(&c, "chan-draft", "default-org", "", "   ").unwrap(),
+            None
+        );
+        assert_eq!(
+            get_draft_impl(&c, "chan-draft", "default-org", "").unwrap(),
+            None
+        );
+        // deleting an absent draft is success, so send-then-clear is retry-safe
+        assert!(!delete_draft_impl(&c, "chan-draft", "default-org", "").unwrap());
+        assert!(delete_draft_impl(&c, "chan-draft", "default-org", "root-1").unwrap());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn typing_excludes_self_expires_and_can_be_retracted() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-type");
+        seed_profiles(&c, &["default-org", "other"]);
+
+        set_typing_impl(&c, "chan-type", "default-org", true).unwrap();
+        set_typing_impl(&c, "chan-type", "other", true).unwrap();
+        let seen = list_typing_impl(&c, "chan-type", Some("default-org"), 60).unwrap();
+        assert_eq!(
+            seen.iter()
+                .map(|t| t.profile_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["other"],
+            "a reader never sees their own beat"
+        );
+
+        // an aged beat is swept, not shown: no stuck "typing…" after a client dies
+        c.execute(
+            "UPDATE channel_typing SET updated_at=updated_at-3600 WHERE profile_id='other'",
+            [],
+        )
+        .unwrap();
+        assert!(list_typing_impl(&c, "chan-type", Some("default-org"), 60)
+            .unwrap()
+            .is_empty());
+        let remaining: i64 = c
+            .query_row("SELECT count(*) FROM channel_typing", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1, "expired rows are swept at read time");
+
+        // explicit retraction beats the TTL
+        set_typing_impl(&c, "chan-type", "other", true).unwrap();
+        set_typing_impl(&c, "chan-type", "other", false).unwrap();
+        assert!(list_typing_impl(&c, "chan-type", Some("default-org"), 60)
+            .unwrap()
+            .is_empty());
+        drop(c);
+        drop(path);
     }
 
     fn seed_message(c: &Connection, channel: &str, id: &str) {
@@ -2248,6 +3799,272 @@ mod tests {
         let fetched = get_channel_impl(&c, &entity_channel_id("issue", "issue-42")).unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().name.as_deref(), Some("Issue #42"));
+        drop(c);
+        drop(path);
+    }
+
+    // ---- V118: history paging + link unfurling ---------------------------------
+
+    /// All rows share one `created_at` on purpose: a timestamp-only cursor would drop or
+    /// repeat rows here, so this fixture is the tie-break test's whole point.
+    fn seed_history(c: &Connection, channel: &str, count: usize) {
+        seed_scheduler(c, channel);
+        for i in 0..count {
+            c.execute(
+                "INSERT INTO messages(id,channel_id,author_id,text,created_at,thread_of,archived,pinned,content_kind) \
+                 VALUES(?1,?2,'default-org',?3,100,NULL,0,0,'text')",
+                rusqlite::params![format!("m-{i:02}"), channel, format!("line {i}")],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn paging_walks_a_tied_timestamp_history_exactly_once() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-page", 7);
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page =
+                list_messages_page_impl(&c, "chan-page", None, cursor.as_deref(), Some(3), None)
+                    .unwrap();
+            seen.extend(page.messages.iter().map(|m| m.message.id.clone()));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => {
+                    assert!(!page.has_more);
+                    break;
+                }
+            }
+        }
+        // Every row once, newest id first (ids tie on time, so id breaks it).
+        let mut unique = seen.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), 7, "paging repeated or skipped rows: {seen:?}");
+        assert_eq!(seen.first().unwrap(), "m-06");
+        assert_eq!(seen.last().unwrap(), "m-00");
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_page_limit_is_clamped_and_a_forged_cursor_is_refused() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-clamp", 3);
+
+        let huge =
+            list_messages_page_impl(&c, "chan-clamp", None, None, Some(1_000_000), None).unwrap();
+        assert_eq!(huge.messages.len(), 3);
+        assert!(!huge.has_more);
+        // A zero/negative page is a client bug, not an infinite loop generator.
+        let tiny = list_messages_page_impl(&c, "chan-clamp", None, None, Some(0), None).unwrap();
+        assert_eq!(tiny.messages.len(), 1);
+        assert!(tiny.has_more);
+
+        assert_eq!(
+            list_messages_page_impl(&c, "chan-clamp", None, Some("not-a-cursor!!"), None, None)
+                .unwrap_err(),
+            "invalid cursor"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_cursor_is_not_a_capability_and_a_thread_must_belong_to_its_channel() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "mallory"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-private".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .unwrap();
+        post(&c, "chan-private", "m-secret", "alice", &[]).unwrap();
+        let page =
+            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice")).unwrap();
+        assert_eq!(page.messages.len(), 1);
+        // Same channel, same (absent) cursor, different reader: the ACL is re-checked on
+        // every page, so holding a cursor grants nothing.
+        assert_eq!(
+            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("mallory"))
+                .unwrap_err(),
+            "channel access denied"
+        );
+
+        seed_history(&c, "chan-other", 1);
+        assert_eq!(
+            list_messages_page_impl(
+                &c,
+                "chan-other",
+                Some("m-secret"),
+                None,
+                Some(5),
+                Some("mallory")
+            )
+            .unwrap_err(),
+            "thread does not belong to this channel"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn thread_replies_page_separately_from_channel_roots() {
+        let (c, path) = conn();
+        seed_history(&c, "chan-thr", 1);
+        for i in 0..3 {
+            c.execute(
+                "INSERT INTO messages(id,channel_id,author_id,text,created_at,thread_of,archived,pinned,content_kind) \
+                 VALUES(?1,'chan-thr','default-org','re',?2,'m-00',0,0,'text')",
+                rusqlite::params![format!("r-{i}"), 200 + i],
+            )
+            .unwrap();
+        }
+        let roots = list_messages_page_impl(&c, "chan-thr", None, None, None, None).unwrap();
+        assert_eq!(roots.messages.len(), 1);
+        let replies =
+            list_messages_page_impl(&c, "chan-thr", Some("m-00"), None, Some(2), None).unwrap();
+        assert_eq!(replies.messages.len(), 2);
+        assert!(replies.has_more);
+        let rest = list_messages_page_impl(
+            &c,
+            "chan-thr",
+            Some("m-00"),
+            replies.next_cursor.as_deref(),
+            Some(2),
+            None,
+        )
+        .unwrap();
+        assert_eq!(rest.messages.len(), 1);
+        assert!(!rest.has_more);
+        assert!(rest.next_cursor.is_none());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn links_are_extracted_on_write_and_re_derived_on_edit() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-link");
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-link".into(),
+                channel_id: "chan-link".into(),
+                author_id: Some("default-org".into()),
+                text: "read https://a.example/x and https://b.example/y".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: vec![],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+        let view = list_messages_page_impl(&c, "chan-link", None, None, None, None).unwrap();
+        let links = &view.messages[0].links;
+        assert_eq!(links.len(), 2);
+        assert!(links.iter().all(|l| l.status == "pending"));
+
+        // Pretend the first was unfurled, then edit the text: the survivor keeps its
+        // preview, the dropped URL takes its own with it.
+        unfurl_message_links_impl(&c, "m-link", None, &|_url| {
+            Ok(crate::chat_links::FetchedDoc {
+                content_type: "text/html".into(),
+                body: "<html><head><title>Kept</title></head></html>".into(),
+            })
+        })
+        .unwrap();
+        update_message_impl(&c, "m-link", "only https://a.example/x now", None).unwrap();
+        let links = crate::chat_links::links_for(&c, "m-link").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://a.example/x");
+        assert_eq!(links[0].title.as_deref(), Some("Kept"));
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn unfurling_needs_the_channel_and_a_refusal_is_recorded_not_retried() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "mallory"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-unf".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .unwrap();
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-unf".into(),
+                channel_id: "chan-unf".into(),
+                author_id: Some("alice".into()),
+                text: "http://169.254.169.254/latest/meta-data".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: vec![],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+
+        // An outsider cannot make the server fetch on behalf of a channel they cannot read.
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            unfurl_message_links_impl(&c, "m-unf", Some("mallory"), &|_u| {
+                calls.set(calls.get() + 1);
+                Ok(crate::chat_links::FetchedDoc {
+                    content_type: "text/html".into(),
+                    body: String::new(),
+                })
+            })
+            .unwrap_err(),
+            "channel access denied"
+        );
+        assert_eq!(calls.get(), 0, "a denied request must not reach the network");
+
+        // The member's request runs, the guard refuses the link-local address, and the
+        // refusal is terminal: a second request does not re-dial.
+        let links = unfurl_message_links_impl(&c, "m-unf", Some("alice"), &|url| {
+            calls.set(calls.get() + 1);
+            crate::chat_links::fetch_url(url)
+        })
+        .unwrap();
+        assert_eq!(links[0].status, "refused");
+        assert!(links[0].title.is_none());
+        assert_eq!(calls.get(), 1);
+        unfurl_message_links_impl(&c, "m-unf", Some("alice"), &|url| {
+            calls.set(calls.get() + 1);
+            crate::chat_links::fetch_url(url)
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1, "a refused link must not be re-fetched");
         drop(c);
         drop(path);
     }

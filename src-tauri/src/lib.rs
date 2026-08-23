@@ -23,6 +23,8 @@ pub mod channel_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod chat_links;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chatbot;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
@@ -339,6 +341,25 @@ pub fn run() {
             chat::remove_message_attachment,
             chat::update_message,
             chat::set_message_pinned,
+            chat::save_message_draft,
+            chat::get_message_draft,
+            chat::list_message_drafts,
+            chat::delete_message_draft,
+            chat::set_channel_typing,
+            chat::list_channel_typing,
+            chat::schedule_message,
+            chat::list_scheduled_messages,
+            chat::get_scheduled_message,
+            chat::update_scheduled_message,
+            chat::cancel_scheduled_message,
+            chat::deliver_due_scheduled_messages,
+            chat::create_poll,
+            chat::get_poll,
+            chat::list_channel_polls,
+            chat::vote_poll,
+            chat::close_poll,
+            chat::list_messages_page,
+            chat::unfurl_message_links,
             chat::list_mentions_for_profile,
             chat::count_unread_mentions,
             chat::delete_message,
