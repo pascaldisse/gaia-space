@@ -85,6 +85,7 @@ export type ScheduledMessage = {
   created_at: number;
   updated_at: number;
 };
+export type MentionPayload = { target_type: "profile" | "team"; target_id: string };
 export type Message = {
   id: string;
   channel_id: string;
@@ -98,7 +99,9 @@ export type Message = {
   // "poll" marks the message that carries a poll: its text is the question, and the
   // tally lives in `message_polls` (fetched separately, never inlined here).
   content_kind?: "text" | "absence-card" | "poll";
+  // Legacy profile ids remain while clients migrate to typed targets.
   mention_ids?: string[];
+  mention_targets?: MentionPayload[];
 };
 // Upload lifecycle (KB §04 collaboration): a row can exist before its bytes are stored,
 // so the state is persisted rather than inferred from the row's presence.
@@ -123,7 +126,7 @@ export type MessageView = Message & { reply_count: number; reactions: Reaction[]
 // One page of history, newest-first. `next_cursor` is opaque: it is a position handed
 // back verbatim, never parsed or built by the client.
 export type MessagePage = { messages: MessageView[]; next_cursor: string | null; has_more: boolean };
-export type MentionView = MessageView & { channel_name: string | null; notification_id: string; read: boolean };
+export type MentionView = MessageView & { channel_name: string | null; notification_id: string; read: boolean; mention_target?: MentionPayload };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
 // command (not owned by this lane; only invoked, never redefined here).
@@ -257,10 +260,10 @@ listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
   setMessageAttachmentState: (messageId: string, id: string, state: AttachmentUploadState, error?: string | null) =>
     invoke<MessageAttachment>("set_message_attachment_state", { messageId, id, state, error: error ?? null }),
   removeMessageAttachment: (messageId: string, id: string) => invoke<void>("remove_message_attachment", { messageId, id }),
-  // `mentionIds` omitted (null) means "leave the mentions alone"; an array replaces them
+  // `mentionTargets` omitted (null) means "leave the mentions alone"; an array replaces them
   // wholesale, so removing a name from the text also removes the notification.
-  updateMessage: (id: string, text: string, mentionIds?: string[] | null) =>
-    invoke<MessageView>("update_message", { id, text, mentionIds: mentionIds ?? null }),
+  updateMessage: (id: string, text: string, mentionTargets?: MentionPayload[] | null) =>
+    invoke<MessageView>("update_message", { id, text, mentionTargets: mentionTargets ?? null }),
 
   // mentions inbox / badge (KB §04: MentionsFolderVM, getTotalUnreadMentions)
   listMentionsForProfile: (profileId: string, unreadOnly?: boolean) =>

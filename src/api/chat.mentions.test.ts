@@ -16,15 +16,15 @@ function record(result: unknown = {}) {
 test("an edit without a mention list leaves the stored mentions untouched", async () => {
   record();
   await chatApi.updateMessage("m-1", "typo fixed");
-  expect(seen[0]).toEqual({ command: "update_message", args: { id: "m-1", text: "typo fixed", mentionIds: null } });
+  expect(seen[0]).toEqual({ command: "update_message", args: { id: "m-1", text: "typo fixed", mentionTargets: null } });
 });
 
 test("an explicit empty list clears the mentions rather than being dropped as falsy", async () => {
   record();
   await chatApi.updateMessage("m-1", "never mind", []);
-  expect(seen[0].args).toEqual({ id: "m-1", text: "never mind", mentionIds: [] });
-  await chatApi.updateMessage("m-1", "hi @bob", ["pb"]);
-  expect(seen[1].args.mentionIds).toEqual(["pb"]);
+  expect(seen[0].args).toEqual({ id: "m-1", text: "never mind", mentionTargets: [] });
+  await chatApi.updateMessage("m-1", "hi @bob", [{ target_type: "profile", target_id: "pb" }]);
+  expect(seen[1].args.mentionTargets).toEqual([{ target_type: "profile", target_id: "pb" }]);
 });
 
 test("the mentions inbox and its badge cross IPC under the declared names", async () => {

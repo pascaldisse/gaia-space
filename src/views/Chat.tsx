@@ -14,6 +14,7 @@ import {
   type ChannelNotificationPreference,
   type MessageView,
   type NewMessageAttachment,
+  type MentionPayload,
   type ProfileLite,
   type ScheduledMessage,
   type PollView,
@@ -32,9 +33,10 @@ import {
 import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
+import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
-import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf } from "../chatMentions";
+import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -477,9 +479,10 @@ export default function Chat() {
     if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
     return `${names.length} people are typing…`;
   };
-  const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
+  const [draftMentionIds, setDraftMentionIds] = createSignal<MentionTargetRef[]>([]);
   const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
-  const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
+  const [threadMentionIds, setThreadMentionIds] = createSignal<MentionTargetRef[]>([]);
+  const [mentionTeams] = createResource(() => platformApi.teams());
   // Only someone who can read the channel is offered: a private channel must not leak
   // its non-members a notification (the backend drops such a mention anyway, so an
   // unrestricted list would just promise a delivery that never happens).
@@ -489,11 +492,16 @@ export default function Chat() {
     const everyone = open === "public" || open === "entity-bound";
     return (profiles() ?? []).filter((profile) => !profile.archived && profile.id !== actingProfileId() && (everyone || ids.has(profile.id)));
   };
-  const mentionCandidates = (text: string) => candidatesFor(text, mentionable());
-  function selectMention(kind: "draft" | "thread" | "edit", profile: ProfileLite) {
+  const mentionTargets = (): MentionTarget[] => [
+    ...mentionable().map((profile) => ({ kind: "profile" as const, id: profile.id, name: profile.display_name, secondary: profile.username })),
+    ...(mentionTeams() ?? []).filter((team) => !team.archived).map((team) => ({ kind: "team" as const, id: team.id, name: team.name })),
+  ];
+  const mentionCandidates = (text: string) => candidatesFor(text, mentionTargets());
+  const mentionPayload = (targets: MentionTargetRef[]): MentionPayload[] => targets.map((target) => ({ target_type: target.kind, target_id: target.id }));
+  function selectMention(kind: "draft" | "thread" | "edit", target: MentionTarget) {
     const text = kind === "draft" ? draft() : kind === "thread" ? threadDraft() : editText();
-    const replace = insertMention(text, profile);
-    const add = (ids: string[]) => ids.includes(profile.id) ? ids : [...ids, profile.id];
+    const replace = insertMention(text, target);
+    const add = (targets: MentionTargetRef[]) => targets.some((item) => item.id === target.id && item.kind === target.kind) ? targets : [...targets, { kind: target.kind, id: target.id }];
     if (kind === "draft") { setDraft(replace); setDraftMentionIds(add); }
     else if (kind === "thread") { setThreadDraft(replace); setThreadMentionIds(add); }
     else { setEditText(replace); setEditMentionIds(add); }
@@ -624,7 +632,7 @@ export default function Chat() {
         edited_at: null,
         thread_of: null,
         archived: false,
-        mention_ids: draftMentionIds(),
+        mention_targets: mentionPayload(draftMentionIds()),
       });
       const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
       setDraftMessageId(ok ? null : message.id);
@@ -656,7 +664,7 @@ export default function Chat() {
         edited_at: null,
         thread_of: root.id,
         archived: false,
-        mention_ids: threadMentionIds(),
+        mention_targets: mentionPayload(threadMentionIds()),
       });
       const ok = await saveAttachments(message.id, attachments, setThreadAttachments);
       setThreadMessageId(ok ? null : message.id);
@@ -682,20 +690,20 @@ export default function Chat() {
   const [editText, setEditText] = createSignal("");
   // An edit carries the mention list it started with, so saving is a diff against the
   // stored one: a name deleted from the text loses its mention, the rest stay put.
-  const [editMentionIds, setEditMentionIds] = createSignal<string[]>([]);
+  const [editMentionIds, setEditMentionIds] = createSignal<MentionTargetRef[]>([]);
   function startEdit(m: MessageView) {
     setEditingId(m.id);
     setEditText(m.text);
-    setEditMentionIds(m.mention_ids ?? []);
+    setEditMentionIds((m.mention_targets ?? (m.mention_ids ?? []).map((id) => ({ target_type: "profile" as const, target_id: id }))).map((target) => ({ kind: target.target_type, id: target.target_id })));
   }
   // A mention only survives while its name is still written in the text; dropping the
   // "@name" is how a user un-mentions someone, and the row must follow the text.
-  const survivingMentions = (text: string, ids: string[]) => survivorsOf(text, ids, profiles() ?? []);
+  const survivingMentions = (text: string, targets: MentionTargetRef[]) => survivorsOf(text, targets, mentionTargets());
   async function saveEdit() {
     const id = editingId();
     if (!id) return;
     try {
-      await chatApi.updateMessage(id, editText(), survivingMentions(editText(), editMentionIds()));
+      await chatApi.updateMessage(id, editText(), mentionPayload(survivingMentions(editText(), editMentionIds())));
       setEditingId(null);
       refetchMessages();
       refetchThread();
@@ -886,7 +894,7 @@ export default function Chat() {
           }
         >
           <div class="edit-box">
-            <Show when={mentionCandidates(editText()).length}><div class="mention-menu"><For each={mentionCandidates(editText())}>{(profile) => <button type="button" onClick={() => selectMention("edit", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={mentionCandidates(editText()).length}><div class="mention-menu"><For each={mentionCandidates(editText())}>{(profile) => <button type="button" onClick={() => selectMention("edit", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <textarea value={editText()} onInput={(e) => setEditText(e.currentTarget.value)} />
             <div class="row-actions">
               <button class="ghost small" onClick={() => setEditingId(null)}>
@@ -1091,6 +1099,7 @@ export default function Chat() {
                 <button type="button" class={`mention-item${mention.read ? "" : " unread"}`} onClick={() => openMention(mention)}>
                   <span class="mention-where">{mention.channel_name ?? mention.channel_id}</span>
                   <span class="mention-who">{profileName(mention.author_id)}</span>
+                  <Show when={mention.mention_target?.target_type === "team"}><span class="mention-kind">team</span></Show>
                   <span class="mention-what">{mention.text}</span>
                   <span class="mention-when">{when(mention.created_at)}</span>
                 </button>
@@ -1202,7 +1211,7 @@ export default function Chat() {
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
             <button type="button" class="schedule-button" title="Send later" onClick={() => setScheduleOpen((v) => !v)}>🕒</button>
             <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
-            <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">
               <For each={draftAttachments()}>{(attachment) => (
@@ -1294,7 +1303,7 @@ export default function Chat() {
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
-            <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.display_name}</button>}</For></div></Show>
+            <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={threadAttachments().length}><div class="pending-attachments">
               <For each={threadAttachments()}>{(attachment) => (
                 <span class={`attachment-chip state-${attachment.state}`} title={attachment.error ?? attachment.state}>
