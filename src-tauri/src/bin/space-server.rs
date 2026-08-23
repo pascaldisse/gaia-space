@@ -4390,7 +4390,7 @@ fn bootstrap() {
             p
         });
         c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('profile-admin','admin','Administrator',unixepoch())",[]).unwrap();
-        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin','GlobalAdmin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
     }
 }
 /// Background delivery ticker configuration, read from the environment.
