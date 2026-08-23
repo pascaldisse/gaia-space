@@ -27,6 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+const PARAMETER_SECRET_MASK: &str = "***";
 const LOGIN_MAX_FAILED_ATTEMPTS: u32 = 5;
 const LOGIN_LOCKOUT_WINDOW: Duration = Duration::from_secs(60);
 #[derive(Clone)]
@@ -288,6 +289,186 @@ fn app_read_scope(token: &applications::AppToken) -> Result<(), axum::response::
         )
             .into_response())
     }
+}
+
+fn app_parameter_context(application_id: &str) -> String {
+    format!("application:{application_id}")
+}
+#[allow(clippy::result_large_err)]
+fn app_parameter_right(
+    c: &rusqlite::Connection,
+    application_id: &str,
+    right: &str,
+) -> Result<(), axum::response::Response> {
+    if app_rights::app_has_right(
+        c,
+        application_id,
+        &app_parameter_context(application_id),
+        right,
+    )
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response())?
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": right})),
+        )
+            .into_response())
+    }
+}
+async fn app_list_parameters(
+    headers: HeaderMap,
+) -> Result<Json<Vec<applications::AppParameter>>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_read_scope(&token)?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    app_parameter_right(&c, &application.id, "Project.ViewParameters")?;
+    drop(c);
+    applications::list_app_parameters(application.id)
+        .map(|parameters| Json(parameters.into_iter().map(mask_parameter).collect()))
+        .map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "parameter lookup failed").into_response()
+        })
+}
+/// A parameter value never leaves the API in clear text once marked secret:
+/// writes echo the stored row back, so the same mask the list endpoint applies
+/// must apply here too, or POST/PUT would become a secret read oracle.
+fn mask_parameter(mut parameter: applications::AppParameter) -> applications::AppParameter {
+    if parameter.is_secret {
+        parameter.value = PARAMETER_SECRET_MASK.to_string();
+    }
+    parameter
+}
+
+/// The app parameter surface, split out of `main` so route wiring (method+path)
+/// is testable, not just the handler bodies.
+fn app_parameter_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    Router::new()
+        .route(
+            "/api/app/parameters",
+            get(app_list_parameters)
+                .post(app_create_parameter)
+                .put(app_update_parameter),
+        )
+        .route(
+            "/api/app/parameters/{key}",
+            axum::routing::delete(app_delete_parameter),
+        )
+}
+
+#[allow(clippy::result_large_err)]
+fn app_parameter_lookup(
+    application_id: &str,
+    key: &str,
+) -> Result<Option<applications::AppParameter>, axum::response::Response> {
+    let parameters =
+        applications::list_app_parameters(application_id.to_string()).map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "parameter lookup failed").into_response()
+        })?;
+    Ok(parameters
+        .into_iter()
+        .find(|parameter| parameter.key == key))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppParameterInput {
+    key: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    is_secret: bool,
+}
+
+/// An app writes only its *own* parameters: the context is derived from the
+/// bearer identity, never from the request body, so a token cannot address
+/// another application's parameter namespace.
+async fn app_write_parameter(
+    headers: HeaderMap,
+    create_only: bool,
+    input: AppParameterInput,
+) -> Result<Json<applications::AppParameter>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_write_scope(&token)?;
+    let key = input.key.trim().to_string();
+    if key.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "parameter key required").into_response());
+    }
+    // Reads mask secrets as `***`; accepting that literal back on a write would let
+    // a naive read-modify-write round trip silently overwrite the real secret with
+    // the mask. Refuse the sentinel instead of guessing what was meant.
+    if input.value == PARAMETER_SECRET_MASK {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "masked secret placeholder is not a parameter value",
+        )
+        .into_response());
+    }
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    app_parameter_right(&c, &application.id, "Project.ModifyParameters")?;
+    drop(c);
+    let existing = app_parameter_lookup(&application.id, &key)?;
+    if create_only && existing.is_some() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"ok": false, "error": "parameter_exists", "key": key})),
+        )
+            .into_response());
+    }
+    if !create_only && existing.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "parameter not found").into_response());
+    }
+    applications::save_app_parameter(applications::AppParameter {
+        application_id: application.id,
+        key,
+        value: input.value,
+        is_secret: input.is_secret,
+        updated_at: 0,
+    })
+    .map(|parameter| Json(mask_parameter(parameter)))
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "parameter save failed").into_response())
+}
+
+async fn app_create_parameter(
+    headers: HeaderMap,
+    Json(input): Json<AppParameterInput>,
+) -> Result<Json<applications::AppParameter>, axum::response::Response> {
+    app_write_parameter(headers, true, input).await
+}
+
+async fn app_update_parameter(
+    headers: HeaderMap,
+    Json(input): Json<AppParameterInput>,
+) -> Result<Json<applications::AppParameter>, axum::response::Response> {
+    app_write_parameter(headers, false, input).await
+}
+
+/// Deletion is a distinct right from modification in the taxonomy, so a token
+/// authorized to edit values still cannot drop them.
+async fn app_delete_parameter(
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<Value>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_write_scope(&token)?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    app_parameter_right(&c, &application.id, "Project.DeleteParameters")?;
+    drop(c);
+    if app_parameter_lookup(&application.id, &key)?.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "parameter not found").into_response());
+    }
+    applications::delete_app_parameter(application.id, key)
+        .map(|_| Json(json!({"ok": true})))
+        .map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "parameter delete failed").into_response()
+        })
 }
 
 async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response::Response> {
@@ -2460,7 +2641,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         // Advanced Team Directory is an optional organization feature; its company
         // activity and absence overview are administrator-only, never a member feed.
         | "list_directory_feed"
-        | "list_directory_calendar" => CommandPolicy::AppAdmin,
+        | "list_directory_calendar"
+        | "list_app_parameters"
+        | "save_app_parameter"
+        | "delete_app_parameter" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -4734,6 +4918,9 @@ async fn cmd(
     "list_ide_sessions" => applications::list_ide_sessions(),
     "report_ide_session" => applications::report_ide_session(value: applications::IdeSession),
     "list_applications" => applications::list_applications(),
+    "list_app_parameters" => applications::list_app_parameters(application_id: String),
+    "save_app_parameter" => applications::save_app_parameter(value: applications::AppParameter),
+    "delete_app_parameter" => applications::delete_app_parameter(application_id: String, key: String),
     "register_redirect_uri" => oauth::register_redirect_uri_cmd(application_id: String, redirect_uri: String),
     "list_redirect_uris" => oauth::list_redirect_uris_cmd(application_id: String),
     "save_application" => applications::save_application(value: applications::Application),
@@ -5438,6 +5625,7 @@ async fn main() {
         .route("/api/documents/upload", post(document_upload))
         .route("/api/documents/files/{document_id}", get(document_download))
         .route("/api/app/me", get(app_me))
+        .merge(app_parameter_routes())
         .route("/api/app/projects", get(app_projects))
         .route("/api/app/rooms", get(app_list_rooms).post(app_create_room))
         .route("/api/app/rooms/{room_id}", get(app_get_room))
@@ -6671,6 +6859,300 @@ mod tests {
             StatusCode::FORBIDDEN,
             "write is not an issue-read scope"
         );
+    }
+
+    #[tokio::test]
+    async fn app_parameters_need_scope_and_context_right_and_mask_secrets() {
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-params','Parameters','Application','client-params',1)", []).unwrap();
+        drop(c);
+        applications::save_app_parameter(applications::AppParameter {
+            application_id: "app-params".into(),
+            key: "secret".into(),
+            value: "do-not-return".into(),
+            is_secret: true,
+            updated_at: 0,
+        })
+        .unwrap();
+        let secret = applications::rotate_app_secret("app-params".into()).unwrap();
+        let token = applications::issue_app_token(
+            "client-params".into(),
+            secret.client_secret,
+            Some("read".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        assert_eq!(
+            app_list_parameters(bearer(&token))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        app_rights::update_authorized_rights(
+            "app-params".into(),
+            "application:app-params".into(),
+            vec!["Project.ViewParameters".into()],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let parameters = app_list_parameters(bearer(&token)).await.unwrap().0;
+        assert_eq!(parameters[0].value, "***");
+        assert_eq!(
+            command_policy("save_app_parameter"),
+            Some(CommandPolicy::AppAdmin)
+        );
+    }
+
+    #[tokio::test]
+    async fn app_parameter_writes_need_write_scope_and_separate_modify_and_delete_rights() {
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-pw','Parameters RW','Application','client-pw',1)", []).unwrap();
+        drop(c);
+        let mint = |scope: &str| {
+            let secret = applications::rotate_app_secret("app-pw".into()).unwrap();
+            applications::issue_app_token(
+                "client-pw".into(),
+                secret.client_secret,
+                Some(scope.into()),
+                Some(60),
+            )
+            .unwrap()
+            .access_token
+            .unwrap()
+        };
+        let readable = mint("read");
+        let input = || AppParameterInput {
+            key: "api-key".into(),
+            value: "v1".into(),
+            is_secret: true,
+        };
+        assert_eq!(
+            app_create_parameter(bearer(&readable), Json(input()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN,
+            "read scope must not create parameters"
+        );
+        let writable = mint("read write");
+        assert_eq!(
+            app_create_parameter(bearer(&writable), Json(input()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN,
+            "write scope alone is not a context right"
+        );
+        app_rights::update_authorized_rights(
+            "app-pw".into(),
+            "application:app-pw".into(),
+            vec![
+                "Project.ViewParameters".into(),
+                "Project.ModifyParameters".into(),
+            ],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let created = app_create_parameter(bearer(&writable), Json(input()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(created.key, "api-key");
+        assert_eq!(
+            created.value, "***",
+            "secret writes are masked in responses"
+        );
+        assert_eq!(
+            app_create_parameter(bearer(&writable), Json(input()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::CONFLICT
+        );
+        let updated = app_update_parameter(
+            bearer(&writable),
+            Json(AppParameterInput {
+                key: "api-key".into(),
+                value: "v2".into(),
+                is_secret: false,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(updated.value, "v2");
+        assert_eq!(
+            app_update_parameter(
+                bearer(&writable),
+                Json(AppParameterInput {
+                    key: "missing".into(),
+                    value: "v".into(),
+                    is_secret: false,
+                }),
+            )
+            .await
+            .unwrap_err()
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            app_delete_parameter(bearer(&writable), Path("api-key".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN,
+            "modify right does not imply delete right"
+        );
+        app_rights::update_authorized_rights(
+            "app-pw".into(),
+            "application:app-pw".into(),
+            vec![
+                "Project.ViewParameters".into(),
+                "Project.ModifyParameters".into(),
+                "Project.DeleteParameters".into(),
+            ],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let _ = app_delete_parameter(bearer(&writable), Path("api-key".into()))
+            .await
+            .unwrap();
+        assert!(app_list_parameters(bearer(&writable))
+            .await
+            .unwrap()
+            .0
+            .is_empty());
+        assert_eq!(
+            app_delete_parameter(bearer(&writable), Path("api-key".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "deleting an unknown key is 404, not a silent success"
+        );
+        assert_eq!(
+            app_create_parameter(
+                bearer(&writable),
+                Json(AppParameterInput {
+                    key: "  ".into(),
+                    value: "v".into(),
+                    is_secret: false,
+                }),
+            )
+            .await
+            .unwrap_err()
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            app_create_parameter(
+                bearer(&writable),
+                Json(AppParameterInput {
+                    key: "masked".into(),
+                    value: PARAMETER_SECRET_MASK.into(),
+                    is_secret: true,
+                }),
+            )
+            .await
+            .unwrap_err()
+            .status(),
+            StatusCode::BAD_REQUEST,
+            "the mask sentinel must not be storable as a value"
+        );
+    }
+
+    /// Route wiring, not handler bodies: the body carries no application id, so a
+    /// forged `applicationId` cannot retarget another app's namespace, and the
+    /// mutation verbs must actually be mounted on the documented paths.
+    #[tokio::test]
+    async fn app_parameter_router_mounts_mutations_and_ignores_body_application_id() {
+        use tower::ServiceExt;
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-router','Router','Application','client-router',1),('app-victim','Victim','Application','client-victim',1);").unwrap();
+        drop(c);
+        let secret = applications::rotate_app_secret("app-router".into()).unwrap();
+        let token = applications::issue_app_token(
+            "client-router".into(),
+            secret.client_secret,
+            Some("read write".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        app_rights::update_authorized_rights(
+            "app-router".into(),
+            "application:app-router".into(),
+            vec![
+                "Project.ViewParameters".into(),
+                "Project.ModifyParameters".into(),
+                "Project.DeleteParameters".into(),
+            ],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let call = |method: Method, uri: &str, body: Value| {
+            let token = token.clone();
+            let request = axum::http::Request::builder()
+                .method(method)
+                .uri(uri.to_string())
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap();
+            async move {
+                app_parameter_routes::<()>()
+                    .oneshot(request)
+                    .await
+                    .unwrap()
+                    .into_response()
+            }
+        };
+        let created = call(
+            Method::POST,
+            "/api/app/parameters",
+            json!({"key": "k", "value": "v", "isSecret": false, "applicationId": "app-victim"}),
+        )
+        .await;
+        let (status, body) = status_and_body(created).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["application_id"], "app-router",
+            "body app id is ignored"
+        );
+        assert!(
+            applications::list_app_parameters("app-victim".into())
+                .unwrap()
+                .is_empty(),
+            "no cross-application write"
+        );
+        let updated = call(
+            Method::PUT,
+            "/api/app/parameters",
+            json!({"key": "k", "value": "v2", "isSecret": false}),
+        )
+        .await;
+        assert_eq!(updated.status(), StatusCode::OK);
+        let deleted = call(Method::DELETE, "/api/app/parameters/k", json!({})).await;
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let missing = call(Method::DELETE, "/api/app/parameters/k", json!({})).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

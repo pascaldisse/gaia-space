@@ -254,6 +254,18 @@ pub struct Application {
     pub pkce_required: bool,
     pub connection_status: String,
     pub archived: bool,
+    #[serde(default)]
+    pub owner_profile_id: Option<String>,
+    #[serde(default)]
+    pub owner_application_id: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct AppParameter {
+    pub application_id: String,
+    pub key: String,
+    pub value: String,
+    pub is_secret: bool,
+    pub updated_at: i64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WebhookSubscription {
@@ -318,12 +330,14 @@ fn read_app(r: &rusqlite::Row<'_>) -> rusqlite::Result<Application> {
         pkce_required: r.get(8)?,
         connection_status: r.get(9)?,
         archived: r.get(10)?,
+        owner_profile_id: r.get(11)?,
+        owner_application_id: r.get(12)?,
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_applications() -> Result<Vec<Application>> {
     let c = db::conn()?;
-    let mut q=c.prepare("SELECT id,name,description,application_type,endpoint_uri,client_id,client_credentials_flow_enabled,code_flow_enabled,pkce_required,connection_status,archived FROM applications ORDER BY name").map_err(|e|e.to_string())?;
+    let mut q=c.prepare("SELECT id,name,description,application_type,endpoint_uri,client_id,client_credentials_flow_enabled,code_flow_enabled,pkce_required,connection_status,archived,owner_profile_id,owner_application_id FROM applications ORDER BY name").map_err(|e|e.to_string())?;
     let rows = q
         .query_map([], read_app)
         .map_err(|e| e.to_string())?
@@ -356,8 +370,49 @@ pub fn save_application(value: Application) -> Result<Application> {
         return Err("endpoint URI must use HTTP(S)".into());
     }
     let c = db::conn()?;
-    c.execute("INSERT INTO applications(id,name,description,application_type,endpoint_uri,client_id,client_credentials_flow_enabled,code_flow_enabled,pkce_required,connection_status,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,application_type=excluded.application_type,endpoint_uri=excluded.endpoint_uri,client_id=excluded.client_id,client_credentials_flow_enabled=excluded.client_credentials_flow_enabled,code_flow_enabled=excluded.code_flow_enabled,pkce_required=excluded.pkce_required,connection_status=excluded.connection_status,archived=excluded.archived",params![value.id,value.name,value.description,value.application_type,value.endpoint_uri,value.client_id,value.client_credentials_flow_enabled,value.code_flow_enabled,value.pkce_required,value.connection_status,value.archived]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO applications(id,name,description,application_type,endpoint_uri,client_id,client_credentials_flow_enabled,code_flow_enabled,pkce_required,connection_status,archived,owner_profile_id,owner_application_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,application_type=excluded.application_type,endpoint_uri=excluded.endpoint_uri,client_id=excluded.client_id,client_credentials_flow_enabled=excluded.client_credentials_flow_enabled,code_flow_enabled=excluded.code_flow_enabled,pkce_required=excluded.pkce_required,connection_status=excluded.connection_status,archived=excluded.archived,owner_profile_id=excluded.owner_profile_id,owner_application_id=excluded.owner_application_id",params![value.id,value.name,value.description,value.application_type,value.endpoint_uri,value.client_id,value.client_credentials_flow_enabled,value.code_flow_enabled,value.pkce_required,value.connection_status,value.archived,value.owner_profile_id,value.owner_application_id]).map_err(|e|e.to_string())?;
     Ok(value)
+}
+fn read_parameter(r: &rusqlite::Row<'_>) -> rusqlite::Result<AppParameter> {
+    Ok(AppParameter {
+        application_id: r.get(0)?,
+        key: r.get(1)?,
+        value: r.get(2)?,
+        is_secret: r.get(3)?,
+        updated_at: r.get(4)?,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_app_parameters(application_id: String) -> Result<Vec<AppParameter>> {
+    app_exists(&application_id)?;
+    let c = db::conn()?;
+    let mut q = c.prepare("SELECT application_id,key,value,is_secret,updated_at FROM app_parameters WHERE application_id=?1 ORDER BY key").map_err(|e| e.to_string())?;
+    let rows = q
+        .query_map([application_id], read_parameter)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_app_parameter(value: AppParameter) -> Result<AppParameter> {
+    app_exists(&value.application_id)?;
+    required("parameter key", &value.key)?;
+    let c = db::conn()?;
+    c.execute("INSERT INTO app_parameters(application_id,key,value,is_secret,updated_at) VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(application_id,key) DO UPDATE SET value=excluded.value,is_secret=excluded.is_secret,updated_at=unixepoch()", params![value.application_id, value.key, value.value, value.is_secret]).map_err(|e| e.to_string())?;
+    c.query_row("SELECT application_id,key,value,is_secret,updated_at FROM app_parameters WHERE application_id=?1 AND key=?2", params![value.application_id, value.key], read_parameter).map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_app_parameter(application_id: String, key: String) -> Result<()> {
+    app_exists(&application_id)?;
+    required("parameter key", &key)?;
+    db::conn()?
+        .execute(
+            "DELETE FROM app_parameters WHERE application_id=?1 AND key=?2",
+            params![application_id, key],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_application(id: String) -> Result<()> {
@@ -1760,6 +1815,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         save_webhook(WebhookSubscription {
@@ -1834,6 +1891,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         save_webhook(WebhookSubscription {
@@ -1896,6 +1955,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         save_webhook(WebhookSubscription {
@@ -2018,6 +2079,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         let hook = |id: &str, filters: &str| WebhookSubscription {
@@ -2098,6 +2161,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         let hook = |id: &str, event: &str, filters: &str| WebhookSubscription {
@@ -2165,6 +2230,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         for (id, event_type, filters) in hooks {
@@ -2439,6 +2506,8 @@ mod delivery_tests {
             pkce_required: false,
             connection_status: "CONNECTED".into(),
             archived: false,
+            owner_profile_id: None,
+            owner_application_id: None,
         })
         .expect("app");
         save_webhook(WebhookSubscription {
