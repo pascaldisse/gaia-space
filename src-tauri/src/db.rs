@@ -579,9 +579,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V74)?;
     }
     // V98: profile email status and messenger contacts are independent facts.
-    if version < 98 { tx.execute_batch(SCHEMA_V98)?; }
+    if version < 98 {
+        tx.execute_batch(SCHEMA_V98)?;
+    }
     // V99: principals unify people, applications, and external identities.
-    if version < 99 { tx.execute_batch(SCHEMA_V99)?; }
+    if version < 99 {
+        tx.execute_batch(SCHEMA_V99)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
