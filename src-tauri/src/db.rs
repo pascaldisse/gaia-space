@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 123;
+pub const SCHEMA_VERSION: i64 = 129;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -790,7 +790,20 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "TEXT NOT NULL DEFAULT 'scheduled'",
         )?;
     }
-    // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
+    // V129: call lifecycle audit facts. The status is the current state; timestamps and
+// the organizer who ended it preserve the lifecycle evidence after a call completes.
+// Additive and table-guarded: historical fixture databases may predate meetings.
+if version < 129 && table_exists(&tx, "meetings")? {
+    add_column_if_missing(&tx, "meetings", "video_started_at", "INTEGER")?;
+    add_column_if_missing(&tx, "meetings", "video_ended_at", "INTEGER")?;
+    add_column_if_missing(
+        &tx,
+        "meetings",
+        "video_ended_by",
+        "TEXT REFERENCES profiles(id)",
+    )?;
+}
+// V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
     if version < 103 && table_exists(&tx, "user_preferences")? {
@@ -2079,6 +2092,31 @@ mod tests {
     }
 
     #[test]
+    fn v129_adds_call_lifecycle_audit_facts_to_a_v123_meeting_table() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(SCHEMA_V1).expect("v1 meetings");
+        conn.pragma_update(None, "user_version", 123).expect("stamp v123");
+
+        migrate(&conn).expect("v129");
+        let columns = conn
+            .prepare("PRAGMA table_info(meetings)")
+            .expect("meeting columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("column rows")
+            .collect::<Result<Vec<_>>>()
+            .expect("column names");
+        for expected in ["video_started_at", "video_ended_at", "video_ended_by"] {
+            assert!(columns.iter().any(|column| column == expected), "missing {expected}");
+        }
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version"),
+            129
+        );
+        migrate(&conn).expect("V129 re-run is idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -2097,7 +2135,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 123);
+        assert_eq!(SCHEMA_VERSION, 129);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

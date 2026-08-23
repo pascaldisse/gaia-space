@@ -358,6 +358,9 @@ mod tests {
             video_room_id: None,
             join_url: None,
             video_status: "scheduled".into(),
+            video_started_at: None,
+            video_ended_at: None,
+            video_ended_by: None,
         }
     }
 
