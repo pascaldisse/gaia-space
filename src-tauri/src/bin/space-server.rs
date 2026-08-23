@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db, devenv, documents,
     events, issues, meetings, oauth, organization, package_registry, payload_dispatch, personal,
     pipelines, platform, review,
 };
@@ -2023,7 +2023,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "search_book_documents" | "list_book_access" | "update_book_access" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -4444,6 +4444,15 @@ async fn cmd(
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
     "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
     "list_meeting_rooms" => meetings::list_meeting_rooms(),
+    "meeting_availability" => meetings::meeting_availability(starts_at: i64, ends_at: i64, profile_ids: Vec<String>, meeting_id: Option<String>),
+    "attach_document_discussion" => documents::attach_document_discussion(document_id: String, meeting_id: Option<String>),
+    "get_document_discussion" => documents::get_document_discussion(document_id: String),
+    "import_document_folder" => documents::import_document_folder(request: documents::DocumentImportRequest),
+    "search_book_documents" => documents::search_book_documents(book_id: String, query: String),
+    "list_book_access" => documents::list_book_access(book_id: String),
+    "update_book_access" => documents::update_book_access(book_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
+    "save_channel_subscription" => channel_feeds::save_channel_subscription(value: channel_feeds::ChannelSubscription),
+    "list_channel_subscriptions" => channel_feeds::list_channel_subscriptions(profile_id: String),
     "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
