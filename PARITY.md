@@ -48,7 +48,11 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
+<<<<<<< HEAD
 TOTALS (8/8 audited, 356 rows): done 63 · partial 180 · stub 4 · missing 109. Matrix NOT green — steering loop active.
+=======
+TOTALS (8/8 audited, 356 rows): done 61 · partial 179 · stub 4 · missing 112. Matrix NOT green — steering loop active.
+>>>>>>> feat/w11-issues
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -62,7 +66,7 @@ Progress (feat/w7-review): quality gates now wait on rule-declared external chec
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
-33 rows — done 8 · partial 17 · stub 0 · missing 8.
+33 rows — done 9 · partial 17 · stub 0 · missing 7.
 Worst gaps: swimlane grouping dimensions · matrix reports · external tracker integration.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)

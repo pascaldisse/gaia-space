@@ -574,11 +574,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 67 {
         tx.execute_batch(SCHEMA_V67)?;
     }
+    // V77: first-class issue attachments, including image previews.
+    if version < 77 {
+        tx.execute_batch(SCHEMA_V77)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
-<<<<<<< HEAD
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 {
@@ -589,7 +592,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // untrusted client-side email suffix check.
     if version < 91 {
         tx.execute_batch(SCHEMA_V91)?;
-=======
+    }
     // V92: project role templates/team bindings and reviewable membership edits.
     if version < 92 {
         tx.execute_batch(SCHEMA_V92)?;
@@ -597,7 +600,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V93: short-lived, single-use mobile pairing grants store only a hash.
     if version < 93 {
         tx.execute_batch(SCHEMA_V93)?;
->>>>>>> 4d8f582
     }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
@@ -645,6 +647,18 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+pub(crate) const SCHEMA_V77: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_attachments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_length INTEGER NOT NULL CHECK(byte_length >= 0 AND byte_length <= 10485760),
+    data_url TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_attachments_issue ON issue_attachments(issue_id, created_at, id);
+"#;
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
 pub(crate) const SCHEMA_V92: &str = r#"

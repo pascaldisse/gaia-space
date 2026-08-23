@@ -1,5 +1,5 @@
 import { createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Checklist, type ChecklistItem, type Issue, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
+import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueAttachment, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import "./IssueDetail.css";
@@ -37,6 +37,18 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const [workDate, setWorkDate] = createSignal(new Date().toISOString().slice(0, 10));
   const [workDescription, setWorkDescription] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
+const addAttachments = async (files: FileList | null) => {
+const id = currentId(); if (!id || !files?.length) return;
+try {
+for (const file of [...files]) {
+if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} exceeds the 10 MiB attachment limit`);
+const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`)); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+await planningApi.addAttachment(id, { id: `issue-attachment-${crypto.randomUUID()}`, file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
+}
+await refetch(); props.onChanged?.();
+} catch (reason) { setError(humanError(reason)); }
+};
+const removeAttachment = async (attachment: IssueAttachment) => { try { await planningApi.deleteAttachment(attachment.id); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
   const [availableTags, { refetch: reloadTags }] = createResource(() => issue()?.project_id, id => id ? planningApi.tags(id) : Promise.resolve([]));
   const [timeEntries, { refetch: reloadTimeEntries }] = createResource(currentId, id => id ? planningApi.time(id) : Promise.resolve([]));
   // A sub-item is a real issue in the same project, linked PARENT_CHILD — so it
@@ -117,6 +129,25 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
             </select>
           </label>
         </div>
+
+        <section class="idp-section">
+          <h3>Attachments</h3>
+          <Show when={detail()?.attachments?.length}>
+            <ul class="idp-attachments">
+              <For each={detail()?.attachments}>{attachment => (
+                <li class="idp-attachment-row">
+                  <Show when={attachment.mime_type.startsWith("image/")}><img class="idp-attachment-preview" src={attachment.data_url} alt={attachment.file_name} /></Show>
+                  <a href={attachment.data_url} download={attachment.file_name}>{attachment.file_name}</a>
+                  <span class="muted">{Math.max(1, Math.round(attachment.byte_length / 1024))} KiB</span>
+                  <button type="button" onClick={() => void removeAttachment(attachment)}>Remove</button>
+                </li>
+              )}</For>
+            </ul>
+          </Show>
+          <div class="inline-form">
+            <input type="file" multiple onChange={e => { void addAttachments(e.currentTarget.files); e.currentTarget.value = ""; }} />
+          </div>
+        </section>
 
         <section class="idp-section">
           <h3>To-do lists</h3>
