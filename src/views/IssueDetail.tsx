@@ -131,6 +131,25 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
         </div>
 
         <section class="idp-section">
+          <h3>Attachments</h3>
+          <Show when={detail()?.attachments?.length}>
+            <ul class="idp-attachments">
+              <For each={detail()?.attachments}>{attachment => (
+                <li class="idp-attachment-row">
+                  <Show when={attachment.mime_type.startsWith("image/")}><img class="idp-attachment-preview" src={attachment.data_url} alt={attachment.file_name} /></Show>
+                  <a href={attachment.data_url} download={attachment.file_name}>{attachment.file_name}</a>
+                  <span class="muted">{Math.max(1, Math.round(attachment.byte_length / 1024))} KiB</span>
+                  <button type="button" onClick={() => void removeAttachment(attachment)}>Remove</button>
+                </li>
+              )}</For>
+            </ul>
+          </Show>
+          <div class="inline-form">
+            <input type="file" multiple onChange={e => { void addAttachments(e.currentTarget.files); e.currentTarget.value = ""; }} />
+          </div>
+        </section>
+
+        <section class="idp-section">
           <h3>To-do lists</h3>
           <For each={detail()?.checklists}>{list => <ChecklistBlock list={list} />}</For>
           <div class="inline-form">
