@@ -69,3 +69,11 @@
 .board-matrix table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
 .board-matrix th, .board-matrix td { border: 1px solid var(--border, #334155); padding: .4rem .6rem; text-align: right; }
 .board-matrix th:first-child { text-align: left; }
+
+.column-head[draggable="true"] { cursor: grab; }
+.column-dragging { opacity: .55; }
+.column-order { display: flex; gap: 2px; margin-left: auto; }
+.column-move { width: 22px; height: 22px; padding: 0; display: grid; place-items: center; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 14px; line-height: 1; }
+.column-move:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+.column-move:disabled { opacity: .3; }
+.column-plus { margin-left: 0; }

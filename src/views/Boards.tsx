@@ -24,8 +24,14 @@ export default function Boards() {
   const [newSprint, setNewSprint] = createSignal("");
   const [newSwimlane, setNewSwimlane] = createSignal("");
   const [activeSwimlane, setActiveSwimlane] = createSignal<string>();
+const [swimlaneGroup, setSwimlaneGroup] = createSignal<"none" | "assignee" | "creator" | "due_date">("none");
   const [openIssue, setOpenIssue] = createSignal<string>();
   const [menu, setMenu] = createSignal<{ column: BoardColumn; x: number; y: number }>();
+  // Board-local selection deliberately survives column changes, so one bulk action
+  // can span the full filtered board rather than only the visible column.
+  const [selectedIssueIds, setSelectedIssueIds] = createSignal<string[]>([]);
+  const [bulkColumnId, setBulkColumnId] = createSignal("");
+  const [bulkSprintId, setBulkSprintId] = createSignal("");
   // Cards name their assignee — without the directory a card shows a raw profile id.
   if (!profiles()) void reloadProfiles().catch(() => undefined);
 
@@ -83,45 +89,73 @@ export default function Boards() {
     catch (reason) { setError(humanError(reason)); }
   };
 
+  /** Column order is the board's reading order — persist the whole run so an
+   *  interrupted reorder cannot leave two columns sharing one ordering. */
+  const reorderColumns = async (fromId: string, toId: string) => {
+    const list = [...(columns() ?? [])];
+    const from = list.findIndex(c => c.id === fromId); const to = list.findIndex(c => c.id === toId);
+    if (from < 0 || to < 0 || from === to) return;
+    const [moved] = list.splice(from, 1); list.splice(to, 0, moved);
+    try {
+      for (const [index, column] of list.entries()) if (column.ordering !== index) await planningApi.saveColumn({ ...column, ordering: index });
+      reloadColumns();
+    } catch (reason) { setError(humanError(reason)); }
+  };
+  const shiftColumn = async (column: BoardColumn, delta: number) => {
+    setMenu(undefined);
+    const list = columns() ?? []; const target = list[list.findIndex(c => c.id === column.id) + delta];
+    if (target) await reorderColumns(column.id, target.id);
+  };
+  const lastColumnId = () => { const list = columns() ?? []; return list.length ? list[list.length - 1].id : undefined; };
+  const [dragColumn, setDragColumn] = createSignal<string>();
   const [composeIn, setComposeIn] = createSignal<string>();
   const [cardTitle, setCardTitle] = createSignal("");
   const addCard = async (column: BoardColumn) => {
-    const project = projectId(); const b = board(); const title = cardTitle().trim();
-    if (!project || !b || !title) return;
-    try {
-      const statusId = (await ensureMapped(column)).status_ids[0] ?? "";
-      const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
-      await planningApi.move(b.id, issue.id, column.id, sprintId(), undefined, activeSwimlane());
-      setCardTitle(""); setComposeIn(undefined); await reloadStatuses(); reloadColumns(); reloadIssues(); setOpenIssue(issue.id);
-    } catch (reason) { setError(humanError(reason)); }
-  };
-  /** A column with no mapped status cannot hold work — give it one named after
-   *  itself before the move, instead of failing the drop. */
-  const ensureMapped = async (column: BoardColumn): Promise<BoardColumn> => {
-    if (column.status_ids.length) return column;
-    const statusId = await statusFor(column.name);
-    if (!statusId) return column;
-    const saved = await planningApi.saveColumn({ ...column, status_ids: [statusId] });
-    await reloadStatuses(); await reloadColumns();
-    return saved ?? { ...column, status_ids: [statusId] };
-  };
-  const move = async (issueId: string, columnId: string) => {
-    const b = board(); const column = columns()?.find(c => c.id === columnId); if (!b || !column) return;
-    try { await ensureMapped(column); await planningApi.move(b.id, issueId, columnId, sprintId(), undefined, activeSwimlane()); await reloadIssues(); }
-    catch (reason) { setError(humanError(reason)); }
-  };
-  // Drag and drop: the card carries its id, the column is the drop target.
-  const [dragOver, setDragOver] = createSignal<string>();
-  const onDrop = (event: DragEvent, column: BoardColumn) => {
-    event.preventDefault(); setDragOver(undefined);
-    const issueId = event.dataTransfer?.getData("text/issue-id");
-    if (issueId) void move(issueId, column.id);
-  };
-
-  const cardsOf = (column: BoardColumn) => issues()?.filter(issue => column.status_ids.includes(issue.status_id ?? "")) ?? [];
-
-  return <section class="planning-view boards-view" onClick={() => setMenu(undefined)}>
-    <header class="planning-head"><div><h1>Issue boards</h1><p>Columns map issue statuses. Right-click a column to rename or delete it.</p></div><ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} /></header>
+const project = projectId(); const b = board(); const title = cardTitle().trim();
+if (!project || !b || !title) return;
+try {
+const statusId = (await ensureMapped(column)).status_ids[0] ?? "";
+const issue = await planningApi.createIssue({ project_id: project, title, description: null, status_id: statusId || null, assignee_id: null, created_by: null, due_date: null, priority: null, archived: false });
+await planningApi.move(b.id, issue.id, column.id, sprintId(), undefined, activeSwimlane());
+setCardTitle(""); setComposeIn(undefined); await reloadStatuses(); reloadColumns(); reloadIssues(); setOpenIssue(issue.id);
+} catch (reason) { setError(humanError(reason)); }
+};
+/** A column with no mapped status cannot hold work — give it one named after itself before the move. */
+const ensureMapped = async (column: BoardColumn): Promise<BoardColumn> => {
+if (column.status_ids.length) return column;
+const statusId = await statusFor(column.name);
+if (!statusId) return column;
+const saved = await planningApi.saveColumn({ ...column, status_ids: [statusId] });
+await reloadStatuses(); await reloadColumns();
+return saved ?? { ...column, status_ids: [statusId] };
+};
+const move = async (issueId: string, columnId: string) => {
+const b = board(); const column = columns()?.find(c => c.id === columnId); if (!b || !column) return;
+try { await ensureMapped(column); await planningApi.move(b.id, issueId, columnId, sprintId(), undefined, activeSwimlane()); await reloadIssues(); }
+catch (reason) { setError(humanError(reason)); }
+};
+const [dragOver, setDragOver] = createSignal<string>();
+const onDrop = (event: DragEvent, column: BoardColumn) => { event.preventDefault(); setDragOver(undefined); const issueId = event.dataTransfer?.getData("text/issue-id"); if (issueId) void move(issueId, column.id); };
+const cardsOf = (column: BoardColumn, laneIssues = issues() ?? []) => laneIssues.filter(issue => column.status_ids.includes(issue.status_id ?? ""));
+const laneGroups = () => {
+const label = (issue: Issue) => {
+if (swimlaneGroup() === "assignee") return issue.assignee_ids?.length ? issue.assignee_ids.map(id => profiles()?.find(p => p.id === id)?.display_name || profiles()?.find(p => p.id === id)?.username || id).join(", ") : "Unassigned";
+if (swimlaneGroup() === "creator") return issue.created_by ? profiles()?.find(p => p.id === issue.created_by)?.display_name || profiles()?.find(p => p.id === issue.created_by)?.username || issue.created_by : "No creator";
+if (swimlaneGroup() === "due_date") return issue.due_date || "No due date";
+return "All work";
+};
+const groups = new Map<string, Issue[]>();
+for (const issue of issues() ?? []) { const name = label(issue); groups.set(name, [...(groups.get(name) ?? []), issue]); }
+return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, laneIssues]) => ({ name, laneIssues }));
+};
+const selected = selectedIssueIds;
+const toggleSelected = (id: string, checked: boolean) => setSelectedIssueIds(ids => checked ? (ids.includes(id) ? ids : [...ids, id]) : ids.filter(value => value !== id));
+const clearSelection = () => setSelectedIssueIds([]);
+const bulkMove = async () => { const b = board(); const columnId = bulkColumnId(); if (!b || !columnId || !selected().length) return; try { await planningApi.bulkMove({ board_id: b.id, issue_ids: selected(), column_id: columnId, sprint_id: sprintId() ?? null, swimlane_id: activeSwimlane() ?? null }); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+const bulkSprint = async () => { const b = board(); if (!b || !selected().length) return; try { await planningApi.bulkSprint(b.id, selected(), bulkSprintId() || null); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+const bulkRemove = async () => { const b = board(); if (!b || !selected().length || !confirm(`Remove ${selected().length} selected issue(s) from this board?`)) return; try { await planningApi.bulkRemove(b.id, selected()); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+return <section class="planning-view boards-view" onClick={() => setMenu(undefined)}>
+    <header class="planning-head"><div><h1>Issue boards</h1><p>Columns map issue statuses. Drag a column header (or use ‹ ›) to reorder; right-click to rename or delete.</p></div><ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} /></header>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
     <div class="board-toolbar">
@@ -140,18 +174,35 @@ export default function Boards() {
         </select>
         <div class="inline-form"><input placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /><button onClick={async () => { const b = board(); const name = newSwimlane().trim(); if (!b || !name) return; try { await planningApi.saveSwimlane({ board_id: b.id, sprint_id: sprintId() ?? null, name, is_default: !(swimlanes()?.length), }); setNewSwimlane(""); reloadSwimlanes(); } catch (reason) { setError(humanError(reason)); } }}>Lane</button></div>
         <select aria-label="Swimlane" value={activeSwimlane() ?? ""} onChange={e => setActiveSwimlane(e.currentTarget.value || undefined)}><option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For></select>
-        <div class="inline-form"><input placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /><button onClick={async () => { const b = board(); if (!b || !newSprint().trim()) return; try { const s = await planningApi.createSprint({ board_id: b.id, name: newSprint().trim(), starts_on: null, ends_on: null, description: null }); setNewSprint(""); setSprintId(s.id); reloadSprints(); } catch (reason) { setError(humanError(reason)); } }}>Sprint</button></div>
+        <label class="swimlane-group">Group cards by <select aria-label="Swimlane grouping" value={swimlaneGroup()} onChange={e => setSwimlaneGroup(e.currentTarget.value as "none" | "assignee" | "creator" | "due_date")}><option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option></select></label>
+<div class="inline-form"><input placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /><button onClick={async () => { const b = board(); if (!b || !newSprint().trim()) return; try { const s = await planningApi.createSprint({ board_id: b.id, name: newSprint().trim(), starts_on: null, ends_on: null, description: null }); setNewSprint(""); setSprintId(s.id); reloadSprints(); } catch (reason) { setError(humanError(reason)); } }}>Sprint</button></div>
       </Show>
     </div>
 
     <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
+      <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected issues"><strong>{selected().length} selected</strong>
+        <select aria-label="Move selected issues to column" value={bulkColumnId()} onChange={e => setBulkColumnId(e.currentTarget.value)}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></select><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
+        <select aria-label="Assign selected issues to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
+        <button class="danger" onClick={() => void bulkRemove()}>Remove from board</button><button class="ghost" onClick={clearSelection}>Clear</button>
+      </div></Show>
       <div class="board-card-settings"><strong>Card fields</strong><For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field => <label><input type="checkbox" checked={cardSettings()?.fields?.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>}</For></div>
       <div class="board-split">
-        <div class="kanban">
+        <Show when={laneGroups().length} fallback={<p class="hint pad">No issues in this board.</p>}>
+<For each={laneGroups()}>{lane => <section class="swimlane-row">
+<Show when={swimlaneGroup() !== "none"}><header><strong>{lane.name}</strong><small>{lane.laneIssues.length} issues</small></header></Show>
+<div class="kanban">
           <For each={columns()}>{column =>
-            <section class="board-column" onContextMenu={event => { event.preventDefault(); setMenu({ column, x: event.clientX, y: event.clientY }); }}>
-              <header class="column-head">
-                <div class="column-title"><h2>{column.name}</h2><small>{cardsOf(column).length}</small></div>
+            <section classList={{ "board-column": true, "column-dragging": dragColumn() === column.id }} onContextMenu={event => { event.preventDefault(); setMenu({ column, x: event.clientX, y: event.clientY }); }}>
+              <header class="column-head" draggable={true}
+                onDragStart={event => { setDragColumn(column.id); event.dataTransfer?.setData("text/column-id", column.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}
+                onDragEnd={() => setDragColumn(undefined)}
+                onDragOver={event => { if (dragColumn() && dragColumn() !== column.id) event.preventDefault(); }}
+                onDrop={event => { event.preventDefault(); const from = event.dataTransfer?.getData("text/column-id") || dragColumn(); setDragColumn(undefined); if (from) void reorderColumns(from, column.id); }}>
+                <div class="column-title"><h2>{column.name}</h2><small>{cardsOf(column, lane.laneIssues).length}</small></div>
+                <div class="column-order">
+                  <button class="column-move" aria-label={`Move ${column.name} left`} title="Move column left" disabled={(columns() ?? [])[0]?.id === column.id} onClick={event => { event.stopPropagation(); void shiftColumn(column, -1); }}>‹</button>
+                  <button class="column-move" aria-label={`Move ${column.name} right`} title="Move column right" disabled={lastColumnId() === column.id} onClick={event => { event.stopPropagation(); void shiftColumn(column, 1); }}>›</button>
+                </div>
                 <button class="column-plus" aria-label={`Add issue to ${column.name}`} title="Add issue" onClick={() => { setComposeIn(column.id); setCardTitle(""); }}>+</button>
               </header>
 
@@ -166,11 +217,11 @@ export default function Boards() {
                    onDragOver={event => { event.preventDefault(); setDragOver(column.id); }}
                    onDragLeave={() => { if (dragOver() === column.id) setDragOver(undefined); }}
                    onDrop={event => onDrop(event, column)}>
-                <For each={cardsOf(column)}>{issue =>
-                  <IssueCard issue={issue} statuses={statuses()} fields={cardSettings()?.fields ?? []} active={openIssue() === issue.id} onOpen={() => setOpenIssue(issue.id)}
+                <For each={cardsOf(column, lane.laneIssues)}>{issue =>
+                  <IssueCard issue={issue} statuses={statuses()} fields={cardSettings()?.fields ?? []} active={openIssue() === issue.id} selected={selectedIssueIds().includes(issue.id)} onSelect={checked => toggleSelected(issue.id, checked)} onOpen={() => setOpenIssue(issue.id)}
                     targets={columns()?.filter(c => c.id !== column.id) ?? []} onMove={target => move(issue.id, target)} />
                 }</For>
-                <Show when={!cardsOf(column).length}><p class="column-empty">No issues</p></Show>
+                <Show when={!cardsOf(column, lane.laneIssues).length}><p class="column-empty">No issues</p></Show>
               </div>
             </section>
           }</For>
@@ -180,14 +231,17 @@ export default function Boards() {
             <button onClick={addColumn} disabled={!newColumn().trim()}>+ Add column</button>
           </section>
         </div>
-
-        <Show when={openIssue()}>{id =>
+</section>}</For>
+</Show>
+<Show when={openIssue()}>{id =>
           <IssueDetail issueId={id()} statuses={statuses()} onChanged={() => { reloadIssues(); }} onClose={() => setOpenIssue(undefined)} />
         }</Show>
 
         <Show when={menu()}>{context =>
           <div class="column-menu" style={{ left: `${context().x}px`, top: `${context().y}px` }} onClick={event => event.stopPropagation()}>
             <button onClick={() => renameColumn(context().column)}>Rename column</button>
+            <button onClick={() => shiftColumn(context().column, -1)} disabled={(columns() ?? [])[0]?.id === context().column.id}>Move column left</button>
+            <button onClick={() => shiftColumn(context().column, 1)} disabled={lastColumnId() === context().column.id}>Move column right</button>
             <details class="column-menu-map"><summary>Map statuses</summary>
               <For each={statuses()}>{status =>
                 <label><input type="checkbox" checked={context().column.status_ids.includes(status.id)} onChange={e => mapStatus(context().column, status.id, e.currentTarget.checked)} /><i style={{ background: status.color }} />{status.name}</label>
@@ -198,7 +252,7 @@ export default function Boards() {
         }</Show>
 
         <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
-        <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} onAdd={issueId => move(issueId, (columns() ?? [])[0]?.id ?? "")} moved={reloadIssues} /></section>
+        <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} sprintId={sprintId()} swimlaneId={activeSwimlane()} moved={reloadIssues} /></section>
 <BoardMatrix issues={issues() ?? []} columns={columns() ?? []} statuses={statuses()} />
       </div>
     </>}</Show>
@@ -206,7 +260,7 @@ export default function Boards() {
 }
 
 /** A card carries what the work actually is: who, when, and its to-do progress. */
-function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[]; active: boolean; onOpen: () => void; targets: BoardColumn[]; onMove: (columnId: string) => void }) {
+function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[]; active: boolean; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; targets: BoardColumn[]; onMove: (columnId: string) => void }) {
   const [detail] = createResource(() => props.issue.id, id => planningApi.issue(id));
   const [items] = createResource(() => detail()?.checklists?.[0]?.id, id => id ? planningApi.items(id) : Promise.resolve([]));
   const nameOf = (id: string) => { const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
@@ -218,7 +272,7 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[];
       draggable={true}
       onDragStart={event => { event.dataTransfer?.setData("text/issue-id", props.issue.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}
       onClick={() => props.onOpen()} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onOpen(); } }}>
-    <div class="card-top"><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
+    <div class="card-top"><input aria-label={`Select issue #${props.issue.number}`} type="checkbox" checked={props.selected} onClick={event => event.stopPropagation()} onChange={event => props.onSelect(event.currentTarget.checked)} /><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
     <strong class="card-title">{props.issue.title}</strong>
     <div class="card-meta">
       <Show when={props.fields.includes("priority") && props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
@@ -233,12 +287,15 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[];
   </article>;
 }
 
-function Backlog(props: { boardId: string; columns: BoardColumn[]; onAdd: (issueId: string) => unknown; moved: () => unknown }) {
+function Backlog(props: { boardId: string; columns: BoardColumn[]; sprintId?: string; swimlaneId?: string; moved: () => unknown }) {
   const [items, { refetch }] = createResource(() => planningApi.backlog(props.boardId));
-  const add = async (id: string) => { if (!props.columns[0]) return; await props.onAdd(id); refetch(); props.moved(); };
+  const [selected, setSelected] = createSignal<string[]>([]);
+  const toggle = (id: string, checked: boolean) => setSelected(ids => checked ? [...new Set([...ids, id])] : ids.filter(value => value !== id));
+  const add = async (ids: string[]) => { const column = props.columns[0]; if (!column || !ids.length) return; await planningApi.bulkMove({ board_id: props.boardId, issue_ids: ids, column_id: column.id, sprint_id: props.sprintId ?? null, swimlane_id: props.swimlaneId ?? null }); setSelected([]); refetch(); props.moved(); };
   return <>
+    <Show when={selected().length}><button disabled={!props.columns.length} onClick={() => void add(selected())}>Add {selected().length} selected to board</button></Show>
     <Show when={!items()?.length}><p class="hint">Nothing in the backlog.</p></Show>
-    <For each={items()}>{issue => <div class="backlog-row"><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => add(issue.id)}>Add to board</button></div>}</For>
+    <For each={items()}>{issue => <div class="backlog-row"><input aria-label={`Select backlog issue #${issue.number}`} type="checkbox" checked={selected().includes(issue.id)} onChange={event => toggle(issue.id, event.currentTarget.checked)} /><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => void add([issue.id])}>Add to board</button></div>}</For>
   </>;
 }
 
