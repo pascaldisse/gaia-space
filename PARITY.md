@@ -51,6 +51,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V115 → feat/w11-chat (per-channel message drafts · channel typing presence) ☀Vishnu
 - V116 → feat/w11-chat (scheduled/postponed messages: `scheduled_messages` + due index) ☀Brahma
 - V117 → feat/w11-chat (message polls: `message_polls` · `message_poll_options` · `message_poll_votes`) ☀Ganga
+- V118 → feat/w11-chat (history paging + link unfurling: `message_links` · `link_previews` cache) ☀Surya
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 357 rows): done 97 · partial 199 · stub 4 · missing 57. Matrix NOT green — steering loop active.
