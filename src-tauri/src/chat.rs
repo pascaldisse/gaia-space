@@ -392,6 +392,15 @@ fn remove_channel_member_impl(c: &Connection, channel_id: &str, profile_id: &str
         rusqlite::params![channel_id, profile_id],
     )
     .map_err(|e| e.to_string())?;
+    // A generic notifications view otherwise retains the private message body after exit.
+    if !channel_allows_profile(c, channel_id, profile_id)? {
+        c.execute(
+            "DELETE FROM notifications WHERE recipient_id=?1 AND event_type='chat.mention' \
+             AND entity_type='message' AND entity_id IN (SELECT id FROM messages WHERE channel_id=?2)",
+            rusqlite::params![profile_id, channel_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<ChannelMember>> {
@@ -573,7 +582,17 @@ fn list_thread_replies_impl(
         .map(|m| to_view(c, m, acting_profile_id))
         .collect()
 }
+const MAX_MENTION_TARGETS: usize = 100;
+
+fn validate_mention_count(mention_ids: &[String]) -> Result<()> {
+    if mention_ids.len() > MAX_MENTION_TARGETS {
+        return Err(format!("at most {MAX_MENTION_TARGETS} mention targets are allowed"));
+    }
+    Ok(())
+}
+
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
+    validate_mention_count(&message.mention_ids)?;
     let allowed = message
         .author_id
         .as_deref()
@@ -676,6 +695,9 @@ fn update_message_impl(
     text: &str,
     mention_ids: Option<&[String]>,
 ) -> Result<()> {
+    if let Some(mention_ids) = mention_ids {
+        validate_mention_count(mention_ids)?;
+    }
     let changed = c
         .execute(
             "UPDATE messages SET text=?2,edited_at=unixepoch() WHERE id=?1",
@@ -1448,10 +1470,38 @@ mod tests {
         // bob cannot open the channel, so naming him neither stores a row nor alerts him
         assert!(mentions_for_impl(&c, "msg-m2").unwrap().is_empty());
         assert!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().is_empty());
+        // Leaving after a valid private mention removes the notification too: the generic
+        // notifications endpoint must not retain the secret message body.
+        add_channel_member_impl(&c, "chan-m2", "bob", false).unwrap();
+        post(&c, "chan-m2", "msg-m2b", "alice", &["bob"]).unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        remove_channel_member_impl(&c, "chan-m2", "bob").unwrap();
+        assert!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().is_empty());
+        let leaked: i64 = c.query_row(
+            "SELECT COUNT(*) FROM notifications WHERE recipient_id='bob' AND event_type='chat.mention'",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(leaked, 0);
         drop(c);
         drop(path);
     }
 
+    #[test]
+    fn mention_target_count_is_bounded_before_message_or_edit_writes() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-m-limit");
+        let too_many = (0..=MAX_MENTION_TARGETS).map(|n| format!("p{n}")).collect::<Vec<_>>();
+        let message = Message { id: "msg-m-limit".into(), channel_id: "chan-m-limit".into(), author_id: Some("default-org".into()), text: "flood".into(), created_at: 1, edited_at: None, thread_of: None, archived: false, mention_ids: too_many.clone() };
+        assert!(create_message_impl(&c, &message).unwrap_err().contains("at most"));
+        let stored: i64 = c.query_row("SELECT COUNT(*) FROM messages WHERE id='msg-m-limit'", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored, 0);
+        post(&c, "chan-m-limit", "msg-m-limit-ok", "default-org", &[]).unwrap();
+        assert!(update_message_impl(&c, "msg-m-limit-ok", "flood", Some(&too_many)).is_err());
+        let text: String = c.query_row("SELECT text FROM messages WHERE id='msg-m-limit-ok'", [], |r| r.get(0)).unwrap();
+        assert_eq!(text, "hey");
+        drop(c);
+        drop(path);
+    }
     #[test]
     fn editing_a_message_diffs_its_mentions() {
         let (c, path) = conn();
