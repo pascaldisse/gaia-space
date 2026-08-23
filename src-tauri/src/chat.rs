@@ -2031,6 +2031,19 @@ fn list_mentions_for_profile_impl(
         if named.iter().any(|(seen, _)| seen.id == m.id) {
             continue;
         }
+        // The alert raised at write time is what makes a team mention this profile's:
+        // the author of the message, and anyone who joined the team after it was sent,
+        // hold no notification and so have nothing in their inbox.
+        let alerted: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notifications WHERE id=?1)",
+                [&notification_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !alerted {
+            continue;
+        }
         named.push((m, notification_id));
     }
     named.sort_by(|a, b| b.0.created_at.cmp(&a.0.created_at));
@@ -3486,6 +3499,197 @@ mod tests {
             )
             .unwrap();
         assert_eq!(unread, 1);
+        drop(c);
+        drop(path);
+    }
+
+    fn post_teams(
+        c: &Connection,
+        channel: &str,
+        id: &str,
+        author: &str,
+        teams: &[&str],
+    ) -> Result<()> {
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some(author.into()),
+                text: "hey team".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                mention_ids: Vec::new(),
+                mention_team_ids: teams.iter().map(|s| s.to_string()).collect(),
+                content_kind: "text".into(),
+            },
+        )
+    }
+
+    fn seed_team(c: &Connection, team: &str, members: &[&str]) {
+        c.execute(
+            "INSERT OR IGNORE INTO teams(id,name,archived) VALUES(?1,?1,0)",
+            [team],
+        )
+        .unwrap();
+        for member in members {
+            c.execute(
+                "INSERT INTO team_memberships(id,profile_id,team_id,archived) VALUES(?1,?2,?3,0)",
+                rusqlite::params![format!("{team}-{member}"), member, team],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_team_mention_fans_out_to_its_live_members_only() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-tm");
+        seed_profiles(&c, &["alice", "bob", "carol", "dave"]);
+        seed_team(&c, "team-a", &["alice", "bob", "carol"]);
+        // carol left the team: an archived membership is not a recipient
+        c.execute(
+            "UPDATE team_memberships SET archived=1 WHERE id='team-a-carol'",
+            [],
+        )
+        .unwrap();
+        post_teams(&c, "chan-tm", "msg-tm1", "alice", &["team-a", "team-a", "ghost-team"])
+            .unwrap();
+        // duplicates collapse, an unknown team is ignored, the row records the utterance
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-tm1").unwrap(),
+            vec!["team-a".to_string()]
+        );
+        let view = list_messages_impl(&c, "chan-tm", Some("alice")).unwrap();
+        assert_eq!(view[0].message.mention_team_ids, vec!["team-a".to_string()]);
+        // bob is alerted; the author is not, the ex-member is not, the outsider is not
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        assert_eq!(count_unread_mentions_impl(&c, "alice").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "dave").unwrap(), 0);
+        // the inbox carries the message once, under the team-scoped notification id
+        let inbox = list_mentions_for_profile_impl(&c, "bob", false).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].message.message.id, "msg-tm1");
+        assert_eq!(inbox[0].notification_id, "mention:msg-tm1:team:team-a:bob");
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_team_mention_never_reaches_a_member_who_cannot_read_the_channel() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "bob"]);
+        seed_team(&c, "team-p", &["alice", "bob"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-tp".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &["alice".to_string()],
+        )
+        .expect("channel");
+        add_channel_member_impl(&c, "chan-tp", "alice", true).unwrap();
+        post_teams(&c, "chan-tp", "msg-tp", "alice", &["team-p"]).unwrap();
+        // the team mention is stored (it was said) but bob, who cannot open the
+        // channel, gets neither an alert nor an inbox entry
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-tp").unwrap(),
+            vec!["team-p".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 0);
+        assert!(list_mentions_for_profile_impl(&c, "bob", false)
+            .unwrap()
+            .is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn editing_a_message_diffs_its_team_mentions() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-td");
+        seed_profiles(&c, &["alice", "bob", "carol"]);
+        seed_team(&c, "team-x", &["bob"]);
+        seed_team(&c, "team-y", &["carol"]);
+        post_teams(&c, "chan-td", "msg-td", "alice", &["team-x"]).unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        // omitting the team list leaves the team mentions untouched
+        update_message_impl(&c, "msg-td", "typo fixed", None, None).unwrap();
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-td").unwrap(),
+            vec!["team-x".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        // swapping the team drops bob's unread alert and raises carol's
+        update_message_impl(
+            &c,
+            "msg-td",
+            "now team y",
+            None,
+            Some(&["team-y".to_string()]),
+        )
+        .unwrap();
+        assert_eq!(
+            team_mentions_for_impl(&c, "msg-td").unwrap(),
+            vec!["team-y".to_string()]
+        );
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 0);
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 1);
+        // a read alert of a dropped team is history and stays
+        c.execute(
+            "UPDATE notifications SET read_at=unixepoch() WHERE id='mention:msg-td:team:team-y:carol'",
+            [],
+        )
+        .unwrap();
+        update_message_impl(&c, "msg-td", "nobody", None, Some(&[])).unwrap();
+        assert!(team_mentions_for_impl(&c, "msg-td").unwrap().is_empty());
+        let kept: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE id='mention:msg-td:team:team-y:carol'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1);
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn profile_and_team_mention_targets_share_one_bound() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-tb");
+        seed_profiles(&c, &["alice"]);
+        let teams = (0..MAX_MENTION_TARGETS)
+            .map(|n| format!("t{n}"))
+            .collect::<Vec<_>>();
+        let message = Message {
+            id: "msg-tb".into(),
+            channel_id: "chan-tb".into(),
+            author_id: Some("alice".into()),
+            text: "flood".into(),
+            created_at: 1,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            pinned: false,
+            mention_ids: vec!["alice".to_string()],
+            mention_team_ids: teams,
+            content_kind: "text".into(),
+        };
+        assert!(create_message_impl(&c, &message)
+            .unwrap_err()
+            .contains("at most"));
         drop(c);
         drop(path);
     }
