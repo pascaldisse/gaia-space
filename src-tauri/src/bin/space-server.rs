@@ -4315,6 +4315,7 @@ async fn cmd(
     "create_cf_definition" => platform::create_cf_definition(input: platform::CfDefinitionInput),
     "create_channel" => chat::create_channel(channel: chat::Channel, member_ids: Vec<String>),
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
+    "ensure_project_document_root" => documents::ensure_project_document_root(project_id: String),
     "create_document" => documents::create_document(document: documents::Document),
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),

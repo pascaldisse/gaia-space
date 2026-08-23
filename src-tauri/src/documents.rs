@@ -282,26 +282,106 @@ pub fn get_document(id: String) -> Result<Option<Document>> {
     Ok(list_documents()?.into_iter().find(|v| v.id == id))
 }
 
+/// The one canonical root per project. It is deterministic, so concurrent first
+/// opens race safely through `INSERT OR IGNORE` without requiring a new table.
+fn project_root_id(project_id: &str) -> String {
+    format!("project-doc-root-{project_id}")
+}
+
+fn validate_document_placement(
+    c: &rusqlite::Connection,
+    container_type: &str,
+    container_id: Option<&str>,
+    folder_id: Option<&str>,
+) -> Result<()> {
+    let container_id = container_id.filter(|id| !id.trim().is_empty());
+    if container_type == "project" && folder_id.is_none() {
+        return Err("project documents must be filed in a project root folder".into());
+    }
+    if let Some(folder_id) = folder_id {
+        let container_id =
+            container_id.ok_or_else(|| "a foldered document needs a container".to_string())?;
+        let found: bool = c.query_row(
+"SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1 AND container_type=?2 AND container_id=?3)",
+rusqlite::params![folder_id, container_type, container_id],
+|row| row.get(0),
+).map_err(|e| e.to_string())?;
+        if !found {
+            return Err("document folder does not belong to its container".into());
+        }
+    }
+    Ok(())
+}
+
+fn ensure_project_document_root_tx(
+    c: &mut rusqlite::Connection,
+    project_id: &str,
+) -> Result<DocumentFolder> {
+    if project_id.trim().is_empty() {
+        return Err("project id is required".into());
+    }
+    let root_id = project_root_id(project_id);
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let project_exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1)",
+            [project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !project_exists {
+        return Err("project not found".into());
+    }
+    tx.execute(
+"INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'project',?2,NULL,'Documents',NULL,0)",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    // A pre-prerequisite project may have direct rows. Preserve them by making this
+    // newly canonical root their parent rather than leaving content inaccessible.
+    tx.execute(
+"UPDATE document_folders SET parent_id=?1 WHERE container_type='project' AND container_id=?2 AND parent_id IS NULL AND id<>?1",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    tx.execute(
+"UPDATE documents SET folder_id=?1 WHERE container_type='project' AND container_id=?2 AND folder_id IS NULL",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    c.query_row(
+"SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
+[root_id], row_to_folder,
+).map_err(|e| e.to_string())
+}
+
+/// Creates/selects the project's required root folder and repairs legacy direct rows.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_document(document: Document) -> Result<()> {
-    let c = db::conn()?;
+pub fn ensure_project_document_root(project_id: String) -> Result<DocumentFolder> {
+    let mut c = db::conn()?;
+    ensure_project_document_root_tx(&mut c, &project_id)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_document(mut document: Document) -> Result<()> {
+    let mut c = db::conn()?;
+    // Callers from an older client may still submit `folder_id = null`. The row never
+    // stays direct: select/create the project root first, then persist into that folder.
+    if document.container_type == "project" && document.folder_id.is_none() {
+        let project_id = document
+            .container_id
+            .as_deref()
+            .ok_or_else(|| "project documents need a project id".to_string())?;
+        document.folder_id = Some(ensure_project_document_root_tx(&mut c, project_id)?.id);
+    }
+    validate_document_placement(
+        &c,
+        &document.container_type,
+        document.container_id.as_deref(),
+        document.folder_id.as_deref(),
+    )?;
     c.execute(
-        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-        rusqlite::params![
-            document.id,
-            document.container_type,
-            document.container_id,
-            document.folder_id,
-            document.doc_type,
-            document.title,
-            document.body,
-            document.version,
-            document.archived,
-            document.created_by
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    // seed initial version snapshot so history is never empty for a saved document
+"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by],
+).map_err(|e| e.to_string())?;
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
         rusqlite::params![
@@ -315,13 +395,18 @@ pub fn create_document(document: Document) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-
 /// Metadata-only update: title, container/folder placement (move), doc_type, archived.
 /// Does NOT touch body/version — content saves go through `save_document` so every
 /// content change is versioned.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document(document: Document) -> Result<()> {
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &document.container_type,
+        document.container_id.as_deref(),
+        document.folder_id.as_deref(),
+    )?;
     c.execute(
         "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,body_format=?6,title=?7,archived=?8,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![
@@ -348,6 +433,12 @@ pub fn move_document(
     folder_id: Option<String>,
 ) -> Result<()> {
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &container_type,
+        container_id.as_deref(),
+        folder_id.as_deref(),
+    )?;
     c.execute(
         "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![id, container_type, container_id, folder_id],
@@ -758,12 +849,12 @@ pub fn update_book_access(
 
 // ---------- local-folder / Confluence-export import ----------
 // A Confluence space export and a plain notes directory are the same shape on disk: a
-// tree of directories holding .md/.html files. Import mirrors that tree into
+// tree of directories holding .md/.txt files. Import mirrors that tree into
 // document_folders and files each page as an ordinary document, so imported pages get
 // versioning, permissions and search for free.
 
 fn default_import_extensions() -> Vec<String> {
-    vec!["md".into()]
+    vec!["md".into(), "txt".into()]
 }
 fn default_max_file_bytes() -> u64 {
     2 * 1024 * 1024
@@ -901,7 +992,7 @@ fn imported_title(raw: &str, text: &str, stem: &str) -> String {
     stem.to_string()
 }
 
-/// Imports a directory tree: Markdown pages stay editable; all other files stay files.
+/// Imports a directory tree: Markdown and plain-text pages stay editable; all other files stay files.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn import_document_folder(request: DocumentImportRequest) -> Result<DocumentImportSummary> {
     let c = db::conn()?;
@@ -913,6 +1004,12 @@ fn import_document_folder_tx(
     request: DocumentImportRequest,
 ) -> Result<DocumentImportSummary> {
     let root = std::path::PathBuf::from(&request.source_path);
+    validate_document_placement(
+        c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.parent_folder_id.as_deref(),
+    )?;
     if !root.is_dir() {
         return Err(format!("'{}' is not a directory", request.source_path));
     }
@@ -1217,6 +1314,12 @@ pub fn upload_document_file_bytes(
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "filename must be a plain file name".to_string())?;
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.folder_id.as_deref(),
+    )?;
     let store = upload_dir()?;
     let document_id = generated_id("doc");
     let mime = mime_for(&filename);
@@ -1272,6 +1375,12 @@ pub(crate) fn upload_document_file_tx(
     store: &std::path::Path,
     request: UploadDocumentFileRequest,
 ) -> Result<DocumentFile> {
+    validate_document_placement(
+        c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.folder_id.as_deref(),
+    )?;
     let source = std::path::PathBuf::from(&request.source_path);
     let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
@@ -1518,8 +1627,38 @@ mod tests {
     }
 
     #[test]
-    fn import_mirrors_tree_and_preserves_non_markdown_as_files() {
-        let c = test_conn();
+    fn project_root_is_idempotent_repairs_legacy_rows_and_blocks_direct_documents() {
+        let mut c = test_conn();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('legacy-folder','project','demo-project',NULL,'Legacy')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title) VALUES('legacy-doc','project','demo-project',NULL,'text','Legacy doc')", []).unwrap();
+        let root = ensure_project_document_root_tx(&mut c, "demo-project").expect("create root");
+        let same = ensure_project_document_root_tx(&mut c, "demo-project").expect("reuse root");
+        assert_eq!(root.id, same.id);
+        let legacy_parent: String = c
+            .query_row(
+                "SELECT parent_id FROM document_folders WHERE id='legacy-folder'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let legacy_doc_folder: String = c
+            .query_row(
+                "SELECT folder_id FROM documents WHERE id='legacy-doc'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_parent, root.id);
+        assert_eq!(legacy_doc_folder, root.id);
+        assert!(validate_document_placement(&c, "project", Some("demo-project"), None).is_err());
+        validate_document_placement(&c, "project", Some("demo-project"), Some(&root.id))
+            .expect("root accepts document");
+    }
+
+    #[test]
+    fn import_mirrors_tree_and_classifies_markdown_and_text_pages() {
+        let mut c = test_conn();
+        let root = ensure_project_document_root_tx(&mut c, "demo-project").expect("project root");
         let dir = import_dir("docs-import");
         std::fs::write(dir.join("root.md"), "# Root Page\n\nbody\n").unwrap();
         std::fs::write(dir.join("skip.txt"), "not imported").unwrap();
@@ -1537,7 +1676,7 @@ mod tests {
                 source_path: dir.to_string_lossy().to_string(),
                 container_type: "project".into(),
                 container_id: Some("demo-project".into()),
-                parent_folder_id: None,
+                parent_folder_id: Some(root.id.clone()),
                 created_by: None,
                 extensions: default_import_extensions(),
                 max_file_bytes: default_max_file_bytes(),
@@ -1560,14 +1699,14 @@ mod tests {
             )
             .expect("html file imported");
         assert_eq!(html_type, "file");
-        let txt_type: String = c
+        let (txt_type, txt_format): (String, String) = c
             .query_row(
-                "SELECT doc_type FROM documents WHERE title='skip.txt'",
+                "SELECT doc_type,body_format FROM documents WHERE title='skip'",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .expect("text file imported");
-        assert_eq!(txt_type, "file");
+            .expect("text page imported");
+        assert_eq!((txt_type.as_str(), txt_format.as_str()), ("text", "text"));
 
         // Markdown heading wins over the file stem; the tree is mirrored, not flattened.
         let deep_folder: String = c
@@ -1580,8 +1719,8 @@ mod tests {
         assert_eq!(deep_folder, "child");
         let root_titles: i64 = c
             .query_row(
-                "SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id IS NULL",
-                [],
+                "SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id=?1",
+                [&root.id],
                 |r| r.get(0),
             )
             .unwrap();

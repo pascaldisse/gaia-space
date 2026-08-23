@@ -372,6 +372,7 @@ pub fn run() {
             review::attempt_merge,
             documents::list_documents,
             documents::get_document,
+            documents::ensure_project_document_root,
             documents::create_document,
             documents::update_document,
             documents::move_document,
