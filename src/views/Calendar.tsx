@@ -27,31 +27,35 @@ const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
 const [selected,setSelected] = createSignal<CalendarItem>();
 const [composerDay,setComposerDay] = createSignal<Date>();
 const [quickKind,setQuickKind] = createSignal<QuickKind>("meeting");
-const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"" });
+const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"", visibility:"participants" as Meeting["visibility"], modification_preference:"organizer-only" as Meeting["modification_preference"] });
 const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
 const [calendarFilter,setCalendarFilter] = createSignal("all");
+const [targetProfile,setTargetProfile] = createSignal("");
+const [targetLocation,setTargetLocation] = createSignal("");
 const [notice,setNotice] = createSignal("");
 const [invitee,setInvitee] = createSignal("");
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
-const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
-  ([profile,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key) : Promise.resolve([]));
+const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), targetProfile(), targetLocation(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
+  ([profile,target_profile,target_location,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key,target_profile||undefined,target_location||undefined) : Promise.resolve([]));
 const [meetings,{refetch:reloadMeetings}] = createResource(() => profileId(), profile => profile ? meetingsApi.list(profile) : Promise.resolve([]));
 const [projects] = createResource(() => platformApi.projects());
 const [calendars] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
+const [options,{refetch:reloadOptions}] = createResource(() => profileId(), owner => owner ? personalApi.calendarOptions(owner) : Promise.resolve(undefined));
+const updateOptions = async (patch:Record<string,boolean|number>) => { const current=options(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); return selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); };
+const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const prefs=options(); return filtered.filter(item => (prefs?.show_todos !== false || item.kind!=="task") && (!prefs?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=prefs.working_hours_start&&hour<prefs.working_hours_end;})())); };
 // Each view steps by its own span: a month, a week, a day, or a schedule window.
 const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
-const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) result.push(new Date(day)); return result; };
+const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(options()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };
 const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
 const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
@@ -61,7 +65,7 @@ const weekdayHeads = () => view()==="day" ? [cursor().toLocaleDateString(undefin
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
 const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setSelected(undefined); setDraft(undefined); setSelectedDay(day); setComposerDay(day); setQuickKind(kind); setNotice("");
-  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"" });
+  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"", visibility:"participants", modification_preference:"organizer-only" });
   setTaskForm({ title:"", day:dateKey(day) });
   setDeadlineForm({ project_id:"", day:dateKey(day) });
 };
@@ -75,9 +79,11 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled"};
 await meetingsApi.create(meeting);
-setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
+const channel_id = await meetingsApi.attachChannel(meeting.id);
+const created = { ...meeting, channel_id };
+setComposerDay(undefined); setDraft(created); setSelected({id:created.id,source_id:created.id,kind:"meeting",title:created.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
 } catch (reason) { setError(humanError(reason)); }
 };
@@ -127,7 +133,7 @@ return <section class="calendar-view">
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
-<Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show>
+<div class="calendar-filters"><Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Display</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">
@@ -196,6 +202,8 @@ return <section class="calendar-view">
 <label>Start<input type="datetime-local" value={form().starts_at} onInput={e=>setForm({...form(),starts_at:e.currentTarget.value})}/></label>
 <label>End<input type="datetime-local" value={form().ends_at} onInput={e=>setForm({...form(),ends_at:e.currentTarget.value})}/></label>
 <label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
+<label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
+<label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label>
 <div class="detail-actions"><button class="primary">Create meeting</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
@@ -231,8 +239,12 @@ return <section class="calendar-view">
 <label>Start<input type="datetime-local" value={localInput(item().starts_at)} onInput={e=>setDraft({...item(),starts_at:epoch(e.currentTarget.value)})}/></label>
 <label>End<input type="datetime-local" value={localInput(item().ends_at)} onInput={e=>setDraft({...item(),ends_at:epoch(e.currentTarget.value)})}/></label>
 <label>Location<input value={item().location??""} onInput={e=>setDraft({...item(),location:e.currentTarget.value||null})}/></label>
+<label>Visibility<select value={item().visibility} onChange={e=>setDraft({...item(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
+<label>Who can edit?<select value={item().modification_preference} onChange={e=>setDraft({...item(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <label>Repeat<input value={item().rrule??""} onInput={e=>setDraft({...item(),rrule:e.currentTarget.value||null})}/></label>
-<a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a>
+<label>Call status<select aria-label="Call status" value={item().video_status} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option><option value="cancelled">Cancelled</option></select></label>
+<Show when={item().video_room_id}>{room=><p class="hint" data-meeting-room>Call room: {room()} · {item().join_url}</p>}</Show>
+<a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a><Show when={item().channel_id} fallback={<button onClick={async()=>{ try { const channel_id=await meetingsApi.attachChannel(item().id); setDraft({...item(),channel_id}); reloadMeetings(); } catch(reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({view:"Chat",entityType:"channel",entityId:item().channel_id!})}>Open discussion</a></Show>
 <section class="rsvp">
 <h3>Participants</h3>
 <div class="inline-form"><ProfilePicker label="" value={invitee()} onChange={setInvitee}/><button onClick={invite}>Invite</button></div>

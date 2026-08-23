@@ -21,6 +21,8 @@ pub struct Channel {
     pub description: Option<String>,
     pub project_id: Option<String>,
     pub archived: bool,
+    #[serde(default)]
+    pub read_only: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChannelSummary {
@@ -37,6 +39,17 @@ pub struct ChannelMember {
     pub administrator: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ChannelNotificationPreference {
+    pub profile_id: String,
+    pub channel_id: String,
+    pub email_enabled: bool,
+    pub push_enabled: bool,
+    pub thread_scope: String,
+}
+fn read_notification_preference(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelNotificationPreference> {
+    Ok(ChannelNotificationPreference { profile_id:r.get(0)?, channel_id:r.get(1)?, email_enabled:r.get(2)?, push_enabled:r.get(3)?, thread_scope:r.get(4)? })
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
     pub channel_id: String,
@@ -46,6 +59,8 @@ pub struct Message {
     pub edited_at: Option<i64>,
     pub thread_of: Option<String>,
     pub archived: bool,
+    #[serde(default = "default_message_content_kind")]
+    pub content_kind: String,
     #[serde(default)]
     pub mention_ids: Vec<String>,
 }
@@ -248,11 +263,12 @@ fn channel_row(r: &rusqlite::Row) -> rusqlite::Result<Channel> {
         description: r.get(3)?,
         project_id: r.get(4)?,
         archived: r.get(5)?,
+        read_only: r.get(6)?,
     })
 }
 fn list_channels_impl(c: &Connection) -> Result<Vec<Channel>> {
     let mut s = c
-        .prepare("SELECT id,content_type,name,description,project_id,archived FROM channels ORDER BY name")
+        .prepare("SELECT id,content_type,name,description,project_id,archived,EXISTS(SELECT 1 FROM private_feeds pf WHERE pf.channel_id=channels.id) FROM channels ORDER BY name")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], channel_row)
@@ -263,7 +279,7 @@ fn list_channels_impl(c: &Connection) -> Result<Vec<Channel>> {
 }
 fn get_channel_impl(c: &Connection, id: &str) -> Result<Option<Channel>> {
     c.query_row(
-        "SELECT id,content_type,name,description,project_id,archived FROM channels WHERE id=?1",
+        "SELECT id,content_type,name,description,project_id,archived,EXISTS(SELECT 1 FROM private_feeds pf WHERE pf.channel_id=channels.id) FROM channels WHERE id=?1",
         [id],
         channel_row,
     )
@@ -295,7 +311,14 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     )
     .map_err(|e| e.to_string())
 }
-fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> { channel_allows_profile(&db::conn()?, channel_id, profile_id) }
+pub(crate) fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
+    // channels stay generic/public as before; this avoids exposing a private agenda
+    // merely because its discussion is implemented by the shared channel primitive.
+    if let Some(meeting_id) = channel_id.strip_prefix("entity:meeting:") {
+        return crate::meetings::meeting_readable_on(c, meeting_id, profile_id);
+    }
     let content_type: String = c
         .query_row(
             "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
@@ -320,6 +343,14 @@ fn channel_allows_actor(
     channel_id: &str,
     profile_id: Option<&str>,
 ) -> Result<bool> {
+    // Meeting discussions retain their meeting visibility boundary even though
+    // generic entity-bound channels are otherwise public.
+    if channel_id.strip_prefix("entity:meeting:").is_some() {
+        return profile_id
+            .map(|profile_id| channel_allows_profile(c, channel_id, profile_id))
+            .transpose()
+            .map(|allowed| allowed.unwrap_or(false));
+    }
     let content_type: String = c
         .query_row(
             "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
@@ -356,6 +387,22 @@ fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<
         })
         .collect();
     Ok(visible?.into_iter().flatten().collect())
+}
+/// Private feeds retain the normal private-channel ACL and add a durable owner map;
+/// this avoids rebuilding the original `channels.content_type` constraint.
+pub(crate) fn ensure_private_feed_on(c: &Connection, profile_id: &str) -> Result<Channel> {
+    if profile_id.trim().is_empty() { return Err("Private feed profile is required".into()); }
+    if let Some(channel_id) = c.query_row("SELECT channel_id FROM private_feeds WHERE profile_id=?1", [profile_id], |r| r.get::<_, String>(0)).optional().map_err(|e| e.to_string())? {
+        return get_channel_impl(c, &channel_id)?.ok_or_else(|| "Private feed channel is missing".into());
+    }
+    let channel = Channel { id: format!("private-feed:{profile_id}"), content_type: "private".into(), name: Some("Private feed".into()), description: Some("Your read-only notification feed".into()), project_id: None, archived: false, read_only: true };
+    create_channel_impl(c, &channel, &[profile_id.to_string()])?;
+    c.execute("INSERT INTO private_feeds(profile_id,channel_id) VALUES(?1,?2)", rusqlite::params![profile_id, channel.id]).map_err(|e| e.to_string())?;
+    Ok(channel)
+}
+pub(crate) fn private_feed_for_on(c: &Connection, profile_id: &str) -> Result<Channel> { ensure_private_feed_on(c, profile_id) }
+fn is_read_only_channel_on(c: &Connection, channel_id: &str) -> Result<bool> {
+    c.query_row("SELECT EXISTS(SELECT 1 FROM private_feeds WHERE channel_id=?1)", [channel_id], |r| r.get(0)).map_err(|e| e.to_string())
 }
 fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String]) -> Result<()> {
     c.execute(
@@ -420,7 +467,7 @@ fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<Cha
         .map_err(|e| e.to_string());
     rows
 }
-fn create_entity_channel_impl(
+pub(crate) fn create_entity_channel_impl(
     c: &Connection,
     entity_type: &str,
     entity_id: &str,
@@ -435,6 +482,16 @@ fn create_entity_channel_impl(
     get_channel_impl(c, &id)?.ok_or_else(|| "entity channel missing after insert".to_string())
 }
 
+fn default_message_content_kind() -> String { "text".into() }
+/// Durable system card for an absence lifecycle event. The entity-bound channel is
+/// intentionally public like other entity discussions; sensitive reasons are never put in it.
+pub(crate) fn post_absence_card_on(c: &Connection, absence_id: &str, profile_id: &str, date_from: &str, date_to: &str, availability: &str, action: &str) -> Result<()> {
+    let channel = create_entity_channel_impl(c, "absence", absence_id, Some(format!("Time off · {profile_id}")))?;
+    let id = format!("absence-card:{absence_id}:{action}:{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+    let payload = serde_json::json!({"absence_id":absence_id,"profile_id":profile_id,"date_from":date_from,"date_to":date_to,"availability":availability,"action":action}).to_string();
+    c.execute("INSERT INTO messages(id,channel_id,author_id,text,thread_of,archived,content_kind) VALUES(?1,?2,NULL,?3,NULL,0,'absence-card')", rusqlite::params![id, channel.id, payload]).map_err(|e| e.to_string())?;
+    Ok(())
+}
 fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
     Ok(Message {
         id: r.get(0)?,
@@ -445,6 +502,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         edited_at: r.get(5)?,
         thread_of: r.get(6)?,
         archived: r.get(7)?,
+        content_kind: r.get(8)?,
         mention_ids: Vec::new(),
     })
 }
@@ -538,7 +596,7 @@ fn list_messages_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE channel_id=?1 AND thread_of IS NULL AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -569,7 +627,7 @@ fn list_thread_replies_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE thread_of=?1 AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -593,6 +651,7 @@ fn validate_mention_count(mention_ids: &[String]) -> Result<()> {
 
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
     validate_mention_count(&message.mention_ids)?;
+    if is_read_only_channel_on(c, &message.channel_id)? { return Err("Private feeds are read-only".into()); }
     let allowed = message
         .author_id
         .as_deref()
@@ -603,8 +662,8 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         return Err("channel access denied".to_string());
     }
     c.execute(
-        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
+        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.content_kind],
     )
     .map_err(|e| e.to_string())?;
     sync_mentions_impl(
@@ -686,6 +745,12 @@ fn sync_mentions_impl(
         .map_err(|e| e.to_string())?;
         c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{message_id}:{profile_id}"), profile_id, text, message_id]).map_err(|e| e.to_string())?;
     }
+    crate::channel_feeds::route_message_on(
+        c,
+        &message.channel_id,
+        message.author_id.as_deref(),
+        &message.text,
+    )?;
     Ok(())
 }
 
@@ -808,7 +873,7 @@ fn delete_message_impl(c: &Connection, id: &str) -> Result<()> {
 }
 fn get_message_impl(c: &Connection, id: &str) -> Result<Option<Message>> {
     c.query_row(
-        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages WHERE id=?1",
+        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages WHERE id=?1",
         [id],
         message_row,
     )
@@ -877,6 +942,23 @@ pub fn list_channels() -> Result<Vec<Channel>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel(id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn private_feed(profile_id: String) -> Result<Channel> { ensure_private_feed_on(&db::conn()?, &profile_id) }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_channel_notification_preference(profile_id: String, channel_id: String) -> Result<ChannelNotificationPreference> {
+    let c=db::conn()?;
+    let row=c.query_row("SELECT profile_id,channel_id,email_enabled,push_enabled,thread_scope FROM channel_notification_preferences WHERE profile_id=?1 AND channel_id=?2", rusqlite::params![&profile_id,&channel_id], read_notification_preference).optional().map_err(|e|e.to_string())?;
+    Ok(row.unwrap_or(ChannelNotificationPreference { profile_id, channel_id, email_enabled:true, push_enabled:true, thread_scope:"all".into() }))
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_channel_notification_preference(preference: ChannelNotificationPreference) -> Result<ChannelNotificationPreference> {
+    if preference.profile_id.trim().is_empty() || preference.channel_id.trim().is_empty() { return Err("Channel preference needs a profile and channel".into()); }
+    if !matches!(preference.thread_scope.as_str(), "all"|"followed"|"none") { return Err("Thread scope must be all, followed, or none".into()); }
+    let c=db::conn()?;
+    if !channel_allows_profile(&c,&preference.channel_id,&preference.profile_id)? { return Err("channel access denied".into()); }
+    c.execute("INSERT INTO channel_notification_preferences(profile_id,channel_id,email_enabled,push_enabled,thread_scope) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,channel_id) DO UPDATE SET email_enabled=excluded.email_enabled,push_enabled=excluded.push_enabled,thread_scope=excluded.thread_scope", rusqlite::params![preference.profile_id,preference.channel_id,preference.email_enabled,preference.push_enabled,preference.thread_scope]).map_err(|e|e.to_string())?;
+    Ok(preference)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channels_with_meta(profile_id: String) -> Result<Vec<ChannelSummary>> {
@@ -1175,6 +1257,7 @@ mod tests {
                 description: None,
                 project_id: None,
                 archived: false,
+                read_only: false,
             },
             &["default-org".to_string()],
         )
@@ -1676,6 +1759,7 @@ mod tests {
             edited_at: None,
             thread_of: None,
             archived: false,
+            content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
         create_message_impl(&c, &root).unwrap();
@@ -1688,6 +1772,7 @@ mod tests {
             edited_at: None,
             thread_of: Some("msg-root".into()),
             archived: false,
+            content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
         create_message_impl(&c, &reply).unwrap();
@@ -1722,6 +1807,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
         )
@@ -1755,6 +1841,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
         )
@@ -1802,6 +1889,7 @@ mod tests {
                 description: None,
                 project_id: None,
                 archived: false,
+                read_only: false,
             },
             &["default-org".into(), "other".into()],
         )
@@ -1830,6 +1918,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             }
         )
@@ -1838,6 +1927,32 @@ mod tests {
         assert!(members
             .iter()
             .any(|m| m.profile_id == "default-org" && m.administrator));
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn meeting_entity_channel_keeps_private_read_scope_for_actor_reads() {
+        let (c, path) = conn();
+        for id in ["guest", "stranger"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,unixepoch())",
+                [id],
+            )
+            .unwrap();
+        }
+        c.execute_batch(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,modification_preference,archived)
+             VALUES('private-meeting','Private',1,2,'default-org','participants','organizer-only',0);
+             INSERT INTO meeting_participants(meeting_id,profile_id,status)
+             VALUES('private-meeting','guest','accepted');",
+        )
+        .unwrap();
+        create_entity_channel_impl(&c, "meeting", "private-meeting", None).unwrap();
+        let channel = "entity:meeting:private-meeting";
+        assert!(channel_allows_actor(&c, channel, Some("guest")).unwrap());
+        assert!(!channel_allows_actor(&c, channel, Some("stranger")).unwrap());
+        assert!(!channel_allows_actor(&c, channel, None).unwrap());
         drop(c);
         drop(path);
     }

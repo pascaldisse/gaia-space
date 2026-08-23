@@ -30,26 +30,30 @@ fn organization_on(c: &rusqlite::Connection) -> Result<Organization> {
 }
 
 #[tauri::command]
-pub fn get_organization() -> Result<Organization> { organization_on(&db::conn()?) }
+pub fn get_organization() -> Result<Organization> {
+    organization_on(&db::conn()?)
+}
 
 #[tauri::command]
 pub fn update_organization(value: Organization) -> Result<Organization> {
-    if value.name.trim().is_empty() || value.timezone.trim().is_empty() { return Err("organization name and timezone are required".into()); }
-    let c=db::conn()?;
+    if value.name.trim().is_empty() || value.timezone.trim().is_empty() {
+        return Err("organization name and timezone are required".into());
+    }
+    let c = db::conn()?;
     c.execute("UPDATE organizations SET name=?1,slogan=?2,logo_id=?3,timezone=?4,onboarding_required=?5,allow_domains_edit=?6 WHERE id=?7", params![value.name.trim(),value.slogan.filter(|s|!s.trim().is_empty()),value.logo_id.filter(|s|!s.trim().is_empty()),value.timezone.trim(),value.onboarding_required as i32,value.allow_domains_edit as i32,DEFAULT_ORG_ID]).map_err(|e|e.to_string())?;
     organization_on(&c)
 }
 
 #[tauri::command]
 pub fn get_org_settings() -> Result<OrgSettings> {
-    let c=db::conn()?;
+    let c = db::conn()?;
     c.query_row("SELECT org_id,available_right_codes,is_space_code,is_space_code_only FROM org_settings WHERE org_id=?1", [DEFAULT_ORG_ID], |r| { let raw:String=r.get(1)?; Ok(OrgSettings { org_id:r.get(0)?, available_right_codes:serde_json::from_str(&raw).unwrap_or_default(),is_space_code:r.get::<_,i64>(2)? != 0,is_space_code_only:r.get::<_,i64>(3)? != 0 }) }).map_err(|e|e.to_string())
 }
 
 #[tauri::command]
 pub fn update_org_settings(value: OrgSettings) -> Result<OrgSettings> {
-    let codes=serde_json::to_string(&value.available_right_codes).map_err(|e|e.to_string())?;
-    let c=db::conn()?;
+    let codes = serde_json::to_string(&value.available_right_codes).map_err(|e| e.to_string())?;
+    let c = db::conn()?;
     c.execute("UPDATE org_settings SET available_right_codes=?1,is_space_code=?2,is_space_code_only=?3 WHERE org_id=?4",params![codes,value.is_space_code as i32,value.is_space_code_only as i32,DEFAULT_ORG_ID]).map_err(|e|e.to_string())?;
     get_org_settings()
 }

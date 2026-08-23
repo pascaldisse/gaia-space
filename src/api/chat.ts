@@ -12,6 +12,7 @@ export type Channel = {
   description: string | null;
   project_id: string | null;
   archived: boolean;
+read_only?: boolean;
 };
 
 export type ChannelSummary = Channel & {
@@ -20,6 +21,7 @@ export type ChannelSummary = Channel & {
   last_message_at: number | null;
 };
 
+export type ChannelNotificationPreference = { profile_id:string; channel_id:string; email_enabled:boolean; push_enabled:boolean; thread_scope:"all"|"followed"|"none"; };
 export type ChannelMember = {
   channel_id: string;
   profile_id: string;
@@ -37,6 +39,7 @@ export type Message = {
   edited_at: number | null;
   thread_of: string | null;
   archived: boolean;
+  content_kind?: "text" | "absence-card";
   mention_ids?: string[];
 };
 // Upload lifecycle (KB §04 collaboration): a row can exist before its bytes are stored,
@@ -63,6 +66,9 @@ export const chatApi = {
   listChannelsWithMeta: (profileId: string) =>
     invoke<ChannelSummary[]>("list_channels_with_meta", { profileId }),
   getChannel: (id: string) => invoke<Channel | null>("get_channel", { id }),
+privateFeed: (profileId:string) => invoke<Channel>("private_feed", {profileId}),
+channelNotificationPreference: (profileId:string,channelId:string) => invoke<ChannelNotificationPreference>("get_channel_notification_preference", {profileId,channelId}),
+saveChannelNotificationPreference: (preference:ChannelNotificationPreference) => invoke<ChannelNotificationPreference>("save_channel_notification_preference", {preference}),
   createChannel: (channel: Channel, memberIds: string[]) =>
     invoke<Channel>("create_channel", { channel, memberIds }),
   updateChannel: (channel: Channel) => invoke<void>("update_channel", { channel }),

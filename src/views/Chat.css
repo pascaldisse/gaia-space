@@ -382,3 +382,5 @@
 .mention-item .mention-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-item .mention-when { color: #6c7c99; font-size: .85em; }
 .message-text.mentions-me { border-left: 2px solid #7a4dd6; padding-left: .5em; }
+.absence-chat-card { display:grid; gap:3px; max-width:360px; padding:10px 12px; border:1px solid var(--line, #29443a); border-left:3px solid #65a879; border-radius:8px; background:var(--surface-2, #18251f); color:var(--text, #e8eee9); }
+.absence-chat-card span,.absence-chat-card small { color:var(--muted, #9dac9f); }

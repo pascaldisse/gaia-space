@@ -13,7 +13,14 @@ export type PlanningTag = { id:string; project_id:string; parent_id:string|null;
 export type Checklist = { id:string; issue_id:string; title:string; ordering:number };
 export type ChecklistItem = { id:string; checklist_id:string; parent_id:string|null; item_text:string; item_done:boolean; ordering:number };
 export type TimeEntry = { id:string; issue_id:string; profile_id:string; entry_date:string; duration_minutes:number; description:string|null };
-export type IssueDetail = { issue:Issue; tags:PlanningTag[]; checklists:Checklist[]; time_total_minutes:number; children:Issue[] };
+export type IssueAttachment = { id:string; issue_id:string; file_name:string; mime_type:string; byte_length:number; data_url:string };
+export type IssueComment = { id:string; issue_id:string; author_id:string|null; body:string; created_at:number; edited_at:number|null };
+export type IssueActivity = { id:string; issue_id:string; activity_type:string; actor_id:string|null; detail:string|null; created_at:number };
+export type TrackerLink = { id:string; issue_id:string; target_kind:"ISSUE"|"REVIEW"|"EXTERNAL"; target_id:string|null; url:string|null; title:string|null };
+export type NewTrackerLink = Omit<TrackerLink,"id">;
+export type NewIssueComment = Omit<IssueComment, "id"|"created_at"|"edited_at"> & { id?:string };
+export type NewIssueAttachment = Omit<IssueAttachment, "issue_id">;
+export type IssueDetail = { issue:Issue; tags:PlanningTag[]; checklists:Checklist[]; time_total_minutes:number; children:Issue[]; attachments:IssueAttachment[]; comments:IssueComment[]; activities:IssueActivity[]; tracker_links:TrackerLink[] };
 const call = <T>(command:string, args:Record<string, unknown> = {}) => invoke<T>(command, args);
 export const planningApi = {
   issues: (filters: Partial<{project_id:string;text:string;status_id:string;assignee_id:string;tag_id:string;custom_field_id:string;custom_field_value_json:string;include_archived:boolean}> = {}) => call<Issue[]>("list_issues", filters),
@@ -23,12 +30,12 @@ export const planningApi = {
     const raw = await call<Record<string, unknown>|null>("get_issue_detail", { id });
     if (!raw) return null;
     const issue = (raw.issue ?? raw) as Issue;
-    return { issue, tags: (raw.tags as PlanningTag[]) ?? [], checklists: (raw.checklists as Checklist[]) ?? [], time_total_minutes: (raw.time_total_minutes as number) ?? 0, children: (raw.children as Issue[]) ?? [] };
+    return { issue, tags: (raw.tags as PlanningTag[]) ?? [], checklists: (raw.checklists as Checklist[]) ?? [], time_total_minutes: (raw.time_total_minutes as number) ?? 0, children: (raw.children as Issue[]) ?? [], attachments: (raw.attachments as IssueAttachment[]) ?? [], comments: (raw.comments as IssueComment[]) ?? [], activities: (raw.activities as IssueActivity[]) ?? [], tracker_links: (raw.tracker_links as TrackerLink[]) ?? [] };
   },
   createIssue: (input: Omit<Issue,"id"|"number"|"assignee_ids"> & { id?:string; assignee_ids?:string[] }) => call<Issue>("create_issue", { input }),
   assignees: (issue_id:string) => call<string[]>("list_issue_assignees", { issueId: issue_id }),
   setAssignees: (issue_id:string, profile_ids:string[]) => call<string[]>("set_issue_assignees", { issueId: issue_id, profileIds: profile_ids }),
-  updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),
+  updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), cloneIssue: (issue_id:string, target_project_id:string) => call<Issue>("clone_issue", { input: { issueId: issue_id, targetProjectId: target_project_id } }), moveIssueToProject: (issue_id:string, target_project_id:string) => call<Issue>("move_issue_to_project", { input: { issueId: issue_id, targetProjectId: target_project_id } }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),
   statuses: (project_id?:string) => call<Status[]>("list_issue_statuses", {projectId:project_id}),
   createStatus: (input: Omit<Status,"id"|"ordering"> & {id?:string;ordering?:number}) => call<Status>("create_issue_status", {input}),
   updateStatus: (status:Status) => call<void>("update_issue_status", {status}), deleteStatus:(id:string)=>call<void>("delete_issue_status",{id}),
@@ -38,5 +45,7 @@ export const planningApi = {
   sprints:(board_id?:string)=>call<Sprint[]>("list_sprints",{boardId:board_id}), createSprint:(input:Omit<Sprint,"id"|"state"|"archived">&{id?:string})=>call<Sprint>("create_sprint",{input}), launchSprint:(id:string)=>call<void>("launch_sprint",{id}), closeSprint:(id:string)=>call<void>("close_sprint",{id}), deleteSprint:(id:string)=>call<void>("delete_sprint",{id}), swimlanes:(board_id:string,sprint_id?:string)=>call<Swimlane[]>("list_swimlanes",{boardId:board_id,sprintId:sprint_id}), saveSwimlane:(input:Omit<Swimlane,"id"|"ordering">&{id?:string;ordering?:number})=>call<Swimlane>("save_swimlane",{input}), deleteSwimlane:(id:string)=>call<void>("delete_swimlane",{id}),
   tags:(project_id:string)=>call<PlanningTag[]>("list_planning_tags",{projectId:project_id}), saveTag:(input:Omit<PlanningTag,"id">&{id?:string})=>call<PlanningTag>("save_planning_tag",{input}), setTags:(issue_id:string,tag_ids:string[])=>call<void>("set_issue_tags",{issueId:issue_id,tagIds:tag_ids}),
   checklists:(issue_id:string)=>call<Checklist[]>("list_checklists",{issueId:issue_id}), saveChecklist:(input:Omit<Checklist,"id"|"ordering">&{id?:string;ordering?:number})=>call<Checklist>("save_checklist",{input}), items:(checklist_id:string)=>call<ChecklistItem[]>("list_checklist_items",{checklistId:checklist_id}), saveItem:(input:Omit<ChecklistItem,"id"|"ordering">&{id?:string;ordering?:number})=>call<ChecklistItem>("save_checklist_item",{input}), toggleItem:(id:string,item_done:boolean)=>call<void>("toggle_checklist_item",{id,itemDone:item_done}),
-  time:(issue_id:string)=>call<TimeEntry[]>("list_time_tracking_entries",{issueId:issue_id}), saveTime:(input:Omit<TimeEntry,"id">&{id?:string})=>call<TimeEntry>("save_time_tracking_entry",{input}), total:(issue_id:string)=>call<number>("issue_time_total",{issueId:issue_id}), addChild:(parent_id:string,child_id:string)=>call<void>("add_issue_child",{parentId:parent_id,childId:child_id}),
+  attachments:(issue_id:string)=>call<IssueAttachment[]>("list_issue_attachments",{issueId:issue_id}), addAttachment:(issue_id:string,attachment:NewIssueAttachment)=>call<IssueAttachment>("add_issue_attachment",{issueId:issue_id,attachment}), deleteAttachment:(id:string)=>call<void>("delete_issue_attachment",{id}), comments:(issue_id:string)=>call<IssueComment[]>("list_issue_comments",{issueId:issue_id}), addComment:(input:NewIssueComment)=>call<IssueComment>("create_issue_comment",{input}), activities:(issue_id:string)=>call<IssueActivity[]>("list_issue_activities",{issueId:issue_id}),
+trackerLinks:(issue_id:string)=>call<TrackerLink[]>("list_issue_tracker_links",{issueId:issue_id}), addTrackerLink:(input:NewTrackerLink)=>call<TrackerLink>("add_issue_tracker_link",{input}), removeTrackerLink:(id:string)=>call<void>("remove_issue_tracker_link",{id}),
+time:(issue_id:string)=>call<TimeEntry[]>("list_time_tracking_entries",{issueId:issue_id}), saveTime:(input:Omit<TimeEntry,"id">&{id?:string})=>call<TimeEntry>("save_time_tracking_entry",{input}), total:(issue_id:string)=>call<number>("issue_time_total",{issueId:issue_id}), addChild:(parent_id:string,child_id:string)=>call<void>("add_issue_child",{parentId:parent_id,childId:child_id}),
 };

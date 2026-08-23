@@ -11,6 +11,7 @@ import {
   type ChannelContentType,
   type ChannelSummary,
   type MentionView,
+  type ChannelNotificationPreference,
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
@@ -73,6 +74,7 @@ export default function Chat() {
   const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
   );
+  createEffect(() => { const id = actingProfileId(); if (id) void chatApi.privateFeed(id).then(refetchChannels).catch(fail); });
   const grouped = () => {
     const groups: Record<string, ChannelSummary[]> = { public: [], private: [], dm: [], "entity-bound": [] };
     for (const c of channels() ?? []) (groups[c.content_type] ??= []).push(c);
@@ -90,6 +92,9 @@ export default function Chat() {
     if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  const preferenceKey = () => { const profile_id=actingProfileId(), channel_id=activeChannelId(); return profile_id&&channel_id ? {profile_id,channel_id} : null; };
+  const [notificationPreference, { refetch: refetchNotificationPreference }] = createResource(preferenceKey, key => chatApi.channelNotificationPreference(key.profile_id, key.channel_id));
+  const updateNotificationPreference = async (patch: Partial<ChannelNotificationPreference>) => { const current=notificationPreference(); if (!current) return; try { await chatApi.saveChannelNotificationPreference({...current,...patch}); await refetchNotificationPreference(); } catch (e) { fail(e); } };
   useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
@@ -487,8 +492,12 @@ export default function Chat() {
     return profiles()?.find((p) => p.id === id)?.display_name ?? id;
   }
 
+  function absenceCard(text: string) {
+    try { const card = JSON.parse(text) as { profile_id:string; date_from:string; date_to:string; availability:string; action:string }; return card; } catch { return null; }
+  }
   function renderMessage(m: MessageView, inThread: boolean) {
     const mine = () => m.author_id === actingProfileId();
+    const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
     return (
       <div class="message-row">
         <Show
@@ -502,7 +511,9 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
-              <div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>
+              <Show when={card()} fallback={<div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>}>
+                {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
+              </Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
@@ -530,7 +541,7 @@ export default function Chat() {
           </div>
         </Show>
 
-        <div class="reaction-row">
+        <Show when={!activeChannel()?.read_only}><div class="reaction-row">
           <For each={m.reactions}>
             {(r) => (
               <span
@@ -551,9 +562,9 @@ export default function Chat() {
               )}
             </For>
           </span>
-        </div>
+        </div></Show>
 
-        <div class="message-actions">
+        <Show when={!activeChannel()?.read_only}><div class="message-actions">
           <Show when={mine()}>
             <button class="ghost small" onClick={() => startEdit(m)}>
               edit
@@ -567,7 +578,7 @@ export default function Chat() {
               reply in thread
             </button>
           </Show>
-        </div>
+        </div></Show>
 
         <Show when={!inThread && m.reply_count > 0}>
           <div class="thread-badge" onClick={() => setThreadRootId(m.id)}>
@@ -697,9 +708,8 @@ export default function Chat() {
                 <span class="mention-badge">{unreadMentions().length}</span>
               </Show>
             </button>
-            <button class="ghost small" onClick={() => setShowMembers((v) => !v)}>
-              members ({members()?.length ?? 0})
-            </button>
+            <Show when={notificationPreference()}>{pref => <details class="chat-notification-settings"><summary>Notifications</summary><label><input type="checkbox" checked={pref().email_enabled} onChange={e=>void updateNotificationPreference({email_enabled:e.currentTarget.checked})}/> Email</label><label><input type="checkbox" checked={pref().push_enabled} onChange={e=>void updateNotificationPreference({push_enabled:e.currentTarget.checked})}/> Push</label><label>Threads <select value={pref().thread_scope} onChange={e=>void updateNotificationPreference({thread_scope:e.currentTarget.value as ChannelNotificationPreference["thread_scope"]})}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></details>}</Show>
+            <Show when={!activeChannel()?.read_only}><button class="ghost small" onClick={() => setShowMembers((v) => !v)}>members ({members()?.length ?? 0})</button></Show>
           </div>
         </header>
 
@@ -726,7 +736,7 @@ export default function Chat() {
           </Show>
         </div>
 
-        <Show when={activeChannelId()}>
+        <Show when={activeChannelId() && !activeChannel()?.read_only} fallback={<Show when={activeChannelId() && activeChannel()?.read_only}><p class="hint pad">This private feed is read-only. Notifications arrive here automatically.</p></Show>}>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"

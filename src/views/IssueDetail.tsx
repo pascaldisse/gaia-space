@@ -1,7 +1,8 @@
 import { createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Checklist, type ChecklistItem, type Issue, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
+import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry, type TrackerLink } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
+import { linkEntity } from "../router";
 import "./IssueDetail.css";
 
 /** An issue IS the card: title, description, assignee, due date, status,
@@ -9,6 +10,8 @@ import "./IssueDetail.css";
  *  used by the board and by any other view that opens an issue. */
 export default function IssueDetail(props: { issueId: string; statuses?: Status[]; onChanged?: () => void; onClose?: () => void }) {
   const [error, setError] = createSignal("");
+const [transfer, setTransfer] = createSignal<"clone" | "move">();
+const [targetProjectId, setTargetProjectId] = createSignal("");
   // A sub-item IS an issue: opening one shows this same surface, with a way back.
   const [openId, setOpenId] = createSignal<string>();
   const [trail, setTrail] = createSignal<{ id: string; label: string }[]>([]);
@@ -20,7 +23,7 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   // The owner (or an admin) may bring somebody onto the project by assigning
   // them; everybody else picks from the people already on it.
-  const mayAdmit = () => { const p = projects()?.find(x => x.id === issue()?.project_id); return currentUser()?.role === "admin" || (!!p && p.created_by === profileId()); };
+  const mayAdmit = () => { const p = projects()?.find(x => x.id === issue()?.project_id); return currentUser()?.role === "GlobalAdmin" || (!!p && p.created_by === profileId()); };
   const candidates = () => (profiles() ?? []).filter(p => !p.archived && !assignees().includes(p.id) && (mayAdmit() || (members() ?? []).includes(p.id)));
   const assignees = () => issue()?.assignee_ids ?? [];
   const setAssignees = async (ids: string[]) => {
@@ -37,6 +40,24 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const [workDate, setWorkDate] = createSignal(new Date().toISOString().slice(0, 10));
   const [workDescription, setWorkDescription] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
+  const [commentBody, setCommentBody] = createSignal("");
+  const [linkKind, setLinkKind] = createSignal<TrackerLink["target_kind"]>("EXTERNAL"); const [linkTarget, setLinkTarget] = createSignal(""); const [linkTitle, setLinkTitle] = createSignal("");
+  const addTrackerLink = async () => { const issue_id=currentId(),target=linkTarget().trim(); if(!issue_id||!target)return; const input=linkKind()==="EXTERNAL"?{issue_id,target_kind:"EXTERNAL" as const,target_id:null,url:target,title:linkTitle().trim()||null}:{issue_id,target_kind:linkKind(),target_id:target,url:null,title:linkTitle().trim()||null};try{await planningApi.addTrackerLink(input);setLinkTarget("");setLinkTitle("");await refetch();props.onChanged?.()}catch(reason){setError(humanError(reason))} };
+  const openTrackerLink=(link:TrackerLink)=>{if(link.target_kind==="ISSUE"&&link.target_id)linkEntity("issue",link.target_id,{},true);if(link.target_kind==="REVIEW"&&link.target_id)linkEntity("review",link.target_id,{},true)};
+  const removeTrackerLink=async(link:TrackerLink)=>{try{await planningApi.removeTrackerLink(link.id);await refetch();props.onChanged?.()}catch(reason){setError(humanError(reason))}};
+  const addComment = async () => { const issue_id = currentId(); const body = commentBody().trim(); if (!issue_id || !body) return; try { await planningApi.addComment({ issue_id, author_id: profileId() || null, body }); setCommentBody(""); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
+const addAttachments = async (files: FileList | null) => {
+const id = currentId(); if (!id || !files?.length) return;
+try {
+for (const file of [...files]) {
+if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} exceeds the 10 MiB attachment limit`);
+const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`)); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+await planningApi.addAttachment(id, { id: `issue-attachment-${crypto.randomUUID()}`, file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
+}
+await refetch(); props.onChanged?.();
+} catch (reason) { setError(humanError(reason)); }
+};
+const removeAttachment = async (attachment: IssueAttachment) => { try { await planningApi.deleteAttachment(attachment.id); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
   const [availableTags, { refetch: reloadTags }] = createResource(() => issue()?.project_id, id => id ? planningApi.tags(id) : Promise.resolve([]));
   const [timeEntries, { refetch: reloadTimeEntries }] = createResource(currentId, id => id ? planningApi.time(id) : Promise.resolve([]));
   // A sub-item is a real issue in the same project, linked PARENT_CHILD — so it
@@ -54,6 +75,8 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const nameOf = (id: string | null) => { if (!id) return "Unassigned"; const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
   const patch = (change: Partial<Issue>) => { const current = issue(); if (current) setDraft({ ...current, ...change }); };
   const save = async () => { const current = issue(); if (!current) return; try { await planningApi.updateIssue(current); setDraft(undefined); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
+const openTransfer = (action: "clone" | "move") => { setTargetProjectId(issue()?.project_id ?? ""); setTransfer(action); };
+const transferIssue = async () => { const current = issue(), target = targetProjectId(); const action = transfer(); if (!current || !action || !target || target === current.project_id) return; try { const next = action === "clone" ? await planningApi.cloneIssue(current.id, target) : await planningApi.moveIssueToProject(current.id, target); setTransfer(undefined); props.onChanged?.(); linkEntity("issue", next.id, { projectId: next.project_id }, true); } catch (reason) { setError(humanError(reason)); } };
   const addChecklist = async () => { const title = checklistTitle().trim(); const id = currentId(); if (!id || !title) return; try { await planningApi.saveChecklist({ issue_id: id, title }); setChecklistTitle(""); await refetch(); } catch (reason) { setError(humanError(reason)); } };
   const currentTags = () => detail()?.tags ?? [];
   const setTags = async (next: PlanningTag[]) => { const item = issue(); if (!item) return; try { await planningApi.setTags(item.id, next.map(tag => tag.id)); await refetch(); await reloadTags(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
@@ -77,7 +100,9 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           <Show when={trail().length}><button class="ghost idp-back" onClick={back}>← {trail()[trail().length - 1].label}</button></Show>
           <span class="idp-number">#{item().number}</span>
           <div class="idp-head-actions">
-            <button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
+            <button class="ghost" onClick={() => openTransfer("clone")}>Clone…</button>
+<button class="ghost" onClick={() => openTransfer("move")}>Move…</button>
+<button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
             <Show when={props.onClose}><button class="ghost" aria-label="Close issue" onClick={() => props.onClose?.()}>×</button></Show>
           </div>
         </header>
@@ -118,6 +143,33 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
           </label>
         </div>
 
+        <section class="idp-section">
+          <h3>Comments <small>{detail()?.comments?.length ?? 0}</small></h3>
+          <Show when={detail()?.comments?.length} fallback={<p class="hint">No comments yet.</p>}><ul class="issue-comments"><For each={detail()?.comments}>{comment => <li><strong>{nameOf(comment.author_id)}</strong><time>{new Date(comment.created_at * 1000).toLocaleString()}</time><p>{comment.body}</p></li>}</For></ul></Show>
+          <div class="comment-form"><textarea aria-label="New comment" placeholder="Write a comment…" value={commentBody()} onInput={event => setCommentBody(event.currentTarget.value)} /><button type="button" onClick={addComment}>Comment</button></div>
+          <h3>Activity</h3>
+          <Show when={detail()?.activities?.length} fallback={<p class="hint">No activity recorded yet.</p>}><ul class="issue-activity"><For each={detail()?.activities}>{activity => <ActivityRow activity={activity} nameOf={nameOf} />}</For></ul></Show>
+        </section>
+        <section class="idp-section">
+          <h3>Attachments</h3>
+          <Show when={detail()?.attachments?.length}>
+            <ul class="idp-attachments">
+              <For each={detail()?.attachments}>{attachment => (
+                <li class="idp-attachment-row">
+                  <Show when={attachment.mime_type.startsWith("image/")}><img class="idp-attachment-preview" src={attachment.data_url} alt={attachment.file_name} /></Show>
+                  <a href={attachment.data_url} download={attachment.file_name}>{attachment.file_name}</a>
+                  <span class="muted">{Math.max(1, Math.round(attachment.byte_length / 1024))} KiB</span>
+                  <button type="button" onClick={() => void removeAttachment(attachment)}>Remove</button>
+                </li>
+              )}</For>
+            </ul>
+          </Show>
+          <div class="inline-form">
+            <input type="file" multiple onChange={e => { void addAttachments(e.currentTarget.files); e.currentTarget.value = ""; }} />
+          </div>
+        </section>
+
+        <section class="idp-section"><h3>Tracker links</h3><Show when={detail()?.tracker_links?.length} fallback={<p class="hint">No linked issues, merge requests, or external trackers.</p>}><ul class="idp-attachments"><For each={detail()?.tracker_links}>{link=><li class="idp-attachment-row"><strong>{link.target_kind}</strong><Show when={link.url} fallback={<button type="button" class="ghost" onClick={()=>openTrackerLink(link)}>{link.title||link.target_id}</button>}>{url=><a href={url()} target="_blank" rel="noreferrer">{link.title||url()}</a>}</Show><button type="button" onClick={()=>void removeTrackerLink(link)}>Remove</button></li>}</For></ul></Show><div class="inline-form"><select aria-label="Tracker link type" value={linkKind()} onChange={e=>setLinkKind(e.currentTarget.value as TrackerLink["target_kind"])}><option value="EXTERNAL">External URL</option><option value="ISSUE">Issue ID</option><option value="REVIEW">Merge request ID</option></select><input aria-label="Tracker link target" placeholder={linkKind()==="EXTERNAL"?"https://tracker.example/PROJ-1":"Record ID"} value={linkTarget()} onInput={e=>setLinkTarget(e.currentTarget.value)}/><input aria-label="Tracker link title" placeholder="Label (optional)" value={linkTitle()} onInput={e=>setLinkTitle(e.currentTarget.value)}/><button type="button" onClick={addTrackerLink}>Link</button></div></section>
         <section class="idp-section">
           <h3>To-do lists</h3>
           <For each={detail()?.checklists}>{list => <ChecklistBlock list={list} />}</For>
@@ -160,11 +212,13 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
         </section>
 
         <p class="idp-owner">Assigned to {assignees().length ? assignees().map(nameOf).join(", ") : "nobody"}</p>
+<Show when={transfer()}>{action => <div class="issue-transfer-backdrop" role="presentation" onClick={() => setTransfer(undefined)}><section class="issue-transfer-dialog" role="dialog" aria-modal="true" aria-label={`${action()} issue`} onClick={event => event.stopPropagation()}><h3>{action() === "clone" ? "Clone issue" : "Move issue"}</h3><label>Destination project<select value={targetProjectId()} onChange={event => setTargetProjectId(event.currentTarget.value)}><For each={(projects() ?? []).filter(project => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></label><div class="planning-actions"><button type="button" class="ghost" onClick={() => setTransfer(undefined)}>Cancel</button><button type="button" class="primary" disabled={!targetProjectId() || targetProjectId() === item().project_id} onClick={() => void transferIssue()}>{action() === "clone" ? "Clone" : "Move"}</button></div></section></div>}</Show>
       </>
     }</Show>
   </aside>;
 }
 
+function ActivityRow(props: { activity: IssueActivity; nameOf: (id: string | null) => string }) { return <li><strong>{props.nameOf(props.activity.actor_id)}</strong><span>{props.activity.detail || props.activity.activity_type}</span><time>{new Date(props.activity.created_at * 1000).toLocaleString()}</time></li>; }
 function TimeEntryRow(props: { entry: TimeEntry; nameOf: (id: string | null) => string }) {
   return <li><time>{props.entry.entry_date}</time><strong>{props.entry.duration_minutes} min</strong><span>{props.entry.description || "No description"}</span><small>{props.nameOf(props.entry.profile_id)}</small></li>;
 }
