@@ -1874,6 +1874,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "update_message"
         | "update_pipeline_script"
         | "update_profile" => CommandPolicy::Session,
+        // Event-driven pipeline entry points. Same session gate as the rest of the
+        // pipelines surface; without these they fall to the catch-all and 403 for
+        // every caller, admins included.
+        "trigger_pipeline_event" | "due_scheduled_runs" => CommandPolicy::Session,
         "update_meeting" => CommandPolicy::MeetingWrite,
         "update_quality_gate_rule"
         | "update_review"
