@@ -45,6 +45,12 @@ pub struct Document {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentDiscussion {
+    pub document_id: String,
+    pub channel_id: String,
+    pub meeting_id: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DocVersion {
     pub id: String,
     pub document_id: String,
@@ -64,6 +70,12 @@ pub struct DocumentAccessRecipient {
     pub access_level: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DocumentSearchResult {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+}
 fn default_body_format() -> String {
     "text".into()
 }
@@ -156,6 +168,30 @@ pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
     rows
 }
 
+/// Searches titles and bodies inside exactly one KB book. The caller supplies a book
+/// id, never a free container scope, so result navigation cannot escape the book.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn search_book_documents(book_id: String, query: String) -> Result<Vec<DocumentSearchResult>> {
+    let term = query.trim();
+    if term.is_empty() {
+        return Ok(Vec::new());
+    }
+    let c = db::conn()?;
+    let pattern = format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
+    let mut s = c.prepare("SELECT id,title,substr(coalesce(body,''),1,180) FROM documents WHERE container_type='kb' AND container_id=?1 AND archived=0 AND (title LIKE ?2 ESCAPE '\\' OR coalesce(body,'') LIKE ?2 ESCAPE '\\') ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(rusqlite::params![book_id, pattern], |r| {
+            Ok(DocumentSearchResult {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                snippet: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
     let c = db::conn()?;
     c.query_row(
@@ -282,26 +318,106 @@ pub fn get_document(id: String) -> Result<Option<Document>> {
     Ok(list_documents()?.into_iter().find(|v| v.id == id))
 }
 
+/// The one canonical root per project. It is deterministic, so concurrent first
+/// opens race safely through `INSERT OR IGNORE` without requiring a new table.
+fn project_root_id(project_id: &str) -> String {
+    format!("project-doc-root-{project_id}")
+}
+
+fn validate_document_placement(
+    c: &rusqlite::Connection,
+    container_type: &str,
+    container_id: Option<&str>,
+    folder_id: Option<&str>,
+) -> Result<()> {
+    let container_id = container_id.filter(|id| !id.trim().is_empty());
+    if container_type == "project" && folder_id.is_none() {
+        return Err("project documents must be filed in a project root folder".into());
+    }
+    if let Some(folder_id) = folder_id {
+        let container_id =
+            container_id.ok_or_else(|| "a foldered document needs a container".to_string())?;
+        let found: bool = c.query_row(
+"SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1 AND container_type=?2 AND container_id=?3)",
+rusqlite::params![folder_id, container_type, container_id],
+|row| row.get(0),
+).map_err(|e| e.to_string())?;
+        if !found {
+            return Err("document folder does not belong to its container".into());
+        }
+    }
+    Ok(())
+}
+
+fn ensure_project_document_root_tx(
+    c: &mut rusqlite::Connection,
+    project_id: &str,
+) -> Result<DocumentFolder> {
+    if project_id.trim().is_empty() {
+        return Err("project id is required".into());
+    }
+    let root_id = project_root_id(project_id);
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let project_exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1)",
+            [project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !project_exists {
+        return Err("project not found".into());
+    }
+    tx.execute(
+"INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'project',?2,NULL,'Documents',NULL,0)",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    // A pre-prerequisite project may have direct rows. Preserve them by making this
+    // newly canonical root their parent rather than leaving content inaccessible.
+    tx.execute(
+"UPDATE document_folders SET parent_id=?1 WHERE container_type='project' AND container_id=?2 AND parent_id IS NULL AND id<>?1",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    tx.execute(
+"UPDATE documents SET folder_id=?1 WHERE container_type='project' AND container_id=?2 AND folder_id IS NULL",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    c.query_row(
+"SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
+[root_id], row_to_folder,
+).map_err(|e| e.to_string())
+}
+
+/// Creates/selects the project's required root folder and repairs legacy direct rows.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_document(document: Document) -> Result<()> {
-    let c = db::conn()?;
+pub fn ensure_project_document_root(project_id: String) -> Result<DocumentFolder> {
+    let mut c = db::conn()?;
+    ensure_project_document_root_tx(&mut c, &project_id)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_document(mut document: Document) -> Result<()> {
+    let mut c = db::conn()?;
+    // Callers from an older client may still submit `folder_id = null`. The row never
+    // stays direct: select/create the project root first, then persist into that folder.
+    if document.container_type == "project" && document.folder_id.is_none() {
+        let project_id = document
+            .container_id
+            .as_deref()
+            .ok_or_else(|| "project documents need a project id".to_string())?;
+        document.folder_id = Some(ensure_project_document_root_tx(&mut c, project_id)?.id);
+    }
+    validate_document_placement(
+        &c,
+        &document.container_type,
+        document.container_id.as_deref(),
+        document.folder_id.as_deref(),
+    )?;
     c.execute(
-        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-        rusqlite::params![
-            document.id,
-            document.container_type,
-            document.container_id,
-            document.folder_id,
-            document.doc_type,
-            document.title,
-            document.body,
-            document.version,
-            document.archived,
-            document.created_by
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    // seed initial version snapshot so history is never empty for a saved document
+"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by],
+).map_err(|e| e.to_string())?;
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
         rusqlite::params![
@@ -315,13 +431,18 @@ pub fn create_document(document: Document) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-
 /// Metadata-only update: title, container/folder placement (move), doc_type, archived.
 /// Does NOT touch body/version — content saves go through `save_document` so every
 /// content change is versioned.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document(document: Document) -> Result<()> {
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &document.container_type,
+        document.container_id.as_deref(),
+        document.folder_id.as_deref(),
+    )?;
     c.execute(
         "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,body_format=?6,title=?7,archived=?8,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![
@@ -348,6 +469,12 @@ pub fn move_document(
     folder_id: Option<String>,
 ) -> Result<()> {
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &container_type,
+        container_id.as_deref(),
+        folder_id.as_deref(),
+    )?;
     c.execute(
         "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![id, container_type, container_id, folder_id],
@@ -432,6 +559,90 @@ fn document_event(event_type: &str, doc: &Document) {
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
         eprintln!("webhook fan-out for {event_type} failed: {e}");
     }
+}
+
+fn discussion_row(r: &rusqlite::Row) -> rusqlite::Result<DocumentDiscussion> {
+    Ok(DocumentDiscussion {
+        document_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        meeting_id: r.get(2)?,
+    })
+}
+fn document_discussion_on(
+    c: &rusqlite::Connection,
+    document_id: &str,
+) -> Result<Option<DocumentDiscussion>> {
+    c.query_row(
+        "SELECT document_id,channel_id,meeting_id FROM document_discussions WHERE document_id=?1",
+        [document_id],
+        discussion_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+fn attach_document_discussion_on(
+    c: &rusqlite::Connection,
+    document_id: &str,
+    meeting_id: Option<&str>,
+) -> Result<DocumentDiscussion> {
+    let title: String = c
+        .query_row(
+            "SELECT title FROM documents WHERE id=?1",
+            [document_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "document not found".to_string())?;
+    let channel_id = format!("entity:document:{document_id}");
+    if let Some(meeting_id) = meeting_id {
+        let bound_channel: Option<String> = c
+            .query_row(
+                "SELECT channel_id FROM meetings WHERE id=?1 AND archived=0",
+                [meeting_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "meeting not found".to_string())?;
+        if bound_channel.as_deref().is_some_and(|id| id != channel_id) {
+            return Err("meeting already has a different discussion channel".into());
+        }
+    }
+    let channel = crate::chat::create_entity_channel_impl(
+        c,
+        "document",
+        document_id,
+        Some(format!("{title} discussion")),
+    )?;
+    let previous = document_discussion_on(c, document_id)?;
+    c.execute("INSERT INTO document_discussions(document_id,channel_id,meeting_id) VALUES(?1,?2,?3) ON CONFLICT(document_id) DO UPDATE SET meeting_id=excluded.meeting_id", rusqlite::params![document_id, channel.id, meeting_id]).map_err(|e| e.to_string())?;
+    if let Some(previous_meeting_id) = previous.and_then(|item| item.meeting_id) {
+        if Some(previous_meeting_id.as_str()) != meeting_id {
+            c.execute(
+                "UPDATE meetings SET channel_id=NULL WHERE id=?1 AND channel_id=?2",
+                rusqlite::params![previous_meeting_id, channel.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    if let Some(meeting_id) = meeting_id {
+        c.execute(
+            "UPDATE meetings SET channel_id=?2 WHERE id=?1",
+            rusqlite::params![meeting_id, channel.id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    document_discussion_on(c, document_id)?.ok_or_else(|| "discussion missing after attach".into())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn attach_document_discussion(
+    document_id: String,
+    meeting_id: Option<String>,
+) -> Result<DocumentDiscussion> {
+    attach_document_discussion_on(&db::conn()?, &document_id, meeting_id.as_deref())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_document_discussion(document_id: String) -> Result<Option<DocumentDiscussion>> {
+    document_discussion_on(&db::conn()?, &document_id)
 }
 
 fn row_to_doc_version(r: &rusqlite::Row) -> rusqlite::Result<DocVersion> {
@@ -758,12 +969,12 @@ pub fn update_book_access(
 
 // ---------- local-folder / Confluence-export import ----------
 // A Confluence space export and a plain notes directory are the same shape on disk: a
-// tree of directories holding .md/.html files. Import mirrors that tree into
+// tree of directories holding .md/.txt files. Import mirrors that tree into
 // document_folders and files each page as an ordinary document, so imported pages get
 // versioning, permissions and search for free.
 
 fn default_import_extensions() -> Vec<String> {
-    vec!["md".into()]
+    vec!["md".into(), "txt".into()]
 }
 fn default_max_file_bytes() -> u64 {
     2 * 1024 * 1024
@@ -901,7 +1112,7 @@ fn imported_title(raw: &str, text: &str, stem: &str) -> String {
     stem.to_string()
 }
 
-/// Imports a directory tree: Markdown pages stay editable; all other files stay files.
+/// Imports a directory tree: Markdown and plain-text pages stay editable; all other files stay files.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn import_document_folder(request: DocumentImportRequest) -> Result<DocumentImportSummary> {
     let c = db::conn()?;
@@ -913,6 +1124,12 @@ fn import_document_folder_tx(
     request: DocumentImportRequest,
 ) -> Result<DocumentImportSummary> {
     let root = std::path::PathBuf::from(&request.source_path);
+    validate_document_placement(
+        c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.parent_folder_id.as_deref(),
+    )?;
     if !root.is_dir() {
         return Err(format!("'{}' is not a directory", request.source_path));
     }
@@ -1217,6 +1434,12 @@ pub fn upload_document_file_bytes(
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "filename must be a plain file name".to_string())?;
     let c = db::conn()?;
+    validate_document_placement(
+        &c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.folder_id.as_deref(),
+    )?;
     let store = upload_dir()?;
     let document_id = generated_id("doc");
     let mime = mime_for(&filename);
@@ -1272,6 +1495,12 @@ pub(crate) fn upload_document_file_tx(
     store: &std::path::Path,
     request: UploadDocumentFileRequest,
 ) -> Result<DocumentFile> {
+    validate_document_placement(
+        c,
+        &request.container_type,
+        request.container_id.as_deref(),
+        request.folder_id.as_deref(),
+    )?;
     let source = std::path::PathBuf::from(&request.source_path);
     let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
@@ -1451,6 +1680,53 @@ mod tests {
     }
 
     #[test]
+    fn document_discussion_binds_and_rebinds_the_meeting_channel() {
+        let c = test_conn();
+        c.execute("INSERT INTO documents(id,container_type,doc_type,title) VALUES('d1','my-docs','text','Article')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,doc_type,title) VALUES('d2','my-docs','text','Other')", []).unwrap();
+        for id in ["m1", "m2"] {
+            c.execute(
+                "INSERT INTO meetings(id,title,starts_at,ends_at) VALUES(?1,'Meeting',1,2)",
+                [id],
+            )
+            .unwrap();
+        }
+
+        let first = attach_document_discussion_on(&c, "d1", Some("m1")).unwrap();
+        assert_eq!(first.channel_id, "entity:document:d1");
+        let m1: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(m1.as_deref(), Some("entity:document:d1"));
+
+        let rebound = attach_document_discussion_on(&c, "d1", Some("m2")).unwrap();
+        assert_eq!(rebound.meeting_id.as_deref(), Some("m2"));
+        let m1: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let m2: Option<String> = c
+            .query_row("SELECT channel_id FROM meetings WHERE id='m2'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(m1, None);
+        assert_eq!(m2.as_deref(), Some("entity:document:d1"));
+        assert!(attach_document_discussion_on(&c, "d2", Some("m2")).is_err());
+        let channels: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM channels WHERE id='entity:document:d2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(channels, 0, "a rejected binding must not create a channel");
+    }
+
+    #[test]
     fn publishing_mints_a_unique_slug_and_only_published_docs_resolve_publicly() {
         let c = test_conn();
         c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body) VALUES('d1','my-docs','p1','text','My First Page!','a')", []).unwrap();
@@ -1518,8 +1794,38 @@ mod tests {
     }
 
     #[test]
-    fn import_mirrors_tree_and_preserves_non_markdown_as_files() {
-        let c = test_conn();
+    fn project_root_is_idempotent_repairs_legacy_rows_and_blocks_direct_documents() {
+        let mut c = test_conn();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('legacy-folder','project','demo-project',NULL,'Legacy')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title) VALUES('legacy-doc','project','demo-project',NULL,'text','Legacy doc')", []).unwrap();
+        let root = ensure_project_document_root_tx(&mut c, "demo-project").expect("create root");
+        let same = ensure_project_document_root_tx(&mut c, "demo-project").expect("reuse root");
+        assert_eq!(root.id, same.id);
+        let legacy_parent: String = c
+            .query_row(
+                "SELECT parent_id FROM document_folders WHERE id='legacy-folder'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let legacy_doc_folder: String = c
+            .query_row(
+                "SELECT folder_id FROM documents WHERE id='legacy-doc'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_parent, root.id);
+        assert_eq!(legacy_doc_folder, root.id);
+        assert!(validate_document_placement(&c, "project", Some("demo-project"), None).is_err());
+        validate_document_placement(&c, "project", Some("demo-project"), Some(&root.id))
+            .expect("root accepts document");
+    }
+
+    #[test]
+    fn import_mirrors_tree_and_classifies_markdown_and_text_pages() {
+        let mut c = test_conn();
+        let root = ensure_project_document_root_tx(&mut c, "demo-project").expect("project root");
         let dir = import_dir("docs-import");
         std::fs::write(dir.join("root.md"), "# Root Page\n\nbody\n").unwrap();
         std::fs::write(dir.join("skip.txt"), "not imported").unwrap();
@@ -1537,7 +1843,7 @@ mod tests {
                 source_path: dir.to_string_lossy().to_string(),
                 container_type: "project".into(),
                 container_id: Some("demo-project".into()),
-                parent_folder_id: None,
+                parent_folder_id: Some(root.id.clone()),
                 created_by: None,
                 extensions: default_import_extensions(),
                 max_file_bytes: default_max_file_bytes(),
@@ -1560,14 +1866,14 @@ mod tests {
             )
             .expect("html file imported");
         assert_eq!(html_type, "file");
-        let txt_type: String = c
+        let (txt_type, txt_format): (String, String) = c
             .query_row(
-                "SELECT doc_type FROM documents WHERE title='skip.txt'",
+                "SELECT doc_type,body_format FROM documents WHERE title='skip'",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .expect("text file imported");
-        assert_eq!(txt_type, "file");
+            .expect("text page imported");
+        assert_eq!((txt_type.as_str(), txt_format.as_str()), ("text", "text"));
 
         // Markdown heading wins over the file stem; the tree is mirrored, not flattened.
         let deep_folder: String = c
@@ -1580,8 +1886,8 @@ mod tests {
         assert_eq!(deep_folder, "child");
         let root_titles: i64 = c
             .query_row(
-                "SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id IS NULL",
-                [],
+                "SELECT COUNT(*) FROM documents WHERE title='Root Page' AND folder_id=?1",
+                [&root.id],
                 |r| r.get(0),
             )
             .unwrap();

@@ -6,7 +6,7 @@ import "./Admin.css";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 
 const blankForm = (): CreateUserInput & { profile_id: string } => ({
-  username: "", display_name: "", password: "", role: "member", profile_id: "",
+  username: "", display_name: "", password: "", role: "GlobalMember", profile_id: "",
 });
 
 /** Admin-only, web-mode-only: manage login accounts (separate from profiles). */

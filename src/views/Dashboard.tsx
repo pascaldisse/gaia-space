@@ -1,5 +1,6 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js";
-import { personalApi } from "../api/personal";
+import { personalApi, type Follow } from "../api/personal";
+import { platformApi } from "../api/platform";
 import { calendarEntries, dateKey } from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
 import { ProfilePicker } from "../components/Pickers";
@@ -43,6 +44,11 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
     profileId,
     (id) => (id ? personalApi.dashboard(id) : Promise.resolve(undefined)),
   );
+  const [follows, { refetch: refetchFollows }] = createResource(profileId, id => id ? personalApi.follows(id) : Promise.resolve([]));
+  const [followProfiles] = createResource(platformApi.profiles);
+  const [followTeams] = createResource(platformApi.teams);
+  const followsSubject = (kind: Follow["subject_type"], id: string) => !!(follows() ?? []).find(f => f.subject_type === kind && f.subject_id === id);
+  const toggleFollow = async (subject_type: Follow["subject_type"], subject_id: string) => { const profile_id=profileId(); if (!profile_id) return; const existing=(follows() ?? []).find(f=>f.subject_type===subject_type&&f.subject_id===subject_id); try { if(existing) await personalApi.deleteFollow(existing); else await personalApi.saveFollow({profile_id,subject_type,subject_id}); await refetchFollows(); } catch(error) { setActionError(humanError(error)); } };
   const [calendar, { refetch: refetchCalendar }] = createResource(
     () => [profileId(), ...bounds()] as const,
     ([id, from, to, fromDay, toDay]) =>
@@ -160,7 +166,8 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
           </section>
           </Show>
 
-          <div class="dashboard-grid">
+          <section class="ov-section"><header><h2>Following</h2><span class="ov-count">{follows()?.length ?? 0}</span></header><div class="ov-cards"><p class="ov-empty">Follow people and teams to personalize your overview signals.</p><For each={(followProfiles() ?? []).filter(p => p.id !== profileId() && !p.archived).slice(0, 6)}>{person => <button class="ghost" aria-pressed={followsSubject("profile", person.id)} onClick={() => void toggleFollow("profile", person.id)}>{followsSubject("profile", person.id) ? "Following" : "Follow"} {person.display_name}</button>}</For><For each={(followTeams() ?? []).filter(team => !team.archived).slice(0, 6)}>{team => <button class="ghost" aria-pressed={followsSubject("team", team.id)} onClick={() => void toggleFollow("team", team.id)}>{followsSubject("team", team.id) ? "Following" : "Follow"} {team.name}</button>}</For></div></section>
+<div class="dashboard-grid">
             <Show when={widgetVisible("issues")}><DashboardSection title="Assigned issues" count={data().assigned_issues.length} empty="No issues assigned to you yet." target="Issues">
               <For each={data().assigned_issues}>{(issue) => <article class="ov-card"><strong class="ov-card-title">#{issue.number} {issue.title}</strong><Show when={issue.due_date}><span class="ov-tag due">Due {issue.due_date}</span></Show></article>}</For>
             </DashboardSection></Show>

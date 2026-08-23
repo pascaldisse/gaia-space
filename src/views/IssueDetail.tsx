@@ -21,7 +21,7 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   // The owner (or an admin) may bring somebody onto the project by assigning
   // them; everybody else picks from the people already on it.
-  const mayAdmit = () => { const p = projects()?.find(x => x.id === issue()?.project_id); return currentUser()?.role === "admin" || (!!p && p.created_by === profileId()); };
+  const mayAdmit = () => { const p = projects()?.find(x => x.id === issue()?.project_id); return currentUser()?.role === "GlobalAdmin" || (!!p && p.created_by === profileId()); };
   const candidates = () => (profiles() ?? []).filter(p => !p.archived && !assignees().includes(p.id) && (mayAdmit() || (members() ?? []).includes(p.id)));
   const assignees = () => issue()?.assignee_ids ?? [];
   const setAssignees = async (ids: string[]) => {

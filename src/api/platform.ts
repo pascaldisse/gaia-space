@@ -1,14 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type ProfileEmailStatus = { profile_id: string; status: "unverified" | "verified" | "bounced"; verified_at: number | null };
+export type MessengerContact = { id?: string; profile_id: string; contact_type: string; login: string; deep_link: string | null };
+export type Principal = { id: string; kind: "profile" | "application" | "external"; profile_id: string | null; label: string };
 export type Organization = { id:string; name:string; slogan:string|null; logo_id:string|null; timezone:string; onboarding_required:boolean; allow_domains_edit:boolean };
 export type OrgSettings = { org_id:string; available_right_codes:string[]; is_space_code:boolean; is_space_code_only:boolean };
 export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
+export type Location = { id:string; name:string; location_type:string; parent_id:string|null; timezone:string; work_schedule_json:string; channel_id:string|null; archived:boolean; equipment:string[] };
 export type Team = { id: string; name: string; description: string | null; parent_id: string | null; archived: boolean };
 export type TeamMembership = {
   id: string; profile_id: string; team_id: string; role_id: string | null; lead: boolean;
   manager_id: string | null; since_date: string | null; till_date: string | null; requires_approval: boolean; archived: boolean;
 };
+export type MembershipEditRequest = { id:string; membership_id:string; requested_by:string; patch_json:string; status:"PENDING"|"APPROVED"|"REJECTED"; approver_id:string|null; created_at:number; decided_at:number|null };
+export type ProjectRoleKind = "ADMIN" | "MEMBER" | "CUSTOM" | "EXTERNAL";
+export type ProjectRoleTemplate = { id:string; code:string; name:string; description:string|null; role_kind:ProjectRoleKind; archived:boolean };
+export type ProjectRole = { id:string; project_id:string; template_id:string|null; name:string; role_kind:ProjectRoleKind; archived:boolean };
+export type ProjectTeamRole = { project_id:string; team_id:string; project_role_id:string };
 export type Role = { id: string; name: string; description: string | null; parent_id: string | null; role_type: string; archived: boolean };
 export type Right = {
   id: string; code: string; title: string; description: string | null; right_type: string; right_group: string | null;
@@ -43,10 +52,19 @@ export const platformApi = {
   profiles: () => call<Profile[]>("list_profiles"),
   createProfile: (profile: Profile) => call<void>("create_profile", { profile }),
   updateProfile: (profile: Profile) => call<void>("update_profile", { profile }),
+getProfileEmailStatus: (profile_id: string) => call<ProfileEmailStatus>("get_profile_email_status", { profileId: profile_id }),
+setProfileEmailStatus: (value: ProfileEmailStatus) => call<void>("set_profile_email_status", { value }),
+messengerContacts: (profile_id: string) => call<MessengerContact[]>("list_messenger_contacts", { profileId: profile_id }),
+saveMessengerContact: (value: MessengerContact) => call<MessengerContact>("save_messenger_contact", { value }),
+principals: () => call<Principal[]>("list_principals"),
 
   memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
 addMemberLocation: (member_id: string, location: string, location_type: string) => call<MemberLocation>("add_member_location", { memberId: member_id, location, locationType: location_type }),
 removeMemberLocation: (id: string) => call<void>("remove_member_location", { id }),
+// Organization locations
+locations: () => call<Location[]>("list_locations"),
+saveLocation: (location: Location) => call<Location>("save_location", { location }),
+locationChannel: (location_id: string) => call<string|null>("location_channel", { locationId: location_id }),
 // Teams + memberships
   teams: () => call<Team[]>("list_teams"),
   createTeam: (input: { id?: string; name: string; description: string | null; parent_id: string | null }) =>
@@ -61,6 +79,25 @@ removeMemberLocation: (id: string) => call<void>("remove_member_location", { id 
   }) => call<TeamMembership>("add_team_membership", { input }),
   updateMembership: (membership: TeamMembership) => call<void>("update_team_membership", { membership }),
   removeMembership: (id: string) => call<void>("remove_team_membership", { id }),
+membershipEditRequests: (membership_id?: string) => call<MembershipEditRequest[]>("list_membership_edit_requests", { membershipId: membership_id ?? null }),
+requestMembershipEdit: (membership: TeamMembership, requested_by: string) => call<MembershipEditRequest>("request_membership_edit", { membership, requestedBy: requested_by }),
+decideMembershipEdit: (id: string, approver_id: string, approve: boolean) => call<MembershipEditRequest>("decide_membership_edit", { id, approverId: approver_id, approve }),
+
+  // Project role templates + per-project roles + team bindings (V92)
+  projectRoleTemplates: () => call<ProjectRoleTemplate[]>("list_project_role_templates"),
+  createProjectRoleTemplate: (input: { id?: string; code: string; name: string; description?: string | null; role_kind: ProjectRoleKind }) =>
+    call<ProjectRoleTemplate>("create_project_role_template", { input }),
+  archiveProjectRoleTemplate: (id: string, archived: boolean) => call<void>("archive_project_role_template", { id, archived }),
+  projectRoles: (project_id?: string) => call<ProjectRole[]>("list_project_roles", { projectId: project_id ?? null }),
+  /** Name and kind may be omitted only with a template: the server inherits them from it. */
+  createProjectRole: (input: { id?: string; project_id: string; template_id?: string | null; name?: string | null; role_kind?: ProjectRoleKind | null }) =>
+    call<ProjectRole>("create_project_role", { input }),
+  archiveProjectRole: (id: string, archived: boolean) => call<void>("archive_project_role", { id, archived }),
+  projectTeamRoles: (project_id?: string) => call<ProjectTeamRole[]>("list_project_team_roles", { projectId: project_id ?? null }),
+  assignProjectTeamRole: (project_id: string, team_id: string, project_role_id: string) =>
+    call<ProjectTeamRole>("assign_project_team_role", { projectId: project_id, teamId: team_id, projectRoleId: project_role_id }),
+  removeProjectTeamRole: (project_id: string, team_id: string, project_role_id: string) =>
+    call<void>("remove_project_team_role", { projectId: project_id, teamId: team_id, projectRoleId: project_role_id }),
 
   // Roles + rights
   roles: () => call<Role[]>("list_roles"),

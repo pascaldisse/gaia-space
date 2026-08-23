@@ -48,7 +48,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 62 · partial 180 · stub 4 · missing 110. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 87 · partial 183 · stub 4 · missing 82. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -71,16 +71,16 @@ Worst gaps: per-format typed detail models (Dart still generic) · retention/imm
 
 Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining formats in `src-tauri/src/package_registry.rs` — NuGet V3 (lower-cased id coordinates, service index, flat-container version list), PyPI (PEP 503 normalization, simple project page, distribution resolve), Composer (`packages.json` + `p2/{vendor}/{package}.json`), OCI distribution v2 (verb-driven name split, tagged manifest PUT/GET, tag list, referrers by `subject.digest`). Routes `/api/registry/{repo}/{nuget|pypi|composer|v2}/*` reuse the existing `registry_auth` seam. Retention gained a preview seam: `package_retention_candidates` returns the exact rows cleanup would delete with an `age`/`count`/`age+count` reason grouped per package name (previously grouped by parsing the row id — a real mis-grouping, now fixed), and `apply_package_retention` deletes that set through `delete_package_version` so payload files go too. CVE ledger gained `repository_vulnerability_report(repository_id, min_severity)` — repository-wide, severity-ranked, local ledger only (no scanner, no network). UI: Preview retention / Repository CVEs actions in `src/views/Packages.tsx`. Tests: `package_registry::tests::*` (6), `pipelines::tests::{retention_candidates_group_per_package_and_carry_a_reason,vulnerability_report_filters_by_severity_and_repository}`, `space-server::tests::format_registry_protocols_are_reachable_over_http` (publish→resolve per format + 401 on unauthenticated). No migration needed at w8 time; V60 was later consumed by feat/w9-caldav (CalDAV-owned VEVENTs). UNVERIFIED (updated w9): real `pip install` verified against a live server (scripts/registry_format_check.sh); dotnet/composer/docker CLIs absent on this machine — those formats curl-verified only. OCI blob (digest) addressing implemented in w9 (content-addressed store), 501 resolved.
 
-## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
-59 rows — done 10 · partial 32 · missing 17.
+## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ d287ca8)
+59 rows — done 18 · partial 33 · missing 8.
 Progress: CalDAV named-calendar discovery + VEVENT PUT/DELETE write-back landed (V60); Google exposure remains absent. · document sharing+KB permissions/search remains UNVERIFIED. · document importer (local/Confluence export: `.md` editable; all other files preserved) landed V71; publish/rich-types remain partial. · meeting rooms/equipment/external attendees.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
-32 rows — done 7 · partial 17 · missing 8.
+32 rows — done 12 · partial 19 · stub 0 · missing 1.
 Worst gaps: remaining operational right enforcement · org settings/multi-workspace · SSO/SAML external modules · OAuth consent UI depth.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
-54 rows — done 9 · partial 26 · stub 2 · missing 17.
+54 rows — done 21 · partial 26 · stub 2 · missing 5.
 Progress (feat/w2-feeds-oauth @7e43228): scoped subscriptions landed (SCHEMA_V29 `subscription_scopes`, org/team/project/location/profile/entity targets, wildcard `*` event, precedence scope→setting→default) + Inbox subscription editor rail ⇒ “Subscription editor / personal feeds” stub→partial, “Whole-org/team/project/location subscription targets” missing→partial. Tests: `personal::tests::scoped_subscription_beats_event_default_and_wildcard`, `invalid_subscription_target_is_rejected`.
 Progress (feat/w7-personal ☀Kali, SCHEMA_V53): to-do bodies carry a `content_kind` (text|markdown) rendered through a token renderer that never emits HTML; `postpone_todo` rolls an overdue task over to today before shifting it and the task view groups Today/Later/No date/Done; `convert_todo_to_issue` promotes a project to-do into that project's issue, closing the to-do and anchoring it to the issue it became; absences separate a possibly confidential reason from a public availability (away|partial|available), redacted to `Private` for every reader but the person and admins at the web chokepoint. Tests: `personal::dashboard_preference_tests::{postponing_an_overdue_task_rolls_it_over_to_today_first,a_todo_body_is_text_or_markdown_and_nothing_else,a_confidential_reason_is_hidden_from_colleagues_but_the_availability_is_not,availability_is_a_closed_set,v53_columns_land_on_a_pre_v53_database_with_todays_behaviour}` + `src/markdownLite.test.ts`. UNVERIFIED: `convert_todo_to_issue` has no automated test (it needs the process-global database) — the handler path is compile-checked and wired only.
 Worst gaps: locations/org-directory stub · dashboard personalization · subscription/feeds system · blog calendar/chat/subscription integrations.

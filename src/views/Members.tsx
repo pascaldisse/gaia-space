@@ -5,6 +5,7 @@ import {
   type Role,
   type Team,
   type TeamMembership,
+  type MembershipEditRequest,
   type MemberLocation,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
@@ -30,6 +31,7 @@ export default function Members() {
   );
   const [roles] = createResource(() => platformApi.roles());
   const [allMemberships] = createResource(() => platformApi.memberships());
+  const [membershipEdits, { refetch: refetchMembershipEdits }] = createResource(() => platformApi.membershipEditRequests());
   const [locations, { refetch: refetchLocations }] = createResource(() => platformApi.memberLocations());
   const [profileDraft, setProfileDraft] = createSignal(newProfile());
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
@@ -39,6 +41,7 @@ export default function Members() {
   const [activeTeam, setActiveTeam] = createSignal<Team | null>(null);
   const [memberId, setMemberId] = createSignal("");
   const [roleId, setRoleId] = createSignal("");
+  const [approverId, setApproverId] = createSignal("");
   const [problem, setProblem] = createSignal("");
   const [includeArchived, setIncludeArchived] = createSignal(false);
   const [directoryQuery, setDirectoryQuery] = createSignal("");
@@ -222,6 +225,15 @@ export default function Members() {
     } catch (error) {
       setProblem(String(error));
     }
+  };
+  const requestMembershipArchive = async (membership: TeamMembership) => {
+    try { await platformApi.requestMembershipEdit({ ...membership, archived: !membership.archived }, membership.profile_id); setProblem(""); refetchMembershipEdits(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const decideMembershipEdit = async (request: MembershipEditRequest, approve: boolean) => {
+    if (!approverId()) { setProblem("Choose an approver before deciding a membership edit."); return; }
+    try { await platformApi.decideMembershipEdit(request.id, approverId(), approve); setProblem(""); refetchMembershipEdits(); refetchMemberships(); }
+    catch (error) { setProblem(String(error)); }
   };
 
   return (
@@ -499,6 +511,15 @@ export default function Members() {
                     <p>No members yet — add the first person above.</p>
                   </div>
                 </Show>
+                <div class="org-form">
+                  <select value={approverId()} onChange={(event) => setApproverId(event.currentTarget.value)} aria-label="Membership edit approver">
+                    <option value="">Choose edit approver…</option>
+                    <For each={profiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For>
+                  </select>
+                </div>
+                <Show when={(membershipEdits() ?? []).filter((request) => request.status === "PENDING" && memberships()?.some((membership) => membership.id === request.membership_id)).length}>
+                  <ul class="org-list"> <For each={(membershipEdits() ?? []).filter((request) => request.status === "PENDING" && memberships()?.some((membership) => membership.id === request.membership_id))}>{(request) => <li><span>Pending edit for {personName(request.requested_by)}</span><button class="ghost small" onClick={() => decideMembershipEdit(request, true)}>Approve</button><button class="ghost small" onClick={() => decideMembershipEdit(request, false)}>Reject</button></li>}</For></ul>
+                </Show>
                 <ul class="org-list">
                   <For each={memberships()}>
                     {(membership) => (
@@ -518,10 +539,10 @@ export default function Members() {
                             </span>
                           </span>
                         </div>
-                        <button
-                          class="ghost small hover-actions"
-                          onClick={() => removeMembership(membership)}
-                        >
+                        <button class="ghost small hover-actions" onClick={() => requestMembershipArchive(membership)}>
+                          Request {membership.archived ? "restore" : "archive"}
+                        </button>
+                        <button class="ghost small hover-actions" onClick={() => removeMembership(membership)}>
                           Remove
                         </button>
                       </li>

@@ -1,5 +1,5 @@
 //! Meetings, RSVP state, and UTC RRULE occurrence expansion.
-use crate::db;
+use crate::{chat, db, personal};
 use chrono::{DateTime, Duration, Months, TimeZone, Utc};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,14 @@ pub const VIDEO_STATUSES: [&str; 4] = ["scheduled", "live", "ended", "cancelled"
 /// Providers Gaia can actually mint a join for. An unknown provider is refused rather
 /// than stored, so no row can promise a room nothing serves.
 pub const VIDEO_PROVIDERS: [&str; 1] = ["livekit"];
+const VISIBILITIES: [&str; 3] = ["public", "private", "participants"];
+const MODIFICATION_PREFERENCES: [&str; 2] = ["organizer-only", "participants"];
+fn default_visibility() -> String {
+    "participants".into()
+}
+fn default_modification_preference() -> String {
+    "organizer-only".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meeting {
@@ -24,6 +32,10 @@ pub struct Meeting {
     pub location: Option<String>,
     pub organizer_id: Option<String>,
     pub channel_id: Option<String>,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    #[serde(default = "default_modification_preference")]
+    pub modification_preference: String,
     pub archived: bool,
     #[serde(default)]
     pub video_provider: Option<String>,
@@ -66,11 +78,13 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         location: r.get(6)?,
         organizer_id: r.get(7)?,
         channel_id: r.get(8)?,
-        archived: r.get(9)?,
-        video_provider: r.get(10)?,
-        video_room_id: r.get(11)?,
-        join_url: r.get(12)?,
-        video_status: r.get(13)?,
+        visibility: r.get(9)?,
+        modification_preference: r.get(10)?,
+        archived: r.get(11)?,
+        video_provider: r.get(12)?,
+        video_room_id: r.get(13)?,
+        join_url: r.get(14)?,
+        video_status: r.get(15)?,
     })
 }
 
@@ -92,13 +106,22 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
             return Err("Unsupported meeting video provider".into());
         }
     }
+    if !VISIBILITIES.contains(&meeting.visibility.as_str()) {
+        return Err("Meeting visibility must be public, private, or participants".into());
+    }
+    if !MODIFICATION_PREFERENCES.contains(&meeting.modification_preference.as_str()) {
+        return Err(
+            "Meeting modification preference must be organizer-only or participants".into(),
+        );
+    }
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status";
-/// Meeting read scope: organizer, explicitly invited participant, or a member of
-/// the project attached through the meeting's channel.
-const MEETING_READ_SCOPE: &str = "(m.organizer_id=?1 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))))";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status";
+/// Private meetings are organizer-only; participant meetings additionally expose
+/// themselves to invited people and the legacy project-channel audience; public
+/// meetings are visible to every authenticated profile.
+const MEETING_READ_SCOPE: &str = "(m.visibility='public' OR m.organizer_id=?1 OR (m.visibility='participants' AND EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1)) OR (m.visibility='participants' AND EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))))";
 /// Every meeting read is this one SELECT. `extra` may only *narrow* it, and the
 /// scope predicate always binds `?1` to the acting profile, so no caller can
 /// assemble a parallel reader that forgets it.
@@ -106,10 +129,9 @@ fn visible_meetings_sql(extra: &str) -> String {
     format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE {MEETING_READ_SCOPE} {extra} ORDER BY m.starts_at")
 }
 
-const MEETING_WRITE_SCOPE: &str = "(m.organizer_id=?1 OR ?2=1 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND p.created_by=?1))";
+const MEETING_WRITE_SCOPE: &str = "(m.organizer_id=?1 OR ?2=1 OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND p.created_by=?1) OR (m.modification_preference='participants' AND EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1)))";
 
-pub fn meeting_readable_by(id: &str, profile_id: &str) -> Result<bool> {
-    let c = db::conn()?;
+pub fn meeting_readable_on(c: &rusqlite::Connection, id: &str, profile_id: &str) -> Result<bool> {
     c.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM meetings m WHERE m.id=?2 AND {MEETING_READ_SCOPE})"),
         rusqlite::params![profile_id, id],
@@ -117,15 +139,25 @@ pub fn meeting_readable_by(id: &str, profile_id: &str) -> Result<bool> {
     )
     .map_err(|e| e.to_string())
 }
+pub fn meeting_readable_by(id: &str, profile_id: &str) -> Result<bool> {
+    meeting_readable_on(&db::conn()?, id, profile_id)
+}
 
-pub fn meeting_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = db::conn()?;
+pub fn meeting_writable_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
     c.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM meetings m WHERE m.id=?3 AND {MEETING_WRITE_SCOPE})"),
         rusqlite::params![profile_id, is_admin, id],
         |row| row.get(0),
     )
     .map_err(|e| e.to_string())
+}
+pub fn meeting_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
+    meeting_writable_on(&db::conn()?, id, profile_id, is_admin)
 }
 
 pub fn list_meetings_scoped(profile_id: String) -> Result<Vec<Meeting>> {
@@ -172,26 +204,79 @@ pub fn get_meeting(id: String, profile_id: String) -> Result<Option<Meeting>> {
     get_meeting_scoped(id, profile_id)
 }
 
+fn notification_recipients_on(c: &rusqlite::Connection, meeting_id: &str) -> Result<Vec<String>> {
+    c.prepare("SELECT profile_id FROM meeting_participants WHERE meeting_id=?1 ORDER BY profile_id")
+        .map_err(|e| e.to_string())?
+        .query_map([meeting_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+fn notify_meeting_change_on(c: &rusqlite::Connection, meeting: &Meeting, event_type: &str) {
+    let Ok(recipients) = notification_recipients_on(c, &meeting.id) else {
+        return;
+    };
+    if recipients.is_empty() {
+        return;
+    }
+    if let Err(error) = personal::fan_out_notification_on(
+        c,
+        personal::NotificationFanout {
+            recipients,
+            event_type,
+            title: &meeting.title,
+            body: meeting.description.as_deref(),
+            entity_type: "meeting",
+            entity_id: &meeting.id,
+            // Subscription kinds are domain entities; the linked channel is navigation only.
+            target_type: Some("entity"),
+            target_id: Some(&meeting.id),
+        },
+    ) {
+        eprintln!("meeting notification fan-out for {event_type} failed: {error}");
+    }
+}
+fn attach_meeting_channel_on(c: &rusqlite::Connection, id: &str) -> Result<String> {
+    let title: String = c
+        .query_row("SELECT title FROM meetings WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let channel =
+        chat::create_entity_channel_impl(c, "meeting", id, Some(format!("{title} discussion")))?;
+    c.execute(
+        "UPDATE meetings SET channel_id=?2 WHERE id=?1",
+        rusqlite::params![id, channel.id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(channel.id)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_meeting(meeting: Meeting) -> Result<()> {
+pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived,video_provider,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    if meeting.channel_id.is_none() {
+        meeting.channel_id = Some(attach_meeting_channel_on(&c, &meeting.id)?);
+    }
+    notify_meeting_change_on(&c, &meeting, "meeting.created");
     Ok(())
 }
-
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    // The live room address is NOT caller-writable: `video_room_id`/`join_url` are
-    // written only by the native join path (`record_call_room_on`), so a webview edit
-    // cannot repoint an existing meeting at a room it controls.
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,archived=?10,video_provider=?11,video_status=?12 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
+    notify_meeting_change_on(&c, &meeting, "meeting.updated");
     Ok(())
+}
+/// Idempotently attach the deterministic entity-bound discussion to legacy meetings.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn attach_meeting_channel(id: String) -> Result<String> {
+    attach_meeting_channel_on(&db::conn()?, &id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -313,6 +398,29 @@ pub fn invite_meeting_participant(meeting_id: String, profile_id: String) -> Res
     }
     let c = db::conn()?;
     c.execute("INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES(?1,?2,'invited') ON CONFLICT(meeting_id,profile_id) DO UPDATE SET status='invited'", rusqlite::params![meeting_id, profile_id]).map_err(|e| e.to_string())?;
+    let meeting = c
+        .query_row(
+            &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id=?1"),
+            [&meeting_id],
+            row_to_meeting,
+        )
+        .map_err(|e| e.to_string())?;
+    if let Err(error) = personal::fan_out_notification_on(
+        &c,
+        personal::NotificationFanout {
+            recipients: vec![profile_id],
+            event_type: "meeting.invited",
+            title: &meeting.title,
+            body: meeting.description.as_deref(),
+            entity_type: "meeting",
+            entity_id: &meeting.id,
+            // Subscription kinds are domain entities; the linked channel is navigation only.
+            target_type: Some("entity"),
+            target_id: Some(&meeting.id),
+        },
+    ) {
+        eprintln!("meeting invitation notification failed: {error}");
+    }
     Ok(())
 }
 
@@ -509,6 +617,8 @@ mod tests {
             location: None,
             organizer_id: Some("default-org".into()),
             channel_id: None,
+            visibility: default_visibility(),
+            modification_preference: default_modification_preference(),
             archived: false,
             video_provider: None,
             video_room_id: None,
@@ -607,6 +717,61 @@ mod tests {
         assert!(
             one.is_none(),
             "get_meeting cannot reach outside the scope either"
+        );
+    }
+
+    #[test]
+    fn privacy_edit_policy_channel_and_notifications_share_the_meeting_scope() {
+        let c = scope_conn();
+        for id in ["owner", "guest", "stranger"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,unixepoch())", [id]).unwrap();
+        }
+        c.execute_batch("            INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,modification_preference,archived)
+                VALUES('private','Private',1,2,'owner','private','organizer-only',0);
+            INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,modification_preference,archived)
+                VALUES('participants','Participants',3,4,'owner','participants','organizer-only',0);
+            INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,modification_preference,archived)
+                VALUES('public','Public',5,6,'owner','public','organizer-only',0);
+            INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES('private','guest','invited');
+            INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES('participants','guest','accepted');
+        ").unwrap();
+        assert!(
+            !meeting_readable_on(&c, "private", "guest").unwrap(),
+            "private ignores an invitation"
+        );
+        assert!(meeting_readable_on(&c, "participants", "guest").unwrap());
+        assert!(meeting_readable_on(&c, "public", "stranger").unwrap());
+        assert!(!meeting_writable_on(&c, "participants", "guest", false).unwrap());
+        c.execute(
+            "UPDATE meetings SET modification_preference='participants' WHERE id='participants'",
+            [],
+        )
+        .unwrap();
+        assert!(meeting_writable_on(&c, "participants", "guest", false).unwrap());
+        let channel_id = attach_meeting_channel_on(&c, "participants").unwrap();
+        assert_eq!(channel_id, "entity:meeting:participants");
+        let meeting = c
+            .query_row(
+                &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id='participants'"),
+                [],
+                row_to_meeting,
+            )
+            .unwrap();
+        notify_meeting_change_on(&c, &meeting, "meeting.updated");
+        let routed: (String, String, String) = c
+            .query_row(
+                "SELECT recipient_id,event_type,entity_id FROM notifications",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            routed,
+            (
+                "guest".into(),
+                "meeting.updated".into(),
+                "participants".into()
+            )
         );
     }
 
@@ -721,6 +886,29 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailabilityConflict {
+    pub kind: String,
+    pub profile_id: Option<String>,
+    pub meeting_id: Option<String>,
+    pub room_id: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailableMeetingRoom {
+    #[serde(flatten)]
+    pub room: MeetingRoom,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingAvailability {
+    pub rooms: Vec<AvailableMeetingRoom>,
+    pub conflicts: Vec<AvailabilityConflict>,
+    pub suggestions: Vec<MeetingRoom>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingRoom {
     pub id: String,
     pub name: String,
@@ -796,6 +984,95 @@ pub fn save_meeting_room(room: MeetingRoom) -> Result<()> {
         .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())
+}
+
+/// Checks derived room, attendee-meeting, and approved-away-absence conflicts.
+/// The half-open overlap test makes back-to-back meetings available.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn meeting_availability(
+    starts_at: i64,
+    ends_at: i64,
+    profile_ids: Vec<String>,
+    meeting_id: Option<String>,
+) -> Result<MeetingAvailability> {
+    if ends_at <= starts_at {
+        return Err("Meeting end must be after its start".into());
+    }
+    let c = db::conn()?;
+    let rooms = list_meeting_rooms()?;
+    let mut conflicts = Vec::new();
+    let mut available_rooms = Vec::with_capacity(rooms.len());
+    for room in rooms {
+        let conflict: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM meeting_room_bookings b JOIN meetings m ON m.id=b.meeting_id WHERE b.room_id=?1 AND (?2 IS NULL OR b.meeting_id<>?2) AND m.archived=0 AND m.starts_at<?4 AND m.ends_at>?3)",
+            rusqlite::params![room.id, meeting_id, starts_at, ends_at],
+            |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if conflict {
+            conflicts.push(AvailabilityConflict {
+                kind: "room".into(),
+                profile_id: None,
+                meeting_id: None,
+                room_id: Some(room.id.clone()),
+                message: format!("{} is already booked for this time", room.name),
+            });
+        }
+        available_rooms.push(AvailableMeetingRoom {
+            room,
+            available: !conflict,
+        });
+    }
+    let start_date = Utc
+        .timestamp_opt(starts_at, 0)
+        .single()
+        .ok_or("Invalid meeting start")?
+        .date_naive()
+        .to_string();
+    let end_date = Utc
+        .timestamp_opt(ends_at - 1, 0)
+        .single()
+        .ok_or("Invalid meeting end")?
+        .date_naive()
+        .to_string();
+    for profile_id in profile_ids.into_iter().filter(|id| !id.trim().is_empty()) {
+        let mut meetings = c.prepare("SELECT DISTINCT m.id,m.title FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND (?1 IS NULL OR m.id<>?1) AND (m.organizer_id=?2 OR mp.profile_id=?2) AND m.starts_at<?4 AND m.ends_at>?3 ORDER BY m.starts_at").map_err(|e| e.to_string())?;
+        let rows = meetings
+            .query_map(
+                rusqlite::params![meeting_id, profile_id, starts_at, ends_at],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (id, title) = row.map_err(|e| e.to_string())?;
+            conflicts.push(AvailabilityConflict {
+                kind: "meeting".into(),
+                profile_id: Some(profile_id.clone()),
+                meeting_id: Some(id),
+                room_id: None,
+                message: format!("{profile_id} has an overlapping meeting: {title}"),
+            });
+        }
+        let away: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM absences WHERE profile_id=?1 AND approved=1 AND availability<>'available' AND date_from<=?2 AND date_to>=?3)", rusqlite::params![profile_id, end_date, start_date], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if away {
+            conflicts.push(AvailabilityConflict {
+                kind: "absence".into(),
+                profile_id: Some(profile_id.clone()),
+                meeting_id: None,
+                room_id: None,
+                message: format!("{profile_id} has an approved absence"),
+            });
+        }
+    }
+    let suggestions = available_rooms
+        .iter()
+        .filter(|room| room.available)
+        .map(|room| room.room.clone())
+        .collect();
+    Ok(MeetingAvailability {
+        rooms: available_rooms,
+        conflicts,
+        suggestions,
+    })
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]

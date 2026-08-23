@@ -7,9 +7,18 @@ import { isMobileServer } from "./mobile";
 export const isWeb = (): boolean =>
   typeof window !== "undefined" && (window.__TAURI_INTERNALS__ === undefined || isMobileServer());
 
+export type Workspace = { id: string; name: string; server: string };
+const WORKSPACES_KEY = "space.workspaces";
+const loadWorkspaces = (): Workspace[] => { try { const raw = localStorage.getItem(WORKSPACES_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; } };
 /** App-wide identity/context: who am I acting as, which project am I in. */
 const session = createRoot(() => {
-  const [profileId, setId] = createSignal(localStorage.getItem("space.profile") ?? "");
+  const [workspaces, setWorkspaceList] = createSignal<Workspace[]>(loadWorkspaces());
+const [workspaceId, setWorkspaceId] = createSignal(localStorage.getItem("space.workspace") ?? workspaces()[0]?.id ?? "");
+const persistWorkspaces = (value: Workspace[]) => { setWorkspaceList(value); localStorage.setItem(WORKSPACES_KEY, JSON.stringify(value)); };
+const saveWorkspace = (workspace: Workspace) => { const value = [...workspaces().filter(x => x.id !== workspace.id), workspace]; persistWorkspaces(value); return workspace; };
+const removeWorkspace = (id: string) => { const value = workspaces().filter(x => x.id !== id); persistWorkspaces(value); if (workspaceId() === id) setWorkspaceId(value[0]?.id ?? ""); };
+const selectWorkspace = (id: string) => { if (workspaces().some(x => x.id === id)) { setWorkspaceId(id); localStorage.setItem("space.workspace", id); } };
+const [profileId, setId] = createSignal(localStorage.getItem("space.profile") ?? "");
   const [projectId, setPid] = createSignal(localStorage.getItem("space.project") ?? "");
 
   const setProfileId = (value: string) => {
@@ -53,14 +62,16 @@ const session = createRoot(() => {
   };
 
   return {
-    profileId, setProfileId, profiles, reloadProfiles,
+    workspaceId, workspaces, saveWorkspace, removeWorkspace, selectWorkspace,
+profileId, setProfileId, profiles, reloadProfiles,
     projectId, setProjectId, projects, reloadProjects,
     ensureDefaults,
   };
 });
 
 export const {
-  profileId, setProfileId, profiles, reloadProfiles,
+  workspaceId, workspaces, saveWorkspace, removeWorkspace, selectWorkspace,
+profileId, setProfileId, profiles, reloadProfiles,
   projectId, setProjectId, projects, reloadProjects,
   ensureDefaults,
 } = session;

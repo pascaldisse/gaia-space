@@ -1,5 +1,6 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
 import { marked } from "marked";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
@@ -14,7 +15,10 @@ import {
   type DocumentImportSummary,
   type DocumentBodyFormat,
   type DocumentFilePreview,
+  type DocumentDiscussion,
 } from "../api/documents";
+import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
+import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
@@ -74,24 +78,58 @@ export default function Documents() {
   // root-level folders sit directly under the container, except in KB where the book
   // itself is a container_id-self-referencing folder row and everything else nests
   // under its own id.
-  const rootParentId = () => (activeContainer() === "kb" ? selectedBookId() : null);
+  const rootParentId = () => {
+    if (activeContainer() === "kb") return selectedBookId();
+    if (activeContainer() === "project") return projectRoot()?.id ?? null;
+    return null;
+  };
 
   const [allFolders, { refetch: refetchFolders }] = createResource(() => documentsApi.listDocumentFolders());
   const [allDocuments, { refetch: refetchDocuments }] = createResource(() => documentsApi.listDocuments());
+  // The backend creates this canonical root atomically and reparents legacy direct rows.
+  const [projectRoot, { refetch: refetchProjectRoot }] = createResource(
+    () => activeContainer() === "project" ? selectedProjectId() : null,
+    (id) => id ? documentsApi.ensureProjectDocumentRoot(id) : Promise.resolve(null),
+  );
 
+  createEffect((previousRootId: string | null | undefined) => {
+    const rootId = projectRoot()?.id ?? null;
+    if (rootId && rootId !== previousRootId) void Promise.all([refetchFolders(), refetchDocuments()]);
+    return rootId;
+  }, null);
   const books = () => (allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
   createEffect(() => {
     if (activeContainer() === "kb" && !selectedBookId() && books().length) setSelectedBookId(books()[0].id);
   });
 
-  const [showArchived, setShowArchived] = createSignal(false);
+  const [bookQuery, setBookQuery] = createSignal("");
+const [bookSearch] = createResource(
+() => ({ bookId: selectedBookId(), query: bookQuery().trim() }),
+({ bookId, query }) => bookId && query ? documentsApi.searchBookDocuments(bookId, query) : Promise.resolve([]),
+);
+const [bookAccess, { refetch: refetchBookAccess }] = createResource(selectedBookId, (id) =>
+id ? documentsApi.listBookAccess(id) : Promise.resolve([]),
+);
+const [showBookAccess, setShowBookAccess] = createSignal(false);
+async function addBookAccessRecipient() {
+const bookId = selectedBookId(); const recipientId = shareRecipientId();
+if (!bookId || !recipientId) return;
+const next = (bookAccess() ?? []).filter((entry) => entry.recipient_type !== shareRecipientType() || entry.recipient_id !== recipientId);
+next.push({ recipient_type: shareRecipientType(), recipient_id: recipientId, access_level: shareAccessLevel() });
+try { await documentsApi.updateBookAccess(bookId, next); await refetchBookAccess(); setShareRecipientId(""); } catch (e) { fail(e); }
+}
+async function removeBookAccessRecipient(permission: DocumentAccessRecipient) {
+const bookId = selectedBookId(); if (!bookId) return;
+try { await documentsApi.updateBookAccess(bookId, (bookAccess() ?? []).filter((entry) => entry.recipient_type !== permission.recipient_type || entry.recipient_id !== permission.recipient_id)); await refetchBookAccess(); } catch (e) { fail(e); }
+}
+const [showArchived, setShowArchived] = createSignal(false);
 
   const treeLoading = () => allFolders.loading || allDocuments.loading;
   const loadFailure = () => {
     const e = allFolders.error ?? allDocuments.error;
     return e ? `Documents could not be loaded: ${String(e)}` : null;
   };
-  const isEmpty = () => !treeLoading() && !loadFailure() && scopedFolders().length === 0 && scopedDocuments().length === 0;
+  const isEmpty = () => !treeLoading() && !loadFailure() && displayFolders().length === 0 && scopedDocuments().length === 0;
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -109,6 +147,8 @@ export default function Documents() {
         (showArchived() || !d.archived),
     );
 
+  const displayFolders = () => scopedFolders().filter((f) => f.id !== rootParentId());
+  const projectReady = () => activeContainer() !== "project" || !!projectRoot();
   const [selectedFolderId, setSelectedFolderId] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   function toggleExpand(id: string) {
@@ -123,6 +163,15 @@ export default function Documents() {
   const [importPath, setImportPath] = createSignal("");
   const [importing, setImporting] = createSignal(false);
   const [importSummary, setImportSummary] = createSignal<DocumentImportSummary | null>(null);
+  async function chooseImportFolder() {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false, title: "Import document folder" });
+      if (typeof selected === "string") setImportPath(selected);
+    } catch (e) {
+      // Browser/server mode has no native picker; the path field remains usable there.
+      setError(`Folder picker unavailable: ${String(e)}`);
+    }
+  }
   async function runImport() {
     const path = importPath().trim();
     const cid = containerId();
@@ -139,7 +188,7 @@ export default function Documents() {
       });
       setImportSummary(summary);
       setImportPath("");
-      await Promise.all([refetchFolders(), refetchDocuments()]);
+      await Promise.all([refetchProjectRoot(), refetchFolders(), refetchDocuments()]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -323,6 +372,66 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   const [access, { refetch: refetchAccess }] = createResource(selectedDocumentId, (id) =>
     id ? documentsApi.listDocumentAccess(id) : Promise.resolve([]),
   );
+  const [discussion, { refetch: refetchDiscussion }] = createResource(selectedDocumentId, (id) =>
+    id ? documentsApi.getDocumentDiscussion(id) : Promise.resolve(null as DocumentDiscussion | null),
+  );
+  const [discussionMessages, { refetch: refetchDiscussionMessages }] = createResource(
+    () => discussion()?.channel_id ?? null,
+    (channelId) => channelId ? chatApi.listMessages(channelId, actingProfileId()) : Promise.resolve([] as MessageView[]),
+  );
+  const [commentText, setCommentText] = createSignal("");
+  const [meetingBinding, setMeetingBinding] = createSignal("");
+  async function attachDiscussion() {
+    const doc = selectedDocument();
+    if (!doc) return;
+    try {
+      const item = await documentsApi.attachDocumentDiscussion(doc.id, meetingBinding().trim() || null);
+      setMeetingBinding(item.meeting_id ?? "");
+      await refetchDiscussion();
+    } catch (e) { fail(e); }
+  }
+  async function sendComment() {
+    const channelId = discussion()?.channel_id;
+    const actor = actingProfileId();
+    const text = commentText().trim();
+    if (!channelId || !actor || !text) return;
+    try {
+      await chatApi.createMessage({ id: newMessageId("message"), channel_id: channelId, author_id: actor, text, created_at: Math.floor(Date.now() / 1000), edited_at: null, thread_of: null, archived: false });
+      setCommentText("");
+      await refetchDiscussionMessages();
+    } catch (e) { fail(e); }
+  }
+  async function react(message: MessageView, emoji: string) {
+    const actor = actingProfileId();
+    if (!actor) return;
+    try {
+      const prior = message.reactions.find((item) => item.emoji === emoji);
+      if (prior?.mine) await chatApi.removeReaction(message.id, actor, emoji);
+      else await chatApi.addReaction(message.id, actor, emoji);
+      await refetchDiscussionMessages();
+    } catch (e) { fail(e); }
+  }
+  function CommentPanel() {
+    const [subscriptions, { refetch }] = createResource(() => actingProfileId(), (id) => id ? channelFeedsApi.list(id) : Promise.resolve([]));
+    const subscribed = () => subscriptions()?.some((entry) => entry.channel_id === discussion()?.channel_id && entry.enabled) ?? false;
+    const toggleFeed = async (enabled: boolean) => {
+      const channelId = discussion()?.channel_id;
+      const actor = actingProfileId();
+      if (!channelId || !actor) return;
+      try { await channelFeedsApi.save({ channel_id: channelId, profile_id: actor, enabled }); await refetch(); } catch (e) { fail(e); }
+    };
+    return <section class="document-comments" aria-label="Article comments">
+      <div class="comments-head"><strong>Comments</strong><span class="hint">Article discussion</span></div>
+      <Show when={discussion()} fallback={<button class="ghost small" onClick={attachDiscussion}>Start discussion</button>}>
+        {(item) => <>
+          <div class="meeting-binding"><input aria-label="Meeting ID binding" placeholder="Meeting ID (optional)" value={meetingBinding() || item().meeting_id || ""} onInput={(e) => setMeetingBinding(e.currentTarget.value)} /><button class="ghost small" onClick={attachDiscussion}>Bind meeting</button></div>
+          <label class="comment-feed"><input type="checkbox" checked={subscribed()} onChange={(e) => void toggleFeed(e.currentTarget.checked)} /> Send activity to #Spacebox</label>
+          <div class="comment-list"><For each={discussionMessages() ?? []}>{(message) => <article class="comment-row"><p>{message.text}</p><div><For each={message.reactions}>{(reaction) => <button class="ghost small" classList={{ active: reaction.mine }} onClick={() => react(message, reaction.emoji)}>{reaction.emoji} {reaction.count}</button>}</For><button class="ghost small" onClick={() => react(message, "👍")}>👍</button><button class="ghost small" onClick={() => react(message, "❤️")}>❤️</button></div></article>}</For></div>
+          <div class="comment-compose"><textarea aria-label="Write a comment" value={commentText()} onInput={(e) => setCommentText(e.currentTarget.value)} placeholder="Write a comment…" /><button class="primary small" onClick={sendComment} disabled={!commentText().trim() || !actingProfileId()}>Comment</button></div>
+        </>}
+      </Show>
+    </section>;
+  }
   const [showSharing, setShowSharing] = createSignal(false);
 
   // ---- uploaded files ----
@@ -341,7 +450,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         source_path: path,
         container_type: activeContainer(),
         container_id: cid,
-        folder_id: selectedFolderId(),
+        // Project uploads are documents too: their canonical root is mandatory.
+        folder_id: selectedFolderId() ?? rootParentId(),
         created_by: actingProfileId(),
       });
       setUploadPath("");
@@ -508,7 +618,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const cid = containerId();
     if (!doc || !cid) return;
     try {
-      await documentsApi.moveDocument(doc.id, doc.container_type, cid, folderId === "" ? null : folderId);
+      await documentsApi.moveDocument(doc.id, doc.container_type, cid, folderId === "" ? (activeContainer() === "project" ? rootParentId() : null) : folderId);
       await refetchDocuments();
     } catch (e) {
       fail(e);
@@ -710,7 +820,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
 
   function FolderRow(props: { folder: DocumentFolder; depth: number }) {
     const f = () => props.folder;
-    const childFolders = () => scopedFolders().filter((c) => c.parent_id === f().id);
+    const childFolders = () => displayFolders().filter((c) => c.parent_id === f().id);
     const childDocs = () => scopedDocuments().filter((d) => d.folder_id === f().id);
     const isOpen = () => expanded().has(f().id);
     return (
@@ -767,7 +877,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             >
               <option value="">move…</option>
               <option value="">root</option>
-              <For each={scopedFolders().filter((o) => o.id !== f().id)}>
+              <For each={displayFolders().filter((o) => o.id !== f().id)}>
                 {(o) => <option value={o.id}>{o.name}</option>}
               </For>
             </select>
@@ -868,6 +978,10 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           <button class="ghost small" onClick={createBook} disabled={!newBookName().trim()}>
             + Book
           </button>
+          <Show when={selectedBookId()}>
+            <button class="ghost small" aria-expanded={showBookAccess()} onClick={() => setShowBookAccess((open) => !open)}>{showBookAccess() ? "hide book access" : "Book access"}</button>
+            <input aria-label="Search this book" placeholder="Search this book…" value={bookQuery()} onInput={(e) => setBookQuery(e.currentTarget.value)} />
+          </Show>
         </Show>
 
         <label class="import-folder">
@@ -878,7 +992,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             onInput={(e) => setImportPath(e.currentTarget.value)}
           />
         </label>
-        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId()}>
+        <button class="ghost small" onClick={chooseImportFolder}>Choose folder…</button>
+        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
           {importing() ? "Importing…" : "Import"}
         </button>
         <Show when={importSummary()}>
@@ -912,9 +1027,17 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
               classList={{ active: selectedFolderId() === null }}
               onClick={() => setSelectedFolderId(null)}
             >
-              (root)
+              {activeContainer() === "project" ? "Documents" : "(root)"}
             </button>
-            <ul class="folder-tree" role="tree" aria-label="Document folders">
+            <Show when={activeContainer() === "kb" && bookQuery().trim()}>
+<div class="book-search-results" role="list" aria-label="Book search results">
+<Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
+<For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
+<Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
+</Show>
+</div>
+</Show>
+<ul class="folder-tree" role="tree" aria-label="Document folders">
               <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
                 {(d) => (
                   <li style={{ "padding-left": "0.4em" }}>
@@ -930,7 +1053,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </li>
                 )}
               </For>
-              <For each={scopedFolders().filter((f) => f.parent_id === rootParentId())}>
+              <For each={displayFolders().filter((f) => f.parent_id === rootParentId())}>
                 {(f) => <FolderRow folder={f} depth={0} />}
               </For>
             </ul>
@@ -940,7 +1063,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <div class="new-item-forms">
               <div class="new-item-row">
                 <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
-                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim()}>
+                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim() || !projectReady()}>
                   + Folder
                 </button>
               </div>
@@ -949,7 +1072,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <select aria-label="Document body type" value={newDocBodyFormat()} onChange={(e) => setNewDocBodyFormat(e.currentTarget.value as DocumentBodyFormat)}>
                   <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
                 </select>
-                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim()}>
+                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim() || !projectReady()}>
                   + Document
                 </button>
               </div>
@@ -960,7 +1083,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   value={uploadPath()}
                   onInput={(e) => setUploadPath(e.currentTarget.value)}
                 />
-                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim()}>
+                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
                   {uploading() ? "Uploading…" : "↑ Upload"}
                 </button>
               </div>
@@ -992,8 +1115,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     {showPreview() ? "hide preview" : "show preview"}
                   </button>
                   <select value={doc().folder_id ?? ""} onChange={(e) => moveDocumentTo(e.currentTarget.value)}>
-                    <option value="">(root)</option>
-                    <For each={scopedFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
+                    <option value={activeContainer() === "project" ? rootParentId() ?? "" : ""}>{activeContainer() === "project" ? "Documents" : "(root)"}</option>
+                    <For each={displayFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
                   </select>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
@@ -1057,8 +1180,21 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </Show>
         </section>
 
-        <Show when={selectedDocument()}>
+        <Show when={selectedDocument() || (activeContainer() === "kb" && showBookAccess())}>
           <aside class="documents-history">
+            <Show when={activeContainer() === "kb" && showBookAccess()}>
+              <section class="document-sharing" aria-label="Book access">
+                <div class="sharing-head"><div class="section-label">Book access</div><span class="sharing-note">People and editor teams</span></div>
+                <div class="sharing-add">
+                  <select value={shareRecipientType()} onChange={(e) => { setShareRecipientType(e.currentTarget.value as "profile" | "team"); setShareRecipientId(""); }}><option value="profile">Person</option><option value="team">Team</option></select>
+                  <select value={shareRecipientId()} onChange={(e) => setShareRecipientId(e.currentTarget.value)}><option value="">Select recipient…</option><Show when={shareRecipientType() === "profile"}><For each={profiles()?.filter((p) => !p.archived && p.id !== actingProfileId())}>{(p) => <option value={p.id}>{p.display_name}</option>}</For></Show><Show when={shareRecipientType() === "team"}><For each={teams()?.filter((t) => !t.archived)}>{(t) => <option value={t.id}>{t.name}</option>}</For></Show></select>
+                  <select value={shareAccessLevel()} onChange={(e) => setShareAccessLevel(e.currentTarget.value as "viewer" | "editor")}><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
+                  <button class="primary small" disabled={!shareRecipientId()} onClick={addBookAccessRecipient}>Add</button>
+                </div>
+                <ul class="sharing-list"><For each={bookAccess()}>{(permission) => <li><span class="sharing-recipient">{recipientName(permission)}</span><span class="sharing-kind">{permission.recipient_type}</span><span class="sharing-level">{permission.access_level}</span><button class="ghost small" onClick={() => removeBookAccessRecipient(permission)}>Remove</button></li>}</For></ul>
+              </section>
+            </Show>
+            <CommentPanel />
             <Show when={canManageAccess() && showSharing()}>
               <section class="document-sharing" aria-label="Document sharing">
                 <div class="sharing-head">

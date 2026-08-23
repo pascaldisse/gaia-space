@@ -796,6 +796,8 @@ fn deliver_delivery(id: &str) -> Result<WebhookDelivery> {
     }
     c.query_row("SELECT id,webhook_id,payload_json,status,attempts,response_status,last_error,created_at,delivered_at,next_attempt_at FROM webhook_deliveries WHERE id=?1",[id],read_delivery).map_err(|e|e.to_string())
 }
+/// Durable enqueue-only seam for subscription targets; network is left to the queue worker.
+pub(crate) fn enqueue_webhook_delivery(webhook_id: &str, payload: &serde_json::Value) -> Result<()> { let c=db::conn()?; let exists:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM webhook_subscriptions WHERE id=?1 AND enabled=1)",[webhook_id],|r|r.get(0)).map_err(|e|e.to_string())?; if !exists{return Err("Webhook subscription not found or disabled".into())}; c.execute("INSERT INTO webhook_deliveries(id,webhook_id,payload_json,status,next_attempt_at) VALUES(?1,?2,?3,'PENDING',unixepoch())",params![new_delivery_id()?,webhook_id,serde_json::to_string(payload).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?; Ok(()) }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn deliver_webhook(webhook_id: String, payload_json: String) -> Result<WebhookDelivery> {
     serde_json::from_str::<serde_json::Value>(&payload_json)
