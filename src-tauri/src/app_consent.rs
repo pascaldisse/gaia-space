@@ -249,6 +249,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn oauth_scope_request_requires_and_records_an_explicit_approval() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("app-consent");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        c.execute("INSERT INTO applications(id,name,application_type,client_id) VALUES('consent-app','Consent app','Application','consent-client')", []).expect("application");
+        c.execute("INSERT INTO rights(id,code,title,right_type) VALUES('consent-right','Project.View','View project','Project')", []).expect("right catalog");
+
+        let requests = request_rights_on(&c, "consent-app", "project:key:DEMO", &["Project.View".into()]).expect("request");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].status, "PENDING");
+        let approved = decide_on(&c, &requests[0].id, true, None).expect("approval");
+        assert_eq!(approved.status, "APPROVED");
+        let granted = app_rights::authorized_rights_on(&c, "consent-app", "project:key:DEMO").expect("grant");
+        assert_eq!(granted.iter().map(|right| right.right_code.as_str()).collect::<Vec<_>>(), vec!["Project.View"]);
+        assert!(decide_on(&c, &requests[0].id, true, None).is_err(), "a decision is single-use");
+    }
+    #[test]
     fn a_context_keeps_its_colons_and_only_the_last_segment_is_the_right() {
         assert_eq!(
             parse_scope("project:key:MY-APP:Project.View").unwrap(),
