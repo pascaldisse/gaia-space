@@ -13,8 +13,27 @@ use crate::platform::require_right_on;
 use crate::rights::Right;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 type Result<T> = std::result::Result<T, String>;
+static NEXT_POOL_ID: AtomicU64 = AtomicU64::new(0);
+fn new_pool_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "standby-{nanos:x}-{:x}",
+        NEXT_POOL_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StandbyPoolPolicy {
+    pub project_id: String,
+    pub ide: String,
+    pub instance_type: String,
+    pub target_size: i64,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DevEnvironment {
@@ -269,6 +288,67 @@ fn resume_dev_environment_tx(c: &Connection, id: &str, at: i64) -> Result<DevEnv
     get_tx(c, id)
 }
 
+/// A target makes a standby pool durable: after every claim the same matching
+/// pre-warmed record is replenished. `actor_id` is optional only for native/system callers.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_standby_pool_policy(
+    policy: StandbyPoolPolicy,
+    actor_id: Option<String>,
+) -> Result<Vec<DevEnvironment>> {
+    let c = db::conn()?;
+    if let Some(actor) = actor_id.as_deref() {
+        require_right_on(
+            &c,
+            actor,
+            Right::ManageDevEnvironmentsInProject,
+            "Project",
+            Some(&policy.project_id),
+        )?;
+    }
+    save_standby_pool_policy_tx(&c, &policy)?;
+    refill_standby_pool_tx(&c, &policy.project_id, &policy.ide, &policy.instance_type)
+}
+fn save_standby_pool_policy_tx(c: &Connection, policy: &StandbyPoolPolicy) -> Result<()> {
+    if policy.project_id.trim().is_empty()
+        || policy.ide.trim().is_empty()
+        || policy.instance_type.trim().is_empty()
+        || policy.target_size < 0
+    {
+        return Err(
+            "standby pool project, IDE and instance type are required; target must be non-negative"
+                .into(),
+        );
+    }
+    c.execute("INSERT INTO dev_environment_pool_policies(project_id,ide,instance_type,target_size,updated_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(project_id,ide,instance_type) DO UPDATE SET target_size=excluded.target_size,updated_at=excluded.updated_at", params![policy.project_id, policy.ide, policy.instance_type, policy.target_size, now()]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn refill_standby_pool(
+    project_id: String,
+    ide: String,
+    instance_type: String,
+) -> Result<Vec<DevEnvironment>> {
+    let c = db::conn()?;
+    refill_standby_pool_tx(&c, &project_id, &ide, &instance_type)
+}
+fn refill_standby_pool_tx(
+    c: &Connection,
+    project_id: &str,
+    ide: &str,
+    instance_type: &str,
+) -> Result<Vec<DevEnvironment>> {
+    let target: Option<i64> = c.query_row("SELECT target_size FROM dev_environment_pool_policies WHERE project_id=?1 AND ide=?2 AND instance_type=?3", params![project_id, ide, instance_type], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+    let Some(target) = target else {
+        return Ok(Vec::new());
+    };
+    let mut added = Vec::new();
+    while (c.query_row("SELECT count(*) FROM dev_environments WHERE project_id=?1 AND ide=?2 AND instance_type=?3 AND state='STANDBY'", params![project_id, ide, instance_type], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?) < target {
+        let id = new_pool_id();
+        c.execute("INSERT INTO dev_environments(id,project_id,owner_id,name,ide,instance_type,state,idle_timeout_minutes,last_activity_at) VALUES(?1,?2,NULL,?3,?4,?5,'STANDBY',30,?6)", params![id, project_id, format!("Standby {ide} ({instance_type})"), ide, instance_type, now()]).map_err(|e| e.to_string())?;
+        added.push(get_tx(c, &id)?);
+    }
+    Ok(added)
+}
 /// Hot pool claim: the first STANDBY environment in the project becomes this member's own
 /// RUNNING environment. The claim is a single conditional UPDATE, so two members racing for
 /// the last pre-warmed environment cannot both win it.
@@ -312,7 +392,9 @@ fn claim_standby_dev_environment_tx(
     if claimed == 0 {
         return Err("the standby environment was claimed by someone else".into());
     }
-    get_tx(c, &id)
+    let env = get_tx(c, &id)?;
+    refill_standby_pool_tx(c, project_id, &env.ide, &env.instance_type)?;
+    Ok(env)
 }
 
 /// Soft delete: the row stays so the project keeps an audit trail of what existed, but the
@@ -402,6 +484,35 @@ mod tests {
             again.is_err(),
             "the pool is empty after the only member is claimed"
         );
+    }
+
+    #[test]
+    fn pool_target_refills_after_a_claim_without_reassigning_the_claimed_environment() {
+        let c = conn();
+        let policy = StandbyPoolPolicy {
+            project_id: "demo-project".into(),
+            ide: "IntelliJ IDEA".into(),
+            instance_type: "regular".into(),
+            target_size: 2,
+        };
+        save_standby_pool_policy_tx(&c, &policy).expect("policy");
+        assert_eq!(
+            refill_standby_pool_tx(&c, &policy.project_id, &policy.ide, &policy.instance_type)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(
+            refill_standby_pool_tx(&c, &policy.project_id, &policy.ide, &policy.instance_type)
+                .unwrap()
+                .is_empty(),
+            "refill is idempotent at target"
+        );
+        let claimed =
+            claim_standby_dev_environment_tx(&c, "demo-project", "default-org", 42).expect("claim");
+        assert_eq!(claimed.owner_id.as_deref(), Some("default-org"));
+        let free: i64 = c.query_row("SELECT count(*) FROM dev_environments WHERE project_id='demo-project' AND ide='IntelliJ IDEA' AND instance_type='regular' AND state='STANDBY'", [], |r| r.get(0)).unwrap();
+        assert_eq!(free, 2, "claim replenishes the configured free pool");
     }
 
     #[test]
