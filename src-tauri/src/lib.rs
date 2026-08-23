@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod actor;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod app_consent;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod app_rights;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod applications;
@@ -37,6 +39,8 @@ pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod auth_modules;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod auth_security;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -151,6 +155,29 @@ pub fn run() {
             app_rights::scope_approval_status,
             app_rights::approve_scope,
             app_rights::application_right_catalog,
+            auth_modules::create_module,
+            auth_modules::list_modules,
+            auth_modules::update_module,
+            auth_modules::delete_module,
+            auth_modules::reorder_modules,
+            auth_modules::config,
+            auth_modules::set_config,
+            auth_modules::reset_config,
+            app_consent::request_consent_rights,
+            app_consent::list_requests,
+            app_consent::decide,
+            auth_security::enroll_totp,
+            auth_security::verify_totp_enrollment,
+            auth_security::totp_scratch_codes_remaining,
+            auth_security::use_totp_scratch_code,
+            auth_security::issue_permanent_token,
+            auth_security::permanent_tokens_for_user,
+            auth_security::revoke_permanent_token_for_user,
+            auth_security::issue_application_password,
+            auth_security::application_passwords_for_user,
+            auth_security::revoke_application_password_for_user,
+            auth_security::issue_invitation,
+            auth_security::redeem_invitation,
             applications::save_chatbot,
             applications::delete_chatbot,
             applications::list_ui_extensions,

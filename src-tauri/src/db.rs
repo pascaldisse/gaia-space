@@ -517,6 +517,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "quality_gate_rules", "applications_json", "TEXT")?;
         add_column_if_missing(&tx, "quality_gate_rules", "roles_json", "TEXT")?;
     }
+    // V62: the credential surface KB §05 §3.2-3.6 requires beside the password:
+    // TOTP scratch codes (a lost phone must not lock an account out), application
+    // passwords (legacy clients cannot answer a 2FA prompt), configurable login
+    // modules with their own order and remember-me TTLs, and the OAuth
+    // request-rights queue whose `<context>:<permission>` scope strings an admin
+    // approves or denies one right at a time.
+    if version < 62 {
+        tx.execute_batch(SCHEMA_V62)?;
+    }
     // V63: self-hosted worker lifecycle (KB §03 §2.3 `WorkerDTO`, §1.2 worker pools).
     // Three facts the previous `workers` row could not carry:
     //   * `suspended` — an admin disabling a worker is NOT the same fact as the worker
@@ -892,6 +901,17 @@ CREATE TABLE IF NOT EXISTS calendar_caldav_events (
 );
 CREATE INDEX IF NOT EXISTS calendar_caldav_events_range ON calendar_caldav_events(calendar_id, starts_at);
 "#;
+pub(crate) const SCHEMA_V62: &str = r#"
+CREATE TABLE IF NOT EXISTS totp_scratch_codes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, code_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), used_at INTEGER);
+CREATE INDEX IF NOT EXISTS totp_scratch_codes_user ON totp_scratch_codes(user_id, used_at);
+CREATE TABLE IF NOT EXISTS application_passwords (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), last_used_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS application_passwords_user ON application_passwords(user_id, revoked_at);
+CREATE TABLE IF NOT EXISTS auth_modules (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('password','external-password','oauth2','saml')), enabled INTEGER NOT NULL DEFAULT 1, hidden INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, settings TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS auth_config (id INTEGER PRIMARY KEY CHECK(id = 1), dont_remember_me_ttl_secs INTEGER NOT NULL, admin_remember_me_ttl_secs INTEGER NOT NULL, user_remember_me_ttl_secs INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_right_requests (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE, context_identifier TEXT NOT NULL, right_code TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','APPROVED','DENIED')), requested_at INTEGER NOT NULL DEFAULT (unixepoch()), decided_at INTEGER, decided_by TEXT REFERENCES users(id) ON DELETE SET NULL, UNIQUE(application_id, context_identifier, right_code));
+CREATE INDEX IF NOT EXISTS app_right_requests_status ON app_right_requests(status, application_id);
+"#;
+
 pub(crate) const SCHEMA_V56: &str = r#"
 CREATE TABLE IF NOT EXISTS app_required_rights (
     application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
