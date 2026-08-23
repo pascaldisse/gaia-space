@@ -141,6 +141,12 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
     .map_err(|e| e.to_string())
 }
 fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
+    // channels stay generic/public as before; this avoids exposing a private agenda
+    // merely because its discussion is implemented by the shared channel primitive.
+    if let Some(meeting_id) = channel_id.strip_prefix("entity:meeting:") {
+        return crate::meetings::meeting_readable_on(c, meeting_id, profile_id);
+    }
     let content_type: String = c
         .query_row(
             "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
@@ -256,7 +262,7 @@ fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<Cha
         .map_err(|e| e.to_string());
     rows
 }
-fn create_entity_channel_impl(
+pub(crate) fn create_entity_channel_impl(
     c: &Connection,
     entity_type: &str,
     entity_id: &str,

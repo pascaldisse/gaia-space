@@ -372,6 +372,7 @@ pub fn run() {
             meetings::create_meeting,
             meetings::update_meeting,
             meetings::archive_meeting,
+            meetings::attach_meeting_channel,
             meetings::list_meeting_rooms,
             meetings::save_meeting_room,
             meetings::reserve_meeting_room,

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 102;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -590,6 +590,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
     }
+    // V101: meeting privacy and edit policy. Guard the legacy table so partially-built
+    // fixtures remain migratable; each column is independently idempotent.
+    if version < 101 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "visibility", "TEXT NOT NULL DEFAULT 'participants' CHECK(visibility IN ('public','private','participants'))")?;
+        add_column_if_missing(&tx, "meetings", "modification_preference", "TEXT NOT NULL DEFAULT 'organizer-only' CHECK(modification_preference IN ('organizer-only','participants'))")?;
+    }
+    // V102: participant lookup drives both the edit-policy predicate and meeting event
+    // delivery. It is additive and table-guarded for partial legacy databases.
+    if version < 102 && table_exists(&tx, "meeting_participants")? {
+        tx.execute_batch(SCHEMA_V102)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1020,6 +1031,11 @@ CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_right
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+/// V102: efficient participant fan-out for meeting notifications and edit checks.
+pub(crate) const SCHEMA_V102: &str = r#"
+CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_participants(profile_id, meeting_id);
+"#;
+
 pub(crate) const SCHEMA_V74: &str = r#"
 CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1415,7 +1431,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 102);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
