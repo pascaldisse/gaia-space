@@ -236,6 +236,11 @@ pub struct IssueDetail {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct IssueTransferInput {
+    pub issue_id: String,
+    pub target_project_id: String,
+}
+#[derive(Debug, Deserialize)]
 pub struct IssueInput {
     pub id: Option<String>,
     pub project_id: String,
@@ -584,6 +589,160 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
     drop(c);
     let issue = get_issue(id)?.ok_or_else(|| "Created issue was not found".to_string())?;
     issue_event(crate::events::ISSUE_CREATED, &issue);
+    Ok(issue)
+}
+/// Clone an issue into another project, mapping its status by name (or the first
+/// target status) and copying tags, checklists/items, and attachments.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
+    let c = db::conn()?;
+    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?
+        .ok_or_else(|| "Issue not found".to_string())?;
+    if source.project_id == input.target_project_id {
+        return Err("Choose a different project".into());
+    }
+    let source_status_name: Option<String> = match &source.status_id {
+        Some(id) => err(c
+            .query_row("SELECT name FROM issue_statuses WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional())?,
+        None => None,
+    };
+    let target_status: Option<String> = if let Some(name) = source_status_name {
+        err(c.query_row("SELECT id FROM issue_statuses WHERE project_id=?1 AND archived=0 AND name=?2 ORDER BY ordering LIMIT 1", params![&input.target_project_id, name], |r| r.get(0)).optional())?
+    } else { None }.or(err(c.query_row("SELECT id FROM issue_statuses WHERE project_id=?1 AND archived=0 ORDER BY ordering LIMIT 1", [&input.target_project_id], |r| r.get(0)).optional())?);
+    let number: i64 = err(c.query_row(
+        "SELECT coalesce(max(number),0)+1 FROM issues WHERE project_id=?1",
+        [&input.target_project_id],
+        |r| r.get(0),
+    ))?;
+    let id = new_id("issue");
+    let tx = err(c.unchecked_transaction())?;
+    err(tx.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![&id,&input.target_project_id,number,&source.title,&source.description,&target_status,&source.assignee_id,&source.created_by,&source.due_date,&source.priority,source.archived]))?;
+    for assignee in assignees_on(&tx, &source.id)? {
+        err(tx.execute(
+            "INSERT OR IGNORE INTO issue_assignees(issue_id,profile_id) VALUES(?1,?2)",
+            params![&id, assignee],
+        ))?;
+    }
+    let mut tags = err(tx.prepare("SELECT t.name FROM planning_tags t JOIN issue_tags it ON it.tag_id=t.id WHERE it.issue_id=?1"))?;
+    let tag_names = err(
+        err(tags.query_map([&source.id], |r| r.get::<_, String>(0)))?
+            .collect::<std::result::Result<Vec<_>, _>>(),
+    )
+    .map_err(|e| e.to_string())?;
+    drop(tags);
+    for name in tag_names {
+        let tag_id: String = match err(tx.query_row("SELECT id FROM planning_tags WHERE project_id=?1 AND name=?2 AND archived=0 ORDER BY id LIMIT 1", params![&input.target_project_id, &name], |r| r.get(0)).optional())? {
+            Some(id) => id,
+            None => { let tag_id = new_id("tag"); err(tx.execute("INSERT INTO planning_tags(id,project_id,parent_id,name,archived) VALUES(?1,?2,NULL,?3,0)", params![&tag_id,&input.target_project_id,&name]))?; tag_id }
+        };
+        err(tx.execute(
+            "INSERT INTO issue_tags(issue_id,tag_id) VALUES(?1,?2)",
+            params![&id, tag_id],
+        ))?;
+    }
+    let mut lists = err(
+        tx.prepare("SELECT id,title,ordering FROM checklists WHERE issue_id=?1 ORDER BY ordering")
+    )?;
+    let old_lists = err(err(lists.query_map([&source.id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>())
+    .map_err(|e| e.to_string())?;
+    drop(lists);
+    for (old_list, title, ordering) in old_lists {
+        let new_list = new_id("checklist");
+        err(tx.execute(
+            "INSERT INTO checklists(id,issue_id,title,ordering) VALUES(?1,?2,?3,?4)",
+            params![&new_list, &id, title, ordering],
+        ))?;
+        let mut items = err(tx.prepare("SELECT item_text,item_done,ordering FROM checklist_items WHERE checklist_id=?1 ORDER BY ordering"))?;
+        let old_items = err(err(items.query_map([&old_list], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, bool>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        }))?
+        .collect::<std::result::Result<Vec<_>, _>>())
+        .map_err(|e| e.to_string())?;
+        drop(items);
+        for (item_text, item_done, item_ordering) in old_items {
+            err(tx.execute("INSERT INTO checklist_items(id,checklist_id,parent_id,item_text,item_done,ordering) VALUES(?1,?2,NULL,?3,?4,?5)", params![new_id("item"),&new_list,item_text,item_done,item_ordering]))?;
+        }
+    }
+    err(tx.execute("INSERT INTO issue_attachments(id,issue_id,file_name,mime_type,byte_length,data_url) SELECT 'issue-attachment-' || lower(hex(randomblob(16))),?1,file_name,mime_type,byte_length,data_url FROM issue_attachments WHERE issue_id=?2", params![&id,&source.id]))?;
+    record_activity(
+        &tx,
+        &id,
+        "cloned",
+        source.created_by.as_deref(),
+        Some("Issue cloned"),
+    )?;
+    err(tx.commit())?;
+    drop(c);
+    let issue = get_issue(id)?.ok_or_else(|| "Cloned issue was not found".to_string())?;
+    issue_event(crate::events::ISSUE_CREATED, &issue);
+    Ok(issue)
+}
+/// Move an issue to another project, keeping its content and mapping status/tags.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn move_issue_to_project(input: IssueTransferInput) -> Result<Issue> {
+    let c = db::conn()?;
+    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?.ok_or_else(|| "Issue not found".to_string())?;
+    if source.project_id == input.target_project_id {
+        return Ok(source);
+    }
+    let status_name: Option<String> = match &source.status_id {
+        Some(id) => err(c
+            .query_row("SELECT name FROM issue_statuses WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional())?,
+        None => None,
+    };
+    let target_status: Option<String> = if let Some(name) = status_name { err(c.query_row("SELECT id FROM issue_statuses WHERE project_id=?1 AND archived=0 AND name=?2 ORDER BY ordering LIMIT 1", params![&input.target_project_id,name], |r| r.get(0)).optional())? } else { None }.or(err(c.query_row("SELECT id FROM issue_statuses WHERE project_id=?1 AND archived=0 ORDER BY ordering LIMIT 1", [&input.target_project_id], |r| r.get(0)).optional())?);
+    let number: i64 = err(c.query_row(
+        "SELECT coalesce(max(number),0)+1 FROM issues WHERE project_id=?1",
+        [&input.target_project_id],
+        |r| r.get(0),
+    ))?;
+    err(c.execute(
+        "UPDATE issues SET project_id=?2,number=?3,status_id=?4 WHERE id=?1",
+        params![&source.id, &input.target_project_id, number, target_status],
+    ))?;
+    // Tags are project-scoped; recreate missing target tags while retaining names.
+    let mut tags = err(c.prepare("SELECT t.name FROM planning_tags t JOIN issue_tags it ON it.tag_id=t.id WHERE it.issue_id=?1"))?;
+    let names = err(
+        err(tags.query_map([&source.id], |r| r.get::<_, String>(0)))?
+            .collect::<std::result::Result<Vec<_>, _>>(),
+    )
+    .map_err(|e| e.to_string())?;
+    drop(tags);
+    err(c.execute("DELETE FROM issue_tags WHERE issue_id=?1", [&source.id]))?;
+    for name in names {
+        let tag_id: String = match err(c.query_row("SELECT id FROM planning_tags WHERE project_id=?1 AND name=?2 AND archived=0 ORDER BY id LIMIT 1", params![&input.target_project_id,&name], |r| r.get(0)).optional())? { Some(id)=>id, None=>{let id=new_id("tag");err(c.execute("INSERT INTO planning_tags(id,project_id,parent_id,name,archived) VALUES(?1,?2,NULL,?3,0)",params![&id,&input.target_project_id,&name]))?;id} };
+        err(c.execute(
+            "INSERT INTO issue_tags(issue_id,tag_id) VALUES(?1,?2)",
+            params![&source.id, tag_id],
+        ))?;
+    }
+    record_activity(
+        &c,
+        &source.id,
+        "moved",
+        source.created_by.as_deref(),
+        Some("Issue moved to another project"),
+    )?;
+    drop(c);
+    let issue = get_issue(source.id)?.ok_or_else(|| "Moved issue was not found".to_string())?;
+    issue_event(crate::events::ISSUE_UPDATED, &issue);
     Ok(issue)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]

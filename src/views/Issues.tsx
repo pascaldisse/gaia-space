@@ -83,7 +83,18 @@ export default function Issues() {
       openInUrl(issue);
     } catch (reason) { setError(humanError(reason)); }
   };
-  const createStatus = async () => {
+  const csvCell = (value: string | number | null | undefined) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+const exportCsv = () => {
+const rows = issues() ?? [];
+const statusName = (id: string | null) => statuses()?.find(status => status.id === id)?.name ?? "";
+const csv = [
+["Number", "Title", "Description", "Status", "Due date", "Priority", "Assignees"],
+...rows.map(issue => [issue.number, issue.title, issue.description, statusName(issue.status_id), issue.due_date, issue.priority, issue.assignee_ids.join("; ")]),
+].map(row => row.map(csvCell).join(",")).join("\r\n");
+const href = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
+const link = document.createElement("a"); link.href = href; link.download = "issues.csv"; link.click(); URL.revokeObjectURL(href);
+};
+const createStatus = async () => {
     const name = prompt("Status name")?.trim();
     if (!name || !projectId()) return;
     try {
@@ -101,7 +112,8 @@ export default function Issues() {
       <div><h1>Issues</h1><p>Track work independently from the boards that visualize it.</p></div>
       <div class="planning-actions">
         <ProjectPicker />
-        <a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+        <button type="button" class="ghost" disabled={!issues()?.length} onClick={exportCsv}>Export CSV</button>
+<a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
       </div>
     </header>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>

@@ -594,6 +594,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
         add_column_if_missing(&tx, "users", "global_role", "TEXT NOT NULL DEFAULT 'GlobalMember' CHECK(global_role IN ('GlobalAdmin','GlobalMember','Guest','LightGuest'))")?;
+        // Backfill: a legacy 'admin' account IS a GlobalAdmin; without this, upgrading
+        // strips every existing administrator.
+        tx.execute("UPDATE users SET global_role='GlobalAdmin' WHERE role='admin' AND global_role='GlobalMember'", [])?;
         tx.execute_batch(SCHEMA_V90)?;
     }
     // V91: verified domains are an organization registration policy, never an
@@ -773,6 +776,7 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+<<<<<<< HEAD
 /// V84: external issue references belong to a review; the URL remains the external
 /// system's canonical navigation target and title is only a local display label.
 pub(crate) const SCHEMA_V84: &str = r#"
@@ -796,6 +800,20 @@ CREATE TABLE IF NOT EXISTS review_merge_policies (
     squash_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(squash_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION','TITLE_AND_COMMITS'))
 );
 "#;
+=======
+/// V79: target is an issue, a code review, or a validated external URL.
+pub(crate) const SCHEMA_V79: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_tracker_links (
+ id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('ISSUE','REVIEW','EXTERNAL')),
+ target_id TEXT, url TEXT, title TEXT,
+ CHECK((target_kind='EXTERNAL' AND url IS NOT NULL AND target_id IS NULL) OR (target_kind IN ('ISSUE','REVIEW') AND target_id IS NOT NULL AND url IS NULL)),
+ UNIQUE(issue_id, target_kind, target_id), UNIQUE(issue_id, url)
+);
+CREATE INDEX IF NOT EXISTS issue_tracker_links_issue ON issue_tracker_links(issue_id);
+"#;
+/// V78: comments are authored discussion; activity is an immutable record of issue lifecycle actions.
+>>>>>>> master
 pub(crate) const SCHEMA_V78: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_comments (
     id TEXT PRIMARY KEY,
@@ -816,6 +834,7 @@ CREATE TABLE IF NOT EXISTS issue_activities (
 );
 CREATE INDEX IF NOT EXISTS issue_activities_issue_created ON issue_activities(issue_id, created_at, id);
 "#;
+<<<<<<< HEAD
 pub(crate) const SCHEMA_V79: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_tracker_links (
  id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -826,6 +845,9 @@ CREATE TABLE IF NOT EXISTS issue_tracker_links (
 );
 CREATE INDEX IF NOT EXISTS issue_tracker_links_issue ON issue_tracker_links(issue_id);
 "#;
+=======
+
+>>>>>>> master
 pub(crate) const SCHEMA_V77: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_attachments (
     id TEXT PRIMARY KEY,

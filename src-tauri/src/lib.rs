@@ -261,6 +261,8 @@ pub fn run() {
             platform::cf_get_values,
             issues::list_issues,
             issues::create_issue,
+            issues::clone_issue,
+            issues::move_issue_to_project,
             issues::update_issue,
             issues::set_issue_assignees,
             personal::add_project_member,

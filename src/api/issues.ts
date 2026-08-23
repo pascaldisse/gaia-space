@@ -35,7 +35,7 @@ export const planningApi = {
   createIssue: (input: Omit<Issue,"id"|"number"|"assignee_ids"> & { id?:string; assignee_ids?:string[] }) => call<Issue>("create_issue", { input }),
   assignees: (issue_id:string) => call<string[]>("list_issue_assignees", { issueId: issue_id }),
   setAssignees: (issue_id:string, profile_ids:string[]) => call<string[]>("set_issue_assignees", { issueId: issue_id, profileIds: profile_ids }),
-  updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),
+  updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), cloneIssue: (issue_id:string, target_project_id:string) => call<Issue>("clone_issue", { input: { issueId: issue_id, targetProjectId: target_project_id } }), moveIssueToProject: (issue_id:string, target_project_id:string) => call<Issue>("move_issue_to_project", { input: { issueId: issue_id, targetProjectId: target_project_id } }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),
   statuses: (project_id?:string) => call<Status[]>("list_issue_statuses", {projectId:project_id}),
   createStatus: (input: Omit<Status,"id"|"ordering"> & {id?:string;ordering?:number}) => call<Status>("create_issue_status", {input}),
   updateStatus: (status:Status) => call<void>("update_issue_status", {status}), deleteStatus:(id:string)=>call<void>("delete_issue_status",{id}),

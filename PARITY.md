@@ -49,7 +49,11 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
+<<<<<<< HEAD
 TOTALS (8/8 audited, 356 rows): done 91 · partial 188 · stub 4 · missing 73. Matrix NOT green — steering loop active.
+=======
+TOTALS (8/8 audited, 356 rows): done 89 · partial 183 · stub 4 · missing 80. Matrix NOT green — steering loop active.
+>>>>>>> master
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -63,9 +67,10 @@ Progress (feat/w7-review): quality gates now wait on rule-declared external chec
 Progress (Vishnu-V): review navigation now cycles unresolved discussions/changed files; the list has quick filters, sort, aggregate badges; source-branch CODEOWNERS drives My owned files diff filtering; webhook catalog covers review/participant/discussion/suggestion transitions.
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
-## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
-33 rows — done 9 · partial 17 · stub 0 · missing 7.
-Worst gaps: swimlane grouping dimensions · matrix reports · external tracker integration.
+## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ bcaad14)
+33 rows — done 12 · partial 18 · stub 0 · missing 3.
+33 rows — done 10 · partial 18 · stub 0 · missing 5.
+Worst gaps: swimlane grouping dimensions · matrix reports · tracker synchronization/import. · V79: tracker links connect issue↔issue, issue↔merge request, and HTTP(S) external targets. · V78: authored issue comments + durable issue activity timeline, API and Issue Detail UI wired.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
 49 rows — done 4 · partial 26 · stub 1 · missing 18.
