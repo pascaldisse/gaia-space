@@ -198,6 +198,10 @@ pub fn begin_totp(user_id: &str, username: &str) -> Result<TotpEnrollment> {
     db::conn()?.execute("INSERT INTO user_totp(user_id,secret_sealed,enabled,enrolled_at) VALUES(?1,?2,0,unixepoch()) ON CONFLICT(user_id) DO UPDATE SET secret_sealed=excluded.secret_sealed,enabled=0,enrolled_at=excluded.enrolled_at",params![user_id,sealed]).map_err(|e|e.to_string())?;
     Ok(TotpEnrollment{otpauth_uri:format!("otpauth://totp/GAIA%20Space:{}?secret={}&issuer=GAIA%20Space&algorithm=SHA1&digits=6&period=30",username,secret),secret})
 }
+#[tauri::command]
+pub fn enroll_totp(user_id: String, username: String) -> Result<TotpEnrollment> {
+    begin_totp(&user_id, &username)
+}
 fn stored_totp(user_id: &str) -> Result<Option<(String, bool)>> {
     db::conn()?
         .query_row(
@@ -243,6 +247,14 @@ fn issue_scratch_codes(user_id: &str) -> Result<Vec<String>> {
     }
     Ok(codes)
 }
+#[tauri::command]
+pub fn verify_totp_enrollment(user_id: String, code: String) -> Result<Option<Vec<String>>> {
+    confirm_totp(&user_id, &code)
+}
+#[tauri::command]
+pub fn totp_scratch_codes_remaining(user_id: String) -> Result<i64> {
+    scratch_codes_remaining(&user_id)
+}
 pub fn scratch_codes_remaining(user_id: &str) -> Result<i64> {
     db::conn()?
         .query_row(
@@ -280,6 +292,10 @@ pub fn consume_scratch_code(user_id: &str, code: &str) -> Result<bool> {
         }
     }
     Ok(false)
+}
+#[tauri::command]
+pub fn use_totp_scratch_code(user_id: String, code: String) -> Result<bool> {
+    consume_scratch_code(&user_id, &code)
 }
 #[derive(Serialize)]
 pub struct ApplicationPassword {
@@ -517,6 +533,25 @@ mod tests {
             totp_code("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 1).unwrap(),
             "287082"
         );
+    }
+    #[test]
+    fn enrollment_confirms_and_burns_a_scratch_code_once() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("auth-security-totp");
+        let conn = crate::db::migrate_path(&temp).expect("migration");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('totp-profile','totp-user','TOTP User',unixepoch())", []).expect("profile");
+        conn.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('totp-user','totp-user','hash','TOTP User','totp-profile','member',unixepoch())", []).expect("user");
+        std::env::set_var("SPACE_DB", temp.path());
+        std::env::set_var(crate::secretbox::KEY_ENV, "aa".repeat(32));
+
+        let enrollment = begin_totp("totp-user", "totp-user").expect("enrollment");
+        let code = totp_code(&enrollment.secret, (chrono::Utc::now().timestamp() / 30) as u64).expect("code");
+        let scratch = confirm_totp("totp-user", &code).expect("confirmation").expect("accepted code");
+        assert_eq!(scratch.len(), SCRATCH_CODE_COUNT);
+        assert_eq!(scratch_codes_remaining("totp-user").expect("remaining"), SCRATCH_CODE_COUNT as i64);
+        assert!(consume_scratch_code("totp-user", &scratch[0]).expect("consume"));
+        assert!(!consume_scratch_code("totp-user", &scratch[0]).expect("reuse fails"));
+        assert_eq!(scratch_codes_remaining("totp-user").expect("remaining"), (SCRATCH_CODE_COUNT - 1) as i64);
     }
     #[test]
     fn base32_round_trips() {
