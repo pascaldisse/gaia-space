@@ -8,6 +8,8 @@ type Result<T> = std::result::Result<T, String>;
 const RSVP_STATUSES: [&str; 3] = ["invited", "accepted", "declined"];
 const VIDEO_STATUSES: [&str; 4] = ["scheduled", "live", "ended", "cancelled"];
 const VIDEO_PROVIDERS: [&str; 2] = ["native", "meet"];
+fn default_video_provider() -> String { "native".into() }
+fn default_video_status() -> String { "scheduled".into() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meeting {
@@ -20,7 +22,9 @@ pub struct Meeting {
     pub location: Option<String>,
     pub organizer_id: Option<String>,
     pub channel_id: Option<String>,
+    #[serde(default = "default_video_provider")]
     pub video_provider: String,
+    #[serde(default = "default_video_status")]
     pub video_status: String,
     pub archived: bool,
 }

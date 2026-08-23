@@ -1034,14 +1034,13 @@ CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_right
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
-/// V85: durable transcription substrate; captions and summaries derive from these segments.
-
 /// V86: lifecycle state for the provider-backed video room. The selected provider
 /// itself arrives in V87; splitting the facts keeps existing meetings safely native.
 pub(crate) const SCHEMA_V86: &str = r#"
 -- column-only migration; see migrate() for table/column guards.
 "#;
 
+/// V85: durable transcription substrate; captions and summaries derive from these segments.
 pub(crate) const SCHEMA_V85: &str = r#"
 CREATE TABLE IF NOT EXISTS call_transcript_segments (
     id TEXT PRIMARY KEY,
@@ -1453,7 +1452,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 85);
+        assert_eq!(SCHEMA_VERSION, 87);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
