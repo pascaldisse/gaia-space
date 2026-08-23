@@ -14,6 +14,8 @@ import {
   MAX_JOBS_PER_SCRIPT,
   MAX_STEPS_PER_JOB,
   DEFAULT_JOB_TIMEOUT_SECS,
+  TRIGGER_EVENT_TYPES,
+  type TriggerEvent,
   type PipelineScript,
   type EditableJob,
   type DeployTarget,
@@ -164,6 +166,55 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
   });
 
   const [triggering, setTriggering] = createSignal(false);
+  // Event-driven triggers: the wire tag is the Rust variant name, so the picker's value *is*
+  // the `TriggerEvent["type"]`. Repository comes from the script (the server rejects a
+  // mismatch anyway); only the branch / review id is free-form.
+  const [eventType, setEventType] = createSignal<TriggerEvent["type"]>("Push");
+  const [eventRef, setEventRef] = createSignal("main");
+  function eventPayload(): TriggerEvent {
+    const type = eventType();
+    const reference = eventRef().trim();
+    switch (type) {
+      case "Push":
+      case "BranchDeleted":
+        return { type, repository: repository().trim(), branch: reference };
+      case "CodeReviewOpened":
+      case "CodeReviewClosed":
+      case "SafeMerge":
+        return { type, review_id: reference };
+      default:
+        return { type: "Manual" };
+    }
+  }
+  async function fireEvent() {
+    const s = selected();
+    if (!s) return;
+    props.setError(null);
+    setTriggering(true);
+    try {
+      await pipelinesApi.triggerPipelineEvent(s.id, eventPayload());
+      await refetchJobNames();
+      await refetchRuns();
+    } catch (err) {
+      props.setError(String(err));
+    } finally {
+      setTriggering(false);
+    }
+  }
+  /// Cron tick is poll-driven server-side; this is the manual pull of whatever is already due.
+  async function runDueSchedules() {
+    props.setError(null);
+    setTriggering(true);
+    try {
+      await pipelinesApi.dueScheduledRuns();
+      await refetchRuns();
+    } catch (err) {
+      props.setError(String(err));
+    } finally {
+      setTriggering(false);
+    }
+  }
+
   async function trigger() {
     const s = selected();
     if (!s) return;
@@ -216,6 +267,22 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                 <button class="ghost" disabled={triggering()} onClick={trigger}>{triggering() ? "Triggering…" : "Trigger run"}</button>
                 <button class="ghost danger" onClick={() => deleteScript(script().id)}>Delete script</button>
               </header>
+
+              <div class="event-trigger-row">
+                <select value={eventType()} onChange={(e) => setEventType(e.currentTarget.value as TriggerEvent["type"])}>
+                  <For each={TRIGGER_EVENT_TYPES}>{(t) => <option value={t}>{t}</option>}</For>
+                </select>
+                <Show when={eventType() !== "Manual"}>
+                  <input
+                    class="event-ref-input"
+                    placeholder={eventType() === "Push" || eventType() === "BranchDeleted" ? "branch" : "review id"}
+                    value={eventRef()}
+                    onInput={(e) => setEventRef(e.currentTarget.value)}
+                  />
+                </Show>
+                <button class="ghost" disabled={triggering()} onClick={fireEvent}>Fire event</button>
+                <button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button>
+              </div>
 
               <section class="jobs-editor">
                 <h3>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>

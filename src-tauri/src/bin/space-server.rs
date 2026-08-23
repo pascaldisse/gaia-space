@@ -4089,6 +4089,8 @@ async fn cmd(
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
     "trigger_pipeline_on_push" => pipelines::trigger_pipeline_on_push(script_id: String, repository: String, branch: String),
+    "trigger_pipeline_event" => pipelines::trigger_pipeline_event(script_id: String, event: pipelines::TriggerEvent),
+    "due_scheduled_runs" => pipelines::due_scheduled_runs(now: i64),
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { normalizeJob, parseScriptSource, scriptDefErrors, serializeJob } from "./pipelines";
+import { describe, expect, mock, test } from "bun:test";
+import { normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
 
 describe("pipeline script normalization", () => {
   test("upgrades legacy trigger_type and string steps without losing compatibility", () => {
@@ -99,5 +99,51 @@ describe("validation parity with parse_and_validate_script", () => {
     expect(scriptDefErrors({ jobs: [job({ timeout_secs: 1.5 })] } as never)[0]).toContain("timeout_secs");
     expect(scriptDefErrors({ jobs: [job({ steps: [{ type: "Unknown", script: "echo" }] })] } as never)[0]).toContain("unknown step type");
     expect(scriptDefErrors({ jobs: [job({ triggers: [{ type: "Unknown" }] })] } as never)[0]).toContain("unknown trigger type");
+  });
+});
+
+/** The wire contract for the event-driven commands: command names and argument keys are what
+ *  the Tauri handler and the space-server dispatch table read, and the event tag must stay the
+ *  Rust *variant* name. Pinned on the Rust side by
+ *  `pipelines::tests::serialized_dsl_tags_are_variant_names`. */
+describe("event trigger wire contract", () => {
+  async function captureCall(call: (api: typeof import("./pipelines").pipelinesApi) => Promise<unknown>) {
+    const calls: Array<{ cmd: string; args: Record<string, unknown> }> = [];
+    mock.module("@tauri-apps/api/core", () => ({
+      invoke: (cmd: string, args: Record<string, unknown>) => {
+        calls.push({ cmd, args });
+        return Promise.resolve([]);
+      },
+    }));
+    const { pipelinesApi } = await import("./pipelines");
+    await call(pipelinesApi);
+    return calls[0];
+  }
+
+  test("triggerPipelineEvent sends the variant-tagged event under camelCase keys", async () => {
+    const call = await captureCall((api) =>
+      api.triggerPipelineEvent("script-1", { type: "Push", repository: "repo", branch: "main" }));
+    expect(call.cmd).toBe("trigger_pipeline_event");
+    expect(call.args).toEqual({ scriptId: "script-1", event: { type: "Push", repository: "repo", branch: "main" } });
+  });
+
+  test("review events carry review_id in Rust field spelling", async () => {
+    const call = await captureCall((api) =>
+      api.triggerPipelineEvent("script-1", { type: "SafeMerge", review_id: "rev-9" }));
+    expect(call.args.event).toEqual({ type: "SafeMerge", review_id: "rev-9" });
+  });
+
+  test("dueScheduledRuns passes an explicit now, and defaults it to unix seconds", async () => {
+    expect((await captureCall((api) => api.dueScheduledRuns(1700)))).toEqual({
+      cmd: "due_scheduled_runs", args: { now: 1700 },
+    });
+    const now = (await captureCall((api) => api.dueScheduledRuns())).args.now as number;
+    expect(Number.isInteger(now)).toBe(true);
+    expect(Math.abs(now - Math.floor(Date.now() / 1000))).toBeLessThan(5);
+  });
+
+  test("every selectable event type is a member of the TriggerEvent union", () => {
+    const tags: Array<TriggerEvent["type"]> = [...TRIGGER_EVENT_TYPES];
+    expect(tags).toEqual(["Manual", "Push", "BranchDeleted", "CodeReviewOpened", "CodeReviewClosed", "SafeMerge"]);
   });
 });

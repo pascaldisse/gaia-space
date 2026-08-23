@@ -53,6 +53,8 @@ export type JobArtifactInput = { id: string; job_run_id: string; name: string; c
 export type TestReport = { id: string; job_run_id: string; suite: string; test_name: string; status: "PASSED" | "FAILED" | "SKIPPED"; duration_ms: number | null; message: string | null; created_at: number };
 export type TeamCityTestReportInput = { job_run_id: string; messages: string };
 
+/** Selectable event tags, in Rust variant spelling — the picker value is the wire tag. */
+export const TRIGGER_EVENT_TYPES = ["Manual", "Push", "BranchDeleted", "CodeReviewOpened", "CodeReviewClosed", "SafeMerge"] as const;
 export const JOB_TRIGGER_TYPES = ["MANUAL", "GIT_PUSH", "SCHEDULE", "GIT_BRANCH_DELETED", "CODE_REVIEW_OPENED", "CODE_REVIEW_CLOSED", "SAFE_MERGE"] as const;
 export const RUN_TERMINAL_STATUSES = ["FINISHED", "TERMINATED", "FAILED", "SKIPPED"];
 export function isTerminalRun(status: string): boolean {
@@ -295,6 +297,12 @@ export const pipelinesApi = {
   listJobRunsForScript: (scriptId: string) => invoke<JobRun[]>("list_job_runs_for_script", { scriptId }),
   triggerScript: (scriptId: string) => invoke<JobRun[]>("trigger_pipeline_script", { scriptId }),
   triggerOnPush: (scriptId: string, repository: string, branch: string) => invoke<JobRun[]>("trigger_pipeline_on_push", { scriptId, repository, branch }),
+  /** Single entry point for every event-driven trigger: `event` is tagged with the Rust
+   *  variant name (`{type:"Push",repository,branch}`), matching `TriggerEvent` above. */
+  triggerPipelineEvent: (scriptId: string, event: TriggerEvent) => invoke<JobRun[]>("trigger_pipeline_event", { scriptId, event }),
+  /** Cron tick: runs every `Schedule` job whose expression fired since its last run.
+   *  `now` is unix seconds; defaults to the current clock. */
+  dueScheduledRuns: (now?: number) => invoke<JobRun[]>("due_scheduled_runs", { now: now ?? Math.floor(Date.now() / 1000) }),
   registerWorker: (worker: Worker) => invoke<Worker>("register_worker", { worker }),
   workerHeartbeat: (workerId: string) => invoke<Worker>("worker_heartbeat", { workerId }),
   setWorkerSuspended: (workerId: string, suspended: boolean) => invoke<Worker>("set_worker_suspended", { workerId, suspended }),
