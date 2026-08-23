@@ -138,6 +138,19 @@ struct CreateUser {
     profile_id: Option<String>,
 }
 #[derive(Deserialize)]
+struct SelfRegistration {
+    username: String,
+    password: String,
+    display_name: String,
+}
+#[derive(Deserialize, Serialize)]
+struct VerifiedDomain {
+    domain: String,
+    auto_join: bool,
+    self_registration: bool,
+    verified_at: i64,
+}
+#[derive(Deserialize)]
 struct PatchUser {
     display_name: Option<String>,
     role: Option<String>,
@@ -558,7 +571,7 @@ enum RepoAccess {
 /// and only one of them was locked (☎Kali-VIII round 4).
 fn repository_access(user: &User, repository_id: &str, level: RepoAccess) -> Result<bool, String> {
     let write = level != RepoAccess::Read;
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return Ok(true);
     }
     let c = db::conn()?;
@@ -998,7 +1011,7 @@ async fn caldav_delete_event(
 
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,global_role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     let (id, username, password_hash, display_name, profile_id, role) = row;
     let verified = PasswordHash::new(&password_hash)
         .ok()
@@ -1016,35 +1029,35 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
         username,
         display_name,
         profile_id,
-        account_admin: role == "admin",
+        account_admin: role == "GlobalAdmin",
         role,
     };
-    if user.role != "admin"
+    if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
     {
-        user.role = "admin".into();
+        user.role = "GlobalAdmin".into();
     }
     Ok(user)
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
-    // Every `user.role=="admin"` test below is the *unified* admin predicate
+    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.global_role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
+    // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
     // (platform::is_admin_on): the account role or the Global.Superadmin right, one
     // meaning on both transports. The raw column alone would leave a rights-model
     // admin powerless over HTTP.
-    if user.role != "admin"
+    if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
     {
-        user.role = "admin".into();
+        user.role = "GlobalAdmin".into();
     }
     Ok(user)
 }
 fn admin(h: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     let u = user_by_token(h)?;
-    if u.role == "admin" {
+    if u.role == "GlobalAdmin" {
         Ok(u)
     } else {
         Err(err(StatusCode::FORBIDDEN, "admin required"))
@@ -1082,7 +1095,7 @@ async fn login(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
+    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,global_role FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
     let Ok((id, username, ph, display_name, profile_id, role)) = row else {
         let locked = app
             .login_limiter
@@ -1166,6 +1179,128 @@ async fn login(
     );
     resp
 }
+fn registration_domain(username: &str) -> Option<String> {
+    let (_, domain) = username.trim().rsplit_once('@')?;
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if domain.is_empty() || domain.contains(['/', '@', ' ']) {
+        None
+    } else {
+        Some(domain)
+    }
+}
+async fn register(Json(x): Json<SelfRegistration>) -> impl IntoResponse {
+    let username = x.username.trim();
+    let display_name = x.display_name.trim();
+    if username.is_empty() || display_name.is_empty() {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "username and display name are required",
+        )
+        .into_response();
+    }
+    if x.password.len() < 8 {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters",
+        )
+        .into_response();
+    }
+    let Some(domain) = registration_domain(username) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "registration requires an email username",
+        )
+        .into_response();
+    };
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let permitted: Option<i64> = match c
+        .query_row(
+            "SELECT 1 FROM verified_domains WHERE domain=?1 AND self_registration=1",
+            [&domain],
+            |r| r.get(0),
+        )
+        .optional()
+    {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    if permitted.is_none() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "self-registration is not enabled for this verified domain",
+        )
+        .into_response();
+    }
+    let id = token();
+    let pid = format!("profile-{}", &id[..12]);
+    let password_hash = match hash(&x.password) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    if let Err(e) = c.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())",
+        params![pid, username, display_name],
+    ) {
+        return err(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
+    }
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,'member','GlobalMember',unixepoch())",params![id,username,password_hash,display_name,pid]) { Ok(_)=>Json(json!({"id":id})).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response() }
+}
+async fn domains(h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let mut q=match c.prepare("SELECT domain,auto_join,self_registration,verified_at FROM verified_domains WHERE org_id='default' ORDER BY domain"){Ok(q)=>q,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};
+    let response = match q.query_map([], |r| {
+        Ok(VerifiedDomain {
+            domain: r.get(0)?,
+            auto_join: r.get::<_, i64>(1)? != 0,
+            self_registration: r.get::<_, i64>(2)? != 0,
+            verified_at: r.get(3)?,
+        })
+    }) {
+        Ok(rows) => Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    response
+}
+async fn save_domain(h: HeaderMap, Json(mut x): Json<VerifiedDomain>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    x.domain = x.domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if x.domain.is_empty() || x.domain.contains(['/', '@', ' ']) {
+        return err(StatusCode::BAD_REQUEST, "invalid domain").into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute("INSERT INTO verified_domains(domain,org_id,auto_join,self_registration,verified_at) VALUES(?1,'default',?2,?3,unixepoch()) ON CONFLICT(domain) DO UPDATE SET auto_join=excluded.auto_join,self_registration=excluded.self_registration,verified_at=unixepoch()",params![x.domain,x.auto_join as i32,x.self_registration as i32]){Ok(_)=>Json(x).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response()}
+}
+async fn delete_domain(h: HeaderMap, Path(domain): Path<String>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute(
+        "DELETE FROM verified_domains WHERE domain=?1 AND org_id='default'",
+        [domain],
+    ) {
+        Ok(_) => (StatusCode::NO_CONTENT).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
+    }
+}
+
 async fn me(h: HeaderMap) -> impl IntoResponse {
     match user_by_token(&h) {
         Ok(u) => Json(json!({"user":u})).into_response(),
@@ -1253,7 +1388,7 @@ async fn users(h: HeaderMap) -> impl IntoResponse {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
     let mut q = match c.prepare(
-        "SELECT id,username,display_name,profile_id,role,active FROM users ORDER BY username",
+        "SELECT id,username,display_name,profile_id,global_role,active FROM users ORDER BY username",
     ) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
@@ -1299,13 +1434,16 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         )
         .into_response();
     }
-    if !matches!(x.role.as_str(), "admin" | "member") {
+    if !matches!(
+        x.role.as_str(),
+        "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+    ) {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
-    if x.role == "admin" && !me.account_admin {
+    if x.role == "GlobalAdmin" && !me.account_admin {
         return err(
             StatusCode::FORBIDDEN,
-            "only an account admin can grant the admin role",
+            "only a GlobalAdmin can grant GlobalAdmin",
         )
         .into_response();
     }
@@ -1347,7 +1485,7 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         Ok(v) => v,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES(?1,?2,?3,?4,?5,?6,unixepoch())", params![id, username, password_hash, display_name, pid, x.role]) {
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())", params![id, username, password_hash, display_name, pid, if x.role == "GlobalAdmin" { "admin" } else { "member" }, x.role]) {
         Ok(_) => Json(json!({"id":id})).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
     }
@@ -1364,26 +1502,25 @@ async fn delete_user(h: HeaderMap, Path(id): Path<String>) -> impl IntoResponse 
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     let active_admins: i64 = c
         .query_row(
-            "SELECT count(*) FROM users WHERE role='admin' AND active=1",
+            "SELECT count(*) FROM users WHERE global_role='GlobalAdmin' AND active=1",
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
-    if target.0 == "admin" && target.1 && active_admins <= 1 {
+    if target.0 == "GlobalAdmin" && target.1 && active_admins <= 1 {
         return err(StatusCode::BAD_REQUEST, "cannot delete last active admin").into_response();
     }
     let tx = match c.unchecked_transaction() {
@@ -1411,17 +1548,20 @@ async fn patch_user(
         Err(e) => return e.into_response(),
     };
     if let Some(role) = x.role.as_deref() {
-        if !matches!(role, "admin" | "member") {
+        if !matches!(
+            role,
+            "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
+        ) {
             return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
         }
         // Promotion gate: the account role is the thing that mints admins, so only
         // an account admin may hand it out. A Global.Superadmin is an admin
         // everywhere it matters, but it cannot promote itself into the column that
         // grants it — the rights model would otherwise be its own escalation path.
-        if role == "admin" && !me.account_admin {
+        if role == "GlobalAdmin" && !me.account_admin {
             return err(
                 StatusCode::FORBIDDEN,
-                "only an account admin can grant the admin role",
+                "only a GlobalAdmin can grant GlobalAdmin",
             )
             .into_response();
         }
@@ -1437,28 +1577,27 @@ async fn patch_user(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let target: (String, bool) =
-        match c.query_row("SELECT role,active FROM users WHERE id=?1", [&id], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? == 1))
-        }) {
-            Ok(v) => v,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                return err(StatusCode::NOT_FOUND, "user not found").into_response()
-            }
-            Err(e) => {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-            }
-        };
+    let target: (String, bool) = match c.query_row(
+        "SELECT global_role,active FROM users WHERE id=?1",
+        [&id],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return err(StatusCode::NOT_FOUND, "user not found").into_response()
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
     if id == me.id && x.active == Some(false) {
         return err(StatusCode::BAD_REQUEST, "cannot deactivate yourself").into_response();
     }
-    let removes_active_admin = target.0 == "admin"
+    let removes_active_admin = target.0 == "GlobalAdmin"
         && target.1
-        && (x.role.as_deref() == Some("member") || x.active == Some(false));
+        && (x.role.as_deref() != Some("GlobalAdmin") || x.active == Some(false));
     if removes_active_admin {
         let n: i64 = c
             .query_row(
-                "SELECT count(*) FROM users WHERE role='admin' AND active=1",
+                "SELECT count(*) FROM users WHERE global_role='GlobalAdmin' AND active=1",
                 [],
                 |r| r.get(0),
             )
@@ -1483,7 +1622,18 @@ async fn patch_user(
         }
     }
     if let Some(v) = x.role {
-        if let Err(e) = c.execute("UPDATE users SET role=?1 WHERE id=?2", params![v, id]) {
+        if let Err(e) = c.execute(
+            "UPDATE users SET role=?1,global_role=?2 WHERE id=?3",
+            params![
+                if v == "GlobalAdmin" {
+                    "admin"
+                } else {
+                    "member"
+                },
+                v,
+                id
+            ],
+        ) {
             return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
         }
     }
@@ -2097,7 +2247,7 @@ fn board_project(board_id: &str) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())
 }
 fn project_readable(user: &User, project_id: &str) -> Result<bool, String> {
-    Ok(user.role == "admin"
+    Ok(user.role == "GlobalAdmin"
         || project_owner(project_id)?.is_some_and(|owner| owner == user.profile_id)
         || personal::project_member_by(project_id, &user.profile_id)?)
 }
@@ -2105,7 +2255,7 @@ fn project_readable(user: &User, project_id: &str) -> Result<bool, String> {
 /// Firing a pipeline executes shell commands on the server host. Unlike reading a project,
 /// it therefore belongs only to its owner (or a platform administrator).
 fn project_pipeline_executable(user: &User, project_id: &str) -> Result<bool, String> {
-    Ok(user.role == "admin"
+    Ok(user.role == "GlobalAdmin"
         || project_owner(project_id)?.is_some_and(|owner| owner == user.profile_id))
 }
 fn issue_id(body: &Value) -> Option<String> {
@@ -2166,7 +2316,7 @@ fn bind_document_create(user: &User, body: &mut Value) -> Result<(), String> {
             .get("container_id")
             .and_then(Value::as_str)
             .ok_or("project document requires container_id")?;
-        if user.role != "admin" && !personal::project_member_by(p, &user.profile_id)? {
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
             return Err("project access denied".into());
         }
     }
@@ -2190,7 +2340,7 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
             .get("container_id")
             .and_then(Value::as_str)
             .ok_or("project folder requires container_id")?;
-        if user.role != "admin" && !personal::project_member_by(p, &user.profile_id)? {
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
             return Err("project access denied".into());
         }
     }
@@ -2266,7 +2416,7 @@ fn authorize_command(
             object.insert("user_id".to_string(), json!(user.profile_id));
         }
     }
-    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "admin")
+    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
     {
@@ -2296,7 +2446,7 @@ fn authorize_command(
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
             // One refusal for both halves: an id that does not exist and one you may not
             // touch must be indistinguishable, or the error text becomes an existence oracle.
-            if user.role != "admin" && owner != user.profile_id {
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
                 return Err(err(StatusCode::FORBIDDEN, "project access denied"));
             }
             Ok(())
@@ -2307,7 +2457,7 @@ fn authorize_command(
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
-            if user.role != "admin" && owner != user.profile_id {
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the project owner or an admin can change this project",
@@ -2450,7 +2600,7 @@ fn authorize_command(
         // back on: an ordinary member must not rotate another app's secret, mint a
         // token, or probe one for validity.
         CommandPolicy::AppAdmin => {
-            if user.role == "admin" {
+            if user.role == "GlobalAdmin" {
                 Ok(())
             } else {
                 Err(err(
@@ -2467,7 +2617,7 @@ fn authorize_command(
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
             // `member_id` deliberately escapes bind_session_identity: naming somebody
             // else is the whole point here, and the right to do it is checked below.
-            if user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str()) {
+            if user.role == "GlobalAdmin" || owner.as_deref() == Some(user.profile_id.as_str()) {
                 Ok(())
             } else {
                 Err(err(
@@ -2493,7 +2643,7 @@ fn authorize_command(
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
             let may_admit =
-                user.role == "admin" || owner.as_deref() == Some(user.profile_id.as_str());
+                user.role == "GlobalAdmin" || owner.as_deref() == Some(user.profile_id.as_str());
             let people: Vec<String> = arg(body, "profile_ids").unwrap_or_default();
             for profile in &people {
                 let member = owner.as_deref() == Some(profile.as_str())
@@ -2584,7 +2734,7 @@ fn authorize_command(
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
             if let Some(id) = input.get("id").and_then(Value::as_str) {
-                if user.role != "admin"
+                if user.role != "GlobalAdmin"
                     && calendar_feeds::calendar_owner(id).ok().flatten().as_deref()
                         != Some(&user.profile_id)
                 {
@@ -2599,7 +2749,7 @@ fn authorize_command(
         }
         CommandPolicy::CalendarOwnerAction => {
             let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role != "admin"
+            if user.role != "GlobalAdmin"
                 && calendar_feeds::calendar_owner(&id)
                     .ok()
                     .flatten()
@@ -2623,7 +2773,7 @@ fn authorize_command(
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid argument `input`"))?;
             if let Some(id) = input.get("id").and_then(Value::as_str).map(str::to_owned) {
-                if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+                if user.role != "GlobalAdmin" && !calendar_feed_owned_by(&user.profile_id, &id) {
                     return Err(err(
                         StatusCode::FORBIDDEN,
                         "only the owner can change this calendar feed",
@@ -2635,7 +2785,7 @@ fn authorize_command(
         }
         CommandPolicy::CalendarFeedOwnerAction => {
             let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role != "admin" && !calendar_feed_owned_by(&user.profile_id, &id) {
+            if user.role != "GlobalAdmin" && !calendar_feed_owned_by(&user.profile_id, &id) {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the owner can change this calendar feed",
@@ -2649,7 +2799,7 @@ fn authorize_command(
             if name == "list_project_member_ids" {
                 let project_id: String =
                     arg(body, "project_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-                if user.role != "admin"
+                if user.role != "GlobalAdmin"
                     && !personal::project_member_by(&project_id, &user.profile_id)
                         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 {
@@ -2671,7 +2821,7 @@ fn authorize_command(
             let Some(todo_id) = todo_id else {
                 return Err(err(StatusCode::BAD_REQUEST, "invalid argument `id`"));
             };
-            if user.role != "admin" && !todo_owned_by(&user.profile_id, &todo_id) {
+            if user.role != "GlobalAdmin" && !todo_owned_by(&user.profile_id, &todo_id) {
                 return Err(err(
                     StatusCode::FORBIDDEN,
                     "only the owner can change this todo",
@@ -2681,7 +2831,7 @@ fn authorize_command(
         }
         CommandPolicy::TodoCompletionWrite => {
             let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if user.role == "admin" || todo_owned_by(&user.profile_id, &todo_id) {
+            if user.role == "GlobalAdmin" || todo_owned_by(&user.profile_id, &todo_id) {
                 return Ok(());
             }
             let assigned = personal::todo_assigned_by(&todo_id, &user.profile_id)
@@ -2710,7 +2860,7 @@ fn authorize_command(
         CommandPolicy::AbsenceWrite => {
             // Admins manage any profile's absences, approval included; identity rebinding is
             // skipped for them upstream so the client-supplied `profile_id` survives.
-            if user.role == "admin" {
+            if user.role == "GlobalAdmin" {
                 return Ok(());
             }
             // Members own their rows only, and may never move the `approved` flag.
@@ -2814,7 +2964,7 @@ fn authorize_command(
         CommandPolicy::DocumentWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_writable_by(&id, &user.profile_id, user.role == "admin")
+            if documents::document_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 if matches!(name, "save_document" | "restore_doc_version") {
@@ -2833,8 +2983,12 @@ fn authorize_command(
         CommandPolicy::DocumentOwnerWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_owner_writable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_owner_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -2844,8 +2998,12 @@ fn authorize_command(
         CommandPolicy::DocumentAccessWrite => {
             let id = document_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
-            if documents::document_access_manageable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_access_manageable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -2866,8 +3024,12 @@ fn authorize_command(
                 arg(body, "id").ok()
             }
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid folder id"))?;
-            if documents::document_folder_writable_by(&id, &user.profile_id, user.role == "admin")
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            if documents::document_folder_writable_by(
+                &id,
+                &user.profile_id,
+                user.role == "GlobalAdmin",
+            )
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 Ok(())
             } else {
@@ -2893,7 +3055,7 @@ fn authorize_command(
         CommandPolicy::MeetingWrite => {
             let id = meeting_id(body, name)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid meeting id"))?;
-            if !meetings::meeting_writable_by(&id, &user.profile_id, user.role == "admin")
+            if !meetings::meeting_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
                 return Err(err(StatusCode::FORBIDDEN, "meeting write denied"));
@@ -2924,7 +3086,7 @@ fn authorize_command(
                     |r| r.get(0),
                 )
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-            if (target == user.profile_id && self_rsvp) || organizer || user.role == "admin" {
+            if (target == user.profile_id && self_rsvp) || organizer || user.role == "GlobalAdmin" {
                 Ok(())
             } else {
                 Err(err(StatusCode::FORBIDDEN, "only a participant may change their RSVP; organizer access is required for another participant"))
@@ -2932,7 +3094,7 @@ fn authorize_command(
         }
         CommandPolicy::SearchRead => {
             put_arg(body, "profile_id", json!(user.profile_id));
-            put_arg(body, "allow_all", json!(user.role == "admin"));
+            put_arg(body, "allow_all", json!(user.role == "GlobalAdmin"));
             Ok(())
         }
         CommandPolicy::PackageRepositoryRead
@@ -3134,7 +3296,7 @@ fn absence_update(user: &User, body: &Value) -> axum::response::Response {
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response(),
     };
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return match personal::update_absence(absence) {
             Ok(v) => Json(json!({"ok":true,"value":v})).into_response(),
             Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
@@ -3153,7 +3315,7 @@ fn absence_delete(user: &User, body: &Value) -> axum::response::Response {
         Ok(v) => v,
         Err(e) => return err(StatusCode::BAD_REQUEST, &e).into_response(),
     };
-    if user.role == "admin" {
+    if user.role == "GlobalAdmin" {
         return match personal::delete_absence(id) {
             Ok(()) => Json(json!({"ok":true,"value":null})).into_response(),
             Err(e) => err(StatusCode::BAD_REQUEST, &e).into_response(),
@@ -3940,7 +4102,7 @@ async fn cmd(
     // the person themselves or an administrator: redaction happens here, at the one
     // chokepoint every web read passes through, not in the view.
     if name == "list_absences" || name == "current_absences" {
-        let admin = user.role == "admin";
+        let admin = user.role == "GlobalAdmin";
         let rows = if name == "list_absences" {
             personal::list_absences(arg::<Option<String>>(&body, "profile_id").ok().flatten())
         } else {
@@ -4364,7 +4526,7 @@ fn bootstrap() {
             p
         });
         c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('profile-admin','admin','Administrator',unixepoch())",[]).unwrap();
-        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES('admin','admin',?1,'Administrator','profile-admin','admin','GlobalAdmin',unixepoch())",[hash(&pw).unwrap()]).unwrap();
     }
 }
 /// Background delivery ticker configuration, read from the environment.
@@ -4511,6 +4673,12 @@ async fn main() {
                 .delete(caldav_delete_event),
         )
         .route("/api/auth/login", post(login))
+        .route("/api/auth/register", post(register))
+        .route("/api/domains", get(domains).post(save_domain))
+        .route(
+            "/api/domains/{domain}",
+            axum::routing::delete(delete_domain),
+        )
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))

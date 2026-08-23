@@ -1,11 +1,14 @@
 import { createSignal, Show } from "solid-js";
 import { humanError, login } from "../session";
+import { authApi } from "../api/auth";
 import "./Login.css";
 
 /** Web-mode login gate — replaces the app shell until /api/auth/me succeeds. */
 export default function Login() {
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
+const [displayName, setDisplayName] = createSignal("");
+const [registering, setRegistering] = createSignal(false);
   const [totpCode, setTotpCode] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -15,7 +18,8 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      await login(username(), password(), totpCode().trim() || undefined);
+      if (registering()) { await authApi.register(username(), displayName(), password()); await login(username(), password()); }
+else await login(username(), password(), totpCode().trim() || undefined);
     } catch (e) {
       setError(humanError(e));
     } finally {

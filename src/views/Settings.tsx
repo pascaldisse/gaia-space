@@ -5,6 +5,7 @@ import { isMobileServer, openServerSetup } from "../mobile";
 import { NAV_GROUPS, defaultView, hiddenGroups, navLayout, setDefaultView, setNavLayout, toggleGroup } from "../nav";
 import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
+import { platformApi, type Organization, type OrgSettings } from "../api/platform";
 import { humanError, profileId } from "../session";
 import "./Settings.css";
 
@@ -85,6 +86,15 @@ const enableTwoFactor = async () => { setBusy(true); setError(""); try { const e
 const disableTwoFactor = async () => { const code = window.prompt("Enter a current authenticator code to disable two-factor authentication."); if (!code) return; setBusy(true); setError(""); try { await twoFactorApi.disable(code); reloadTwoFactor(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
 return <div class="settings-card"><h2>Security</h2><Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show><h3>Two-factor authentication</h3><p class="settings-hint">{twoFactor()?.enabled ? "An authenticator code is required when you sign in." : "Protect your password sign-in with an RFC 6238 authenticator."}</p><button type="button" disabled={busy()} onClick={() => void (twoFactor()?.enabled ? disableTwoFactor() : enableTwoFactor())}>{twoFactor()?.enabled ? "Disable two-factor authentication" : "Set up two-factor authentication"}</button><h3>Permanent tokens</h3><p class="settings-hint">Use a token for scripts. Its value is shown only once and is never stored in plaintext.</p><Show when={oneTime()}><p class="calendar-error" role="status">Copy now: <code>{oneTime()}</code></p></Show><form class="feed-connect" onSubmit={createToken}><input aria-label="Token name" placeholder="Token name" value={name()} onInput={e => setName(e.currentTarget.value)} /><button type="submit" class="primary" disabled={busy()}>Create token</button></form><ul class="settings-groups feed-list"><For each={tokens() ?? []}>{token => <li class="settings-option feed-row"><span><strong>{token.name}</strong><em class="settings-sub">Created {when(token.created_at)} · last used {when(token.last_used_at)}</em></span><button type="button" class="danger" disabled={busy()} onClick={() => void permanentTokensApi.revoke(token.id).then(() => refetch()).catch(reason => setError(humanError(reason)))}>Revoke</button></li>}</For><Show when={!tokens.loading && (tokens() ?? []).length === 0}><li class="settings-sub">No permanent tokens.</li></Show></ul></div>;
 }
+function OrganizationSettings() {
+const [organization, { refetch: reloadOrganization }] = createResource(() => platformApi.organization());
+const [settings, { refetch: reloadSettings }] = createResource(() => platformApi.orgSettings());
+const [error, setError] = createSignal(""); const [busy, setBusy] = createSignal(false);
+const saveOrganization = async (event: SubmitEvent) => { event.preventDefault(); const form = new FormData(event.currentTarget); const value = organization(); if (!value) return; setBusy(true); setError(""); try { await platformApi.updateOrganization({...value, name:String(form.get("org-name") ?? ""), slogan:String(form.get("org-slogan") ?? "") || null, timezone:String(form.get("org-timezone") ?? "UTC"), onboarding_required:form.get("org-onboarding") === "on", allow_domains_edit:form.get("org-domains") === "on"}); reloadOrganization(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
+const saveSettings = async (event: SubmitEvent) => { event.preventDefault(); const form = new FormData(event.currentTarget); const value=settings(); if (!value) return; setBusy(true); setError(""); try { await platformApi.updateOrgSettings({...value, available_right_codes:String(form.get("right-codes") ?? "").split(",").map(x=>x.trim()).filter(Boolean), is_space_code:form.get("space-code") === "on", is_space_code_only:form.get("space-code-only") === "on"}); reloadSettings(); } catch (reason) { setError(humanError(reason)); } finally { setBusy(false); } };
+return <Show when={organization() && settings()}><section class="settings-card"><h2>Organization</h2><Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show><form class="feed-connect" onSubmit={saveOrganization}><input name="org-name" aria-label="Organization name" value={organization()!.name}/><input name="org-slogan" aria-label="Organization slogan" value={organization()!.slogan ?? ""}/><input name="org-timezone" aria-label="Organization timezone" value={organization()!.timezone}/><label><input name="org-onboarding" type="checkbox" checked={organization()!.onboarding_required}/> Require onboarding</label><label><input name="org-domains" type="checkbox" checked={organization()!.allow_domains_edit}/> Allow domain editing</label><button class="primary" disabled={busy()}>Save organization</button></form><form class="feed-connect" onSubmit={saveSettings}><input name="right-codes" aria-label="Available rights" value={settings()!.available_right_codes.join(", ")} placeholder="Right codes, comma separated"/><label><input name="space-code" type="checkbox" checked={settings()!.is_space_code}/> Space Code</label><label><input name="space-code-only" type="checkbox" checked={settings()!.is_space_code_only}/> Space Code only</label><button disabled={busy()}>Save organization settings</button></form></section></Show>;
+}
+
 /** User settings — navigation layout is per-user, stored locally, default = the shipped grouped view. */
 export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
@@ -119,7 +129,8 @@ export default function Settings() {
       </div>
     </div>
 
-    <NamedCalendars />
+    <OrganizationSettings />
+<NamedCalendars />
 <ConnectedCalendars />
 <SecuritySettings />
 
