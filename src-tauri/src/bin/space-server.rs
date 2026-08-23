@@ -3,7 +3,7 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::{any, get, patch, post, put},
     Json, Router,
@@ -600,55 +600,72 @@ fn ics_time(seconds: i64) -> String {
         .format("%Y%m%dT%H%M%SZ")
         .to_string()
 }
-fn caldav_ics(profile_id: &str, calendar_id: &str) -> Result<String, String> {
-    let c = db::conn()?;
-    let owned: Option<i64> = c
-        .query_row(
-            "SELECT 1 FROM calendars WHERE id=?1 AND profile_id=?2",
-            params![calendar_id, profile_id],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    if owned.is_none() {
-        return Err("calendar not found".into());
-    }
-    let mut q = c.prepare("SELECT e.uid,e.occurrence_key,e.title,e.starts_at,e.ends_at,e.all_day_date FROM calendar_feed_events e JOIN calendar_feeds f ON f.id=e.feed_id WHERE f.profile_id=?1 AND f.calendar_id=?2 ORDER BY e.starts_at,e.uid,e.occurrence_key").map_err(|e| e.to_string())?;
-    let rows = q
-        .query_map(params![profile_id, calendar_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, Option<i64>>(4)?,
-                r.get::<_, Option<String>>(5)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//GAIA Space//CalDAV Export//EN\r\nCALSCALE:GREGORIAN\r\n");
-    for row in rows {
-        let (uid, occurrence, title, starts_at, ends_at, all_day) =
-            row.map_err(|e| e.to_string())?;
-        out.push_str("BEGIN:VEVENT\r\n");
-        out.push_str(&format!(
-            "UID:{}-{}\r\nSUMMARY:{}\r\n",
-            ics_escape(&uid),
-            ics_escape(&occurrence),
-            ics_escape(&title)
-        ));
-        if let Some(day) = all_day {
-            out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", day.replace('-', "")));
-        } else {
-            out.push_str(&format!("DTSTART:{}\r\n", ics_time(starts_at)));
+type CaldavParsedEvent = (String, String, i64, Option<i64>, Option<String>);
+fn caldav_event(body: &str) -> Result<CaldavParsedEvent, String> {
+    let unfolded = body.replace("\r\n ", "").replace("\n ", "");
+    let mut uid = None;
+    let mut title = None;
+    let mut start = None;
+    let mut end = None;
+    let mut in_event = false;
+    for line in unfolded.lines() {
+        let line = line.trim_end_matches('\r');
+        if line == "BEGIN:VEVENT" {
+            in_event = true;
+            continue;
         }
-        if let Some(end) = ends_at {
-            out.push_str(&format!("DTEND:{}\r\n", ics_time(end)));
+        if line == "END:VEVENT" {
+            break;
         }
-        out.push_str("END:VEVENT\r\n");
+        if !in_event {
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = key.split(';').next().unwrap_or(key);
+        match name {
+            "UID" => uid = Some(caldav_unescape(value)),
+            "SUMMARY" => title = Some(caldav_unescape(value)),
+            "DTSTART" => start = Some(caldav_time(value)?),
+            "DTEND" => end = Some(caldav_time(value)?.0),
+            _ => {}
+        }
     }
-    out.push_str("END:VCALENDAR\r\n");
-    Ok(out)
+    let uid = uid
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("VEVENT needs UID")?;
+    let title = title.unwrap_or_else(|| "Untitled".into());
+    let (starts_at, all_day_date) = start.ok_or("VEVENT needs DTSTART")?;
+    if end.is_some_and(|ends_at| ends_at < starts_at) {
+        return Err("DTEND precedes DTSTART".into());
+    }
+    Ok((uid, title, starts_at, end, all_day_date))
+}
+async fn caldav_home(headers: HeaderMap) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let calendars = match c
+        .prepare("SELECT id FROM calendars WHERE profile_id=?1 ORDER BY name")
+        .and_then(|mut q| {
+            q.query_map([&user.profile_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()
+        }) {
+        Ok(rows) => rows,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    (
+        StatusCode::MULTI_STATUS,
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        caldav_multistatus(calendars.into_iter().map(|id| format!("/caldav/{id}/"))),
+    )
+        .into_response()
 }
 async fn caldav_collection(
     headers: HeaderMap,
@@ -658,19 +675,36 @@ async fn caldav_collection(
         Ok(user) => user,
         Err(response) => return response,
     };
-    match caldav_ics(&user.profile_id, &calendar_id) {
-        Ok(_) => (StatusCode::MULTI_STATUS, [(header::CONTENT_TYPE, "application/xml; charset=utf-8")], format!("<?xml version=\"1.0\"?><D:multistatus xmlns:D=\"DAV:\"><D:response><D:href>/caldav/{calendar_id}/calendar.ics</D:href></D:response></D:multistatus>")).into_response(),
+    match caldav_calendar_owned(&user.profile_id, &calendar_id) {
+        Ok(()) => (
+            StatusCode::MULTI_STATUS,
+            [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+            caldav_multistatus(vec![
+                format!("/caldav/{calendar_id}/"),
+                format!("/caldav/{calendar_id}/calendar.ics"),
+            ]),
+        )
+            .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 async fn caldav_calendar(
     headers: HeaderMap,
+    method: Method,
     Path(calendar_id): Path<String>,
 ) -> axum::response::Response {
     let user = match caldav_auth(&headers) {
         Ok(user) => user,
         Err(response) => return response,
     };
+    if method == Method::from_bytes(b"REPORT").unwrap()
+        || method == Method::from_bytes(b"PROPFIND").unwrap()
+    {
+        return caldav_collection_for_user(&user.profile_id, &calendar_id);
+    }
+    if method != Method::GET {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
     match caldav_ics(&user.profile_id, &calendar_id) {
         Ok(ics) => (
             StatusCode::OK,
@@ -681,6 +715,70 @@ async fn caldav_calendar(
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
+fn caldav_collection_for_user(profile_id: &str, calendar_id: &str) -> axum::response::Response {
+    match caldav_calendar_owned(profile_id, calendar_id) {
+        Ok(()) => (
+            StatusCode::MULTI_STATUS,
+            [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+            caldav_multistatus(vec![
+                format!("/caldav/{calendar_id}/"),
+                format!("/caldav/{calendar_id}/calendar.ics"),
+            ]),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+async fn caldav_put_event(
+    headers: HeaderMap,
+    Path((calendar_id, href)): Path<(String, String)>,
+    body: String,
+) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if !href.ends_with(".ics") || href == "calendar.ics" {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let (uid, title, starts_at, ends_at, all_day_date) = match caldav_event(&body) {
+        Ok(event) => event,
+        Err(reason) => return (StatusCode::BAD_REQUEST, reason).into_response(),
+    };
+    if caldav_calendar_owned(&user.profile_id, &calendar_id).is_err() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    match c.execute("INSERT INTO calendar_caldav_events(calendar_id,href,uid,title,starts_at,ends_at,all_day_date,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch()) ON CONFLICT(calendar_id,href) DO UPDATE SET uid=excluded.uid,title=excluded.title,starts_at=excluded.starts_at,ends_at=excluded.ends_at,all_day_date=excluded.all_day_date,updated_at=unixepoch()", params![calendar_id, href, uid, title, starts_at, ends_at, all_day_date]) { Ok(_) => StatusCode::NO_CONTENT.into_response(), Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response() }
+}
+async fn caldav_delete_event(
+    headers: HeaderMap,
+    Path((calendar_id, href)): Path<(String, String)>,
+) -> axum::response::Response {
+    let user = match caldav_auth(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if caldav_calendar_owned(&user.profile_id, &calendar_id).is_err() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    match c.execute(
+        "DELETE FROM calendar_caldav_events WHERE calendar_id=?1 AND href=?2",
+        params![calendar_id, href],
+    ) {
+        Ok(0) => StatusCode::NOT_FOUND.into_response(),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
@@ -3809,8 +3907,10 @@ async fn main() {
     bootstrap();
     spawn_webhook_ticker();
     let app = Router::new()
+        .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
         .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
+        .route("/caldav/{calendar_id}/{href}", put(caldav_put_event).delete(caldav_delete_event))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
@@ -5273,7 +5373,7 @@ mod tests {
         c.execute("INSERT INTO calendar_feed_events(feed_id,uid,occurrence_key,title,starts_at,ends_at,all_day_date) VALUES('work-feed','work-uid','1704067200','Work planning',1704067200,1704070800,NULL),('private-feed','private-uid','1704153600','Private event',1704153600,NULL,NULL)", []).unwrap();
         drop(c);
 
-        let denied = caldav_calendar(HeaderMap::new(), Path("work".into())).await;
+        let denied = caldav_calendar(HeaderMap::new(), Method::GET, Path("work".into())).await;
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(
             denied.headers()[header::WWW_AUTHENTICATE],
@@ -5295,6 +5395,7 @@ mod tests {
         assert!(collection_text.contains("/caldav/work/calendar.ics"));
         let calendar = caldav_calendar(
             basic("alice", "correct-horse-battery-staple"),
+            Method::GET,
             Path("work".into()),
         )
         .await;
@@ -5316,10 +5417,52 @@ mod tests {
             !ics.contains("Private event"),
             "named calendar exports must stay separated"
         );
-        let wrong_password = caldav_calendar(basic("alice", "wrong"), Path("work".into())).await;
+        let wrong_password =
+            caldav_calendar(basic("alice", "wrong"), Method::GET, Path("work".into())).await;
         assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[tokio::test]
+    async fn caldav_put_delete_and_collection_discovery_are_profile_scoped() {
+        let _serial = test_lock();
+        setup();
+        set_password("alice", "correct-horse-battery-staple");
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO calendars(id,profile_id,name,color,visible,created_at) VALUES('work','pa','Work','#2563eb',1,1),('private','pa','Private','#dc2626',1,1)", []).unwrap();
+        drop(c);
+        let auth = basic("alice", "correct-horse-battery-staple");
+        let home = caldav_home(auth.clone()).await;
+        let home_text =
+            String::from_utf8(to_bytes(home.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(home_text.contains("/caldav/work/") && home_text.contains("/caldav/private/"));
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:write-1\r\nSUMMARY:Writable event\r\nDTSTART:20300102T030405Z\r\nDTEND:20300102T040405Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        assert_eq!(
+            caldav_put_event(
+                auth.clone(),
+                Path(("work".into(), "write-1.ics".into())),
+                ics.into()
+            )
+            .await
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+        let exported = caldav_calendar(auth.clone(), Method::GET, Path("work".into())).await;
+        let exported = String::from_utf8(
+            to_bytes(exported.into_body(), 1 << 20)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(exported.contains("SUMMARY:Writable event") && !exported.contains("Private"));
+        assert_eq!(
+            caldav_delete_event(auth, Path(("work".into(), "write-1.ics".into())))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!caldav_ics("pa", "work").unwrap().contains("Writable event"));
+    }
     #[tokio::test]
     async fn calendar_feed_endpoints_bind_the_session_profile_and_refuse_foreign_feeds() {
         let _serial = test_lock();
