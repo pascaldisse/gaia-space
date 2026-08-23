@@ -367,7 +367,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         source_path: path,
         container_type: activeContainer(),
         container_id: cid,
-        folder_id: selectedFolderId(),
+        // Project uploads are documents too: their canonical root is mandatory.
+        folder_id: selectedFolderId() ?? rootParentId(),
         created_by: actingProfileId(),
       });
       setUploadPath("");
