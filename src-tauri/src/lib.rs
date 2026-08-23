@@ -394,6 +394,8 @@ pub fn run() {
             pipelines::list_test_reports,
             pipelines::trigger_pipeline_script,
             pipelines::trigger_pipeline_on_push,
+            pipelines::trigger_pipeline_event,
+            pipelines::due_scheduled_runs,
             pipelines::list_deploy_targets,
             pipelines::create_deploy_target,
             pipelines::update_deploy_target,

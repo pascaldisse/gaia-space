@@ -1,6 +1,7 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { api } from "../api";
+import { currentUser } from "../session";
 import {
   pipelinesApi,
   newId,
@@ -8,11 +9,18 @@ import {
   isTerminalRun,
   allowedDeploymentTransitions,
   JOB_TRIGGER_TYPES,
+  droppedContainerSteps,
+  scriptDefErrors,
+  scriptDefWarnings,
+  serializeJob,
+  editableJob,
   MAX_JOBS_PER_SCRIPT,
   MAX_STEPS_PER_JOB,
   DEFAULT_JOB_TIMEOUT_SECS,
+  TRIGGER_EVENT_TYPES,
+  type TriggerEvent,
   type PipelineScript,
-  type ScriptJobDef,
+  type EditableJob,
   type DeployTarget,
   type JobRun,
   type Worker,
@@ -20,16 +28,15 @@ import {
 } from "../api/pipelines";
 import "./Pipelines.css";
 
-type EditJob = ScriptJobDef & { stepsText: string };
-function toEditJob(j: ScriptJobDef): EditJob {
-  return { ...j, stepsText: j.steps.join("\n") };
-}
-function fromEditJob(j: EditJob): ScriptJobDef {
-  return { name: j.name, trigger_type: j.trigger_type, timeout_secs: j.timeout_secs, steps: j.stepsText.split("\n").map((s) => s.trim()).filter(Boolean) };
-}
+// Wire conversion lives in ../api/pipelines (tested against the Rust serde contract) so the
+// view cannot invent a step shape the server rejects.
+type EditJob = EditableJob;
+const toEditJob = editableJob;
+const fromEditJob = serializeJob;
 
 export default function Pipelines() {
   const [error, setError] = createSignal<string | null>(null);
+  const [warning, setWarning] = createSignal<string | null>(null);
   const [tab, setTab] = createSignal<"automation" | "deployments">("automation");
   const [projects] = createResource(() => api.listProjects());
 
@@ -48,8 +55,12 @@ export default function Pipelines() {
         <div class="pipelines-error" onClick={() => setError(null)}>{error()}</div>
       </Show>
 
+      <Show when={warning()}>
+        <div class="pipelines-warning" role="alert" onClick={() => setWarning(null)}>{warning()}</div>
+      </Show>
+
       <Show when={tab() === "automation"}>
-        <Automation projects={projects} setError={setError} />
+        <Automation projects={projects} setError={setError} setWarning={setWarning} />
       </Show>
       <Show when={tab() === "deployments"}>
         <Deployments projects={projects} setError={setError} />
@@ -58,7 +69,7 @@ export default function Pipelines() {
   );
 }
 
-function Automation(props: { projects: () => { id: string; name: string }[] | undefined; setError: (e: string | null) => void }) {
+function Automation(props: { projects: () => { id: string; name: string }[] | undefined; setError: (e: string | null) => void; setWarning: (e: string | null) => void }) {
   const [scripts, { refetch: refetchScripts }] = createResource(() => pipelinesApi.listScripts());
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   createEffect(() => {
@@ -110,11 +121,13 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (s) {
       setPath(s.path);
       setRepository(s.repository ?? "");
-      setJobs(parseScriptSource(s.source).jobs.map(toEditJob));
+      const parsed = parseScriptSource(s.source);
+      setJobs(parsed.jobs.map(toEditJob));
+      props.setWarning(parsed.warnings.length ? `Source preservation warning: ${parsed.warnings.join("; ")}. Saving will omit those parts.` : null);
     }
   });
   function addJob() {
-    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], stepsText: "" }); }));
+    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, triggers: [{ type: "Manual" }], stepsText: "" }); }));
   }
   function removeJob(i: number) {
     setJobs(produce((draft) => { draft.splice(i, 1); }));
@@ -128,7 +141,24 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (!s) return;
     props.setError(null);
     try {
-      const source = JSON.stringify({ jobs: jobs.map(fromEditJob) });
+      // A container step whose command line was edited away cannot be re-emitted; saving would
+      // silently move that command from its image onto the worker host. Block, don't warn.
+      const dropped = jobs.flatMap((job) => droppedContainerSteps(job).map((image) => `job '${job.name}': container step (image '${image}') was edited or removed; saving would run its command on the worker host instead. Restore the original command line or delete the step deliberately in the source view.`));
+      if (dropped.length) {
+        props.setError(dropped.join("; "));
+        return;
+      }
+      const def = { jobs: jobs.map(fromEditJob) };
+      // Refuse locally exactly what parse_and_validate_script would refuse, so "Save script"
+      // never reports success for a script the server dropped.
+      const problems = scriptDefErrors(def);
+      if (problems.length) {
+        props.setError(problems.join("; "));
+        return;
+      }
+      const warnings = scriptDefWarnings(def);
+      props.setWarning(warnings.length ? warnings.join("; ") : null);
+      const source = JSON.stringify(def);
       await pipelinesApi.updateScript({ ...s, path: path().trim() || ".space.kts", repository: repository().trim() || null, source });
       await refetchScripts();
     } catch (err) {
@@ -155,6 +185,55 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
   });
 
   const [triggering, setTriggering] = createSignal(false);
+  // Event-driven triggers: the wire tag is the Rust variant name, so the picker's value *is*
+  // the `TriggerEvent["type"]`. Repository comes from the script (the server rejects a
+  // mismatch anyway); only the branch / review id is free-form.
+  const [eventType, setEventType] = createSignal<TriggerEvent["type"]>("Push");
+  const [eventRef, setEventRef] = createSignal("main");
+  function eventPayload(): TriggerEvent {
+    const type = eventType();
+    const reference = eventRef().trim();
+    switch (type) {
+      case "Push":
+      case "BranchDeleted":
+        return { type, repository: repository().trim(), branch: reference };
+      case "CodeReviewOpened":
+      case "CodeReviewClosed":
+      case "SafeMerge":
+        return { type, review_id: reference };
+      default:
+        return { type: "Manual" };
+    }
+  }
+  async function fireEvent() {
+    const s = selected();
+    if (!s) return;
+    props.setError(null);
+    setTriggering(true);
+    try {
+      await pipelinesApi.triggerPipelineEvent(s.id, eventPayload());
+      await refetchJobNames();
+      await refetchRuns();
+    } catch (err) {
+      props.setError(String(err));
+    } finally {
+      setTriggering(false);
+    }
+  }
+  /// Cron tick is poll-driven server-side; this is the manual pull of whatever is already due.
+  async function runDueSchedules() {
+    props.setError(null);
+    setTriggering(true);
+    try {
+      await pipelinesApi.dueScheduledRuns();
+      await refetchRuns();
+    } catch (err) {
+      props.setError(String(err));
+    } finally {
+      setTriggering(false);
+    }
+  }
+
   async function trigger() {
     const s = selected();
     if (!s) return;
@@ -208,6 +287,22 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                 <button class="ghost danger" onClick={() => deleteScript(script().id)}>Delete script</button>
               </header>
 
+              <div class="event-trigger-row">
+                <select value={eventType()} onChange={(e) => setEventType(e.currentTarget.value as TriggerEvent["type"])}>
+                  <For each={TRIGGER_EVENT_TYPES}>{(t) => <option value={t}>{t}</option>}</For>
+                </select>
+                <Show when={eventType() !== "Manual"}>
+                  <input
+                    class="event-ref-input"
+                    placeholder={eventType() === "Push" || eventType() === "BranchDeleted" ? "branch" : "review id"}
+                    value={eventRef()}
+                    onInput={(e) => setEventRef(e.currentTarget.value)}
+                  />
+                </Show>
+                <button class="ghost" disabled={triggering()} onClick={fireEvent}>Fire event</button>
+                <Show when={currentUser()?.role === "admin"}><button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button></Show>
+              </div>
+
               <section class="jobs-editor">
                 <h3>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
                 <For each={jobs}>
@@ -227,6 +322,9 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                         />
                         <button class="ghost small danger" onClick={() => removeJob(i())}>Remove job</button>
                       </div>
+                      <Show when={job.triggers?.length}>
+                        <p class="hint">Triggers: {job.triggers!.map((trigger) => trigger.type.replace(/(?!^)([A-Z])/g, " $1")).join(", ")}</p>
+                      </Show>
                       <textarea
                         class="steps-input"
                         placeholder={`shell steps, one per line (max ${MAX_STEPS_PER_JOB})`}
