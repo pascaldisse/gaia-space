@@ -403,6 +403,8 @@ export default function Chat() {
   const [scheduleAt, setScheduleAt] = createSignal("");
   const [scheduleOpen, setScheduleOpen] = createSignal(false);
   const [scheduleEditId, setScheduleEditId] = createSignal<string | null>(null);
+  // null targets the channel composer; a root id targets that thread's composer.
+  const [scheduleThreadOf, setScheduleThreadOf] = createSignal<string | null>(null);
   const [scheduled, setScheduled] = createSignal<ScheduledMessage[]>([]);
 
   function localToEpochSecs(value: string): number | null {
@@ -433,6 +435,7 @@ export default function Chat() {
   function resetScheduleForm() {
     setScheduleOpen(false);
     setScheduleEditId(null);
+    setScheduleThreadOf(null);
     setScheduleAt("");
   }
 
@@ -444,16 +447,17 @@ export default function Chat() {
     const when = localToEpochSecs(scheduleAt());
     if (!ch || !p || when === null) return;
     const editing = scheduleEditId();
-    const text = draft().trim();
+    const threadOf = scheduleThreadOf();
+    const text = (threadOf ? threadDraft() : draft()).trim();
     try {
       if (editing) {
         await chatApi.updateScheduledMessage(editing, p, text ? text : null, when);
       } else {
         if (!text) return;
-        await chatApi.scheduleMessage({ id: newId("sched"), channelId: ch, authorId: p, text, scheduledAt: when });
+        await chatApi.scheduleMessage({ id: newId("sched"), channelId: ch, authorId: p, text, threadOf, scheduledAt: when });
       }
-      setDraft("");
-      clearDraftState();
+      if (threadOf) setThreadDraft("");
+      else { setDraft(""); clearDraftState(); }
       resetScheduleForm();
       refreshScheduled();
     } catch (e) {
@@ -462,7 +466,9 @@ export default function Chat() {
   }
 
   function editScheduled(row: ScheduledMessage) {
-    setDraft(row.text);
+    setScheduleThreadOf(row.thread_of);
+    if (row.thread_of) setThreadDraft(row.text);
+    else setDraft(row.text);
     setScheduleAt(epochToLocalInput(row.scheduled_at));
     setScheduleEditId(row.id);
     setScheduleOpen(true);
@@ -1235,7 +1241,7 @@ export default function Chat() {
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
-            <button type="button" class="schedule-button" title="Send later" onClick={() => setScheduleOpen((v) => !v)}>🕒</button>
+            <button type="button" class="schedule-button" title="Send later" onClick={() => { setScheduleThreadOf(null); setScheduleOpen((v) => !v); }}>🕒</button>
             <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
@@ -1337,6 +1343,7 @@ export default function Chat() {
             />
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
+            <button type="button" class="schedule-button" title="Schedule reply" onClick={() => { setScheduleThreadOf(threadRoot()!.id); setScheduleOpen(true); }}>🕒</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={threadAttachments().length}><div class="pending-attachments">
               <For each={threadAttachments()}>{(attachment) => (
