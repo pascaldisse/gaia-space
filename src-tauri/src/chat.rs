@@ -869,6 +869,296 @@ fn list_typing_impl(
     Ok(rows)
 }
 
+/// How many due intents one delivery run may claim. A tick is bounded so a backlog
+/// (server down over a weekend) drains across ticks instead of holding the write lock.
+pub const SCHEDULED_TICK_LIMIT_DEFAULT: i64 = 100;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduledMessage {
+    pub id: String,
+    pub channel_id: String,
+    pub author_id: String,
+    pub text: String,
+    pub thread_of: Option<String>,
+    /// UTC epoch seconds — the wire never carries a local wall clock.
+    pub scheduled_at: i64,
+    pub status: String,
+    pub sent_message_id: Option<String>,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn scheduled_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledMessage> {
+    Ok(ScheduledMessage {
+        id: r.get(0)?,
+        channel_id: r.get(1)?,
+        author_id: r.get(2)?,
+        text: r.get(3)?,
+        thread_of: r.get(4)?,
+        scheduled_at: r.get(5)?,
+        status: r.get(6)?,
+        sent_message_id: r.get(7)?,
+        error: r.get(8)?,
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
+    })
+}
+
+const SCHEDULED_COLS: &str = "id,channel_id,author_id,text,thread_of,scheduled_at,status,sent_message_id,error,created_at,updated_at";
+
+/// The delivered message id is derived from the intent id, never random: a replayed
+/// delivery hits the messages primary key instead of posting the text twice.
+fn scheduled_message_id(id: &str) -> String {
+    format!("sched-{id}")
+}
+
+/// A thread target must live in the same channel and still exist — otherwise the reply
+/// would surface in a conversation its author never chose.
+fn validate_scheduled_thread(
+    c: &Connection,
+    channel_id: &str,
+    thread_of: Option<&str>,
+) -> Result<()> {
+    let Some(thread_of) = thread_of else {
+        return Ok(());
+    };
+    let root_channel: Option<String> = c
+        .query_row(
+            "SELECT channel_id FROM messages WHERE id=?1 AND archived=0",
+            [thread_of],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match root_channel.as_deref() {
+        Some(found) if found == channel_id => Ok(()),
+        Some(_) => Err("thread root belongs to another channel".into()),
+        None => Err("thread root not found".into()),
+    }
+}
+
+/// Scheduling is a future act by definition: a past (or now) timestamp would fire on the
+/// very next tick, which is a plain send wearing a scheduling costume.
+fn validate_future(scheduled_at: i64, now: i64) -> Result<()> {
+    if scheduled_at <= now {
+        return Err("scheduled_at must be in the future".into());
+    }
+    Ok(())
+}
+
+fn scheduled_write_guard(c: &Connection, channel_id: &str, author_id: &str) -> Result<()> {
+    if is_read_only_channel_on(c, channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
+    if !channel_allows_profile(c, channel_id, author_id)? {
+        return Err("channel access denied".into());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn schedule_message_impl(
+    c: &Connection,
+    id: &str,
+    channel_id: &str,
+    author_id: &str,
+    text: &str,
+    thread_of: Option<&str>,
+    scheduled_at: i64,
+) -> Result<ScheduledMessage> {
+    if text.trim().is_empty() {
+        return Err("scheduled message text is required".into());
+    }
+    scheduled_write_guard(c, channel_id, author_id)?;
+    validate_future(scheduled_at, now_secs())?;
+    validate_scheduled_thread(c, channel_id, thread_of)?;
+    let now = now_secs();
+    c.execute(
+        "INSERT INTO scheduled_messages(id,channel_id,author_id,text,thread_of,scheduled_at,status,created_at,updated_at) \
+         VALUES(?1,?2,?3,?4,?5,?6,'pending',?7,?7)",
+        rusqlite::params![id, channel_id, author_id, text, thread_of, scheduled_at, now],
+    )
+    .map_err(|e| e.to_string())?;
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+fn get_scheduled_impl(c: &Connection, id: &str) -> Result<Option<ScheduledMessage>> {
+    c.query_row(
+        &format!("SELECT {SCHEDULED_COLS} FROM scheduled_messages WHERE id=?1"),
+        [id],
+        scheduled_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Only the author may see or steer their own unsent intents — a pending message is not
+/// channel content yet, so channel membership alone grants nothing.
+fn owned_scheduled(c: &Connection, id: &str, actor_id: &str) -> Result<ScheduledMessage> {
+    let row =
+        get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())?;
+    if row.author_id != actor_id {
+        return Err("scheduled message belongs to another author".into());
+    }
+    Ok(row)
+}
+
+fn list_scheduled_impl(
+    c: &Connection,
+    author_id: &str,
+    channel_id: Option<&str>,
+    status: Option<&str>,
+) -> Result<Vec<ScheduledMessage>> {
+    if let Some(status) = status {
+        if !matches!(status, "pending" | "sent" | "cancelled") {
+            return Err(format!("invalid scheduled status: {status}"));
+        }
+    }
+    let mut s = c
+        .prepare(&format!(
+            "SELECT {SCHEDULED_COLS} FROM scheduled_messages \
+             WHERE author_id=?1 AND (?2 IS NULL OR channel_id=?2) AND (?3 IS NULL OR status=?3) \
+             ORDER BY scheduled_at, id"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(
+            rusqlite::params![author_id, channel_id, status],
+            scheduled_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Editing is CAS on `status='pending'`: an intent that already fired (or was cancelled)
+/// is history and cannot be rewritten by a client that raced the ticker.
+fn update_scheduled_impl(
+    c: &Connection,
+    id: &str,
+    actor_id: &str,
+    text: Option<&str>,
+    scheduled_at: Option<i64>,
+) -> Result<ScheduledMessage> {
+    let current = owned_scheduled(c, id, actor_id)?;
+    if current.status != "pending" {
+        return Err(format!("scheduled message is {}", current.status));
+    }
+    let text = text.unwrap_or(&current.text);
+    if text.trim().is_empty() {
+        return Err("scheduled message text is required".into());
+    }
+    let when = scheduled_at.unwrap_or(current.scheduled_at);
+    validate_future(when, now_secs())?;
+    scheduled_write_guard(c, &current.channel_id, actor_id)?;
+    let changed = c
+        .execute(
+            "UPDATE scheduled_messages SET text=?2, scheduled_at=?3, updated_at=?4 WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, text, when, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("scheduled message is no longer pending".into());
+    }
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+/// Cancelling is the same CAS; it never deletes the row, so the author keeps the record
+/// of what they called off.
+fn cancel_scheduled_impl(c: &Connection, id: &str, actor_id: &str) -> Result<ScheduledMessage> {
+    let current = owned_scheduled(c, id, actor_id)?;
+    if current.status == "cancelled" {
+        return Ok(current); // idempotent retry
+    }
+    let changed = c
+        .execute(
+            "UPDATE scheduled_messages SET status='cancelled', updated_at=?2 WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("scheduled message already delivered".into());
+    }
+    get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())
+}
+
+/// One delivery step: *lease* a single due row with a conditional UPDATE (`status='pending'`
+/// -> `sent` in the same statement that names the message id), then insert the message.
+/// Two concurrent ticks cannot both win that UPDATE, so nobody posts twice; a crash after
+/// the lease leaves a `sent` row whose derived message id is reinserted idempotently on the
+/// next run. A failed insert releases the lease and records `error` for the author.
+fn deliver_one_scheduled(c: &Connection, id: &str) -> Result<Option<ScheduledMessage>> {
+    let message_id = scheduled_message_id(id);
+    let leased = c
+        .execute(
+            "UPDATE scheduled_messages SET status='sent', sent_message_id=?2, error=NULL, updated_at=?3 \
+             WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, message_id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    if leased == 0 {
+        return Ok(None);
+    }
+    let row =
+        get_scheduled_impl(c, id)?.ok_or_else(|| "scheduled message not found".to_string())?;
+    let message = Message {
+        id: message_id,
+        channel_id: row.channel_id.clone(),
+        author_id: Some(row.author_id.clone()),
+        text: row.text.clone(),
+        created_at: row.scheduled_at,
+        edited_at: None,
+        thread_of: row.thread_of.clone(),
+        archived: false,
+        pinned: false,
+        content_kind: default_message_content_kind(),
+        mention_ids: Vec::new(),
+    };
+    match create_message_impl(c, &message) {
+        Ok(()) => Ok(Some(row)),
+        Err(e) => {
+            c.execute(
+                "UPDATE scheduled_messages SET status='pending', sent_message_id=NULL, error=?2, updated_at=?3 WHERE id=?1",
+                rusqlite::params![id, e, now_secs()],
+            )
+            .map_err(|e| e.to_string())?;
+            Err(e)
+        }
+    }
+}
+
+/// Bounded tick: claim at most `limit` due intents, oldest first. Failures are recorded
+/// on their row and do not abort the run — one broken channel must not block the rest.
+fn deliver_due_scheduled_impl(
+    c: &Connection,
+    now: i64,
+    limit: i64,
+) -> Result<Vec<ScheduledMessage>> {
+    let limit = limit.clamp(1, 1000);
+    let mut s = c
+        .prepare(
+            "SELECT id FROM scheduled_messages WHERE status='pending' AND scheduled_at <= ?1 ORDER BY scheduled_at, id LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = s
+        .query_map(rusqlite::params![now, limit], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let mut delivered = Vec::new();
+    for id in ids {
+        match deliver_one_scheduled(c, &id) {
+            Ok(Some(row)) => delivered.push(row),
+            Ok(None) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(delivered)
+}
+
 /// Pinning is idempotent; a caller may retry a lost response without changing history.
 fn set_message_pinned_impl(c: &Connection, id: &str, pinned: bool) -> Result<MessageView> {
     let changed = c
@@ -1380,6 +1670,68 @@ pub fn delete_message_draft(
     )
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+#[allow(clippy::too_many_arguments)]
+pub fn schedule_message(
+    id: String,
+    channel_id: String,
+    author_id: String,
+    text: String,
+    thread_of: Option<String>,
+    scheduled_at: i64,
+) -> Result<ScheduledMessage> {
+    schedule_message_impl(
+        &db::conn()?,
+        &id,
+        &channel_id,
+        &author_id,
+        &text,
+        thread_of.as_deref(),
+        scheduled_at,
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_scheduled_messages(
+    author_id: String,
+    channel_id: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<ScheduledMessage>> {
+    list_scheduled_impl(
+        &db::conn()?,
+        &author_id,
+        channel_id.as_deref(),
+        status.as_deref(),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_scheduled_message(id: String, author_id: String) -> Result<ScheduledMessage> {
+    owned_scheduled(&db::conn()?, &id, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn update_scheduled_message(
+    id: String,
+    author_id: String,
+    text: Option<String>,
+    scheduled_at: Option<i64>,
+) -> Result<ScheduledMessage> {
+    update_scheduled_impl(&db::conn()?, &id, &author_id, text.as_deref(), scheduled_at)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn cancel_scheduled_message(id: String, author_id: String) -> Result<ScheduledMessage> {
+    cancel_scheduled_impl(&db::conn()?, &id, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn deliver_due_scheduled_messages(
+    now: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<ScheduledMessage>> {
+    let c = db::conn()?;
+    deliver_due_scheduled_impl(
+        &c,
+        now.unwrap_or_else(now_secs),
+        limit.unwrap_or(SCHEDULED_TICK_LIMIT_DEFAULT),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_channel_typing(channel_id: String, profile_id: String, typing: bool) -> Result<()> {
     set_typing_impl(&db::conn()?, &channel_id, &profile_id, typing)
 }
@@ -1639,6 +1991,173 @@ mod tests {
             &["default-org".to_string()],
         )
         .unwrap();
+    }
+
+    fn seed_scheduler(c: &Connection, channel: &str) {
+        seed_channel(c, channel);
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('default-org','org','Org',unixepoch())",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn scheduling_requires_future_time_and_owner_may_edit_and_cancel() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-sched");
+        let future = now_secs() + 600;
+
+        assert!(
+            schedule_message_impl(
+                &c,
+                "s-past",
+                "chan-sched",
+                "default-org",
+                "x",
+                None,
+                now_secs()
+            )
+            .is_err(),
+            "a past timestamp is a plain send, not a schedule"
+        );
+        assert!(schedule_message_impl(
+            &c,
+            "s-empty",
+            "chan-sched",
+            "default-org",
+            "   ",
+            None,
+            future
+        )
+        .is_err());
+
+        let row = schedule_message_impl(
+            &c,
+            "s-1",
+            "chan-sched",
+            "default-org",
+            "later",
+            None,
+            future,
+        )
+        .unwrap();
+        assert_eq!(row.status, "pending");
+
+        assert!(
+            owned_scheduled(&c, "s-1", "someone-else").is_err(),
+            "an unsent intent is private to its author"
+        );
+        assert!(update_scheduled_impl(&c, "s-1", "someone-else", Some("hack"), None).is_err());
+
+        let edited =
+            update_scheduled_impl(&c, "s-1", "default-org", Some("later, edited"), None).unwrap();
+        assert_eq!(edited.text, "later, edited");
+
+        let cancelled = cancel_scheduled_impl(&c, "s-1", "default-org").unwrap();
+        assert_eq!(cancelled.status, "cancelled");
+        // cancel is idempotent, and a cancelled intent can no longer be rewritten
+        assert_eq!(
+            cancel_scheduled_impl(&c, "s-1", "default-org")
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+        assert!(update_scheduled_impl(&c, "s-1", "default-org", Some("zombie"), None).is_err());
+
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn delivery_is_bounded_idempotent_and_skips_cancelled() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-deliver");
+        let future = now_secs() + 60;
+        for id in ["d-1", "d-2", "d-3"] {
+            schedule_message_impl(&c, id, "chan-deliver", "default-org", id, None, future).unwrap();
+        }
+        cancel_scheduled_impl(&c, "d-3", "default-org").unwrap();
+
+        // not due yet
+        assert!(deliver_due_scheduled_impl(&c, future - 1, 10)
+            .unwrap()
+            .is_empty());
+
+        // bounded tick: one per run
+        let first = deliver_due_scheduled_impl(&c, future, 1).unwrap();
+        assert_eq!(first.len(), 1);
+        let second = deliver_due_scheduled_impl(&c, future, 10).unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "remaining pending intent, cancelled one skipped"
+        );
+        assert!(deliver_due_scheduled_impl(&c, future, 10)
+            .unwrap()
+            .is_empty());
+
+        let sent = get_scheduled_impl(&c, "d-1").unwrap().unwrap();
+        assert_eq!(sent.status, "sent");
+        assert_eq!(sent.sent_message_id.as_deref(), Some("sched-d-1"));
+        let posted: i64 = c
+            .query_row(
+                "SELECT count(*) FROM messages WHERE channel_id='chan-deliver'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(posted, 2, "exactly one message per delivered intent");
+
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn thread_target_must_live_in_the_same_channel() {
+        let (c, path) = conn();
+        seed_scheduler(&c, "chan-a");
+        seed_channel(&c, "chan-b");
+        create_message_impl(
+            &c,
+            &Message {
+                id: "root-b".to_string(),
+                channel_id: "chan-b".to_string(),
+                author_id: Some("default-org".to_string()),
+                text: "root".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: default_message_content_kind(),
+                mention_ids: Vec::new(),
+            },
+        )
+        .unwrap();
+        let future = now_secs() + 60;
+        assert!(schedule_message_impl(
+            &c,
+            "s-x",
+            "chan-a",
+            "default-org",
+            "cross",
+            Some("root-b"),
+            future
+        )
+        .is_err());
+        assert!(schedule_message_impl(
+            &c,
+            "s-y",
+            "chan-a",
+            "default-org",
+            "ghost",
+            Some("nope"),
+            future
+        )
+        .is_err());
+        drop(c);
+        drop(path);
     }
 
     #[test]
