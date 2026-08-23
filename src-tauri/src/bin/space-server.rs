@@ -1043,7 +1043,7 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.global_role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="admin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
+    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.global_role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
     // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
     // (platform::is_admin_on): the account role or the Global.Superadmin right, one
     // meaning on both transports. The raw column alone would leave a rights-model
@@ -1224,7 +1224,7 @@ async fn login(
     let t = token();
     let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]);
     let mut resp = Json(
-        json!({"user":User{id,username,display_name,profile_id,account_admin:role=="admin",role}}),
+        json!({"user":User{id,username,display_name,profile_id,account_admin:role=="GlobalAdmin",role}}),
     )
     .into_response();
     resp.headers_mut().insert(
