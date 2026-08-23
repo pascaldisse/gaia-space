@@ -158,6 +158,12 @@ fn last_message_at_impl(c: &Connection, channel_id: &str) -> Result<Option<i64>>
 }
 pub(crate) fn channel_readable_by(channel_id: &str, profile_id: &str) -> Result<bool> { channel_allows_profile(&db::conn()?, channel_id, profile_id) }
 fn channel_allows_profile(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    // Entity-bound meetings inherit the meeting's privacy predicate. Other entity
+    // channels stay generic/public as before; this avoids exposing a private agenda
+    // merely because its discussion is implemented by the shared channel primitive.
+    if let Some(meeting_id) = channel_id.strip_prefix("entity:meeting:") {
+        return crate::meetings::meeting_readable_on(c, meeting_id, profile_id);
+    }
     let content_type: String = c
         .query_row(
             "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
@@ -182,6 +188,14 @@ fn channel_allows_actor(
     channel_id: &str,
     profile_id: Option<&str>,
 ) -> Result<bool> {
+    // Meeting discussions retain their meeting visibility boundary even though
+    // generic entity-bound channels are otherwise public.
+    if channel_id.strip_prefix("entity:meeting:").is_some() {
+        return profile_id
+            .map(|profile_id| channel_allows_profile(c, channel_id, profile_id))
+            .transpose()
+            .map(|allowed| allowed.unwrap_or(false));
+    }
     let content_type: String = c
         .query_row(
             "SELECT content_type FROM channels WHERE id=?1 AND archived=0",
@@ -289,7 +303,7 @@ fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<Cha
         .map_err(|e| e.to_string());
     rows
 }
-fn create_entity_channel_impl(
+pub(crate) fn create_entity_channel_impl(
     c: &Connection,
     entity_type: &str,
     entity_id: &str,
@@ -928,6 +942,32 @@ mod tests {
         assert!(members
             .iter()
             .any(|m| m.profile_id == "default-org" && m.administrator));
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn meeting_entity_channel_keeps_private_read_scope_for_actor_reads() {
+        let (c, path) = conn();
+        for id in ["guest", "stranger"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,unixepoch())",
+                [id],
+            )
+            .unwrap();
+        }
+        c.execute_batch(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,modification_preference,archived)
+             VALUES('private-meeting','Private',1,2,'default-org','participants','organizer-only',0);
+             INSERT INTO meeting_participants(meeting_id,profile_id,status)
+             VALUES('private-meeting','guest','accepted');",
+        )
+        .unwrap();
+        create_entity_channel_impl(&c, "meeting", "private-meeting", None).unwrap();
+        let channel = "entity:meeting:private-meeting";
+        assert!(channel_allows_actor(&c, channel, Some("guest")).unwrap());
+        assert!(!channel_allows_actor(&c, channel, Some("stranger")).unwrap());
+        assert!(!channel_allows_actor(&c, channel, None).unwrap());
         drop(c);
         drop(path);
     }

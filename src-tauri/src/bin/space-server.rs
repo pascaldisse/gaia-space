@@ -1945,7 +1945,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
         "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
-        "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
@@ -4290,6 +4290,7 @@ async fn cmd(
     "delete_document" => documents::delete_document(id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
+    "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
     "delete_meeting" => meetings::delete_meeting(id: String),
     "archive_role" => platform::archive_role(id: String, archived: bool),
     "archive_sprint" => issues::archive_sprint(id: String, archived: bool),
