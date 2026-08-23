@@ -1720,6 +1720,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
         | "join_meeting_call"
+        | "end_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
         | "trigger_pipeline_on_push"
@@ -3116,7 +3117,7 @@ macro_rules! dispatch {
                 }
             })*
             n if n.starts_with("repo_") || matches!(n,
-                "app_info" | "join_meeting_call" | "start_livekit_server" |
+                "app_info" | "join_meeting_call" | "end_meeting_call" | "start_livekit_server" |
                 "trigger_pipeline_script" | "review_diff" | "dry_run_merge" |
                 "attempt_merge" | "open_merge_request"
             ) => err(StatusCode::NOT_IMPLEMENTED,"not available in web mode").into_response(),
