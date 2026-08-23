@@ -417,6 +417,10 @@ struct LivekitClaims {
     attributes: std::collections::BTreeMap<String, String>,
 }
 
+/// The only provider Gaia mints for today; stored on the meeting so a future second
+/// provider cannot be mistaken for this one on old rows.
+pub(crate) const VIDEO_PROVIDER: &str = "livekit";
+
 fn room_for_meeting(meeting_id: &str) -> String {
     format!("meeting-{meeting_id}")
 }
@@ -539,7 +543,16 @@ pub(crate) fn join_meeting_call_with_config(
         return Err("Waiting for organizer admission: only accepted participants can join this meeting call".into());
     }
     let status = ensure_server(config.clone())?;
-    let room = room_for_meeting(&meeting_id);
+    // Persist the room BEFORE minting: the token must be scoped to the room the
+    // meeting is actually bound to. `record_call_room_on` returns the first room ever
+    // recorded, so a later join can never mint a token for a second, split room.
+    let room = meetings::record_call_room_on(
+        &connection,
+        &meeting_id,
+        VIDEO_PROVIDER,
+        &room_for_meeting(&meeting_id),
+        &status.url,
+    )?;
     Ok(CallJoin {
         url: status.url,
         token: token_for(
@@ -551,6 +564,21 @@ pub(crate) fn join_meeting_call_with_config(
         )?,
         room,
     })
+}
+
+/// End the call. Organizer-only: any accepted participant may leave their own client,
+/// but only the host declares the conference over for the record.
+#[cfg(feature = "desktop")]
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn end_meeting_call(app: AppHandle, meeting_id: String) -> Result<bool> {
+    let connection = db::connection(&app)?;
+    let (participant_id, _) = actor::resolve(&connection)?;
+    let meeting = meetings::get_meeting_scoped(meeting_id.clone(), participant_id.clone())?
+        .ok_or("Meeting not found")?;
+    if meeting.organizer_id.as_deref() != Some(participant_id.as_str()) {
+        return Err("Only the meeting organizer can end the call".into());
+    }
+    meetings::end_call_on(&connection, &meeting_id)
 }
 
 /// LiveKit room-composite Egress handle as Gaia records it. The Egress worker writes
