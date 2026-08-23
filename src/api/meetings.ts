@@ -11,6 +11,7 @@ export type MeetingOccurrence = { id:string; meeting_id:string; title:string; st
 export type LivekitConfig = { server_path?:string; host?:string; port?:number; api_key?:string; api_secret?:string; egress_url?:string; recording_filepath?:string; egress_timeout_ms?:number; recording_reservation_ttl_seconds?:number; recording_max_stop_attempts?:number };
 export type CallJoin = { url:string; room:string; token:string };
 export type CallRecording = { id:string; meeting_id:string; egress_id:string|null; status:"starting"|"recording"|"stopping"|"stopped"|"failed"; filepath:string|null; started_by:string|null; started_at:number; stopped_at:number|null; stop_attempts:number; last_error:string|null };
+export type CallTranscriptSegment = { id:string; meeting_id:string; speaker_id:string|null; text:string; started_at:number; ended_at:number; source:"external"|"manual"; created_at:number };
 export type LivekitStatus = { running:boolean; url:string; pid:number|null };
 // Whether the native side can name the acting profile at all. `available:false` means
 // recording is refused (fail-closed) and `reason` says why, so the UI can say so too.
@@ -43,5 +44,6 @@ reserveRoom: (meetingId:string, roomId:string) => call<void>("reserve_meeting_ro
   stopRecording: (meeting_id:string) => call<CallRecording>("stop_meeting_recording", {meetingId:meeting_id}),
   // Recording history is meeting-read scoped against the native actor; start/stop stay organizer-only.
   recordings: (meeting_id:string) => call<CallRecording[]>("list_meeting_recordings", {meetingId:meeting_id}),
+  transcriptSegments: (meeting_id:string) => call<CallTranscriptSegment[]>("list_meeting_transcript_segments", {meetingId:meeting_id}),
   recordingActor: () => call<RecordingActorStatus>("recording_actor_status"),
 };
