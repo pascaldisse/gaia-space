@@ -772,7 +772,11 @@ fn check_right_on(
         if !granted {
             continue;
         }
-        if assignment_scope_type == "global" && (requested_propagates || scope_type == "global") {
+        if assignment_scope_type == "global"
+            && (requested_propagates
+                || scope_type == "global"
+                || granted_code == rights::Right::Superadmin.code())
+        {
             return Ok(true);
         }
         if assignment_scope_type == scope_type && assignment_scope_id.as_deref() == scope_id {
@@ -1469,8 +1473,8 @@ mod tests {
             .ok();
         let right_id = format!("{right_code}-id");
         c.execute(
-            "INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES(?1,?2,?2,?3)",
-            params![right_id, right_code, right_type],
+            "INSERT OR IGNORE INTO rights(id,code,title,right_type,propagation) VALUES(?1,?2,?2,?3,?4)",
+            params![right_id, right_code, right_type, rights::PROPAGATION_GLOBAL_TO_DESCENDANTS],
         )
         .unwrap();
         c.execute(
