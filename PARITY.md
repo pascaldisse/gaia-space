@@ -44,7 +44,7 @@ MANUAL-ONLY UNVERIFIED (owner): production ticker delivery to an external receiv
 52 rows — done 5 · partial 19 · stub 1 · missing 27.
 Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21); ordered MR stacks create/list and retarget open children after parent merge landed (V22; `review::tests::merged_stack_parent_retargets_open_children_only`).
 Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
-Worst gaps: quality-gate application/role principals and bypass permissions; CODEOWNERS team owners/full gitignore negation remain partial.
+Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)
 33 rows — done 8 · partial 17 · stub 0 · missing 8.
