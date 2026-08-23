@@ -84,6 +84,11 @@ export default function Meetings() {
         organizer_id: draft.organizer_id || profileId() || null,
         channel_id: draft.channel_id || null,
         archived: false,
+        // A new meeting has no room yet: the room is minted and bound at the first join.
+        video_provider: null,
+        video_room_id: null,
+        join_url: null,
+        video_status: "scheduled",
       };
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);

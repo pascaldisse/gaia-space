@@ -75,7 +75,7 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled"};
 await meetingsApi.create(meeting);
 setComposerDay(undefined); setDraft(meeting); setSelected({id:meeting.id,source_id:meeting.id,kind:"meeting",title:meeting.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
@@ -232,6 +232,8 @@ return <section class="calendar-view">
 <label>End<input type="datetime-local" value={localInput(item().ends_at)} onInput={e=>setDraft({...item(),ends_at:epoch(e.currentTarget.value)})}/></label>
 <label>Location<input value={item().location??""} onInput={e=>setDraft({...item(),location:e.currentTarget.value||null})}/></label>
 <label>Repeat<input value={item().rrule??""} onInput={e=>setDraft({...item(),rrule:e.currentTarget.value||null})}/></label>
+<label>Call status<select aria-label="Call status" value={item().video_status} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option><option value="cancelled">Cancelled</option></select></label>
+<Show when={item().video_room_id}>{room=><p class="hint" data-meeting-room>Call room: {room()} · {item().join_url}</p>}</Show>
 <a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a>
 <section class="rsvp">
 <h3>Participants</h3>
