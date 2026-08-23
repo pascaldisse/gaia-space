@@ -2,7 +2,7 @@
 // bridge — these are plain HTTP under {BASE}api/auth/* and {BASE}api/users*).
 // Never called in Tauri mode.
 
-export type Role = "admin" | "member";
+export type Role = "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest";
 export type User = {
   id: string;
   username: string;
@@ -39,6 +39,8 @@ export const authApi = {
   directory: () => req<DirectoryUser[]>("api/directory"),
   login: (username: string, password: string, totp_code?: string) =>
     req<{ user: User }>("api/auth/login", { method: "POST", body: JSON.stringify({ username, password, totp_code }) }),
+  register: (username: string, display_name: string, password: string) =>
+    req<{ id: string }>("api/auth/register", { method: "POST", body: JSON.stringify({ username, display_name, password }) }),
   logout: () => req<void>("api/auth/logout", { method: "POST" }),
   changePassword: (current: string, next: string) =>
     req<void>("api/auth/password", { method: "POST", body: JSON.stringify({ current, next }) }),

@@ -365,3 +365,6 @@
 .attachment-card img, .attachment-card video { max-width: 260px; max-height: 180px; border-radius: 5px; border: 1px solid #33405e; }
 .attachment-card audio { max-width: 260px; }
 .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.absence-chat-card { display:grid; gap:3px; max-width:360px; padding:10px 12px; border:1px solid var(--line, #29443a); border-left:3px solid #65a879; border-radius:8px; background:var(--surface-2, #18251f); color:var(--text, #e8eee9); }
+.absence-chat-card span,.absence-chat-card small { color:var(--muted, #9dac9f); }

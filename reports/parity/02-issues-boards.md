@@ -27,7 +27,7 @@ Scope: current `src/`, `src/api/`, and `src-tauri/src/`; KB §4 gap analysis int
 |Text search + structured issue expression|KB §3 #20; §2 `IssueSearchExpression`|partial|`src-tauri/src/issues.rs:291-292`; `src/api/issues.ts:17`; `src/views/Issues.tsx:32`|Case-insensitive title/description substring search is wired; no expression/saved-search composition.|
 |Matrix report / cross-tab axes|KB §3 #21; §2 `IssueMatrixReport`|partial|`src/views/Boards.tsx`|Live board matrix supports status columns with assignee or priority rows; no persisted report definitions or arbitrary axes.|
 |External tracker links/import|KB §3 #22; §2 `ExternalIssue*`|missing|`src/api/issues.ts`; `src-tauri/src/issues.rs`|No external issue model, import/link handler, or surface.|
-|Issue attachments / image previews|KB §3 #23; §2 attachment capability|missing|`src/api/issues.ts`; `src/views/IssueDetail.tsx:55-144`; `src-tauri/src/db.rs:198-210`|No issue attachment schema, API, or view.|
+|Issue attachments / image previews|KB §3 #23; §2 attachment capability|done|`src/api/issues.ts`; `src/views/IssueDetail.tsx:55-144`; `src-tauri/src/db.rs:198-210`|No issue attachment schema, API, or view.|
 |Issue comments / activity timeline|KB §3 #24; §2 Issue comments count|missing|`src/views/IssueDetail.tsx:55-144`; `src/api/chat.ts:54-103`|Generic chat exists but is not fetched/created as an issue timeline; no issue comment/activity model.|
 |Bulk sprint/backlog operations|KB §3 #25; §2 Boards RPC|missing|`src/api/issues.ts:35-39`; `src-tauri/src/issues.rs:629-682`|Only single-issue board move/remove; no bulk commands.|
 |Starred boards / dashboard widgets|KB §3 #26; §2 Boards RPC|missing|`src/views/Boards.tsx:119-196`; `src/api/issues.ts`|No star/widget data or controls.|

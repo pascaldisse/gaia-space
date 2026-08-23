@@ -300,7 +300,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                   />
                 </Show>
                 <button class="ghost" disabled={triggering()} onClick={fireEvent}>Fire event</button>
-                <Show when={currentUser()?.role === "admin"}><button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button></Show>
+                <Show when={currentUser()?.role === "GlobalAdmin"}><button class="ghost" disabled={triggering()} onClick={runDueSchedules}>Run due schedules</button></Show>
               </div>
 
               <section class="jobs-editor">

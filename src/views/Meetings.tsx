@@ -8,12 +8,12 @@ import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
 import "./Meetings.css";
 
-type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id">;
+type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference">;
 
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
   const start = Math.floor(Date.now() / 1000) + 3600;
-  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null };
+  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only" };
 };
 const recurrenceLabel = (rrule: string | null) => {
   if (!rrule) return "Does not repeat";
@@ -38,9 +38,17 @@ export default function Meetings() {
   const [invitee, setInvitee] = createSignal("");
   const [error, setError] = createSignal("");
   const [notice, setNotice] = createSignal("");
+  const [equipmentFilter, setEquipmentFilter] = createSignal("");
+  const [roomId, setRoomId] = createSignal("");
+  const [rooms] = createResource(() => meetingsApi.rooms());
   const [participants, { refetch: reloadParticipants }] = createResource(
     () => [selected()?.id, profileId()] as const,
     ([meetingId, personId]) => meetingId && personId ? meetingsApi.participants(meetingId, personId) : Promise.resolve([]),
+  );
+  const availabilityProfiles = createMemo(() => [...new Set([selected()?.organizer_id, ...((participants() ?? []).filter((participant) => participant.status !== "declined").map((participant) => participant.profile_id))].filter((id): id is string => Boolean(id)))]);
+  const [availability, { refetch: reloadAvailability }] = createResource(
+    () => [selected()?.starts_at, selected()?.ends_at, selected()?.id, availabilityProfiles()] as const,
+    ([startsAt, endsAt, meetingId, people]) => startsAt && endsAt ? meetingsApi.availability(startsAt, endsAt, people, meetingId) : Promise.resolve(undefined),
   );
   const visibleMeetings = createMemo(() => {
     const needle = query().trim().toLocaleLowerCase();
@@ -83,12 +91,20 @@ export default function Meetings() {
         location: draft.location?.trim() || null,
         organizer_id: draft.organizer_id || profileId() || null,
         channel_id: draft.channel_id || null,
+        visibility: draft.visibility,
+        modification_preference: draft.modification_preference,
         archived: false,
+        // A new meeting has no room yet: the room is minted and bound at the first join.
+        video_provider: null,
+        video_room_id: null,
+        join_url: null,
+        video_status: "scheduled",
       };
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);
       await meetingsApi.create(meeting);
-      setSelected(meeting);
+      const channel_id = await meetingsApi.attachChannel(meeting.id);
+      setSelected({ ...meeting, channel_id });
       setForm(newForm());
       setNotice("Meeting created. Add participants or open it on the calendar.");
       await refetch();
@@ -137,16 +153,32 @@ export default function Meetings() {
       setError(humanError(reason));
     }
   };
+  const filteredRooms = () => { const required = equipmentFilter().split(",").map(x => x.trim().toLowerCase()).filter(Boolean); return (rooms() ?? []).filter(room => required.every(item => room.equipment.some(equipment => equipment.toLowerCase() === item))); };
   const rsvp = async (participant: MeetingParticipant, status: MeetingParticipant["status"]) => {
     setError("");
     try {
       await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status);
       await reloadParticipants();
+      await reloadAvailability();
     } catch (reason) {
       setError(humanError(reason));
     }
   };
 
+  const reserveRoom = async (roomId: string) => {
+    const meeting = selected();
+    if (!meeting) return;
+    setError("");
+    try {
+      await meetingsApi.reserveRoom(meeting.id, roomId);
+      setMeetingField("location", availability()?.rooms.find((room) => room.id === roomId)?.name ?? null);
+      setNotice("Room reserved.");
+      await reloadAvailability();
+      await refetch();
+    } catch (reason) {
+      setError(humanError(reason));
+    }
+  };
   useDeepLink("meeting", (id) => {
     const found = meetings()?.find((meeting) => meeting.id === id);
     if (found) selectMeeting(found);
@@ -168,6 +200,8 @@ export default function Meetings() {
           <div class="mc-field mc-when"><div><label for="meeting-start">Start</label><input id="meeting-start" type="datetime-local" required value={localInput(form().starts_at)} onInput={(event) => setFormField("starts_at", epoch(event.currentTarget.value))}/></div><div><label for="meeting-end">End</label><input id="meeting-end" type="datetime-local" required value={localInput(form().ends_at)} onInput={(event) => setFormField("ends_at", epoch(event.currentTarget.value))}/></div></div>
           <div class="mc-field"><label for="meeting-location">Location</label><input id="meeting-location" placeholder="Room, video link, or hybrid details" value={form().location ?? ""} onInput={(event) => setFormField("location", event.currentTarget.value || null)}/></div>
           <div class="mc-field mc-organizer"><ProfilePicker label="Organizer" identity value={form().organizer_id ?? profileId()} onChange={(id) => setFormField("organizer_id", id)}/></div>
+          <div class="mc-field"><label for="meeting-visibility">Visibility</label><select id="meeting-visibility" value={form().visibility} onChange={(event) => setFormField("visibility", event.currentTarget.value as Meeting["visibility"])}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></div>
+          <div class="mc-field"><label for="meeting-modification">Who can edit?</label><select id="meeting-modification" value={form().modification_preference} onChange={(event) => setFormField("modification_preference", event.currentTarget.value as Meeting["modification_preference"])}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></div>
           <div class="mc-field"><label for="meeting-repeat">Repeat</label><select id="meeting-repeat" value={form().rrule ?? ""} onChange={(event) => setFormField("rrule", event.currentTarget.value || null)}><For each={recurrenceOptions}>{([value, label]) => <option value={value}>{label}</option>}</For></select><span class="mc-hint">For a bounded or custom series, enter an RRULE below.</span></div>
           <div class="mc-field"><label for="meeting-rrule">RRULE</label><input id="meeting-rrule" aria-label="RRULE recurrence" placeholder="FREQ=WEEKLY;BYDAY=MO,WE;COUNT=8" value={form().rrule ?? ""} onInput={(event) => setFormField("rrule", event.currentTarget.value || null)}/></div>
           <button class="primary mc-submit">Create meeting</button>
@@ -185,13 +219,17 @@ export default function Meetings() {
       <aside class="meeting-detail" aria-label="Meeting details">
         <Show when={selected()} fallback={<div class="meeting-empty"><h2>Meeting details</h2><p>Select a meeting to edit it, manage RSVPs, or open it on Calendar.</p></div>}>
           {(meeting) => <>
-            <div class="detail-actions"><a class="meeting-permalink" {...linkProps({ view: "Calendar", entityType: "meeting", entityId: meeting().id })}>Open on calendar</a><button type="button" onClick={save}>Save</button><button type="button" class="danger" onClick={archive}>Archive</button></div>
+            <div class="detail-actions"><a class="meeting-permalink" {...linkProps({ view: "Calendar", entityType: "meeting", entityId: meeting().id })}>Open on calendar</a><Show when={meeting().channel_id} fallback={<button type="button" onClick={async () => { try { const channel_id = await meetingsApi.attachChannel(meeting().id); setSelected({ ...meeting(), channel_id }); await refetch(); } catch (reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({ view: "Chat", entityType: "channel", entityId: meeting().channel_id! })}>Open discussion</a></Show><button type="button" onClick={save}>Save</button><button type="button" class="danger" onClick={archive}>Archive</button></div>
             <label>Title<input class="meeting-title" value={meeting().title} onInput={(event) => setMeetingField("title", event.currentTarget.value)}/></label>
             <label>Description<textarea value={meeting().description ?? ""} onInput={(event) => setMeetingField("description", event.currentTarget.value || null)}/></label>
             <div class="meeting-detail-when"><label>Start<input type="datetime-local" value={localInput(meeting().starts_at)} onInput={(event) => setMeetingField("starts_at", epoch(event.currentTarget.value))}/></label><label>End<input type="datetime-local" value={localInput(meeting().ends_at)} onInput={(event) => setMeetingField("ends_at", epoch(event.currentTarget.value))}/></label></div>
             <label>Location<input value={meeting().location ?? ""} onInput={(event) => setMeetingField("location", event.currentTarget.value || null)}/></label>
+            <label>Visibility<select value={meeting().visibility} onChange={(event) => setMeetingField("visibility", event.currentTarget.value as Meeting["visibility"])}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
+            <label>Who can edit?<select value={meeting().modification_preference} onChange={(event) => setMeetingField("modification_preference", event.currentTarget.value as Meeting["modification_preference"])}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
             <label>RRULE<input placeholder="FREQ=WEEKLY;COUNT=4" value={meeting().rrule ?? ""} onInput={(event) => setMeetingField("rrule", event.currentTarget.value || null)}/></label>
+            <section class="rsvp"><div class="section-heading"><div><h3>Room booking</h3><p>Filter by equipment; overlaps are rejected.</p></div></div><input aria-label="Required equipment" placeholder="Projector, Whiteboard" value={equipmentFilter()} onInput={event => setEquipmentFilter(event.currentTarget.value)}/><div class="inline-form"><select aria-label="Meeting room" value={roomId()} onChange={event => setRoomId(event.currentTarget.value)}><option value="">Select room</option><For each={filteredRooms()}>{room => <option value={room.id}>{room.name} · {room.equipment.join(", ") || "No equipment"}</option>}</For></select><button type="button" onClick={() => roomId() && reserveRoom(roomId())}>Reserve</button></div></section>
             <section class="rsvp"><div class="section-heading"><div><h3>Participants</h3><p>Invite people and record their response.</p></div></div><div class="inline-form"><ProfilePicker label="Participant" value={invitee()} onChange={setInvitee}/><button type="button" onClick={invite}>Invite</button></div><Show when={participants.loading}><p class="meeting-empty">Loading participants…</p></Show><For each={participants()}>{(participant) => <div class="participant"><span>{participant.profile_id}</span><select aria-label={`RSVP for ${participant.profile_id}`} value={participant.status} onChange={(event) => rsvp(participant, event.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For></section>
+            <section class="meeting-availability"><div class="section-heading"><div><h3>Availability</h3><p>Room and attendee conflicts for this meeting time.</p></div><button type="button" onClick={() => reloadAvailability()}>Refresh</button></div><Show when={availability.loading}><p class="meeting-empty">Checking availability…</p></Show><For each={availability()?.conflicts ?? []}>{(conflict) => <p class="availability-conflict">{conflict.message}</p>}</For><Show when={!availability.loading && !((availability()?.conflicts ?? []).length)}><p class="availability-clear">No room, meeting, or absence conflicts.</p></Show><div class="room-suggestions"><For each={availability()?.suggestions ?? []}>{(room) => <button type="button" class="room-suggestion" onClick={() => reserveRoom(room.id)}>{room.name}<small>{room.location || "Room"}{room.equipment.length ? ` · ${room.equipment.join(", ")}` : ""}</small></button>}</For></div><Show when={!availability.loading && !((availability()?.suggestions ?? []).length)}><p class="meeting-empty">No available rooms to suggest.</p></Show></section>
             <Show when={!isWeb()}><CallPanel meeting={meeting()} identity={profileId()} displayName={profileId()}/></Show>
           </>}
         </Show>
