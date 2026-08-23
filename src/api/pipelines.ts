@@ -270,7 +270,7 @@ export function scriptDefErrors(def: ScriptDef): string[] {
     if (job.timeout_secs != null && (!Number.isInteger(job.timeout_secs) || job.timeout_secs < 1 || job.timeout_secs > MAX_JOB_TIMEOUT_SECS)) errors.push(`job '${job.name}' timeout_secs must be in 1..=${MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)`);
     for (const step of job.steps ?? []) {
       if (step.type !== "Shell" && step.type !== "Container") {
-        errors.push(`job '${job.name}': unknown step type '${String(step.type)}'`);
+        errors.push(`job '${job.name}': unknown step type '${String((step as { type: unknown }).type)}'`);
         continue;
       }
       if (!step.script?.trim()) errors.push(`job '${job.name}' has a step with an empty script`);
@@ -283,7 +283,7 @@ export function scriptDefErrors(def: ScriptDef): string[] {
       else if (!LEGACY_TRIGGER_TYPES[legacy]) errors.push(`job '${job.name}': unknown trigger type '${legacy}'`);
     } else {
       for (const trigger of triggers) {
-        if (!Object.hasOwn(TRIGGER_TAGS, trigger.type)) {
+        if (!Object.prototype.hasOwnProperty.call(TRIGGER_TAGS, trigger.type)) {
           errors.push(`job '${job.name}': unknown trigger type '${String(trigger.type)}'`);
           continue;
         }
