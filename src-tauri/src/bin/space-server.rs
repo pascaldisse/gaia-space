@@ -335,6 +335,62 @@ fn app_write_scope(token: &applications::AppToken) -> Result<(), axum::response:
 /// The first write the external app API offers, and the first consumer of the
 /// stage-2 grant: without `Project.CreateIssues` authorized in this project (or
 /// org-wide) the call is refused even with a `write` token.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppExternalCheckInput {
+    status: String,
+    #[serde(default)]
+    details: Option<String>,
+}
+
+/// A configured application reports only its own reserved quality-gate check.
+/// The bearer scope and stage-2 review right prevent a token from becoming a
+/// cross-project CI approval oracle.
+async fn app_record_external_check(
+    headers: HeaderMap,
+    Path(review_id): Path<String>,
+    Json(input): Json<AppExternalCheckInput>,
+) -> Result<Json<review::ExternalCheck>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_write_scope(&token)?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    let project_id: String = c
+        .query_row(
+            "SELECT project_id FROM reviews WHERE id=?1",
+            params![review_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| err(StatusCode::NOT_FOUND, "review not found").into_response())?;
+    let contexts = app_rights::app_project_contexts(&project_id);
+    let granted = app_rights::app_has_right_anywhere(
+        &c,
+        &application.id,
+        &contexts,
+        "Project.EditCodeReview",
+    )
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response())?;
+    drop(c);
+    if !granted {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.EditCodeReview"})),
+        )
+            .into_response());
+    }
+    let check = review::ExternalCheck {
+        review_id,
+        check_name: format!("application:{}", application.id),
+        status: input.status,
+        details: input.details,
+        updated_at: 0,
+    };
+    review::record_external_check(check.clone())
+        .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
+    Ok(Json(check))
+}
+
 async fn app_create_issue(
     headers: HeaderMap,
     Path(project_id): Path<String>,
@@ -4287,6 +4343,10 @@ async fn main() {
         .route(
             "/api/registry/{repository_id}/generic/{package_name}/{version}/metadata",
             get(registry_generic_metadata),
+        .route(
+            "/api/app/reviews/{review_id}/checks",
+            post(app_record_external_check),
+        )
         )
         .route(
             "/api/registry/{repository_id}/generic/{package_name}/{version}/{filename}",
@@ -4469,6 +4529,79 @@ mod tests {
     /// The external app API consumes the stage-2 grant: a valid token with the right
     /// OAuth scope still sees nothing and writes nothing until an admin authorized the
     /// application in that context, and the grant scopes to exactly that project.
+    #[tokio::test]
+    async fn app_external_check_requires_review_right_and_reports_only_its_own_name() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-check','Check App','Application','client-check',1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('p-check','Checks','CHK','pa',1)", []).unwrap();
+        c.execute("INSERT INTO reviews(id,project_id,number,kind,state,title,target_branch) VALUES('r-check','p-check',1,'MR','Opened','Check','main')", []).unwrap();
+        c.execute("INSERT INTO quality_gate_rules(id,project_id,branch_pattern,applications_json) VALUES('check-gate','p-check','main','[\"app-check\"]')", []).unwrap();
+        drop(c);
+        platform::seed_rights().unwrap();
+        let secret = applications::rotate_app_secret("app-check".into()).unwrap();
+        let token = applications::issue_app_token(
+            "client-check".into(),
+            secret.client_secret,
+            Some("write".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        let denied = app_record_external_check(
+            bearer(&token),
+            Path("r-check".into()),
+            Json(AppExternalCheckInput {
+                status: "SUCCEEDED".into(),
+                details: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert!(
+            !review::evaluate_quality_gate("r-check".into())
+                .unwrap()
+                .satisfied
+        );
+        app_rights::update_required_rights(
+            "app-check".into(),
+            vec!["Project.EditCodeReview".into()],
+            vec![],
+            Some(true),
+        )
+        .unwrap();
+        app_rights::approve_scope(
+            "app-check".into(),
+            "project:p-check".into(),
+            Some("uc".into()),
+            None,
+        )
+        .unwrap();
+        let recorded = app_record_external_check(
+            bearer(&token),
+            Path("r-check".into()),
+            Json(AppExternalCheckInput {
+                status: "SUCCEEDED".into(),
+                details: Some("green".into()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recorded.0.check_name, "application:app-check");
+        assert_eq!(
+            review::list_external_checks("r-check".into()).unwrap()[0].status,
+            "SUCCEEDED"
+        );
+        assert!(
+            review::evaluate_quality_gate("r-check".into())
+                .unwrap()
+                .satisfied
+        );
+    }
+
     #[tokio::test]
     async fn the_app_api_shows_and_writes_only_what_the_rights_model_authorized() {
         let _serial = test_lock();

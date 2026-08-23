@@ -89,7 +89,7 @@ pub struct ReviewStack {
     pub source_branch: String,
     pub review_ids: Vec<String>,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCheck {
     pub review_id: String,
     pub check_name: String,
