@@ -13,7 +13,9 @@ let calls: { command: string; body: Record<string, unknown> }[] = [];
 async function until(check: () => boolean, timeoutMs = 4000) {
   const started = Date.now();
   while (!check()) {
-    if (Date.now() - started > timeoutMs) throw new Error("condition never held");
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`condition never held; calls=${JSON.stringify(calls)} text=${document.body.textContent?.slice(0, 400)}`);
+    }
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 }
