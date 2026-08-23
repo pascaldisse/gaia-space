@@ -544,6 +544,29 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailabilityConflict {
+    pub kind: String,
+    pub profile_id: Option<String>,
+    pub meeting_id: Option<String>,
+    pub room_id: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailableMeetingRoom {
+    #[serde(flatten)]
+    pub room: MeetingRoom,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingAvailability {
+    pub rooms: Vec<AvailableMeetingRoom>,
+    pub conflicts: Vec<AvailabilityConflict>,
+    pub suggestions: Vec<MeetingRoom>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingRoom {
     pub id: String,
     pub name: String,
@@ -619,6 +642,95 @@ pub fn save_meeting_room(room: MeetingRoom) -> Result<()> {
         .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())
+}
+
+/// Checks derived room, attendee-meeting, and approved-away-absence conflicts.
+/// The half-open overlap test makes back-to-back meetings available.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn meeting_availability(
+    starts_at: i64,
+    ends_at: i64,
+    profile_ids: Vec<String>,
+    meeting_id: Option<String>,
+) -> Result<MeetingAvailability> {
+    if ends_at <= starts_at {
+        return Err("Meeting end must be after its start".into());
+    }
+    let c = db::conn()?;
+    let rooms = list_meeting_rooms()?;
+    let mut conflicts = Vec::new();
+    let mut available_rooms = Vec::with_capacity(rooms.len());
+    for room in rooms {
+        let conflict: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM meeting_room_bookings b JOIN meetings m ON m.id=b.meeting_id WHERE b.room_id=?1 AND (?2 IS NULL OR b.meeting_id<>?2) AND m.archived=0 AND m.starts_at<?4 AND m.ends_at>?3)",
+            rusqlite::params![room.id, meeting_id, starts_at, ends_at],
+            |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if conflict {
+            conflicts.push(AvailabilityConflict {
+                kind: "room".into(),
+                profile_id: None,
+                meeting_id: None,
+                room_id: Some(room.id.clone()),
+                message: format!("{} is already booked for this time", room.name),
+            });
+        }
+        available_rooms.push(AvailableMeetingRoom {
+            room,
+            available: !conflict,
+        });
+    }
+    let start_date = Utc
+        .timestamp_opt(starts_at, 0)
+        .single()
+        .ok_or("Invalid meeting start")?
+        .date_naive()
+        .to_string();
+    let end_date = Utc
+        .timestamp_opt(ends_at - 1, 0)
+        .single()
+        .ok_or("Invalid meeting end")?
+        .date_naive()
+        .to_string();
+    for profile_id in profile_ids.into_iter().filter(|id| !id.trim().is_empty()) {
+        let mut meetings = c.prepare("SELECT DISTINCT m.id,m.title FROM meetings m LEFT JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.archived=0 AND (?1 IS NULL OR m.id<>?1) AND (m.organizer_id=?2 OR mp.profile_id=?2) AND m.starts_at<?4 AND m.ends_at>?3 ORDER BY m.starts_at").map_err(|e| e.to_string())?;
+        let rows = meetings
+            .query_map(
+                rusqlite::params![meeting_id, profile_id, starts_at, ends_at],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (id, title) = row.map_err(|e| e.to_string())?;
+            conflicts.push(AvailabilityConflict {
+                kind: "meeting".into(),
+                profile_id: Some(profile_id.clone()),
+                meeting_id: Some(id),
+                room_id: None,
+                message: format!("{profile_id} has an overlapping meeting: {title}"),
+            });
+        }
+        let away: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM absences WHERE profile_id=?1 AND approved=1 AND availability<>'available' AND date_from<=?2 AND date_to>=?3)", rusqlite::params![profile_id, end_date, start_date], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if away {
+            conflicts.push(AvailabilityConflict {
+                kind: "absence".into(),
+                profile_id: Some(profile_id.clone()),
+                meeting_id: None,
+                room_id: None,
+                message: format!("{profile_id} has an approved absence"),
+            });
+        }
+    }
+    let suggestions = available_rooms
+        .iter()
+        .filter(|room| room.available)
+        .map(|room| room.room.clone())
+        .collect();
+    Ok(MeetingAvailability {
+        rooms: available_rooms,
+        conflicts,
+        suggestions,
+    })
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
