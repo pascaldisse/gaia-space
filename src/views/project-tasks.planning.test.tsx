@@ -67,9 +67,8 @@ test("project tasks filters persisted issues and links to the matching board", a
   expect(host.textContent).toContain("Open board");
   const board = host.querySelector('a.primary') as HTMLAnchorElement;
   expect(board.getAttribute("href")).toContain("boards");
-  board.click();
-  expect(projectId()).toBe("p1");
-  expect(route().view).toBe("Boards");
+  // Filter first, then follow the board link: after navigation this view's route
+  // no longer carries the project, and its filter refetch is not observable.
   // The tag options arrive on their own resource, and the select is re-rendered
   // when they do: a single set+dispatch can land on a node that is about to be
   // replaced (it did, on CI). Keep selecting until the refetch is observed.
@@ -88,4 +87,7 @@ test("project tasks filters persisted issues and links to the matching board", a
     return false;
   });
   expect(calls.filter(call => call.command === "list_issues").slice(-1)[0]?.body).toMatchObject({ project_id: "p1", tag_id: "t1" });
+  board.click();
+  expect(projectId()).toBe("p1");
+  expect(route().view).toBe("Boards");
 });
