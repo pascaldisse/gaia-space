@@ -290,6 +290,60 @@ fn app_read_scope(token: &applications::AppToken) -> Result<(), axum::response::
     }
 }
 
+fn app_parameter_context(application_id: &str) -> String {
+    format!("application:{application_id}")
+}
+#[allow(clippy::result_large_err)]
+fn app_parameter_right(
+    c: &rusqlite::Connection,
+    application_id: &str,
+    right: &str,
+) -> Result<(), axum::response::Response> {
+    if app_rights::app_has_right(
+        c,
+        application_id,
+        &app_parameter_context(application_id),
+        right,
+    )
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response())?
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "right_not_authorized", "right": right})),
+        )
+            .into_response())
+    }
+}
+async fn app_list_parameters(
+    headers: HeaderMap,
+) -> Result<Json<Vec<applications::AppParameter>>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_read_scope(&token)?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    app_parameter_right(&c, &application.id, "Project.ViewParameters")?;
+    drop(c);
+    applications::list_app_parameters(application.id)
+        .map(|parameters| {
+            Json(
+                parameters
+                    .into_iter()
+                    .map(|mut parameter| {
+                        if parameter.is_secret {
+                            parameter.value = "***".to_string();
+                        }
+                        parameter
+                    })
+                    .collect(),
+            )
+        })
+        .map_err(|_| {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "parameter lookup failed").into_response()
+        })
+}
 async fn app_me(headers: HeaderMap) -> Result<Json<AppIdentity>, axum::response::Response> {
     let (token, application) = app_bearer(&headers)?;
     Ok(Json(AppIdentity {
@@ -2451,7 +2505,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "dispatch_application_payload"
         | "parse_application_payload"
         | "application_payload_classes"
-        | "list_redirect_uris" => CommandPolicy::AppAdmin,
+        | "list_redirect_uris"
+        | "list_app_parameters"
+        | "save_app_parameter"
+        | "delete_app_parameter" => CommandPolicy::AppAdmin,
         "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
@@ -4698,6 +4755,9 @@ async fn cmd(
     "list_ide_sessions" => applications::list_ide_sessions(),
     "report_ide_session" => applications::report_ide_session(value: applications::IdeSession),
     "list_applications" => applications::list_applications(),
+    "list_app_parameters" => applications::list_app_parameters(application_id: String),
+    "save_app_parameter" => applications::save_app_parameter(value: applications::AppParameter),
+    "delete_app_parameter" => applications::delete_app_parameter(application_id: String, key: String),
     "register_redirect_uri" => oauth::register_redirect_uri_cmd(application_id: String, redirect_uri: String),
     "list_redirect_uris" => oauth::list_redirect_uris_cmd(application_id: String),
     "save_application" => applications::save_application(value: applications::Application),
@@ -5398,6 +5458,7 @@ async fn main() {
         .route("/api/documents/upload", post(document_upload))
         .route("/api/documents/files/{document_id}", get(document_download))
         .route("/api/app/me", get(app_me))
+        .route("/api/app/parameters", get(app_list_parameters))
         .route("/api/app/projects", get(app_projects))
         .route("/api/app/rooms", get(app_list_rooms).post(app_create_room))
         .route("/api/app/rooms/{room_id}", get(app_get_room))
@@ -6612,6 +6673,55 @@ mod tests {
                 .status(),
             StatusCode::FORBIDDEN,
             "write is not an issue-read scope"
+        );
+    }
+
+    #[tokio::test]
+    async fn app_parameters_need_scope_and_context_right_and_mask_secrets() {
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-params','Parameters','Application','client-params',1)", []).unwrap();
+        drop(c);
+        applications::save_app_parameter(applications::AppParameter {
+            application_id: "app-params".into(),
+            key: "secret".into(),
+            value: "do-not-return".into(),
+            is_secret: true,
+            updated_at: 0,
+        })
+        .unwrap();
+        let secret = applications::rotate_app_secret("app-params".into()).unwrap();
+        let token = applications::issue_app_token(
+            "client-params".into(),
+            secret.client_secret,
+            Some("read".into()),
+            Some(60),
+        )
+        .unwrap()
+        .access_token
+        .unwrap();
+        assert_eq!(
+            app_list_parameters(bearer(&token))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        app_rights::update_authorized_rights(
+            "app-params".into(),
+            "application:app-params".into(),
+            vec!["Project.ViewParameters".into()],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let parameters = app_list_parameters(bearer(&token)).await.unwrap().0;
+        assert_eq!(parameters[0].value, "***");
+        assert_eq!(
+            command_policy("save_app_parameter"),
+            Some(CommandPolicy::AppAdmin)
         );
     }
 
