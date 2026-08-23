@@ -13,7 +13,7 @@ type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_a
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
   const start = Math.floor(Date.now() / 1000) + 3600;
-  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, video_provider: "native", video_status: "scheduled" };
+  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, video_provider: "native", video_status: "scheduled", access_level: "PRIVATE" };
 };
 const recurrenceLabel = (rrule: string | null) => {
   if (!rrule) return "Does not repeat";
@@ -85,7 +85,7 @@ export default function Meetings() {
         channel_id: draft.channel_id || null,
         video_provider: draft.video_provider,
         video_status: draft.video_status,
-        access_level: "PRIVATE",
+        access_level: draft.access_level,
         archived: false,
       };
       const invalid = validate(meeting);
@@ -171,6 +171,7 @@ export default function Meetings() {
           <div class="mc-field mc-when"><div><label for="meeting-start">Start</label><input id="meeting-start" type="datetime-local" required value={localInput(form().starts_at)} onInput={(event) => setFormField("starts_at", epoch(event.currentTarget.value))}/></div><div><label for="meeting-end">End</label><input id="meeting-end" type="datetime-local" required value={localInput(form().ends_at)} onInput={(event) => setFormField("ends_at", epoch(event.currentTarget.value))}/></div></div>
           <div class="mc-field"><label for="meeting-video-provider">Video provider</label><select id="meeting-video-provider" value={form().video_provider} onChange={(event) => setFormField("video_provider", event.currentTarget.value as Meeting["video_provider"])}><option value="native">Native LiveKit</option><option value="meet">External Meet</option></select></div>
 <div class="mc-field"><label for="meeting-video-status">Video status</label><select id="meeting-video-status" value={form().video_status} onChange={(event) => setFormField("video_status", event.currentTarget.value as Meeting["video_status"])}><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option><option value="cancelled">Cancelled</option></select></div>
+<div class="mc-field"><label for="meeting-access-level">Room access</label><select id="meeting-access-level" value={form().access_level} onChange={(event) => setFormField("access_level", event.currentTarget.value as Meeting["access_level"])}><option value="PRIVATE">Private (invited members)</option><option value="PUBLIC">Normal room (OIDC or anonymous if enabled)</option></select></div>
 <div class="mc-field"><label for="meeting-location">Location</label><input id="meeting-location" placeholder="Room, video link, or hybrid details" value={form().location ?? ""} onInput={(event) => setFormField("location", event.currentTarget.value || null)}/></div>
           <div class="mc-field mc-organizer"><ProfilePicker label="Organizer" identity value={form().organizer_id ?? profileId()} onChange={(id) => setFormField("organizer_id", id)}/></div>
           <div class="mc-field"><label for="meeting-repeat">Repeat</label><select id="meeting-repeat" value={form().rrule ?? ""} onChange={(event) => setFormField("rrule", event.currentTarget.value || null)}><For each={recurrenceOptions}>{([value, label]) => <option value={value}>{label}</option>}</For></select><span class="mc-hint">For a bounded or custom series, enter an RRULE below.</span></div>
@@ -196,6 +197,7 @@ export default function Meetings() {
             <div class="meeting-detail-when"><label>Start<input type="datetime-local" value={localInput(meeting().starts_at)} onInput={(event) => setMeetingField("starts_at", epoch(event.currentTarget.value))}/></label><label>End<input type="datetime-local" value={localInput(meeting().ends_at)} onInput={(event) => setMeetingField("ends_at", epoch(event.currentTarget.value))}/></label></div>
             <label>Video provider<select aria-label="Video provider" value={meeting().video_provider} onChange={(event) => setMeetingField("video_provider", event.currentTarget.value as Meeting["video_provider"])}><option value="native">Native LiveKit</option><option value="meet">External Meet</option></select></label>
 <label>Video status<select aria-label="Video status" value={meeting().video_status} onChange={(event) => setMeetingField("video_status", event.currentTarget.value as Meeting["video_status"])}><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option><option value="cancelled">Cancelled</option></select></label>
+<label>Room access<select aria-label="Room access" value={meeting().access_level} onChange={(event) => setMeetingField("access_level", event.currentTarget.value as Meeting["access_level"])}><option value="PRIVATE">Private (invited members)</option><option value="PUBLIC">Normal room (OIDC or anonymous if enabled)</option></select></label>
 <label>Location<input value={meeting().location ?? ""} onInput={(event) => setMeetingField("location", event.currentTarget.value || null)}/></label>
             <label>RRULE<input placeholder="FREQ=WEEKLY;COUNT=4" value={meeting().rrule ?? ""} onInput={(event) => setMeetingField("rrule", event.currentTarget.value || null)}/></label>
             <section class="rsvp"><div class="section-heading"><div><h3>Participants</h3><p>Invite people and record their response.</p></div></div><div class="inline-form"><ProfilePicker label="Participant" value={invitee()} onChange={setInvitee}/><button type="button" onClick={invite}>Invite</button></div><Show when={participants.loading}><p class="meeting-empty">Loading participants…</p></Show><For each={participants()}>{(participant) => <div class="participant"><span>{participant.profile_id}</span><select aria-label={`RSVP for ${participant.profile_id}`} value={participant.status} onChange={(event) => rsvp(participant, event.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For></section>

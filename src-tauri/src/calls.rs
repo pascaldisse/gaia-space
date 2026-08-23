@@ -1,8 +1,6 @@
 //! Native LiveKit runtime + token authority. Claims mirror `meet/src/backend/core/utils.py`.
 use crate::{actor, db, meetings};
-#[cfg(test)]
-use jsonwebtoken::{decode, DecodingKey, Validation};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::RngCore;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -143,7 +141,10 @@ impl LivekitConfig {
     /// Invalid and absent environment values keep anonymous access closed.
     fn allow_unregistered_rooms(&self) -> bool {
         self.allow_unregistered_rooms.unwrap_or_else(|| {
-            matches!(std::env::var("ALLOW_UNREGISTERED_ROOMS").ok().as_deref(), Some("true") | Some("1"))
+            matches!(
+                std::env::var("ALLOW_UNREGISTERED_ROOMS").ok().as_deref(),
+                Some("true") | Some("1")
+            )
         })
     }
     fn egress_url(&self) -> String {
@@ -480,9 +481,112 @@ pub struct CallJoin {
     pub token: String,
 }
 
+/// HS256 OIDC normal-room admission. Real IdP JWKS discovery is not implemented.
+#[derive(Debug, Deserialize)]
+struct NormalRoomOidcClaims {
+    sub: String,
+    iss: String,
+    aud: serde_json::Value,
+    exp: usize,
+    #[serde(default)]
+    name: Option<String>,
+}
+#[derive(Clone)]
+pub struct NormalRoomOidcConfig {
+    pub issuer: String,
+    pub audience: String,
+    pub hs256_secret: String,
+}
+impl NormalRoomOidcConfig {
+    pub fn from_env() -> Result<Self> {
+        let required = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .ok_or_else(|| format!("{key} must be configured for OIDC normal-room admission"))
+        };
+        Ok(Self {
+            issuer: required("SPACE_NORMAL_ROOM_OIDC_ISSUER")?,
+            audience: required("SPACE_NORMAL_ROOM_OIDC_AUDIENCE")?,
+            hs256_secret: required("SPACE_NORMAL_ROOM_OIDC_HS256_SECRET")?,
+        })
+    }
+}
+fn verify_normal_room_oidc_token(
+    token: &str,
+    config: &NormalRoomOidcConfig,
+) -> Result<(String, String)> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_issuer(&[&config.issuer]);
+    validation.set_audience(&[&config.audience]);
+    let claims = decode::<NormalRoomOidcClaims>(
+        token,
+        &DecodingKey::from_secret(config.hs256_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| "invalid OIDC normal-room token".to_string())?
+    .claims;
+    let _ = (&claims.iss, &claims.aud, claims.exp);
+    let subject = claims.sub.trim();
+    if subject.is_empty() || subject.len() > 128 {
+        return Err("OIDC subject must be 1 to 128 characters".into());
+    }
+    let name = claims
+        .name
+        .unwrap_or_else(|| subject.into())
+        .trim()
+        .to_owned();
+    if name.is_empty() || name.len() > 128 {
+        return Err("OIDC display name must be 1 to 128 characters".into());
+    }
+    Ok((subject.into(), name))
+}
+/// Authenticated normal-room join: LiveKit identity derives from token `sub`.
+pub fn join_oidc_normal_meeting_call(meeting_id: String, oidc_token: &str) -> Result<CallJoin> {
+    let oidc = NormalRoomOidcConfig::from_env()?;
+    let (subject, display_name) = verify_normal_room_oidc_token(oidc_token, &oidc)?;
+    join_oidc_normal_meeting_call_with_config(
+        meeting_id,
+        subject,
+        display_name,
+        LivekitConfig::default(),
+    )
+}
+fn join_oidc_normal_meeting_call_with_config(
+    meeting_id: String,
+    subject: String,
+    display_name: String,
+    config: LivekitConfig,
+) -> Result<CallJoin> {
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered normal rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Normal room not found")?;
+    if meeting.video_provider != "native" {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("oidc-{subject}"),
+            display_name,
+            false,
+        )?,
+        room,
+    })
+}
+
 /// Anonymous admission is independent of persisted participant scope. Both this
 /// config flag and the meeting's persisted PUBLIC access level must opt in.
-pub fn join_public_meeting_call(meeting_id: String, display_name: Option<String>) -> Result<CallJoin> {
+pub fn join_public_meeting_call(
+    meeting_id: String,
+    display_name: Option<String>,
+) -> Result<CallJoin> {
     join_public_meeting_call_with_config(meeting_id, display_name, LivekitConfig::default())
 }
 pub(crate) fn join_public_meeting_call_with_config(
@@ -493,13 +597,15 @@ pub(crate) fn join_public_meeting_call_with_config(
     if !config.allow_unregistered_rooms() {
         return Err("Unregistered public rooms are disabled".into());
     }
-    let meeting = meetings::get_public_meeting(meeting_id)?
-        .ok_or("Public room not found")?;
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
     if meeting.video_provider != "native" {
         return Err("External Meet rooms are not configured".into());
     }
     meetings::video_status_after_join(&meeting.video_status)?;
-    let name = display_name.unwrap_or_else(|| "Anonymous".into()).trim().to_owned();
+    let name = display_name
+        .unwrap_or_else(|| "Anonymous".into())
+        .trim()
+        .to_owned();
     if name.is_empty() || name.len() > 128 {
         return Err("Anonymous display name must be 1 to 128 characters".into());
     }
@@ -509,7 +615,13 @@ pub(crate) fn join_public_meeting_call_with_config(
     let room = room_for_meeting(&meeting.id);
     Ok(CallJoin {
         url: status.url,
-        token: token_for(&config, room.clone(), format!("anonymous-{}", hex::encode(entropy)), name, false)?,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("anonymous-{}", hex::encode(entropy)),
+            name,
+            false,
+        )?,
         room,
     })
 }
@@ -1658,9 +1770,59 @@ mod tests {
     }
 
     #[test]
+    fn normal_room_oidc_verifies_signature_issuer_audience_and_expiry() {
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            iss: &'a str,
+            aud: &'a str,
+            exp: usize,
+            name: &'a str,
+        }
+        let config = NormalRoomOidcConfig {
+            issuer: "https://idp.test".into(),
+            audience: "space-room".into(),
+            hs256_secret: "test-secret".into(),
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &Claims {
+                sub: "person-1",
+                iss: "https://idp.test",
+                aud: "space-room",
+                exp: (SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + 60) as usize,
+                name: "Person One",
+            },
+            &EncodingKey::from_secret(config.hs256_secret.as_bytes()),
+        )
+        .unwrap();
+        assert_eq!(
+            verify_normal_room_oidc_token(&token, &config).unwrap(),
+            ("person-1".into(), "Person One".into())
+        );
+        let wrong = NormalRoomOidcConfig {
+            audience: "other".into(),
+            ..config
+        };
+        assert!(verify_normal_room_oidc_token(&token, &wrong).is_err());
+    }
+
+    #[test]
     fn anonymous_rooms_need_an_explicit_config_opt_in() {
-        assert!(!LivekitConfig { allow_unregistered_rooms: Some(false), ..Default::default() }.allow_unregistered_rooms());
-        assert!(LivekitConfig { allow_unregistered_rooms: Some(true), ..Default::default() }.allow_unregistered_rooms());
+        assert!(!LivekitConfig {
+            allow_unregistered_rooms: Some(false),
+            ..Default::default()
+        }
+        .allow_unregistered_rooms());
+        assert!(LivekitConfig {
+            allow_unregistered_rooms: Some(true),
+            ..Default::default()
+        }
+        .allow_unregistered_rooms());
     }
 
     #[test]

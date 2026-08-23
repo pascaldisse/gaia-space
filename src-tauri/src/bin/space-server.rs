@@ -147,17 +147,18 @@ struct PatchUser {
 fn err(code: StatusCode, s: &str) -> (StatusCode, Json<Value>) {
     (code, Json(json!({"ok":false,"error":s})))
 }
-#[derive(Deserialize)]
-struct PublicRoomQuery {
-    username: Option<String>,
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
 }
-/// The token authority remains in `calls`; this route neither accepts an identity
-/// nor sees LiveKit credentials. Disabled/private/unknown rooms all look absent.
-async fn public_room(
-    Path(room): Path<String>,
-    Query(query): Query<PublicRoomQuery>,
-) -> axum::response::Response {
-    match calls::join_public_meeting_call(room, query.username) {
+/// Normal-room admission is bearer-only; browser-supplied query identity is ignored.
+async fn public_room(Path(room): Path<String>, headers: HeaderMap) -> axum::response::Response {
+    let Some(token) = bearer_token(&headers) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match calls::join_oidc_normal_meeting_call(room, token) {
         Ok(join) => Json(join).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
@@ -8695,6 +8696,12 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "plain http off localhost stays out: {value}"
         );
+    }
+
+    #[tokio::test]
+    async fn normal_room_http_join_fails_closed_without_a_bearer() {
+        let response = public_room(Path("normal-room".into()), HeaderMap::new()).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     /// Without a session there is no resource owner to consent.
