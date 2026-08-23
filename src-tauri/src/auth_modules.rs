@@ -76,7 +76,7 @@ pub fn create_module(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    let id = format!("authmod-{}", crate::auth_security::opaque("")[..16].to_string());
+    let id = format!("authmod-{}", &crate::auth_security::opaque("")[..16]);
     c.execute(
         "INSERT INTO auth_modules(id,key,name,kind,enabled,hidden,position,settings) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         params![id, key, name, kind, enabled as i32, hidden as i32, position, settings.to_string()],

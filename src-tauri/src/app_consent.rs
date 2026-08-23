@@ -102,7 +102,7 @@ pub fn request_rights_on(
         }
         let id = format!(
             "appreq-{}",
-            &crate::auth_security::opaque("")[..16].to_string()
+            &crate::auth_security::opaque("")[..16]
         );
         c.execute(
             "INSERT INTO app_right_requests(id,application_id,context_identifier,right_code) VALUES(?1,?2,?3,?4) ON CONFLICT(application_id,context_identifier,right_code) DO NOTHING",
