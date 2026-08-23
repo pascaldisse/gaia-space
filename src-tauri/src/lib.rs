@@ -214,6 +214,7 @@ pub fn run() {
             platform::set_profile_email_status,
             platform::list_messenger_contacts,
             platform::save_messenger_contact,
+            platform::delete_messenger_contact,
             platform::list_principals,
             platform::list_member_locations,
             platform::list_desk_assignments,

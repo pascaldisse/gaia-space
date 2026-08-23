@@ -33,6 +33,8 @@
 .org-profile-readonly strong { color: var(--text-strong); }
 .org-profile-edit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; }
 .org-profile-edit label { display: grid; gap: 4px; font-size: 11px; color: var(--text-muted); }
+.org-profile-settings { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--surface-border); }
+.org-profile-settings > label { display: grid; gap: 4px; max-width: 220px; font-size: 11px; color: var(--text-muted); }
 .org-directory-addons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .org-directory-addons .org-list { max-height: 300px; overflow: auto; }
 .panel-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }

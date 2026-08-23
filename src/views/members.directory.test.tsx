@@ -19,6 +19,7 @@ const replies: Record<string, Reply> = {
   list_directory_feed: { ok: true, value: [{ id: "event", event_type: "member.joined", profile_id: "bea", profile_name: "Bea", team_id: null, team_name: null, role_id: null, role_name: null, created_at: 1 }] },
   list_directory_calendar: { ok: true, value: [{ id: "absence", profile_id: "bea", profile_name: "Bea", reason_type: "Vacation", date_from: "2030-01-02", date_to: "2030-01-04", availability: "away" }] },
   list_messenger_contacts: { ok: true, value: [{ id: "contact", profile_id: "bea", contact_type: "Telegram", login: "@bea", deep_link: "https://example.test/chat" }] },
+  get_profile_email_status: { ok: true, value: { profile_id: "ada", status: "verified", verified_at: 1 } },
 };
 const realFetch = globalThis.fetch;
 let dispose: (() => void) | undefined;
@@ -42,6 +43,11 @@ describe("advanced directory", () => {
     await settle();
     expect(host.querySelector("[aria-label='Company feed']")?.textContent).toContain("Bea joined the organization");
     expect(host.querySelector("[aria-label='Organization calendar']")?.textContent).toContain("Vacation");
+    const adaRow = [...host.querySelectorAll(".org-list li")].find((row) => row.textContent?.includes("Ada"))!;
+    (adaRow.querySelector("button") as HTMLButtonElement).click(); await settle();
+    expect(host.querySelector("[aria-label='Email status']")?.textContent).toContain("Verified");
+    expect(host.querySelector("[aria-label='Messenger contacts']")?.textContent).toContain("Messenger contacts");
+    ([...host.querySelectorAll("button")].find((button) => button.textContent === "Close") as HTMLButtonElement).click(); await settle();
     const beaRow = [...host.querySelectorAll(".org-list li")].find((row) => row.textContent?.includes("Bea"))!;
     (beaRow.querySelector("button") as HTMLButtonElement).click(); await settle();
     const detail = host.querySelector("[aria-label='Profile detail']")!;

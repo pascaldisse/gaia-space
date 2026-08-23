@@ -61,6 +61,7 @@ getProfileEmailStatus: (profile_id: string) => call<ProfileEmailStatus>("get_pro
 setProfileEmailStatus: (value: ProfileEmailStatus) => call<void>("set_profile_email_status", { value }),
 messengerContacts: (profile_id: string) => call<MessengerContact[]>("list_messenger_contacts", { profileId: profile_id }),
 saveMessengerContact: (value: MessengerContact) => call<MessengerContact>("save_messenger_contact", { value }),
+deleteMessengerContact: (id: string, profile_id: string) => call<void>("delete_messenger_contact", { id, profileId: profile_id }),
 principals: () => call<Principal[]>("list_principals"),
 
   deskAssignments: (profile_id?: string, location_id?: string) => call<DeskAssignment[]>("list_desk_assignments", { profileId: profile_id ?? null, locationId: location_id ?? null }),

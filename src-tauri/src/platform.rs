@@ -237,16 +237,43 @@ pub fn list_messenger_contacts(profile_id: String) -> Result<Vec<MessengerContac
         .map_err(|e| e.to_string());
     result
 }
+const MESSENGER_CONTACT_TYPES: [&str; 7] = ["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"];
+
+fn messenger_deep_link(contact_type: &str, login: &str) -> Result<String> {
+    let login = login.trim().trim_start_matches('@');
+    if login.is_empty() || login.chars().any(char::is_whitespace) { return Err("A contact login cannot be blank or contain spaces".into()); }
+    let encoded = login.bytes().map(|byte| match byte { b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'@' => char::from(byte).to_string(), _ => format!("%{byte:02X}") }).collect::<String>();
+    match contact_type {
+        "Twitter" => Ok(format!("https://x.com/{encoded}")),
+        "Slack" => Ok(format!("slack://user?team={encoded}")),
+        "Telegram" => Ok(format!("https://t.me/{encoded}")),
+        "Skype" => Ok(format!("skype:{encoded}?chat")),
+        "ICQ" => Ok(format!("icq:{encoded}")),
+        "XMPP" => Ok(format!("xmpp:{encoded}?message")),
+        "Space" => Ok(format!("space://chat/{encoded}")),
+        _ => Err("Unsupported messenger contact type".into()),
+    }
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerContact> {
-    if value.contact_type.trim().is_empty() || value.login.trim().is_empty() {
-        return Err("Contact type and login are required".into());
-    };
+    let contact_type = value.contact_type.trim();
+    if !MESSENGER_CONTACT_TYPES.contains(&contact_type) { return Err("Unsupported messenger contact type".into()); }
+    value.login = value.login.trim().trim_start_matches('@').to_string();
+    value.deep_link = Some(messenger_deep_link(contact_type, &value.login)?);
+    value.contact_type = contact_type.to_string();
     let id = value.id.clone().unwrap_or_else(|| new_id("contact"));
     let c = db::conn()?;
-    c.execute("INSERT INTO profile_messenger_contacts(id,profile_id,contact_type,login,deep_link) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,contact_type,login) DO UPDATE SET deep_link=excluded.deep_link",params![id,value.profile_id,value.contact_type.trim(),value.login.trim(),value.deep_link]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO profile_messenger_contacts(id,profile_id,contact_type,login,deep_link) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,contact_type,login) DO UPDATE SET deep_link=excluded.deep_link",params![id,value.profile_id,value.contact_type,value.login,value.deep_link]).map_err(|e|e.to_string())?;
     value.id = Some(id);
     Ok(value)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_messenger_contact(id: String, profile_id: String) -> Result<()> {
+    let c = db::conn()?;
+    if err(c.execute("DELETE FROM profile_messenger_contacts WHERE id=?1 AND profile_id=?2", params![id, profile_id]))? == 0 { return Err("Messenger contact not found".into()); }
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_principals() -> Result<Vec<Principal>> {
@@ -2268,6 +2295,14 @@ mod tests {
         db::migrate(&c).unwrap();
         c
     }
+    #[test]
+    fn messenger_contacts_are_closed_set_and_generate_safe_deep_links() {
+        assert_eq!(messenger_deep_link("Telegram", "@ada").unwrap(), "https://t.me/ada");
+        assert_eq!(messenger_deep_link("XMPP", "ada@example.test").unwrap(), "xmpp:ada@example.test?message");
+        assert!(messenger_deep_link("Discord", "ada").is_err());
+        assert!(messenger_deep_link("Telegram", "two words").is_err());
+    }
+
     #[test]
     fn advanced_directory_feed_is_durable_and_calendar_shows_only_approved_absences() {
         let c = conn();

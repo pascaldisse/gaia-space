@@ -8,6 +8,7 @@ import {
   type MembershipEditRequest,
   type MemberLocation,
   type DirectoryFeedEvent,
+  type MessengerContact,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -60,10 +61,15 @@ export default function Members() {
     () => selectedProfile()?.id,
     (id) => id ? platformApi.memberships(undefined, id) : Promise.resolve([] as TeamMembership[]),
   );
-  const [profileContacts] = createResource(
+  const [profileContacts, { refetch: refetchProfileContacts }] = createResource(
     () => selectedProfile()?.id,
-    (id) => id ? platformApi.messengerContacts(id) : Promise.resolve([]),
+    (id) => id ? platformApi.messengerContacts(id) : Promise.resolve([] as MessengerContact[]),
   );
+  const [profileEmailStatus, { refetch: refetchProfileEmailStatus }] = createResource(
+    () => selectedProfile()?.id,
+    (id) => id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null),
+  );
+  const [contactDraft, setContactDraft] = createSignal({ contact_type: "Telegram", login: "" });
   const [memberships, { refetch: refetchMemberships }] = createResource(
     () => activeTeam()?.id,
     (id) =>
@@ -125,6 +131,23 @@ export default function Members() {
     setSelectedProfile(profile);
     setProfileTab("about");
     if (profile.id === ownProfileId()) beginEdit(profile);
+  };
+  const saveEmailStatus = async (status: "unverified" | "verified" | "bounced") => {
+    const profile = selectedProfile();
+    if (!profile) return;
+    try { await platformApi.setProfileEmailStatus({ profile_id: profile.id, status, verified_at: status === "verified" ? Math.floor(Date.now() / 1000) : null }); setProblem(""); refetchProfileEmailStatus(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const saveMessengerContact = async () => {
+    const profile = selectedProfile(); const draft = contactDraft();
+    if (!profile || !draft.login.trim()) return;
+    try { await platformApi.saveMessengerContact({ profile_id: profile.id, contact_type: draft.contact_type, login: draft.login.trim(), deep_link: null }); setContactDraft({ contact_type: "Telegram", login: "" }); setProblem(""); refetchProfileContacts(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const removeMessengerContact = async (contact: MessengerContact) => {
+    if (!contact.id) return;
+    try { await platformApi.deleteMessengerContact(contact.id, contact.profile_id); setProblem(""); refetchProfileContacts(); }
+    catch (error) { setProblem(String(error)); }
   };
   const feedText = (event: DirectoryFeedEvent) => {
     const team = event.team_name ? ` · ${event.team_name}` : "";
@@ -315,6 +338,15 @@ export default function Members() {
               <label>Email<input type="email" value={profileDraft().email} onInput={(event) => setProfileDraft({ ...profileDraft(), email: event.currentTarget.value })} /></label>
               <button class="primary">Save my profile</button>
             </form>
+            <section class="org-profile-settings" aria-label="Email status">
+              <label>Email status<select value={profileEmailStatus()?.status ?? "unverified"} onChange={(event) => void saveEmailStatus(event.currentTarget.value as "unverified" | "verified" | "bounced")}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
+              <span class="org-hint">{profileEmailStatus()?.verified_at ? `Verified ${new Date(profileEmailStatus()!.verified_at! * 1000).toLocaleDateString()}` : "No verified email timestamp"}</span>
+            </section>
+            <section class="org-profile-settings" aria-label="Messenger contacts">
+              <div class="panel-title"><h2>Messenger contacts</h2></div>
+              <form class="org-form-inline" onSubmit={(event) => { event.preventDefault(); void saveMessengerContact(); }}><select aria-label="Messenger type" value={contactDraft().contact_type} onChange={(event) => setContactDraft({ ...contactDraft(), contact_type: event.currentTarget.value })}><For each={["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"]}>{(type) => <option value={type}>{type}</option>}</For></select><input aria-label="Messenger login" placeholder="Username or address" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })}/><button class="ghost">Add contact</button></form>
+              <ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <a href={link()} target="_blank" rel="noreferrer">Open chat</a>}</Show><button class="ghost small" onClick={() => void removeMessengerContact(contact)}>Remove</button></li>}</For></ul>
+            </section>
           </Show>
         </section>
       )}</Show>

@@ -2489,6 +2489,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
+        | "delete_messenger_contact"
         | "remove_team_membership"
         | "request_membership_edit"
         | "decide_membership_edit"
@@ -4822,6 +4823,7 @@ async fn cmd(
     "delete_issue_status" => issues::delete_issue_status(id: String),
     "delete_issue_attachment" => issues::delete_issue_attachment(id: String),
     "delete_message" => chat::delete_message(id: String),
+    "delete_messenger_contact" => platform::delete_messenger_contact(id: String, profile_id: String),
     "delete_package_repository" => pipelines::delete_package_repository(id: String),
     "delete_package_version" => pipelines::delete_package_version(id: String),
     "delete_pipeline_script" => pipelines::delete_pipeline_script(id: String),
@@ -5526,6 +5528,17 @@ mod tests {
         let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
         bind_session_identity(&mut close, "me");
         assert_eq!(close["author_id"], json!("me"));
+    }
+
+    #[test]
+    fn profile_communication_writes_are_bound_to_the_session() {
+        for name in ["save_messenger_contact", "delete_messenger_contact", "set_profile_email_status"] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::Session)), "{name}");
+        }
+        let mut body = json!({"value":{"profile_id":"someone-else"},"profile_id":"someone-else"});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["value"]["profile_id"], json!("me"));
+        assert_eq!(body["profile_id"], json!("me"));
     }
 
     #[test]
