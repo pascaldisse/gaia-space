@@ -126,6 +126,10 @@ pub enum OciTarget {
     Manifest { reference: String },
     /// `/v2/{name}/blobs/{digest}`.
     Blob { digest: String },
+    /// `/v2/{name}/blobs/uploads/` — session start (POST), possibly monolithic with `?digest=`.
+    BlobUploadStart,
+    /// `/v2/{name}/blobs/uploads/{session}` — the PUT that closes a session.
+    BlobUpload { session: String },
     /// `/v2/{name}/tags/list`.
     TagList,
     /// `/v2/{name}/referrers/{digest}` — OCI artifact attachments (subject).
@@ -148,6 +152,10 @@ pub fn oci_coordinates(path: &str) -> Result<(String, OciTarget)> {
     let target = match rest {
         ["manifests", reference] => OciTarget::Manifest {
             reference: (*reference).to_string(),
+        },
+        ["blobs", "uploads"] => OciTarget::BlobUploadStart,
+        ["blobs", "uploads", session] => OciTarget::BlobUpload {
+            session: (*session).to_string(),
         },
         ["blobs", digest] => OciTarget::Blob {
             digest: (*digest).to_string(),
@@ -374,6 +382,112 @@ pub fn oci_referrers(repository_id: &str, package_name: &str, digest: &str) -> R
     }))
 }
 
+// ---------- OCI content-addressed blob store ----------
+//
+// Blobs are addressed by their own content digest, so the store is a pure function of the
+// bytes: `{package base dir}/_blobs/{repository}/{algo}/{aa}/{hex}`. Nothing is written under
+// a client-supplied name, and a digest that does not match the bytes is refused rather than
+// stored under a lie.
+use std::fs;
+use std::path::{Path, PathBuf};
+/// The one digest algorithm this store accepts. Adding another means adding a real
+/// implementation for it — an unknown algorithm is rejected, never silently treated as sha256.
+pub const BLOB_DIGEST_ALGORITHM: &str = "sha256";
+/// `sha256:{64 lower-case hex}` → `(algorithm, hex)`.
+pub fn parse_digest(digest: &str) -> Result<(String, String)> {
+    let (algorithm, hex) = digest
+        .split_once(':')
+        .ok_or_else(|| "digest must be {algorithm}:{hex}".to_string())?;
+    if algorithm != BLOB_DIGEST_ALGORITHM {
+        return Err(format!("unsupported digest algorithm '{algorithm}'"));
+    }
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        return Err("sha256 digest must be 64 lower-case hex characters".into());
+    }
+    Ok((algorithm.to_string(), hex.to_string()))
+}
+/// The digest of these bytes, in the wire form clients send back.
+pub fn compute_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{BLOB_DIGEST_ALGORITHM}:{}", hex::encode(Sha256::digest(bytes)))
+}
+fn safe_repository(repository_id: &str) -> Result<()> {
+    if repository_id.is_empty()
+        || !repository_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        || repository_id.starts_with('.')
+    {
+        return Err("invalid repository id for blob storage".into());
+    }
+    Ok(())
+}
+/// Where a digest lives. Path components come from the *validated* digest, never from a path
+/// the client wrote, so traversal has no surface here.
+pub fn blob_path(base_dir: &Path, repository_id: &str, digest: &str) -> Result<PathBuf> {
+    safe_repository(repository_id)?;
+    let (algorithm, hex) = parse_digest(digest)?;
+    Ok(base_dir
+        .join("_blobs")
+        .join(repository_id)
+        .join(algorithm)
+        .join(&hex[..2])
+        .join(hex))
+}
+/// Writes bytes under their own digest. `expected` (the client's `?digest=`) must match the
+/// bytes actually received; a mismatch is the spec's `DIGEST_INVALID`, not a stored blob.
+/// Re-uploading an identical blob is a no-op — content addressing makes it idempotent.
+pub fn store_blob(
+    base_dir: &Path,
+    repository_id: &str,
+    bytes: &[u8],
+    expected: Option<&str>,
+) -> Result<String> {
+    let digest = compute_digest(bytes);
+    if let Some(expected) = expected {
+        let (_, expected_hex) = parse_digest(expected)?;
+        if !digest.ends_with(&expected_hex) {
+            return Err(format!("digest mismatch: bytes hash to {digest}"));
+        }
+    }
+    let path = blob_path(base_dir, repository_id, &digest)?;
+    if path.exists() {
+        return Ok(digest);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "blob path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("cannot create blob directory: {e}"))?;
+    // Write-then-rename: a reader never sees a half-written blob under a digest that promises
+    // the whole content.
+    let staging = parent.join(format!(".{}.partial", &digest[digest.len() - 32..]));
+    fs::write(&staging, bytes).map_err(|e| format!("cannot write blob: {e}"))?;
+    fs::rename(&staging, &path).map_err(|e| format!("cannot commit blob: {e}"))?;
+    Ok(digest)
+}
+/// Reads a blob and re-verifies it against the digest it was asked for. The check is done on
+/// the bytes read from disk, not on the path that produced them — a corrupted or swapped file
+/// fails here instead of being served as if it were the requested content.
+pub fn read_blob(base_dir: &Path, repository_id: &str, digest: &str) -> Result<Vec<u8>> {
+    let path = blob_path(base_dir, repository_id, digest)?;
+    let bytes = fs::read(&path).map_err(|_| "blob not found".to_string())?;
+    if compute_digest(&bytes) != digest {
+        return Err("stored blob does not match its digest".into());
+    }
+    Ok(bytes)
+}
+/// Whether a digest is present (the `HEAD` / mount-check answer), without reading it.
+pub fn blob_exists(base_dir: &Path, repository_id: &str, digest: &str) -> bool {
+    blob_path(base_dir, repository_id, digest).is_ok_and(|path| path.is_file())
+}
+/// Size in bytes of a stored blob — what a `HEAD` response reports as `Content-Length`.
+pub fn blob_size(base_dir: &Path, repository_id: &str, digest: &str) -> Result<u64> {
+    let path = blob_path(base_dir, repository_id, digest)?;
+    fs::metadata(&path)
+        .map(|meta| meta.len())
+        .map_err(|_| "blob not found".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +582,103 @@ mod tests {
         );
     }
 
+    fn blob_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "gaia-space-blobstore-test-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    #[test]
+    fn digests_are_parsed_strictly() {
+        assert!(parse_digest(&format!("sha256:{}", "a".repeat(64))).is_ok());
+        assert!(parse_digest("sha256:abc").is_err());
+        assert!(parse_digest(&format!("sha512:{}", "a".repeat(64))).is_err());
+        assert!(parse_digest(&format!("sha256:{}", "A".repeat(64))).is_err());
+        assert!(parse_digest("nocolon").is_err());
+        assert_eq!(
+            compute_digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+    #[test]
+    fn blobs_round_trip_by_digest_and_reject_a_lying_digest() {
+        let dir = blob_test_dir("round-trip");
+        let digest = store_blob(&dir, "repo-1", b"layer-bytes", None).unwrap();
+        // Independent check: the digest the store returned must equal an outside sha256 of the
+        // same bytes, computed without going through store_blob.
+        {
+            use sha2::{Digest, Sha256};
+            assert_eq!(
+                digest,
+                format!("sha256:{}", hex::encode(Sha256::digest(b"layer-bytes")))
+            );
+        }
+        assert_eq!(read_blob(&dir, "repo-1", &digest).unwrap(), b"layer-bytes");
+        assert!(blob_exists(&dir, "repo-1", &digest));
+        assert_eq!(blob_size(&dir, "repo-1", &digest).unwrap(), 11);
+        // Same bytes again: idempotent, same digest, no error.
+        assert_eq!(
+            store_blob(&dir, "repo-1", b"layer-bytes", Some(&digest)).unwrap(),
+            digest
+        );
+        // A declared digest that does not describe the bytes is refused.
+        assert!(store_blob(&dir, "repo-1", b"other", Some(&digest))
+            .unwrap_err()
+            .contains("digest mismatch"));
+        // Blobs are per repository: another repository does not see it.
+        assert!(!blob_exists(&dir, "repo-2", &digest));
+        assert!(read_blob(&dir, "repo-2", &digest).is_err());
+        // No partial files survive a successful write.
+        let stored = blob_path(&dir, "repo-1", &digest).unwrap();
+        let leftovers: Vec<_> = fs::read_dir(stored.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staging files must not survive");
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn blob_paths_cannot_escape_the_store() {
+        let dir = blob_test_dir("escape");
+        assert!(blob_path(&dir, "../etc", &compute_digest(b"x")).is_err());
+        assert!(blob_path(&dir, "repo", "sha256:../../etc/passwd").is_err());
+        assert!(blob_path(&dir, "", &compute_digest(b"x")).is_err());
+        let ok = blob_path(&dir, "repo", &compute_digest(b"x")).unwrap();
+        assert!(ok.starts_with(dir.join("_blobs").join("repo").join("sha256")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn oci_upload_paths_parse() {
+        assert_eq!(
+            oci_coordinates("library/nginx/blobs/uploads").unwrap(),
+            ("library/nginx".into(), OciTarget::BlobUploadStart)
+        );
+        assert_eq!(
+            oci_coordinates("nginx/blobs/uploads/session-1").unwrap(),
+            (
+                "nginx".into(),
+                OciTarget::BlobUpload {
+                    session: "session-1".into()
+                }
+            )
+        );
+        assert_eq!(
+            oci_coordinates(&format!("nginx/blobs/sha256:{}", "a".repeat(64))).unwrap(),
+            (
+                "nginx".into(),
+                OciTarget::Blob {
+                    digest: format!("sha256:{}", "a".repeat(64))
+                }
+            )
+        );
+    }
     #[test]
     fn pypi_filenames_fall_back_to_pep625_sdist_name() {
         assert_eq!(
