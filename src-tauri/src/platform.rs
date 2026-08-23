@@ -237,12 +237,24 @@ pub fn list_messenger_contacts(profile_id: String) -> Result<Vec<MessengerContac
         .map_err(|e| e.to_string());
     result
 }
-const MESSENGER_CONTACT_TYPES: [&str; 7] = ["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"];
+const MESSENGER_CONTACT_TYPES: [&str; 7] = [
+    "Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space",
+];
 
 fn messenger_deep_link(contact_type: &str, login: &str) -> Result<String> {
     let login = login.trim().trim_start_matches('@');
-    if login.is_empty() || login.chars().any(char::is_whitespace) { return Err("A contact login cannot be blank or contain spaces".into()); }
-    let encoded = login.bytes().map(|byte| match byte { b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'@' => char::from(byte).to_string(), _ => format!("%{byte:02X}") }).collect::<String>();
+    if login.is_empty() || login.chars().any(char::is_whitespace) {
+        return Err("A contact login cannot be blank or contain spaces".into());
+    }
+    let encoded = login
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'@' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect::<String>();
     match contact_type {
         "Twitter" => Ok(format!("https://x.com/{encoded}")),
         "Slack" => Ok(format!("slack://user?team={encoded}")),
@@ -258,7 +270,9 @@ fn messenger_deep_link(contact_type: &str, login: &str) -> Result<String> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerContact> {
     let contact_type = value.contact_type.trim();
-    if !MESSENGER_CONTACT_TYPES.contains(&contact_type) { return Err("Unsupported messenger contact type".into()); }
+    if !MESSENGER_CONTACT_TYPES.contains(&contact_type) {
+        return Err("Unsupported messenger contact type".into());
+    }
     value.login = value.login.trim().trim_start_matches('@').to_string();
     value.deep_link = Some(messenger_deep_link(contact_type, &value.login)?);
     value.contact_type = contact_type.to_string();
@@ -272,7 +286,13 @@ pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerCo
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_messenger_contact(id: String, profile_id: String) -> Result<()> {
     let c = db::conn()?;
-    if err(c.execute("DELETE FROM profile_messenger_contacts WHERE id=?1 AND profile_id=?2", params![id, profile_id]))? == 0 { return Err("Messenger contact not found".into()); }
+    if err(c.execute(
+        "DELETE FROM profile_messenger_contacts WHERE id=?1 AND profile_id=?2",
+        params![id, profile_id],
+    ))? == 0
+    {
+        return Err("Messenger contact not found".into());
+    }
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2297,8 +2317,14 @@ mod tests {
     }
     #[test]
     fn messenger_contacts_are_closed_set_and_generate_safe_deep_links() {
-        assert_eq!(messenger_deep_link("Telegram", "@ada").unwrap(), "https://t.me/ada");
-        assert_eq!(messenger_deep_link("XMPP", "ada@example.test").unwrap(), "xmpp:ada@example.test?message");
+        assert_eq!(
+            messenger_deep_link("Telegram", "@ada").unwrap(),
+            "https://t.me/ada"
+        );
+        assert_eq!(
+            messenger_deep_link("XMPP", "ada@example.test").unwrap(),
+            "xmpp:ada@example.test?message"
+        );
         assert!(messenger_deep_link("Discord", "ada").is_err());
         assert!(messenger_deep_link("Telegram", "two words").is_err());
     }

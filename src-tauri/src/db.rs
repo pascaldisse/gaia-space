@@ -176,11 +176,6 @@ pub fn connection(app: &AppHandle) -> Result<Connection, String> {
 pub fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version >= SCHEMA_VERSION {
-        // V126 is intentionally extensible within this worktree. Replay its idempotent
-        // DDL so a database already stamped 126 receives newly added V126 tables too.
-        if version == 126 && table_exists(conn, "messages")? {
-            conn.execute_batch(SCHEMA_V126)?;
-        }
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
@@ -836,19 +831,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
     // V129: call lifecycle audit facts. The status is the current state; timestamps and
-// the organizer who ended it preserve the lifecycle evidence after a call completes.
-// Additive and table-guarded: historical fixture databases may predate meetings.
-if version < 129 && table_exists(&tx, "meetings")? {
-    add_column_if_missing(&tx, "meetings", "video_started_at", "INTEGER")?;
-    add_column_if_missing(&tx, "meetings", "video_ended_at", "INTEGER")?;
-    add_column_if_missing(
-        &tx,
-        "meetings",
-        "video_ended_by",
-        "TEXT REFERENCES profiles(id)",
-    )?;
-}
-// V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
+    // the organizer who ended it preserve the lifecycle evidence after a call completes.
+    // Additive and table-guarded: historical fixture databases may predate meetings.
+    if version < 129 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "video_started_at", "INTEGER")?;
+        add_column_if_missing(&tx, "meetings", "video_ended_at", "INTEGER")?;
+        add_column_if_missing(
+            &tx,
+            "meetings",
+            "video_ended_by",
+            "TEXT REFERENCES profiles(id)",
+        )?;
+    }
+    // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
     if version < 103 && table_exists(&tx, "user_preferences")? {
@@ -2190,9 +2185,16 @@ mod tests {
         conn.execute("DELETE FROM profiles WHERE id='p1'", [])
             .unwrap();
         let owner: Option<String> = conn
-            .query_row("SELECT owner_profile_id FROM applications WHERE id='a1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT owner_profile_id FROM applications WHERE id='a1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(owner, None, "deleting the owner never deletes the application");
+        assert_eq!(
+            owner, None,
+            "deleting the owner never deletes the application"
+        );
         conn.execute("DELETE FROM applications WHERE id='a1'", [])
             .unwrap();
         let left: i64 = conn
@@ -2237,7 +2239,8 @@ mod tests {
     fn v129_adds_call_lifecycle_audit_facts_to_a_v123_meeting_table() {
         let conn = Connection::open_in_memory().expect("database");
         conn.execute_batch(SCHEMA_V1).expect("v1 meetings");
-        conn.pragma_update(None, "user_version", 123).expect("stamp v123");
+        conn.pragma_update(None, "user_version", 123)
+            .expect("stamp v123");
 
         migrate(&conn).expect("v129");
         let columns = conn
@@ -2248,7 +2251,10 @@ mod tests {
             .collect::<Result<Vec<_>>>()
             .expect("column names");
         for expected in ["video_started_at", "video_ended_at", "video_ended_by"] {
-            assert!(columns.iter().any(|column| column == expected), "missing {expected}");
+            assert!(
+                columns.iter().any(|column| column == expected),
+                "missing {expected}"
+            );
         }
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -2539,13 +2545,21 @@ mod tests {
     }
 
     #[test]
-    fn v126_extension_repairs_an_already_stamped_database() {
+    fn v125_database_gains_thread_channels() {
         let conn = open_in_memory().expect("db");
         migrate(&conn).expect("latest schema");
-        conn.execute("DROP TABLE thread_channels", []).expect("simulate pre-extension V126");
-        conn.pragma_update(None, "user_version", 126).expect("V126 stamp");
-        migrate(&conn).expect("replay idempotent V126 extension");
-        let exists: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='thread_channels'", [], |row| row.get(0)).unwrap();
+        conn.execute("DROP TABLE thread_channels", [])
+            .expect("simulate pre-V126 database");
+        conn.pragma_update(None, "user_version", 125)
+            .expect("V125 stamp");
+        migrate(&conn).expect("V126 migration");
+        let exists: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='thread_channels'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(exists, 1);
     }
 

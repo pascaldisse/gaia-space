@@ -2952,12 +2952,22 @@ fn bind_document_create(user: &User, body: &mut Value) -> Result<(), String> {
         d.insert("container_id".into(), json!(user.profile_id));
     }
     if t == "project" {
-        let p = d.get("container_id").and_then(Value::as_str).ok_or("project document requires container_id")?;
-        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? { return Err("project access denied".into()); }
+        let p = d
+            .get("container_id")
+            .and_then(Value::as_str)
+            .ok_or("project document requires container_id")?;
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
+            return Err("project access denied".into());
+        }
     }
     if t == "kb" {
-        let book_id = d.get("container_id").and_then(Value::as_str).ok_or("knowledge-base document requires book id")?;
-        if !documents::book_writable_by(book_id, &user.profile_id, user.role == "GlobalAdmin")? { return Err("knowledge-base book write denied".into()); }
+        let book_id = d
+            .get("container_id")
+            .and_then(Value::as_str)
+            .ok_or("knowledge-base document requires book id")?;
+        if !documents::book_writable_by(book_id, &user.profile_id, user.role == "GlobalAdmin")? {
+            return Err("knowledge-base book write denied".into());
+        }
     }
     Ok(())
 }
@@ -2984,12 +2994,22 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
         }
     }
     if t == "kb" {
-        let id = f.get("id").and_then(Value::as_str).ok_or("knowledge-base folder requires id")?;
-        let book_id = f.get("container_id").and_then(Value::as_str).ok_or("knowledge-base folder requires book id")?;
+        let id = f
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("knowledge-base folder requires id")?;
+        let book_id = f
+            .get("container_id")
+            .and_then(Value::as_str)
+            .ok_or("knowledge-base folder requires book id")?;
         let is_book = f.get("parent_id").is_some_and(Value::is_null) && id == book_id;
         if is_book {
             f.insert("owner_id".into(), json!(user.profile_id));
-        } else if !documents::book_writable_by(book_id, &user.profile_id, user.role == "GlobalAdmin")? {
+        } else if !documents::book_writable_by(
+            book_id,
+            &user.profile_id,
+            user.role == "GlobalAdmin",
+        )? {
             return Err("knowledge-base book write denied".into());
         }
     }
@@ -3737,12 +3757,32 @@ fn authorize_command(
             }
         }
         CommandPolicy::BookRead => {
-            let book_id: String = arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if documents::book_readable_by(&book_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "knowledge-base book access denied")) }
+            let book_id: String =
+                arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if documents::book_readable_by(&book_id, &user.profile_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "knowledge-base book access denied",
+                ))
+            }
         }
         CommandPolicy::BookManage => {
-            let book_id: String = arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-            if documents::book_manageable_by(&book_id, &user.profile_id, user.role == "GlobalAdmin").map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "knowledge-base book management denied")) }
+            let book_id: String =
+                arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if documents::book_manageable_by(&book_id, &user.profile_id, user.role == "GlobalAdmin")
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "knowledge-base book management denied",
+                ))
+            }
         }
         CommandPolicy::MeetingReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
@@ -3958,8 +3998,11 @@ fn authorize_command(
                 }
             }
             if name == "ensure_thread_channel" {
-                let root_message_id: String = arg(body, "root_message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
-                if !chat_message_channel(&root_message_id).is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id)) {
+                let root_message_id: String =
+                    arg(body, "root_message_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_message_channel(&root_message_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
                 }
             }
@@ -5750,8 +5793,15 @@ mod tests {
 
     #[test]
     fn profile_communication_writes_are_bound_to_the_session() {
-        for name in ["save_messenger_contact", "delete_messenger_contact", "set_profile_email_status"] {
-            assert!(matches!(command_policy(name), Some(CommandPolicy::Session)), "{name}");
+        for name in [
+            "save_messenger_contact",
+            "delete_messenger_contact",
+            "set_profile_email_status",
+        ] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
         }
         let mut body = json!({"value":{"profile_id":"someone-else"},"profile_id":"someone-else"});
         bind_session_identity(&mut body, "me");
@@ -5762,7 +5812,10 @@ mod tests {
     #[test]
     fn advanced_directory_commands_are_admin_gated() {
         for name in ["list_directory_feed", "list_directory_calendar"] {
-            assert!(matches!(command_policy(name), Some(CommandPolicy::AppAdmin)), "{name}");
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::AppAdmin)),
+                "{name}"
+            );
         }
     }
 
@@ -10334,18 +10387,52 @@ mod tests {
         let (status, value) = call(cookie("ta"), "update_book_access", json!({"book_id":"book-perms","permissions":[{"recipient_type":"profile","member_id":"pb","access_level":"viewer"}]})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let grants: Vec<(String, String, String)> = c.prepare("SELECT recipient_type,recipient_id,access_level FROM document_folder_permissions WHERE folder_id='book-perms'").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<std::result::Result<_, _>>().unwrap();
-        assert_eq!(grants, vec![("profile".into(), "pb".into(), "viewer".into())], "grant persistence");
-        assert!(documents::book_readable_by("book-perms", "pb").unwrap(), "grant must make pb readable");
-        assert_eq!(call(cookie("tb"), "list_book_access", json!({"book_id":"book-perms"})).await.0, StatusCode::FORBIDDEN, "a viewer cannot enumerate grants");
-        let (status, value) = call(cookie("tb"), "search_book_documents", json!({"book_id":"book-perms","query":"rules"})).await;
-        assert_eq!(status, StatusCode::OK, "a viewer can search its book: {value}");
+        assert_eq!(
+            grants,
+            vec![("profile".into(), "pb".into(), "viewer".into())],
+            "grant persistence"
+        );
+        assert!(
+            documents::book_readable_by("book-perms", "pb").unwrap(),
+            "grant must make pb readable"
+        );
+        assert_eq!(
+            call(
+                cookie("tb"),
+                "list_book_access",
+                json!({"book_id":"book-perms"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN,
+            "a viewer cannot enumerate grants"
+        );
+        let (status, value) = call(
+            cookie("tb"),
+            "search_book_documents",
+            json!({"book_id":"book-perms","query":"rules"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a viewer can search its book: {value}"
+        );
         let (status, _) = call(cookie("tb"), "create_document", json!({"document":{"id":"viewer-kb-write","container_type":"kb","container_id":"book-perms","folder_id":"book-perms","doc_type":"text","title":"Denied","body":"","version":1,"archived":false}})).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "viewer cannot author");
         let (status, value) = call(cookie("ta"), "update_book_access", json!({"book_id":"book-perms","permissions":[{"recipient_type":"profile","member_id":"pb","access_level":"editor"}]})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let (status, value) = call(cookie("tb"), "create_document", json!({"document":{"id":"editor-kb-write","container_type":"kb","container_id":"book-perms","folder_id":"book-perms","doc_type":"text","title":"Allowed","body":"","version":1,"archived":false}})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(c.query_row("SELECT created_by FROM documents WHERE id='editor-kb-write'", [], |r| r.get::<_, String>(0)).unwrap(), "pb");
+        assert_eq!(
+            c.query_row(
+                "SELECT created_by FROM documents WHERE id='editor-kb-write'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "pb"
+        );
     }
 
     #[tokio::test]

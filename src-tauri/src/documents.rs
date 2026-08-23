@@ -910,20 +910,29 @@ fn get_public_document_tx(c: &rusqlite::Connection, slug: String) -> Result<Opti
 
 /// A book owner alone manages grants; content editors cannot widen access.
 pub fn book_manageable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-if is_admin { return Ok(true); }
-let c = db::conn()?;
-c.query_row("SELECT EXISTS(SELECT 1 FROM kb_book_owners WHERE book_id=?1 AND profile_id=?2)", rusqlite::params![book_id, profile_id], |row| row.get(0)).map_err(|e| e.to_string())
+    if is_admin {
+        return Ok(true);
+    }
+    let c = db::conn()?;
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM kb_book_owners WHERE book_id=?1 AND profile_id=?2)",
+        rusqlite::params![book_id, profile_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 pub fn book_readable_by(book_id: &str, profile_id: &str) -> Result<bool> {
-let c = db::conn()?;
-c.query_row("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?1 AND f.container_type='kb' AND f.parent_id IS NULL AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id AND bo.profile_id=?2) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id AND ((bp.recipient_type='profile' AND bp.recipient_id=?2) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?2 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.container_id=f.id AND d.created_by=?2)))", rusqlite::params![book_id, profile_id], |row| row.get(0)).map_err(|e| e.to_string())
+    let c = db::conn()?;
+    c.query_row("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?1 AND f.container_type='kb' AND f.parent_id IS NULL AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id AND bo.profile_id=?2) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id AND ((bp.recipient_type='profile' AND bp.recipient_id=?2) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?2 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.container_id=f.id AND d.created_by=?2)))", rusqlite::params![book_id, profile_id], |row| row.get(0)).map_err(|e| e.to_string())
 }
 pub fn book_writable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-if is_admin { return Ok(true); }
-let c = db::conn()?;
-// Pre-owner legacy books were historically open to authors. Keep them writable until
-// a first owner/grant is recorded; newly created books always have an owner row.
-c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND f.container_type='kb' AND f.parent_id IS NULL AND ({FOLDER_WRITE_SCOPE} OR (NOT EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id) AND NOT EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id))))"), rusqlite::params![profile_id, false, book_id], |row| row.get(0)).map_err(|e| e.to_string())
+    if is_admin {
+        return Ok(true);
+    }
+    let c = db::conn()?;
+    // Pre-owner legacy books were historically open to authors. Keep them writable until
+    // a first owner/grant is recorded; newly created books always have an owner row.
+    c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND f.container_type='kb' AND f.parent_id IS NULL AND ({FOLDER_WRITE_SCOPE} OR (NOT EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id) AND NOT EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id))))"), rusqlite::params![profile_id, false, book_id], |row| row.get(0)).map_err(|e| e.to_string())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_book_access(book_id: String) -> Result<Vec<DocumentAccessRecipient>> {
@@ -1262,19 +1271,30 @@ fn import_document_folder_tx(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document_folder(folder: DocumentFolder, owner_id: Option<String>) -> Result<()> {
-let c = db::conn()?;
-let is_book = folder.container_type == "kb" && folder.parent_id.is_none() && folder.container_id.as_deref() == Some(&folder.id);
-if folder.container_type == "kb" && !is_book {
-let book_id = folder.container_id.as_deref().ok_or_else(|| "knowledge-base folder requires book id".to_string())?;
-let parent_ok: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1 AND container_type='kb' AND container_id=?2)", rusqlite::params![folder.parent_id, book_id], |row| row.get(0)).map_err(|e| e.to_string())?;
-if !parent_ok { return Err("knowledge-base folder parent does not belong to its book".into()); }
-}
-c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)", rusqlite::params![folder.id,folder.container_type,folder.container_id,folder.parent_id,folder.name,folder.description,folder.archived]).map_err(|e| e.to_string())?;
-if is_book {
-let owner_id = owner_id.ok_or_else(|| "knowledge-base book requires owner".to_string())?;
-c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES(?1,?2)", rusqlite::params![folder.id, owner_id]).map_err(|e| e.to_string())?;
-}
-Ok(())
+    let c = db::conn()?;
+    let is_book = folder.container_type == "kb"
+        && folder.parent_id.is_none()
+        && folder.container_id.as_deref() == Some(&folder.id);
+    if folder.container_type == "kb" && !is_book {
+        let book_id = folder
+            .container_id
+            .as_deref()
+            .ok_or_else(|| "knowledge-base folder requires book id".to_string())?;
+        let parent_ok: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1 AND container_type='kb' AND container_id=?2)", rusqlite::params![folder.parent_id, book_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if !parent_ok {
+            return Err("knowledge-base folder parent does not belong to its book".into());
+        }
+    }
+    c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7)", rusqlite::params![folder.id,folder.container_type,folder.container_id,folder.parent_id,folder.name,folder.description,folder.archived]).map_err(|e| e.to_string())?;
+    if is_book {
+        let owner_id = owner_id.ok_or_else(|| "knowledge-base book requires owner".to_string())?;
+        c.execute(
+            "INSERT INTO kb_book_owners(book_id,profile_id) VALUES(?1,?2)",
+            rusqlite::params![folder.id, owner_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 /// Full-replace update: rename, edit description, move to a new parent (children follow
 /// automatically since they merely reference this folder's id), toggle archived.
@@ -2268,31 +2288,57 @@ mod tests {
     }
 
     #[test]
-fn kb_book_grants_make_the_whole_book_navigable_and_editors_writable() {
-let c = test_conn();
-for p in ["book-owner", "book-viewer", "book-editor", "book-stranger"] {
-c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,0)", [p]).unwrap();
-}
-c.execute("INSERT INTO teams(id,name) VALUES('book-editors','Book editors')", []).unwrap();
-c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('book-editor-membership','book-editor','book-editors')", []).unwrap();
-c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book-grants','kb','book-grants',NULL,'Handbook'),('book-grants-folder','kb','book-grants','book-grants','Chapter')", []).unwrap();
-c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book-grants','book-owner')", []).unwrap();
-c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book-grants','profile','book-viewer','viewer'),('book-grants','team','book-editors','editor')", []).unwrap();
-c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,version,archived,created_by) VALUES('book-grants-doc','kb','book-grants','book-grants-folder','text','Rules',1,0,'book-owner')", []).unwrap();
-assert_eq!(scoped_doc_ids(&c, "book-viewer", false), vec!["book-grants-doc"]);
-assert!(scoped_doc_ids(&c, "book-viewer", true).is_empty(), "viewers cannot edit");
-assert_eq!(scoped_doc_ids(&c, "book-editor", true), vec!["book-grants-doc"]);
-for profile in ["book-owner", "book-viewer", "book-editor"] {
-assert_eq!(readable_folders(&c, profile), vec!["book-grants".to_string(), "book-grants-folder".to_string()]);
-}
-assert!(readable_folders(&c, "book-stranger").is_empty());
-let folder_write = |profile: &str| c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id='book-grants-folder' AND {FOLDER_WRITE_SCOPE})"), rusqlite::params![profile, false], |r| r.get::<_, bool>(0)).unwrap();
-assert!(folder_write("book-owner"));
-assert!(folder_write("book-editor"));
-assert!(!folder_write("book-viewer"));
-}
+    fn kb_book_grants_make_the_whole_book_navigable_and_editors_writable() {
+        let c = test_conn();
+        for p in ["book-owner", "book-viewer", "book-editor", "book-stranger"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,0)",
+                [p],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO teams(id,name) VALUES('book-editors','Book editors')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO team_memberships(id,profile_id,team_id) VALUES('book-editor-membership','book-editor','book-editors')", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book-grants','kb','book-grants',NULL,'Handbook'),('book-grants-folder','kb','book-grants','book-grants','Chapter')", []).unwrap();
+        c.execute(
+            "INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book-grants','book-owner')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book-grants','profile','book-viewer','viewer'),('book-grants','team','book-editors','editor')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,version,archived,created_by) VALUES('book-grants-doc','kb','book-grants','book-grants-folder','text','Rules',1,0,'book-owner')", []).unwrap();
+        assert_eq!(
+            scoped_doc_ids(&c, "book-viewer", false),
+            vec!["book-grants-doc"]
+        );
+        assert!(
+            scoped_doc_ids(&c, "book-viewer", true).is_empty(),
+            "viewers cannot edit"
+        );
+        assert_eq!(
+            scoped_doc_ids(&c, "book-editor", true),
+            vec!["book-grants-doc"]
+        );
+        for profile in ["book-owner", "book-viewer", "book-editor"] {
+            assert_eq!(
+                readable_folders(&c, profile),
+                vec!["book-grants".to_string(), "book-grants-folder".to_string()]
+            );
+        }
+        assert!(readable_folders(&c, "book-stranger").is_empty());
+        let folder_write = |profile: &str| {
+            c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id='book-grants-folder' AND {FOLDER_WRITE_SCOPE})"), rusqlite::params![profile, false], |r| r.get::<_, bool>(0)).unwrap()
+        };
+        assert!(folder_write("book-owner"));
+        assert!(folder_write("book-editor"));
+        assert!(!folder_write("book-viewer"));
+    }
 
-fn upload_source(name: &str, bytes: &[u8]) -> (std::path::PathBuf, std::path::PathBuf) {
+    fn upload_source(name: &str, bytes: &[u8]) -> (std::path::PathBuf, std::path::PathBuf) {
         let dir = import_dir(name);
         let file = dir.join(name);
         std::fs::write(&file, bytes).unwrap();

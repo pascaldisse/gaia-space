@@ -338,7 +338,11 @@ pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
     let current: String = c
-        .query_row("SELECT video_status FROM meetings WHERE id=?1", [&meeting.id], |row| row.get(0))
+        .query_row(
+            "SELECT video_status FROM meetings WHERE id=?1",
+            [&meeting.id],
+            |row| row.get(0),
+        )
         .map_err(|_| "Meeting not found".to_string())?;
     validate_calendar_video_status_transition(&current, &meeting.video_status)?;
     let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
@@ -434,11 +438,7 @@ pub fn record_call_room_on(
 
 /// Native-only writer for the end of a call. `ended` is only reachable from `live`,
 /// so a stale leave cannot retro-end a meeting that never started or was cancelled.
-pub fn end_call_on(
-    c: &rusqlite::Connection,
-    meeting_id: &str,
-    ended_by: &str,
-) -> Result<bool> {
+pub fn end_call_on(c: &rusqlite::Connection, meeting_id: &str, ended_by: &str) -> Result<bool> {
     c.execute(
         "UPDATE meetings SET video_status='ended', video_ended_at=unixepoch(), video_ended_by=?2 WHERE id=?1 AND video_status='live'",
         rusqlite::params![meeting_id, ended_by],
@@ -944,8 +944,15 @@ mod tests {
             .unwrap();
         assert_eq!(status, "cancelled");
 
-        assert!(record_call_room_on(&c, "m-c", "livekit", "meeting-m-c", "ws://127.0.0.1:7880").is_err());
-        c.execute("UPDATE meetings SET video_status='scheduled' WHERE id='m-c'", []).unwrap();
+        assert!(
+            record_call_room_on(&c, "m-c", "livekit", "meeting-m-c", "ws://127.0.0.1:7880")
+                .is_err()
+        );
+        c.execute(
+            "UPDATE meetings SET video_status='scheduled' WHERE id='m-c'",
+            [],
+        )
+        .unwrap();
         record_call_room_on(&c, "m-c", "livekit", "meeting-m-c", "ws://127.0.0.1:7880").unwrap();
         assert!(end_call_on(&c, "m-c", "p-owner").unwrap());
         let (status, started_at, ended_at, ended_by): (String, Option<i64>, Option<i64>, Option<String>) = c
@@ -956,7 +963,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "ended");
-        assert!(started_at.is_some(), "first successful join stamps call start");
+        assert!(
+            started_at.is_some(),
+            "first successful join stamps call start"
+        );
         assert!(ended_at.is_some(), "organizer end stamps call end");
         assert_eq!(ended_by.as_deref(), Some("p-owner"));
         assert!(VIDEO_STATUSES.contains(&status.as_str()));
@@ -966,7 +976,11 @@ mod tests {
     fn calendar_cannot_forge_live_or_ended_call_statuses() {
         assert!(validate_calendar_video_status_transition("scheduled", "scheduled").is_ok());
         assert!(validate_calendar_video_status_transition("scheduled", "cancelled").is_ok());
-        for (current, next) in [("scheduled", "live"), ("live", "ended"), ("ended", "scheduled")] {
+        for (current, next) in [
+            ("scheduled", "live"),
+            ("live", "ended"),
+            ("ended", "scheduled"),
+        ] {
             assert!(validate_calendar_video_status_transition(current, next).is_err());
         }
     }
