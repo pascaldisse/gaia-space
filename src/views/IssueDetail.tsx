@@ -1,7 +1,8 @@
 import { createResource, createSignal, For, Show } from "solid-js";
-import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry } from "../api/issues";
+import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry, type TrackerLink } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
+import { linkEntity } from "../router";
 import "./IssueDetail.css";
 
 /** An issue IS the card: title, description, assignee, due date, status,
@@ -38,6 +39,10 @@ export default function IssueDetail(props: { issueId: string; statuses?: Status[
   const [workDescription, setWorkDescription] = createSignal("");
   const [childTitle, setChildTitle] = createSignal("");
   const [commentBody, setCommentBody] = createSignal("");
+  const [linkKind, setLinkKind] = createSignal<TrackerLink["target_kind"]>("EXTERNAL"); const [linkTarget, setLinkTarget] = createSignal(""); const [linkTitle, setLinkTitle] = createSignal("");
+  const addTrackerLink = async () => { const issue_id=currentId(),target=linkTarget().trim(); if(!issue_id||!target)return; const input=linkKind()==="EXTERNAL"?{issue_id,target_kind:"EXTERNAL" as const,target_id:null,url:target,title:linkTitle().trim()||null}:{issue_id,target_kind:linkKind(),target_id:target,url:null,title:linkTitle().trim()||null};try{await planningApi.addTrackerLink(input);setLinkTarget("");setLinkTitle("");await refetch();props.onChanged?.()}catch(reason){setError(humanError(reason))} };
+  const openTrackerLink=(link:TrackerLink)=>{if(link.target_kind==="ISSUE"&&link.target_id)linkEntity("issue",link.target_id,{},true);if(link.target_kind==="REVIEW"&&link.target_id)linkEntity("review",link.target_id,{},true)};
+  const removeTrackerLink=async(link:TrackerLink)=>{try{await planningApi.removeTrackerLink(link.id);await refetch();props.onChanged?.()}catch(reason){setError(humanError(reason))}};
   const addComment = async () => { const issue_id = currentId(); const body = commentBody().trim(); if (!issue_id || !body) return; try { await planningApi.addComment({ issue_id, author_id: profileId() || null, body }); setCommentBody(""); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
 const addAttachments = async (files: FileList | null) => {
 const id = currentId(); if (!id || !files?.length) return;
@@ -158,6 +163,7 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
           </div>
         </section>
 
+        <section class="idp-section"><h3>Tracker links</h3><Show when={detail()?.tracker_links?.length} fallback={<p class="hint">No linked issues, merge requests, or external trackers.</p>}><ul class="idp-attachments"><For each={detail()?.tracker_links}>{link=><li class="idp-attachment-row"><strong>{link.target_kind}</strong><Show when={link.url} fallback={<button type="button" class="ghost" onClick={()=>openTrackerLink(link)}>{link.title||link.target_id}</button>}>{url=><a href={url()} target="_blank" rel="noreferrer">{link.title||url()}</a>}</Show><button type="button" onClick={()=>void removeTrackerLink(link)}>Remove</button></li>}</For></ul></Show><div class="inline-form"><select aria-label="Tracker link type" value={linkKind()} onChange={e=>setLinkKind(e.currentTarget.value as TrackerLink["target_kind"])}><option value="EXTERNAL">External URL</option><option value="ISSUE">Issue ID</option><option value="REVIEW">Merge request ID</option></select><input aria-label="Tracker link target" placeholder={linkKind()==="EXTERNAL"?"https://tracker.example/PROJ-1":"Record ID"} value={linkTarget()} onInput={e=>setLinkTarget(e.currentTarget.value)}/><input aria-label="Tracker link title" placeholder="Label (optional)" value={linkTitle()} onInput={e=>setLinkTitle(e.currentTarget.value)}/><button type="button" onClick={addTrackerLink}>Link</button></div></section>
         <section class="idp-section">
           <h3>To-do lists</h3>
           <For each={detail()?.checklists}>{list => <ChecklistBlock list={list} />}</For>

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 78;
+pub const SCHEMA_VERSION: i64 = 79;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -582,6 +582,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 78 {
         tx.execute_batch(SCHEMA_V78)?;
     }
+    // V79: tracker links connect issues to issues, merge requests, and external systems.
+    if version < 79 {
+        tx.execute_batch(SCHEMA_V79)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
@@ -632,6 +636,17 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+/// V79: target is an issue, a code review, or a validated external URL.
+pub(crate) const SCHEMA_V79: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_tracker_links (
+ id TEXT PRIMARY KEY, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('ISSUE','REVIEW','EXTERNAL')),
+ target_id TEXT, url TEXT, title TEXT,
+ CHECK((target_kind='EXTERNAL' AND url IS NOT NULL AND target_id IS NULL) OR (target_kind IN ('ISSUE','REVIEW') AND target_id IS NOT NULL AND url IS NULL)),
+ UNIQUE(issue_id, target_kind, target_id), UNIQUE(issue_id, url)
+);
+CREATE INDEX IF NOT EXISTS issue_tracker_links_issue ON issue_tracker_links(issue_id);
+"#;
 /// V78: comments are authored discussion; activity is an immutable record of issue lifecycle actions.
 pub(crate) const SCHEMA_V78: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_comments (
@@ -1473,7 +1488,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 78);
+        assert_eq!(SCHEMA_VERSION, 79);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
