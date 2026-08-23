@@ -17,18 +17,30 @@ export type PackageFormat = (typeof PACKAGE_FORMATS)[number];
 export const REPO_MODES = ["HOSTING", "PROXY"] as const;
 
 // ---------- pipeline scripts (config-as-code, JSON in place of .space.kts) ----------
-/** Tagged exactly like Rust's `#[serde(tag = "type", rename_all = "snake_case")]` model. */
+/** Tagged like Rust's `#[serde(tag = "type")]` on `TriggerDef`: there is no `rename_all`, so
+ * the wire tag is the *variant* name (`{"type":"GitPush",...}`). Pinned against the serialized
+ * output in `pipelines::tests::serialized_dsl_tags_are_variant_names`. Legacy snake_case and
+ * SCREAMING tags are still accepted on input (Rust keeps serde aliases) but never emitted. */
 export type TriggerDef =
-  | { type: "manual" }
-  | { type: "git_push"; branches: string[]; repository: string }
-  | { type: "schedule"; cron: string }
-  | { type: "git_branch_deleted"; branches: string[] }
-  | { type: "code_review_opened" }
-  | { type: "code_review_closed" }
-  | { type: "safe_merge" };
+  | { type: "Manual" }
+  | { type: "GitPush"; branches: string[]; repository?: string | null }
+  | { type: "Schedule"; cron: string }
+  | { type: "GitBranchDeleted"; branches: string[] }
+  | { type: "CodeReviewOpened" }
+  | { type: "CodeReviewClosed" }
+  | { type: "SafeMerge" };
+/** Mirrors Rust `StepDef`: one script per step (singular `script`), optional env map. */
 export type StepDef =
-  | { type: "host"; scripts: string[] }
-  | { type: "container"; image: string; script: string };
+  | { type: "Shell"; script: string; env?: Record<string, string> }
+  | { type: "Container"; image: string; script: string; env?: Record<string, string> };
+/** Mirrors Rust `TriggerEvent` (same tagging rule). */
+export type TriggerEvent =
+  | { type: "Manual" }
+  | { type: "Push"; repository: string; branch: string }
+  | { type: "BranchDeleted"; repository: string; branch: string }
+  | { type: "CodeReviewOpened"; review_id: string }
+  | { type: "CodeReviewClosed"; review_id: string }
+  | { type: "SafeMerge"; review_id: string };
 export type ScriptJobDef = { name: string; trigger_type: string; timeout_secs: number | null; steps: StepDef[]; triggers?: TriggerDef[] };
 export type ScriptDef = { jobs: ScriptJobDef[] };
 
@@ -50,22 +62,53 @@ export function isTerminalRun(status: string): boolean {
 export function emptyScriptDef(): ScriptDef {
   return { jobs: [] };
 }
-function normalizeStep(step: unknown): StepDef | null {
-  if (typeof step === "string") return { type: "host", scripts: [step] };
-  if (!step || typeof step !== "object") return null;
+/** Canonical tag for every spelling Rust's serde aliases accept. */
+const STEP_TAGS: Record<string, "Shell" | "Container"> = {
+  Shell: "Shell", shell: "Shell", SHELL: "Shell", Host: "Shell", host: "Shell", HOST: "Shell",
+  Container: "Container", container: "Container", CONTAINER: "Container",
+};
+const TRIGGER_TAGS: Record<string, TriggerDef["type"]> = {
+  Manual: "Manual", manual: "Manual", MANUAL: "Manual",
+  GitPush: "GitPush", git_push: "GitPush", gitPush: "GitPush", GIT_PUSH: "GitPush",
+  Schedule: "Schedule", schedule: "Schedule", SCHEDULE: "Schedule",
+  GitBranchDeleted: "GitBranchDeleted", git_branch_deleted: "GitBranchDeleted", GIT_BRANCH_DELETED: "GitBranchDeleted",
+  CodeReviewOpened: "CodeReviewOpened", code_review_opened: "CodeReviewOpened", CODE_REVIEW_OPENED: "CodeReviewOpened",
+  CodeReviewClosed: "CodeReviewClosed", code_review_closed: "CodeReviewClosed", CODE_REVIEW_CLOSED: "CodeReviewClosed",
+  SafeMerge: "SafeMerge", safe_merge: "SafeMerge", SAFE_MERGE: "SafeMerge",
+};
+function stringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? (value as string[]) : null;
+}
+function envOf(value: Record<string, unknown>): { env?: Record<string, string> } {
+  return value.env && typeof value.env === "object" && !Array.isArray(value.env) ? { env: value.env as Record<string, string> } : {};
+}
+/** One input step may expand to several: the pre-DSL `{type:"host",scripts:[…]}` shape (which
+ *  the server rejects outright) becomes one `Shell` step per script. */
+function normalizeStep(step: unknown): StepDef[] {
+  if (typeof step === "string") return [{ type: "Shell", script: step }];
+  if (!step || typeof step !== "object") return [];
   const value = step as Record<string, unknown>;
-  if (value.type === "host" && Array.isArray(value.scripts) && value.scripts.every((script) => typeof script === "string")) return { type: "host", scripts: value.scripts };
-  if (value.type === "container" && typeof value.image === "string" && typeof value.script === "string") return { type: "container", image: value.image, script: value.script };
-  return null;
+  const tag = typeof value.type === "string" ? STEP_TAGS[value.type] : undefined;
+  if (tag === "Shell") {
+    if (typeof value.script === "string") return [{ type: "Shell", script: value.script, ...envOf(value) }];
+    const legacy = stringArray(value.scripts);
+    return legacy ? legacy.map((script): StepDef => ({ type: "Shell", script })) : [];
+  }
+  if (tag === "Container" && typeof value.image === "string" && typeof value.script === "string") return [{ type: "Container", image: value.image, script: value.script, ...envOf(value) }];
+  return [];
 }
 function normalizeTrigger(trigger: unknown): TriggerDef | null {
-  if (!trigger || typeof trigger !== "object" || typeof (trigger as Record<string, unknown>).type !== "string") return null;
+  if (!trigger || typeof trigger !== "object") return null;
   const value = trigger as Record<string, unknown>;
-  switch (value.type) {
-    case "manual": case "code_review_opened": case "code_review_closed": case "safe_merge": return { type: value.type };
-    case "git_push": return typeof value.repository === "string" && Array.isArray(value.branches) && value.branches.every((branch) => typeof branch === "string") ? { type: "git_push", repository: value.repository, branches: value.branches } : null;
-    case "schedule": return typeof value.cron === "string" ? { type: "schedule", cron: value.cron } : null;
-    case "git_branch_deleted": return Array.isArray(value.branches) && value.branches.every((branch) => typeof branch === "string") ? { type: "git_branch_deleted", branches: value.branches } : null;
+  const tag = typeof value.type === "string" ? TRIGGER_TAGS[value.type] : undefined;
+  switch (tag) {
+    case "Manual": case "CodeReviewOpened": case "CodeReviewClosed": case "SafeMerge": return { type: tag };
+    case "GitPush": {
+      const branches = stringArray(value.branches) ?? []; // Rust defaults both fields
+      return typeof value.repository === "string" ? { type: "GitPush", repository: value.repository, branches } : { type: "GitPush", branches };
+    }
+    case "Schedule": return typeof value.cron === "string" ? { type: "Schedule", cron: value.cron } : null;
+    case "GitBranchDeleted": return { type: "GitBranchDeleted", branches: stringArray(value.branches) ?? [] };
     default: return null;
   }
 }
@@ -74,7 +117,7 @@ export function normalizeJob(job: unknown): ScriptJobDef | null {
   if (!job || typeof job !== "object") return null;
   const value = job as Record<string, unknown>;
   if (typeof value.name !== "string") return null;
-  const steps = Array.isArray(value.steps) ? value.steps.map(normalizeStep).filter((step): step is StepDef => step !== null) : [];
+  const steps = Array.isArray(value.steps) ? value.steps.flatMap(normalizeStep) : [];
   const explicitTriggers = Array.isArray(value.triggers) ? value.triggers.map(normalizeTrigger).filter((trigger): trigger is TriggerDef => trigger !== null) : undefined;
   const trigger_type = typeof value.trigger_type === "string" ? value.trigger_type : "MANUAL";
   return { name: value.name, trigger_type, timeout_secs: typeof value.timeout_secs === "number" ? value.timeout_secs : null, steps, ...(explicitTriggers?.length ? { triggers: explicitTriggers } : {}) };
@@ -85,6 +128,102 @@ export function parseScriptSource(source: string): ScriptDef {
     if (parsed && Array.isArray(parsed.jobs)) return { jobs: parsed.jobs.map(normalizeJob).filter((job): job is ScriptJobDef => job !== null) };
   } catch { /* fall through to empty */ }
   return emptyScriptDef();
+}
+
+/** Editor shape: steps are edited as one script per line. */
+export type EditableJob = { name: string; trigger_type: string; timeout_secs: number | null; stepsText: string; triggers?: TriggerDef[] };
+/** Editor → wire. Emits the singular-`script` shape the server accepts; one step per line. */
+export function serializeJob(job: EditableJob): ScriptJobDef {
+  const steps: StepDef[] = job.stepsText.split("\n").map((s) => s.trim()).filter(Boolean).map((script) => ({ type: "Shell", script }));
+  return { name: job.name, trigger_type: job.trigger_type, timeout_secs: job.timeout_secs, steps, ...(job.triggers?.length ? { triggers: job.triggers } : {}) };
+}
+/** Wire → editor. */
+export function editableJob(job: ScriptJobDef): EditableJob {
+  const { steps, ...rest } = job;
+  return { ...rest, stepsText: steps.map((step) => step.script).join("\n") };
+}
+
+// ---------- validation parity with pipelines.rs::parse_and_validate_script ----------
+// Anything the server refuses must be refused here too, otherwise the UI reports a save that
+// the server dropped. Kept as pure functions so they are testable without a backend.
+const LEGACY_TRIGGER_TYPES: Record<string, TriggerDef["type"]> = { MANUAL: "Manual", GIT_PUSH: "GitPush", GITPUSH: "GitPush", GIT_BRANCH_DELETED: "GitBranchDeleted", CODE_REVIEW_OPENED: "CodeReviewOpened", CODE_REVIEW_CLOSED: "CodeReviewClosed", SAFE_MERGE: "SafeMerge" };
+/** Mirrors Rust `CronField::parse` + `CronSpec::parse` (5 UTC fields). Returns an error string. */
+export function cronError(expr: string): string | null {
+  const fields = expr.trim().split(/\s+/).filter(Boolean);
+  if (fields.length !== 5) return `cron expression needs exactly 5 fields (min hour dom mon dow), got ${fields.length}`;
+  const ranges: [number, number][] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
+  for (let i = 0; i < 5; i += 1) {
+    const [min, max] = ranges[i];
+    let any = false;
+    for (const rawPart of fields[i].split(",")) {
+      const part = rawPart.trim();
+      if (!part) return `empty cron field element in '${fields[i]}'`;
+      const slash = part.indexOf("/");
+      const range = slash === -1 ? part : part.slice(0, slash);
+      const stepRaw = slash === -1 ? "1" : part.slice(slash + 1);
+      if (!/^\d+$/.test(stepRaw)) return `invalid cron step '${stepRaw}'`;
+      const step = Number(stepRaw);
+      if (step === 0) return `cron step must be >0 in '${part}'`;
+      const num = (raw: string): number | null => {
+        if (!/^\d+$/.test(raw.trim())) return null;
+        const v0 = Number(raw.trim());
+        const v = max === 6 && v0 === 7 ? 0 : v0; // cron allows 7 = Sunday
+        return v < min || v > max ? null : v;
+      };
+      let lo: number, hi: number;
+      if (range === "*") { [lo, hi] = [min, max]; }
+      else {
+        const dash = range.indexOf("-");
+        if (dash > 0) {
+          const a = num(range.slice(0, dash)), b = num(range.slice(dash + 1));
+          if (a === null || b === null) return `invalid cron value in '${range}'`;
+          [lo, hi] = [a, b];
+        } else {
+          const v = num(range);
+          if (v === null) return `invalid cron value '${range}'`;
+          [lo, hi] = [v, v];
+        }
+      }
+      if (lo > hi) return `cron range '${range}' is inverted`;
+      if (lo + 0 <= hi) any = true;
+    }
+    if (!any) return `cron field '${fields[i]}' matches nothing`;
+  }
+  return null;
+}
+/** Every reason the server would reject this script, in the server's own wording where practical. */
+export function scriptDefErrors(def: ScriptDef): string[] {
+  const errors: string[] = [];
+  const jobs = def.jobs ?? [];
+  if (jobs.length > MAX_JOBS_PER_SCRIPT) errors.push(`script exceeds max ${MAX_JOBS_PER_SCRIPT} jobs/script (has ${jobs.length})`);
+  const seen = new Set<string>();
+  for (const job of jobs) {
+    if (!job.name || !job.name.trim()) { errors.push("every job needs a non-empty name"); continue; }
+    if (seen.has(job.name)) errors.push(`duplicate job name '${job.name}' in script`);
+    seen.add(job.name);
+    if (!job.steps?.length) errors.push(`job '${job.name}' needs at least one step`);
+    else if (job.steps.length > MAX_STEPS_PER_JOB) errors.push(`job '${job.name}' exceeds max ${MAX_STEPS_PER_JOB} steps/job (has ${job.steps.length})`);
+    if (job.timeout_secs != null && (job.timeout_secs === 0 || job.timeout_secs > MAX_JOB_TIMEOUT_SECS)) errors.push(`job '${job.name}' timeout_secs must be in 1..=${MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)`);
+    for (const step of job.steps ?? []) {
+      if (!step.script?.trim()) errors.push(`job '${job.name}' has a step with an empty script`);
+      // pipelines.rs run_job refuses container steps: this build has no container runtime,
+      // so a "successful" save would still produce a failed run. Say so before saving.
+      if (step.type === "Container") errors.push(`job '${job.name}': container steps are not executed by this build (image '${step.image}') — the run will fail`);
+    }
+    const triggers = job.triggers?.length ? job.triggers : null;
+    if (!triggers) {
+      const legacy = (job.trigger_type ?? "MANUAL").trim().toUpperCase();
+      if (legacy === "SCHEDULE") errors.push(`job '${job.name}': legacy SCHEDULE trigger needs an explicit cron expression`);
+      else if (!LEGACY_TRIGGER_TYPES[legacy]) errors.push(`job '${job.name}': unknown trigger type '${legacy}'`);
+    } else {
+      for (const trigger of triggers) {
+        if (trigger.type !== "Schedule") continue;
+        const err = cronError(trigger.cron);
+        if (err) errors.push(`job '${job.name}': ${err}`);
+      }
+    }
+  }
+  return errors;
 }
 
 // ---------- deploy targets + deployments ----------

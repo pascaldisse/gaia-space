@@ -8,11 +8,14 @@ import {
   isTerminalRun,
   allowedDeploymentTransitions,
   JOB_TRIGGER_TYPES,
+  scriptDefErrors,
+  serializeJob,
+  editableJob,
   MAX_JOBS_PER_SCRIPT,
   MAX_STEPS_PER_JOB,
   DEFAULT_JOB_TIMEOUT_SECS,
   type PipelineScript,
-  type ScriptJobDef,
+  type EditableJob,
   type DeployTarget,
   type JobRun,
   type Worker,
@@ -20,13 +23,11 @@ import {
 } from "../api/pipelines";
 import "./Pipelines.css";
 
-type EditJob = ScriptJobDef & { stepsText: string };
-function toEditJob(j: ScriptJobDef): EditJob {
-  return { ...j, stepsText: j.steps.flatMap((step) => step.type === "host" ? step.scripts : [step.script]).join("\n") };
-}
-function fromEditJob(j: EditJob): ScriptJobDef {
-  return { name: j.name, trigger_type: j.trigger_type, timeout_secs: j.timeout_secs, steps: [{ type: "host", scripts: j.stepsText.split("\n").map((s) => s.trim()).filter(Boolean) }], ...(j.triggers?.length ? { triggers: j.triggers } : {}) };
-}
+// Wire conversion lives in ../api/pipelines (tested against the Rust serde contract) so the
+// view cannot invent a step shape the server rejects.
+type EditJob = EditableJob;
+const toEditJob = editableJob;
+const fromEditJob = serializeJob;
 
 export default function Pipelines() {
   const [error, setError] = createSignal<string | null>(null);
@@ -114,7 +115,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     }
   });
   function addJob() {
-    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, steps: [], triggers: [{ type: "manual" }], stepsText: "" }); }));
+    setJobs(produce((draft) => { draft.push({ name: `job-${draft.length + 1}`, trigger_type: "MANUAL", timeout_secs: null, triggers: [{ type: "Manual" }], stepsText: "" }); }));
   }
   function removeJob(i: number) {
     setJobs(produce((draft) => { draft.splice(i, 1); }));
@@ -128,7 +129,15 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (!s) return;
     props.setError(null);
     try {
-      const source = JSON.stringify({ jobs: jobs.map(fromEditJob) });
+      const def = { jobs: jobs.map(fromEditJob) };
+      // Refuse locally exactly what parse_and_validate_script would refuse, so "Save script"
+      // never reports success for a script the server dropped.
+      const problems = scriptDefErrors(def);
+      if (problems.length) {
+        props.setError(problems.join("; "));
+        return;
+      }
+      const source = JSON.stringify(def);
       await pipelinesApi.updateScript({ ...s, path: path().trim() || ".space.kts", repository: repository().trim() || null, source });
       await refetchScripts();
     } catch (err) {
@@ -228,7 +237,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                         <button class="ghost small danger" onClick={() => removeJob(i())}>Remove job</button>
                       </div>
                       <Show when={job.triggers?.length}>
-                        <p class="hint">Triggers: {job.triggers!.map((trigger) => trigger.type.replaceAll("_", " ")).join(", ")}</p>
+                        <p class="hint">Triggers: {job.triggers!.map((trigger) => trigger.type.replace(/(?!^)([A-Z])/g, " $1")).join(", ")}</p>
                       </Show>
                       <textarea
                         class="steps-input"
