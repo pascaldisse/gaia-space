@@ -1287,7 +1287,7 @@ mod tests {
         migrate(&conn).expect("V60 migration");
         let columns: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('calendar_caldav_events') WHERE name='calendar_id'", [], |row| row.get(0)).unwrap();
         assert_eq!(columns, 1);
-        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 60);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     /// The integration lane merged three schema-touching branches into one serial
