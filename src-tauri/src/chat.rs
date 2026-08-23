@@ -1326,9 +1326,9 @@ mod tests {
     }
 
     #[test]
-    fn v75_migrated_completed_attachment_accepts_its_lost_answer_retry() {
+    fn v76_migrated_completed_attachment_accepts_its_lost_answer_retry() {
         let (c, path) = conn();
-        seed_message(&c, "chan-att-v75", "msg-att-v75");
+        seed_message(&c, "chan-att-v76", "msg-att-v76");
         // Rebuild the exact V74 table shape over a real message, then let V76 stamp
         // its existing row completed. A client retry after that upgrade must recover
         // the row rather than hit the attachment id's UNIQUE constraint.
@@ -1347,7 +1347,7 @@ mod tests {
         .unwrap();
         c.execute(
             "INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url)
-             VALUES('att-v75','msg-att-v75','f.txt','text/plain',2,'data:,hi')",
+             VALUES('att-v75','msg-att-v76','f.txt','text/plain',2,'data:,hi')",
             [],
         )
         .unwrap();
@@ -1356,13 +1356,13 @@ mod tests {
 
         let retried = add_message_attachment_impl(
             &c,
-            "msg-att-v75",
+            "msg-att-v76",
             new_attachment("att-v75", "data:,hi", 2, Some("uploading")),
         )
         .unwrap();
         assert_eq!(retried.upload_state, "completed");
         assert!(retried.error.is_none());
-        assert_eq!(attachments_for_impl(&c, "msg-att-v75").unwrap().len(), 1);
+        assert_eq!(attachments_for_impl(&c, "msg-att-v76").unwrap().len(), 1);
         drop(c);
         drop(path);
     }
