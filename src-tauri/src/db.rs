@@ -1029,13 +1029,13 @@ CREATE TABLE IF NOT EXISTS app_authorized_rights (
 CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_rights(application_id, context_identifier);
 "#;
 
-/// V74: one target per project + IDE + instance type. The pool contains durable
-/// STANDBY rows; its target is configuration, not process-local scheduler state.
 /// V102: efficient participant fan-out for meeting notifications and edit checks.
 pub(crate) const SCHEMA_V102: &str = r#"
 CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_participants(profile_id, meeting_id);
 "#;
 
+/// V74: one target per project + IDE + instance type. The pool contains durable
+/// STANDBY rows; its target is configuration, not process-local scheduler state.
 pub(crate) const SCHEMA_V74: &str = r#"
 CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
