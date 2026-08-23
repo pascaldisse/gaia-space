@@ -39,8 +39,11 @@ export type Message = {
   archived: boolean;
   mention_ids?: string[];
 };
-export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string };
-export type NewMessageAttachment = Omit<MessageAttachment, "message_id">;
+// Upload lifecycle (KB §04 collaboration): a row can exist before its bytes are stored,
+// so the state is persisted rather than inferred from the row's presence.
+export type AttachmentUploadState = "loading" | "uploading" | "completed" | "failed";
+export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string; upload_state: AttachmentUploadState; error: string | null };
+export type NewMessageAttachment = Omit<MessageAttachment, "message_id" | "upload_state" | "error"> & { upload_state?: AttachmentUploadState };
 export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
@@ -86,6 +89,9 @@ export const chatApi = {
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),
   addMessageAttachment: (messageId: string, attachment: NewMessageAttachment) => invoke<MessageAttachment>("add_message_attachment", { messageId, attachment }),
+  setMessageAttachmentState: (id: string, state: AttachmentUploadState, error?: string | null) =>
+    invoke<MessageAttachment>("set_message_attachment_state", { id, state, error: error ?? null }),
+  removeMessageAttachment: (id: string) => invoke<void>("remove_message_attachment", { id }),
   updateMessage: (id: string, text: string) => invoke<MessageView>("update_message", { id, text }),
   deleteMessage: (id: string) => invoke<void>("delete_message", { id }),
 

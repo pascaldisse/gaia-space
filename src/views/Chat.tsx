@@ -142,7 +142,9 @@ export default function Chat() {
   });
 
   // ---- composing ----
-  type PendingAttachment = NewMessageAttachment;
+  // A pending attachment carries its own lifecycle: one bad file (too large, unreadable,
+  // rejected by the backend) must not discard the ones that are fine.
+  type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
   const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
@@ -196,23 +198,71 @@ export default function Chat() {
 
   async function queueAttachments(files: FileList | null, setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void) {
     if (!files) return;
-    try {
-      const loaded = await Promise.all([...files].map((file) => new Promise<PendingAttachment>((resolve, reject) => {
-        if (file.size > 10 * 1024 * 1024) { reject(new Error(`${file.name} exceeds the 10 MiB attachment limit`)); return; }
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
-        reader.onload = () => resolve({ id: newId("attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url: String(reader.result) });
-        reader.readAsDataURL(file);
-      })));
-      setAttachments((items) => [...items, ...loaded]);
-    } catch (e) { fail(e); }
+    // settled, not all-or-nothing: an oversized file is reported as its own failed chip
+    const loaded = await Promise.all([...files].map((file) => new Promise<PendingAttachment>((resolve) => {
+      const base = { id: newId("attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size };
+      if (file.size > 10 * 1024 * 1024) { resolve({ ...base, data_url: "", state: "failed", error: `${file.name} exceeds the 10 MiB attachment limit` }); return; }
+      const reader = new FileReader();
+      reader.onerror = () => resolve({ ...base, data_url: "", state: "failed", error: reader.error?.message ?? `Could not read ${file.name}` });
+      reader.onload = () => resolve({ ...base, data_url: String(reader.result), state: "loading" });
+      reader.readAsDataURL(file);
+    })));
+    setAttachments((items) => [...items, ...loaded]);
+    const rejected = loaded.filter((item) => item.state === "failed");
+    if (rejected.length) fail(new Error(rejected.map((item) => item.error).join("; ")));
   }
-  async function saveAttachments(messageId: string, attachments: PendingAttachment[]) { await Promise.all(attachments.map((attachment) => chatApi.addMessageAttachment(messageId, attachment))); }
+
+  /// Stores every attachment the backend accepts and leaves the rest in the composer,
+  /// marked failed, so a retry reuses the same message instead of posting a duplicate.
+  async function saveAttachments(
+    messageId: string,
+    attachments: PendingAttachment[],
+    setAttachments: (value: PendingAttachment[] | ((items: PendingAttachment[]) => PendingAttachment[])) => void,
+  ): Promise<boolean> {
+    const uploadable = attachments.filter((item) => item.state !== "failed" || item.data_url);
+    setAttachments((items) => items.map((item) => uploadable.some((u) => u.id === item.id) ? { ...item, state: "uploading", error: undefined } : item));
+    const results = await Promise.all(uploadable.map(async (attachment) => {
+      try {
+        await chatApi.addMessageAttachment(messageId, { id: attachment.id, file_name: attachment.file_name, mime_type: attachment.mime_type, byte_length: attachment.byte_length, data_url: attachment.data_url, upload_state: "completed" });
+        return { id: attachment.id, error: null as string | null };
+      } catch (e) {
+        return { id: attachment.id, error: e instanceof Error ? e.message : String(e) };
+      }
+    }));
+    const failures = results.filter((r) => r.error);
+    setAttachments((items) => items
+      .filter((item) => failures.some((f) => f.id === item.id) || !uploadable.some((u) => u.id === item.id))
+      .map((item) => {
+        const failure = failures.find((f) => f.id === item.id);
+        return failure ? { ...item, state: "failed" as const, error: failure.error ?? "upload failed" } : item;
+      }));
+    if (failures.length) fail(new Error(failures.map((f) => f.error).join("; ")));
+    return failures.length === 0;
+  }
+
+  // The message id of a post whose attachments partly failed: a retry attaches to it
+  // rather than creating a second message.
+  const [draftMessageId, setDraftMessageId] = createSignal<string | null>(null);
+  const [threadMessageId, setThreadMessageId] = createSignal<string | null>(null);
+  async function retryDraftAttachments() {
+    const id = draftMessageId();
+    if (!id) return;
+    if (await saveAttachments(id, draftAttachments().filter((a) => a.data_url), setDraftAttachments)) setDraftMessageId(null);
+    refetchMessages();
+  }
+  async function retryThreadAttachments() {
+    const id = threadMessageId();
+    if (!id) return;
+    if (await saveAttachments(id, threadAttachments().filter((a) => a.data_url), setThreadAttachments)) setThreadMessageId(null);
+    refetchThread(); refetchMessages();
+  }
   async function sendMessage() {
     const ch = activeChannelId();
     const p = actingProfileId();
     const text = draft().trim();
     const attachments = draftAttachments();
+    // a half-posted message is finished, never duplicated
+    if (draftMessageId()) { await retryDraftAttachments(); return; }
     if (!ch || !p || (!text && !attachments.length)) return;
     try {
       const message = await chatApi.createMessage({
@@ -226,8 +276,9 @@ export default function Chat() {
         archived: false,
         mention_ids: draftMentionIds(),
       });
-      await saveAttachments(message.id, attachments);
-      setDraft(""); setDraftAttachments([]); setDraftMentionIds([]);
+      const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
+      setDraftMessageId(ok ? null : message.id);
+      setDraft(""); setDraftMentionIds([]);
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -241,6 +292,7 @@ export default function Chat() {
     const p = actingProfileId();
     const text = threadDraft().trim();
     const attachments = threadAttachments();
+    if (threadMessageId()) { await retryThreadAttachments(); return; }
     if (!root || !p || (!text && !attachments.length)) return;
     try {
       const message = await chatApi.createMessage({
@@ -254,14 +306,23 @@ export default function Chat() {
         archived: false,
         mention_ids: threadMentionIds(),
       });
-      await saveAttachments(message.id, attachments);
-      setThreadDraft(""); setThreadAttachments([]); setThreadMentionIds([]);
+      const ok = await saveAttachments(message.id, attachments, setThreadAttachments);
+      setThreadMessageId(ok ? null : message.id);
+      setThreadDraft(""); setThreadMentionIds([]);
       refetchThread();
       refetchMessages();
       refetchChannels();
     } catch (e) {
       fail(e);
     }
+  }
+
+  async function deleteAttachment(id: string) {
+    try {
+      await chatApi.removeMessageAttachment(id);
+      refetchMessages();
+      refetchThread();
+    } catch (e) { fail(e); }
   }
 
   // ---- edit / delete ----
@@ -396,6 +457,10 @@ export default function Chat() {
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
                   <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
+                  <Show when={attachment.upload_state !== "completed"}>
+                    <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
+                  </Show>
+                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.id)}>×</button>
                 </div>
               )}</For></div></Show>
             </>
@@ -606,7 +671,17 @@ export default function Chat() {
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
-            <Show when={draftAttachments().length}><div class="pending-attachments"><For each={draftAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
+            <Show when={draftAttachments().length}><div class="pending-attachments">
+              <For each={draftAttachments()}>{(attachment) => (
+                <span class={`attachment-chip state-${attachment.state}`} title={attachment.error ?? attachment.state}>
+                  <Show when={attachment.state === "uploading"}>⏳ </Show><Show when={attachment.state === "failed"}>⚠ </Show>{attachment.file_name}
+                  <Show when={attachment.state === "failed" && attachment.data_url && draftMessageId()}>
+                    <button class="attachment-retry" onClick={retryDraftAttachments}>Retry</button>
+                  </Show>
+                  <button class="attachment-remove" onClick={() => setDraftAttachments((items) => items.filter((item) => item.id !== attachment.id))}>×</button>
+                </span>
+              )}</For>
+            </div></Show>
           </div>
         </Show>
       </section>
@@ -687,7 +762,17 @@ export default function Chat() {
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadDraft().trim() && !threadAttachments().length}>Reply</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.display_name}</button>}</For></div></Show>
-            <Show when={threadAttachments().length}><div class="pending-attachments"><For each={threadAttachments()}>{(attachment) => <button class="attachment-chip" onClick={() => setThreadAttachments((items) => items.filter((item) => item.id !== attachment.id))}>× {attachment.file_name}</button>}</For></div></Show>
+            <Show when={threadAttachments().length}><div class="pending-attachments">
+              <For each={threadAttachments()}>{(attachment) => (
+                <span class={`attachment-chip state-${attachment.state}`} title={attachment.error ?? attachment.state}>
+                  <Show when={attachment.state === "uploading"}>⏳ </Show><Show when={attachment.state === "failed"}>⚠ </Show>{attachment.file_name}
+                  <Show when={attachment.state === "failed" && attachment.data_url && threadMessageId()}>
+                    <button class="attachment-retry" onClick={retryThreadAttachments}>Retry</button>
+                  </Show>
+                  <button class="attachment-remove" onClick={() => setThreadAttachments((items) => items.filter((item) => item.id !== attachment.id))}>×</button>
+                </span>
+              )}</For>
+            </div></Show>
           </div>
         </Show>
       </aside>

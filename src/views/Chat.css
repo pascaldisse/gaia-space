@@ -356,7 +356,12 @@
 .attachment-button:hover { color: #5fe6d4; }
 .attachment-button input { display: none; }
 .pending-attachments { width: 100%; display: flex; gap: .3em; flex-wrap: wrap; }
-.attachment-chip { border: 1px solid #33405e; border-radius: 10px; background: #141d30; color: var(--text-muted); font-size: .78em; }
+.attachment-chip { display: inline-flex; align-items: center; gap: .3em; padding: .1em .4em; border: 1px solid #33405e; border-radius: 10px; background: #141d30; color: var(--text-muted); font-size: .78em; }
+.attachment-chip.state-uploading { border-color: #4b6ea9; }
+.attachment-chip.state-failed { border-color: #b4544a; color: #f0a49c; }
+.attachment-retry, .attachment-remove { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 1em; padding: 0 .2em; }
+.attachment-state { font-size: .75em; }
+.attachment-state.state-failed { color: #f0a49c; }
 .mention-menu { position: absolute; bottom: calc(100% - .25em); left: .9em; z-index: 3; display: grid; min-width: 180px; padding: .25em; border: 1px solid #33405e; border-radius: 6px; background: #101827; box-shadow: 0 8px 20px #0008; }
 .mention-menu button { text-align: left; background: transparent; border: 0; color: var(--text); padding: .35em .5em; }
 .mention-menu button:hover { background: #243050; }
