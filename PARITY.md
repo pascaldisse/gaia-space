@@ -34,7 +34,11 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V63 → feat/w9-workers (pipeline workers · artifacts · test reporting) ☀wave9
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
+<<<<<<< HEAD
 TOTALS (8/8 audited, 356 rows): done 55 · partial 175 · stub 4 · missing 122. Matrix NOT green — steering loop active.
+=======
+TOTALS (8/8 audited, 356 rows): done 56 · partial 174 · stub 4 · missing 122. Matrix NOT green — steering loop active.
+>>>>>>> feat/w9-rights
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -62,8 +66,8 @@ Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining 
 Progress: CalDAV named-calendar discovery + VEVENT PUT/DELETE write-back landed (V60); Google exposure remains absent. · document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
-32 rows — done 4 · partial 16 · missing 12.
-Worst gaps: Right taxonomy+enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
+32 rows — done 7 · partial 13 · missing 12.
+Worst gaps: remaining operational right enforcement · org settings/multi-workspace · SSO/OAuth/2FA/permanent tokens · OAuth app consent · invitations with role preassignment.
 
 ## 06 Personal / Org (audited ✓ — rows: reports/parity/06-personal-org.md @ d495902)
 54 rows — done 9 · partial 26 · stub 2 · missing 17.

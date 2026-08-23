@@ -188,6 +188,7 @@ pub fn run() {
             platform::update_role,
             platform::archive_role,
             platform::list_rights,
+            platform::list_right_groups,
             platform::seed_rights,
             platform::list_role_rights,
             platform::set_role_rights,

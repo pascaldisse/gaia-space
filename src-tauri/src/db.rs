@@ -468,6 +468,45 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 56 {
         tx.execute_batch(SCHEMA_V56)?;
     }
+    // V58: Right taxonomy (KB §05 §2.1). Group codes become `RightGroup` codes, and
+    // every persisted right gets the propagation the catalog defines for it. Rows
+    // seeded before this migration carried group *labels* and a blanket `'NONE'`
+    // propagation, which read as "grant only at the exact scope" for rights that were
+    // in fact being honoured organization-wide — the stored value contradicted the
+    // resolver. Descriptor columns are rewritten; `implied_rights_json` is not, because
+    // an administrator may have edited the implication graph deliberately.
+    if version < 58 && table_exists(&tx, "rights")? {
+        tx.execute(
+            "UPDATE rights SET right_group='DevEnvironments' WHERE right_group='Dev Environments'",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE rights SET right_group='Planning' WHERE right_group='Issues'",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE rights SET propagation=?1",
+            [crate::rights::PROPAGATION_GLOBAL_TO_DESCENDANTS],
+        )?;
+        for code in crate::rights::NON_PROPAGATING_RIGHTS {
+            tx.execute(
+                "UPDATE rights SET propagation=?1 WHERE code=?2",
+                rusqlite::params![crate::rights::PROPAGATION_NONE, code],
+            )?;
+        }
+        for (group, flag) in crate::rights::FEATURE_GATES {
+            tx.execute(
+                "UPDATE rights SET feature_gate=?1 WHERE right_group=?2",
+                rusqlite::params![flag, group],
+            )?;
+        }
+        for group in ["Books", "Internal"] {
+            tx.execute(
+                "UPDATE rights SET flags=?1 WHERE right_group=?2",
+                rusqlite::params![crate::rights::default_flags(group), group],
+            )?;
+        }
+    }
     // V60: CalDAV-owned VEVENTs are durable and separate from read-only feed cache.
     if version < 60 {
         tx.execute_batch(SCHEMA_V60)?;

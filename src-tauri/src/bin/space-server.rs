@@ -1775,6 +1775,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_review_participants"
         | "list_reviews"
         | "list_rights"
+        | "list_right_groups"
         | "list_role_assignments" => CommandPolicy::Session,
         "list_role_rights"
         | "list_roles"
@@ -2138,6 +2139,42 @@ fn require_catalog_right(
     platform::require_right_on(&c, &user.profile_id, right, scope_type, scope_id)
         .map_err(|_| err(StatusCode::FORBIDDEN, "right required"))
 }
+
+/// Commands whose effect is organization-wide administration of the rights model
+/// itself, with the global right each one costs (KB §05 §1, §2.1). Before this table
+/// the whole role↔right matrix was `CommandPolicy::Session`: every logged-in account
+/// could grant itself any right by editing a role. An administrator passes without a
+/// grant — `platform::is_admin_on` is the single definition of that — so bootstrapping
+/// an organization does not require a right that only an administrator could hand out.
+const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
+    ("create_role", gaia_space_lib::rights::Right::EditRoles),
+    ("update_role", gaia_space_lib::rights::Right::EditRoles),
+    ("archive_role", gaia_space_lib::rights::Right::EditRoles),
+    ("set_role_rights", gaia_space_lib::rights::Right::EditRoles),
+    (
+        "create_role_assignment",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    (
+        "delete_role_assignment",
+        gaia_space_lib::rights::Right::EditRoles,
+    ),
+    ("seed_rights", gaia_space_lib::rights::Right::EditRoles),
+];
+fn require_rights_administration(
+    user: &User,
+    name: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let Some((_, right)) = RIGHTS_ADMIN_COMMANDS.iter().find(|(command, _)| *command == name)
+    else {
+        return Ok(());
+    };
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    if platform::is_admin_on(&c, &user.profile_id).unwrap_or(false) {
+        return Ok(());
+    }
+    require_catalog_right(user, *right, "global", None)
+}
 /// Single authorization + identity-binding gate for the complete web command
 /// surface. Domain dispatch is deliberately below this function.
 fn authorize_command(
@@ -2152,6 +2189,7 @@ fn authorize_command(
     // another person's menu — and be announced to a third party as them.
     // `user_id` is not in `bind_session_identity` because elsewhere it legitimately
     // names someone else, so the rebinding is done here, for this command only.
+    require_rights_administration(user, name)?;
     if name == "list_chatbot_commands" {
         if let Value::Object(object) = &mut *body {
             object.insert("userId".to_string(), json!(user.profile_id));
@@ -2631,7 +2669,12 @@ fn authorize_command(
                 if matches!(name, "save_document" | "restore_doc_version") {
                     put_arg(body, "actor", json!(user.profile_id));
                 }
-                Ok(())
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::EditDocument,
+                    "document",
+                    Some(&id),
+                )
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document write denied"))
             }
@@ -2845,6 +2888,29 @@ fn authorize_command(
                         "only the author can change this message",
                     ));
                 }
+            }
+            if matches!(name, "create_channel" | "create_entity_channel") {
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::ManageChannel,
+                    "global",
+                    None,
+                )?;
+            }
+            if matches!(name, "update_channel" | "add_channel_member" | "remove_channel_member") {
+                let channel_id: String = if name == "update_channel" {
+                    body.get("channel")
+                        .and_then(|channel| arg(channel, "id").ok())
+                        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid channel"))?
+                } else {
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+                };
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::ManageChannel,
+                    "channel",
+                    Some(&channel_id),
+                )?;
             }
             if name == "create_channel" {
                 let supplied: Vec<String> = arg(body, "member_ids").unwrap_or_default();
@@ -3941,6 +4007,7 @@ async fn cmd(
     "list_review_participants" => review::list_review_participants(review_id: String),
     "list_reviews" => review::list_reviews(),
     "list_rights" => platform::list_rights(),
+    "list_right_groups" => platform::list_right_groups(),
     "list_role_assignments" => platform::list_role_assignments(profile_id: Option<String>, team_id: Option<String>),
     "list_role_rights" => platform::list_role_rights(role_id: String),
     "list_roles" => platform::list_roles(),
