@@ -50,6 +50,7 @@ test("joining exposes native media controls, device selectors, and a clean leave
     if (command === "stop_meeting_recording") return { egress_id: "EG_1", status: "stopped" };
     if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
     if (command === "list_meeting_recordings") return [];
+if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", meeting_id: "meeting-1", speaker_id: "them", text: "Caption proof", started_at: 1, ended_at: 2, source: "external", created_at: 1 }];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
@@ -67,6 +68,8 @@ test("joining exposes native media controls, device selectors, and a clean leave
   await settle();
   expect(calls.some(call => call.includes('chat:') && call.includes("Ship it"))).toBe(true);
   expect(host.textContent).toContain("Ship it");
+expect(host.textContent).toContain("Caption proof");
+expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();

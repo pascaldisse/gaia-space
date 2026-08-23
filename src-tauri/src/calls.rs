@@ -572,6 +572,122 @@ pub struct CallRecording {
 const RECORDING_COLUMNS: &str =
     "id,meeting_id,egress_id,status,filepath,started_by,started_at,stopped_at,stop_attempts,last_error";
 
+/// A durable caption fact. Audio never crosses this boundary; an external
+/// transcriber may submit source-attributed text, while the desktop UI reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallTranscriptSegment {
+    pub id: String,
+    pub meeting_id: String,
+    pub speaker_id: Option<String>,
+    pub text: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub source: String,
+    pub created_at: i64,
+}
+
+const TRANSCRIPT_COLUMNS: &str =
+    "id,meeting_id,speaker_id,text,started_at,ended_at,source,created_at";
+
+fn row_to_transcript_segment(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallTranscriptSegment> {
+    Ok(CallTranscriptSegment {
+        id: row.get(0)?,
+        meeting_id: row.get(1)?,
+        speaker_id: row.get(2)?,
+        text: row.get(3)?,
+        started_at: row.get(4)?,
+        ended_at: row.get(5)?,
+        source: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn new_transcript_segment_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("segment-{nanos:x}")
+}
+
+pub(crate) fn append_transcript_segment(
+    connection: &rusqlite::Connection,
+    meeting_id: &str,
+    speaker_id: Option<&str>,
+    text: &str,
+    started_at: i64,
+    ended_at: i64,
+    source: &str,
+) -> Result<CallTranscriptSegment> {
+    let text = text.trim();
+    if text.is_empty() || ended_at < started_at || !matches!(source, "external" | "manual") {
+        return Err("Transcript segment is invalid".into());
+    }
+    let segment = CallTranscriptSegment {
+        id: new_transcript_segment_id(),
+        meeting_id: meeting_id.to_owned(),
+        speaker_id: speaker_id.map(str::to_owned),
+        text: text.to_owned(),
+        started_at,
+        ended_at,
+        source: source.to_owned(),
+        created_at: now_seconds(),
+    };
+    connection.execute(
+        "INSERT INTO call_transcript_segments (id,meeting_id,speaker_id,text,started_at,ended_at,source,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        rusqlite::params![segment.id, segment.meeting_id, segment.speaker_id, segment.text, segment.started_at, segment.ended_at, segment.source, segment.created_at],
+    ).map_err(|e| e.to_string())?;
+    Ok(segment)
+}
+
+pub(crate) fn transcript_segments_for_meeting(
+    connection: &rusqlite::Connection,
+    meeting_id: &str,
+) -> Result<Vec<CallTranscriptSegment>> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT {TRANSCRIPT_COLUMNS} FROM call_transcript_segments WHERE meeting_id=?1 ORDER BY started_at,id"
+    )).map_err(|e| e.to_string())?;
+    let segments = statement
+        .query_map(rusqlite::params![meeting_id], row_to_transcript_segment)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(segments)
+}
+
+/// Captions are readable only through the same meeting scope as recordings.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_meeting_transcript_segments(meeting_id: String) -> Result<Vec<CallTranscriptSegment>> {
+    let connection = db::conn()?;
+    let (actor_id, _) = actor::resolve(&connection)?;
+    meetings::get_meeting_scoped(meeting_id.clone(), actor_id)?.ok_or("Meeting not found")?;
+    transcript_segments_for_meeting(&connection, &meeting_id)
+}
+
+/// A participant can contribute only a self-attributed manual caption. External
+/// provider ingestion stays outside IPC and uses `append_transcript_segment` directly.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn append_manual_transcript_segment(
+    meeting_id: String,
+    text: String,
+    started_at: i64,
+    ended_at: i64,
+) -> Result<CallTranscriptSegment> {
+    let connection = db::conn()?;
+    let (actor_id, _) = actor::resolve(&connection)?;
+    meetings::get_meeting_scoped(meeting_id.clone(), actor_id.clone())?
+        .ok_or("Meeting not found")?;
+    append_transcript_segment(
+        &connection,
+        &meeting_id,
+        Some(&actor_id),
+        &text,
+        started_at,
+        ended_at,
+        "manual",
+    )
+}
+
 fn row_to_recording(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallRecording> {
     Ok(CallRecording {
         id: row.get(0)?,
@@ -1136,6 +1252,34 @@ mod tests {
             )
             .expect("seed meeting");
         connection
+    }
+
+    #[test]
+    fn transcript_segments_are_ordered_and_validate_their_facts() {
+        let connection = recording_conn();
+        let later = append_transcript_segment(
+            &connection,
+            "m-1",
+            Some("default-org"),
+            "Later",
+            20,
+            21,
+            "manual",
+        )
+        .unwrap();
+        let first =
+            append_transcript_segment(&connection, "m-1", None, " First ", 10, 12, "external")
+                .unwrap();
+        assert!(
+            append_transcript_segment(&connection, "m-1", None, "   ", 1, 1, "external").is_err()
+        );
+        assert!(
+            append_transcript_segment(&connection, "m-1", None, "bad range", 2, 1, "external")
+                .is_err()
+        );
+        let segments = transcript_segments_for_meeting(&connection, "m-1").unwrap();
+        assert_eq!(segments, vec![first, later]);
+        assert_eq!(segments[0].text, "First");
     }
 
     #[test]
