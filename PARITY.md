@@ -41,7 +41,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V70 → feat/w11-cicd (remaining trigger types · deployment webhook wiring) ☀wave11
 - V71 → feat/w11-collab (document importer completion · meeting remainder) ☀wave11
 - V72 → feat/w11-personal (personal feed remainder · org chart/locations) ☀wave11
-- V73 → feat/w11-auth (OAuth implicit/password grant + consent UI) ☀wave11
+- V73 → feat/w11-auth (OAuth consent UI; implicit/ROPC intentionally excluded: KB §05 deprecated/not recommended) ☀wave11 — no schema migration required
 - V74 → feat/w11-devenv (standby pool live run) ☀wave11
 - V75 → feat/w11-calls (call recording completion) ☀wave11
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
