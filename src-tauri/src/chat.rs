@@ -1118,6 +1118,48 @@ mod tests {
     }
 
     #[test]
+    fn v75_migrated_completed_attachment_accepts_its_lost_answer_retry() {
+        let (c, path) = conn();
+        seed_message(&c, "chan-att-v75", "msg-att-v75");
+        // Rebuild the exact V74 table shape over a real message, then let V75 stamp
+        // its existing row completed. A client retry after that upgrade must recover
+        // the row rather than hit the attachment id's UNIQUE constraint.
+        c.execute_batch(
+            "DROP TABLE message_attachments;
+             CREATE TABLE message_attachments (
+                 id TEXT PRIMARY KEY,
+                 message_id TEXT NOT NULL,
+                 file_name TEXT NOT NULL,
+                 mime_type TEXT NOT NULL,
+                 byte_length INTEGER NOT NULL,
+                 data_url TEXT NOT NULL,
+                 created_at INTEGER NOT NULL DEFAULT (unixepoch())
+             );",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url)
+             VALUES('att-v75','msg-att-v75','f.txt','text/plain',2,'data:,hi')",
+            [],
+        )
+        .unwrap();
+        c.pragma_update(None, "user_version", 74).unwrap();
+        db::migrate(&c).unwrap();
+
+        let retried = add_message_attachment_impl(
+            &c,
+            "msg-att-v75",
+            new_attachment("att-v75", "data:,hi", 2, Some("uploading")),
+        )
+        .unwrap();
+        assert_eq!(retried.upload_state, "completed");
+        assert!(retried.error.is_none());
+        assert_eq!(attachments_for_impl(&c, "msg-att-v75").unwrap().len(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
     fn attachment_add_is_idempotent_but_refuses_a_different_payload() {
         let (c, path) = conn();
         seed_message(&c, "chan-att8", "msg-att8");
