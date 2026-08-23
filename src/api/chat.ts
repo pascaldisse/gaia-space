@@ -30,6 +30,30 @@ export type ChannelMember = {
 
 export type Reaction = { emoji: string; count: number; mine: boolean };
 
+// A poll option carries its tally and whether *I* picked it — never who else did.
+export type PollOptionResult = {
+  id: string;
+  position: number;
+  text: string;
+  vote_count: number;
+  me_voted: boolean;
+};
+export type PollView = {
+  id: string;
+  message_id: string;
+  channel_id: string;
+  author_id: string;
+  question: string;
+  multiple_choice: boolean;
+  anonymous: boolean;
+  closed_at: number | null;
+  created_at: number;
+  updated_at: number;
+  options: PollOptionResult[];
+  // Distinct people, not ballots: a multi-choice poll never reports turnout > electorate.
+  voter_count: number;
+};
+
 // `thread_key` is "" for the channel-root composer, else the root message id.
 export type MessageDraft = {
   channel_id: string;
@@ -71,7 +95,9 @@ export type Message = {
   thread_of: string | null;
   archived: boolean;
   pinned?: boolean;
-  content_kind?: "text" | "absence-card";
+  // "poll" marks the message that carries a poll: its text is the question, and the
+  // tally lives in `message_polls` (fetched separately, never inlined here).
+  content_kind?: "text" | "absence-card" | "poll";
   mention_ids?: string[];
 };
 // Upload lifecycle (KB §04 collaboration): a row can exist before its bytes are stored,
@@ -165,6 +191,30 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<ScheduledMessage>("update_scheduled_message", { id, authorId, text: text ?? null, scheduledAt: scheduledAt ?? null }),
   cancelScheduledMessage: (id: string, authorId: string) =>
     invoke<ScheduledMessage>("cancel_scheduled_message", { id, authorId }),
+
+  // polls: a poll is the content of the message that carries it. The read model is an
+  // aggregate (counts + my own picks) — individual ballots never cross this seam.
+  createPoll: (
+    input: { id: string; channelId: string; authorId: string; question: string; options: string[]; multipleChoice?: boolean; anonymous?: boolean },
+  ) =>
+    invoke<PollView>("create_poll", {
+      id: input.id,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      question: input.question,
+      options: input.options,
+      multipleChoice: input.multipleChoice ?? null,
+      anonymous: input.anonymous ?? null,
+    }),
+  getPoll: (id: string, actingProfileId?: string | null) =>
+    invoke<PollView>("get_poll", { id, actingProfileId: actingProfileId ?? null }),
+  listChannelPolls: (channelId: string, actingProfileId?: string | null) =>
+    invoke<PollView[]>("list_channel_polls", { channelId, actingProfileId: actingProfileId ?? null }),
+  // An empty `optionIds` withdraws the ballot; a single-choice poll refuses more than one.
+  votePoll: (pollId: string, voterId: string, optionIds: string[]) =>
+    invoke<PollView>("vote_poll", { pollId, voterId, optionIds }),
+  closePoll: (pollId: string, authorId: string) =>
+    invoke<PollView>("close_poll", { pollId, authorId }),
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),

@@ -393,3 +393,17 @@
 .message-text.mentions-me { border-left: 2px solid #7a4dd6; padding-left: .5em; }
 .absence-chat-card { display:grid; gap:3px; max-width:360px; padding:10px 12px; border:1px solid var(--line, #29443a); border-left:3px solid #65a879; border-radius:8px; background:var(--surface-2, #18251f); color:var(--text, #e8eee9); }
 .absence-chat-card span,.absence-chat-card small { color:var(--muted, #9dac9f); }
+
+/* Polls: the bar is the tally, drawn as a share of the electorate. */
+.poll-card { display: flex; flex-direction: column; gap: .25em; padding: .4em .6em; border: 1px solid var(--border, #333); border-radius: 6px; }
+.poll-question { font-weight: 600; }
+.poll-option { position: relative; display: flex; align-items: center; gap: .5em; padding: .3em .5em; text-align: left; overflow: hidden; }
+.poll-option.mine { font-weight: 600; }
+.poll-bar { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft, rgba(120,160,255,.22)); }
+.poll-option-text { position: relative; flex: 1; }
+.poll-option-count { position: relative; }
+.poll-foot { display: flex; align-items: center; justify-content: space-between; gap: .5em; }
+.poll-form { display: flex; flex-direction: column; gap: .3em; padding: 4px 12px; }
+.poll-form-option { display: flex; gap: .3em; }
+.poll-form-option input { flex: 1; }
+.poll-form-actions { display: flex; align-items: center; gap: .5em; flex-wrap: wrap; }

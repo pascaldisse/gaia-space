@@ -16,7 +16,9 @@ import {
   type NewMessageAttachment,
   type ProfileLite,
   type ScheduledMessage,
+  type PollView,
 } from "../api/chat";
+import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
@@ -236,6 +238,75 @@ export default function Chat() {
     if (!ch || !p) return;
     chatApi.deleteMessageDraft(ch, p).catch(fail);
     chatApi.setChannelTyping(ch, p, false).catch(fail);
+  }
+
+  // ---- polls ----
+  // A poll is the content of the message that carries it, so the list is keyed by
+  // message id and the card renders inside that message row.
+  const [polls, setPolls] = createSignal<PollView[]>([]);
+  const [pollOpen, setPollOpen] = createSignal(false);
+  const [pollQuestion, setPollQuestion] = createSignal("");
+  const [pollOptions, setPollOptions] = createSignal<string[]>(["", ""]);
+  const [pollMultiple, setPollMultiple] = createSignal(false);
+  const [pollAnonymous, setPollAnonymous] = createSignal(false);
+  const pollFor = (messageId: string) => polls().find((p) => p.message_id === messageId);
+
+  function refreshPolls() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch) { setPolls([]); return; }
+    chatApi
+      .listChannelPolls(ch, p)
+      .then((rows) => { if (activeChannelId() === ch) setPolls(rows); })
+      .catch(fail);
+  }
+  createEffect(() => { activeChannelId(); actingProfileId(); refreshPolls(); });
+
+  function resetPollForm() {
+    setPollOpen(false);
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setPollMultiple(false);
+    setPollAnonymous(false);
+  }
+  async function submitPoll() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) return;
+    const problem = pollDraftError(pollQuestion(), pollOptions());
+    if (problem) { setError(problem); return; }
+    try {
+      await chatApi.createPoll({
+        id: newId("poll"),
+        channelId: ch,
+        authorId: p,
+        question: pollQuestion().trim(),
+        options: pollOptions().map((o) => o.trim()).filter(Boolean),
+        multipleChoice: pollMultiple(),
+        anonymous: pollAnonymous(),
+      });
+      resetPollForm();
+      refreshPolls();
+      refetchMessages();
+    } catch (e) { fail(e); }
+  }
+  // The click decides the whole ballot (single choice replaces, multiple toggles); the
+  // server answers with the new tally, so the card never guesses the count locally.
+  async function clickPollOption(poll: PollView, optionId: string) {
+    const p = actingProfileId();
+    if (!p || !pollIsOpen(poll)) return;
+    try {
+      const updated = await chatApi.votePoll(poll.id, p, ballotAfterClick(poll, optionId));
+      setPolls((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (e) { fail(e); }
+  }
+  async function closePoll(poll: PollView) {
+    const p = actingProfileId();
+    if (!p) return;
+    try {
+      const updated = await chatApi.closePoll(poll.id, p);
+      setPolls((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (e) { fail(e); }
   }
 
   // ---- scheduled messages ----
@@ -692,8 +763,41 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
+              <Show when={m.content_kind === "poll" && pollFor(m.id)}>
+                {(poll) => (
+                  <div class="poll-card">
+                    <div class="poll-question">
+                      📊 {poll().question}
+                      <Show when={poll().multiple_choice}><span class="hint"> · pick several</span></Show>
+                      <Show when={poll().anonymous}><span class="hint"> · anonymous</span></Show>
+                      <Show when={!pollIsOpen(poll())}><span class="hint"> · closed</span></Show>
+                    </div>
+                    <For each={poll().options}>{(option) => (
+                      <button
+                        type="button"
+                        class={`poll-option${option.me_voted ? " mine" : ""}`}
+                        aria-pressed={option.me_voted}
+                        disabled={!pollIsOpen(poll())}
+                        onClick={() => clickPollOption(poll(), option.id)}
+                      >
+                        <span class="poll-bar" style={{ width: `${optionShare(option, poll().voter_count)}%` }} />
+                        <span class="poll-option-text">{option.text}</span>
+                        <span class="poll-option-count">{option.vote_count}</span>
+                      </button>
+                    )}</For>
+                    <div class="poll-foot">
+                      <span class="hint">{poll().voter_count} voted</span>
+                      <Show when={pollIsOpen(poll()) && poll().author_id === actingProfileId()}>
+                        <button type="button" class="ghost small" onClick={() => closePoll(poll())}>Close poll</button>
+                      </Show>
+                    </div>
+                  </div>
+                )}
+              </Show>
+              <Show when={m.content_kind !== "poll"}>
               <Show when={card()} fallback={<div class={`message-text${(m.mention_ids ?? []).includes(actingProfileId() ?? "") ? " mentions-me" : ""}`}>{m.text}</div>}>
                 {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
+              </Show>
               </Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
@@ -948,6 +1052,38 @@ export default function Chat() {
               )}</For>
             </div>
           </Show>
+          <Show when={pollOpen()}>
+            <div class="poll-form">
+              <input
+                type="text"
+                aria-label="Poll question"
+                placeholder="Ask something…"
+                value={pollQuestion()}
+                onInput={(e) => setPollQuestion(e.currentTarget.value)}
+              />
+              <For each={pollOptions()}>{(option, index) => (
+                <div class="poll-form-option">
+                  <input
+                    type="text"
+                    aria-label={`Option ${index() + 1}`}
+                    placeholder={`Option ${index() + 1}`}
+                    value={option}
+                    onInput={(e) => { const v = e.currentTarget.value; setPollOptions((os) => os.map((o, i) => (i === index() ? v : o))); }}
+                  />
+                  <Show when={pollOptions().length > POLL_MIN_OPTIONS}>
+                    <button type="button" onClick={() => setPollOptions((os) => os.filter((_, i) => i !== index()))}>×</button>
+                  </Show>
+                </div>
+              )}</For>
+              <div class="poll-form-actions">
+                <button type="button" onClick={() => setPollOptions((os) => [...os, ""])}>Add option</button>
+                <label><input type="checkbox" checked={pollMultiple()} onChange={(e) => setPollMultiple(e.currentTarget.checked)} /> Multiple choice</label>
+                <label><input type="checkbox" checked={pollAnonymous()} onChange={(e) => setPollAnonymous(e.currentTarget.checked)} /> Anonymous</label>
+                <button type="button" class="primary" onClick={submitPoll} disabled={!!pollDraftError(pollQuestion(), pollOptions())}>Create poll</button>
+                <button type="button" onClick={resetPollForm}>Dismiss</button>
+              </div>
+            </div>
+          </Show>
           <Show when={scheduleOpen()}>
             <div class="schedule-form">
               <input
@@ -977,6 +1113,7 @@ export default function Chat() {
             <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
             <button type="button" class="schedule-button" title="Send later" onClick={() => setScheduleOpen((v) => !v)}>🕒</button>
+            <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.display_name}</button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">
