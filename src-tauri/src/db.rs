@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 95;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V94: personal feeds are private, read-only channels; per-channel transport preferences are separate from generic event subscriptions.
+    if version < 94 {
+        tx.execute_batch(SCHEMA_V94)?;
+    }
+    // V95: follows and delivery targets are durable dashboard/subscription facts.
+    if version < 95 {
+        tx.execute_batch(SCHEMA_V95)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -607,6 +615,43 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V94: notification transport policy and the 1:1 notification-feed channel.
+pub(crate) const SCHEMA_V94: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_notification_preferences (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+ email_enabled INTEGER NOT NULL DEFAULT 1,
+ push_enabled INTEGER NOT NULL DEFAULT 1,
+ thread_scope TEXT NOT NULL DEFAULT 'all' CHECK(thread_scope IN ('all','followed','none')),
+ PRIMARY KEY(profile_id,channel_id)
+);
+CREATE TABLE IF NOT EXISTS private_feeds (
+ profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+ channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE
+);
+"#;
+/// V95: explicit follows power personalization; delivery targets represent feed/channel/app webhook destinations.
+pub(crate) const SCHEMA_V95: &str = r#"
+CREATE TABLE IF NOT EXISTS follows (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ subject_type TEXT NOT NULL CHECK(subject_type IN ('profile','team')),
+ subject_id TEXT NOT NULL,
+ PRIMARY KEY(profile_id,subject_type,subject_id)
+);
+CREATE INDEX IF NOT EXISTS follows_subject ON follows(subject_type,subject_id);
+CREATE TABLE IF NOT EXISTS subscription_deliveries (
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ event_type TEXT NOT NULL,
+ target_kind TEXT NOT NULL CHECK(target_kind IN ('feed','channel','webhook')),
+ target_id TEXT NOT NULL,
+ application_id TEXT REFERENCES applications(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL DEFAULT 1,
+ PRIMARY KEY(profile_id,event_type,target_kind,target_id),
+ CHECK((target_kind='webhook') = (application_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS subscription_deliveries_profile ON subscription_deliveries(profile_id,event_type);
+"#;
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
@@ -1415,7 +1460,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 95);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

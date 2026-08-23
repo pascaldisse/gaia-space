@@ -10,6 +10,7 @@ import {
   type Channel,
   type ChannelContentType,
   type ChannelSummary,
+  type ChannelNotificationPreference,
   type MessageView,
   type NewMessageAttachment,
   type ProfileLite,
@@ -69,6 +70,7 @@ export default function Chat() {
   const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
   );
+  createEffect(() => { const id = actingProfileId(); if (id) void chatApi.privateFeed(id).then(refetchChannels).catch(fail); });
   const grouped = () => {
     const groups: Record<string, ChannelSummary[]> = { public: [], private: [], dm: [], "entity-bound": [] };
     for (const c of channels() ?? []) (groups[c.content_type] ??= []).push(c);
@@ -86,6 +88,9 @@ export default function Chat() {
     if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  const preferenceKey = () => { const profile_id=actingProfileId(), channel_id=activeChannelId(); return profile_id&&channel_id ? {profile_id,channel_id} : null; };
+  const [notificationPreference, { refetch: refetchNotificationPreference }] = createResource(preferenceKey, key => chatApi.channelNotificationPreference(key.profile_id, key.channel_id));
+  const updateNotificationPreference = async (patch: Partial<ChannelNotificationPreference>) => { const current=notificationPreference(); if (!current) return; try { await chatApi.saveChannelNotificationPreference({...current,...patch}); await refetchNotificationPreference(); } catch (e) { fail(e); } };
   useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
@@ -414,7 +419,7 @@ export default function Chat() {
           </div>
         </Show>
 
-        <div class="reaction-row">
+        <Show when={!activeChannel()?.read_only}><div class="reaction-row">
           <For each={m.reactions}>
             {(r) => (
               <span
@@ -435,9 +440,9 @@ export default function Chat() {
               )}
             </For>
           </span>
-        </div>
+        </div></Show>
 
-        <div class="message-actions">
+        <Show when={!activeChannel()?.read_only}><div class="message-actions">
           <Show when={mine()}>
             <button class="ghost small" onClick={() => startEdit(m)}>
               edit
@@ -451,7 +456,7 @@ export default function Chat() {
               reply in thread
             </button>
           </Show>
-        </div>
+        </div></Show>
 
         <Show when={!inThread && m.reply_count > 0}>
           <div class="thread-badge" onClick={() => setThreadRootId(m.id)}>
@@ -575,9 +580,8 @@ export default function Chat() {
             <span class="branch-chip">{activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">
-            <button class="ghost small" onClick={() => setShowMembers((v) => !v)}>
-              members ({members()?.length ?? 0})
-            </button>
+            <Show when={notificationPreference()}>{pref => <details class="chat-notification-settings"><summary>Notifications</summary><label><input type="checkbox" checked={pref().email_enabled} onChange={e=>void updateNotificationPreference({email_enabled:e.currentTarget.checked})}/> Email</label><label><input type="checkbox" checked={pref().push_enabled} onChange={e=>void updateNotificationPreference({push_enabled:e.currentTarget.checked})}/> Push</label><label>Threads <select value={pref().thread_scope} onChange={e=>void updateNotificationPreference({thread_scope:e.currentTarget.value as ChannelNotificationPreference["thread_scope"]})}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></details>}</Show>
+            <Show when={!activeChannel()?.read_only}><button class="ghost small" onClick={() => setShowMembers((v) => !v)}>members ({members()?.length ?? 0})</button></Show>
           </div>
         </header>
 
@@ -589,7 +593,7 @@ export default function Chat() {
           </Show>
         </div>
 
-        <Show when={activeChannelId()}>
+        <Show when={activeChannelId() && !activeChannel()?.read_only} fallback={<Show when={activeChannelId() && activeChannel()?.read_only}><p class="hint pad">This private feed is read-only. Notifications arrive here automatically.</p></Show>}>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"
