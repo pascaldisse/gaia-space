@@ -1537,10 +1537,14 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
-    thread_of TEXT,
+    -- A postponed reply survives deletion of its root: the intent stays, it just
+    -- becomes a channel-root message instead of dangling at a vanished thread.
+    thread_of TEXT REFERENCES messages(id) ON DELETE SET NULL,
     scheduled_at INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','cancelled')),
-    sent_message_id TEXT,
+    -- UNIQUE: one delivery may never be claimed by two rows, so a replayed run
+    -- cannot attach the same message to a second intent.
+    sent_message_id TEXT UNIQUE,
     error TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
