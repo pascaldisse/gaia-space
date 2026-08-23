@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 81;
+pub const SCHEMA_VERSION: i64 = 82;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -584,6 +584,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 68 && table_exists(&tx, "job_runs")? {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
+    }
+    // V82: view/collapse is per reviewer and per file, never a shared review mutation.
+    if version < 82 {
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
     }
     // V81: merge action preferences are per-review facts. They keep source deletion and
     // linked-issue transitions coupled to the successful merge, never a later UI chore.

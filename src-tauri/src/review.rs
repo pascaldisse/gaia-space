@@ -39,6 +39,14 @@ pub struct ReviewParticipant {
     pub their_turn: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewFileState {
+    pub review_id: String,
+    pub profile_id: String,
+    pub file_path: String,
+    pub viewed: bool,
+    pub collapsed: bool,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewDiscussion {
     pub id: String,
     pub review_id: String,
@@ -241,6 +249,35 @@ fn review_event_by_id(event_type: &str, review_id: &str) {
         Ok(None) => {}
         Err(e) => eprintln!("webhook fan-out for {event_type} failed: {e}"),
     }
+}
+
+// ---------- file reading state (KB §1 reviewProgress / ReviewChangesCollapsingVM) ----------
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_review_file_states(
+    review_id: String,
+    profile_id: String,
+) -> Result<Vec<ReviewFileState>> {
+    let c = db::conn()?;
+    let mut s = c.prepare("SELECT review_id,profile_id,file_path,viewed,collapsed FROM review_file_states WHERE review_id=?1 AND profile_id=?2 ORDER BY file_path").map_err(|e|e.to_string())?;
+    let rows = s
+        .query_map(rusqlite::params![review_id, profile_id], |r| {
+            Ok(ReviewFileState {
+                review_id: r.get(0)?,
+                profile_id: r.get(1)?,
+                file_path: r.get(2)?,
+                viewed: r.get(3)?,
+                collapsed: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_review_file_state(state: ReviewFileState) -> Result<()> {
+    db::conn()?.execute("INSERT INTO review_file_states(review_id,profile_id,file_path,viewed,collapsed) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(review_id,profile_id,file_path) DO UPDATE SET viewed=excluded.viewed,collapsed=excluded.collapsed", rusqlite::params![state.review_id,state.profile_id,state.file_path,state.viewed,state.collapsed]).map_err(|e|e.to_string())?;
+    Ok(())
 }
 
 // ---------- participants (roles, accept/reject, turn-based ping-pong) ----------
