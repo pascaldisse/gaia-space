@@ -90,3 +90,9 @@
 .new-discussion-form input[type="number"] { width: 70px; }
 
 .review-navigation { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; min-height: 24px; }
+
+.review-list-controls { display: flex; flex-direction: column; gap: 7px; margin: 0 0 9px; font-size: 11px; color: var(--text-muted); }
+.quick-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+.quick-filters button { padding: 2px 6px; font-size: 10px; text-transform: capitalize; }
+.quick-filters button.active { background: var(--accent-soft); border-color: var(--accent); }
+.review-status-badge { color: var(--text-dim); font-size: 9px; letter-spacing: .03em; }

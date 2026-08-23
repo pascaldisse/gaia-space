@@ -46,6 +46,7 @@ export type ReviewDiscussion = {
   suggestion_resolved_by: string | null;
 };
 export type SuggestedEditStatus = "OPEN" | "ACCEPTED" | "REJECTED";
+export type ReviewAggregatedStatus = "MERGED" | "CLOSED" | "ACCEPTED" | "NEEDS_MY_REVIEW" | "NEEDS_MY_ATTENTION" | "WAITING_FOR_REVIEW" | "WAITING_FOR_UPDATES" | "OPENED";
 
 export type ProtectedBranchRule = {
   id: string;
@@ -160,6 +161,8 @@ export const reviewApi = {
   list: () => invoke<Review[]>("list_reviews"),
   get: (id: string) => invoke<Review | null>("get_review", { id }),
   update: (review: Review) => invoke<void>("update_review", { review }),
+  aggregatedStatus: (reviewId: string, profileId: string) =>
+    invoke<ReviewAggregatedStatus>("review_aggregated_status", { reviewId, profileId }),
   openMergeRequest: (req: NewMergeRequest) =>
     invoke<Review>("open_merge_request", { req }),
   diff: (repoPath: string, sourceBranch: string, targetBranch: string) =>

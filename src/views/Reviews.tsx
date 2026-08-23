@@ -2,6 +2,7 @@ import {
   createResource,
   createSignal,
   createEffect,
+  createMemo,
   For,
   Show,
 } from "solid-js";
@@ -58,6 +59,28 @@ export default function Reviews() {
   const [reviews, { refetch: refetchReviews }] = createResource(() =>
     reviewApi.list(),
   );
+  const [quickFilter, setQuickFilter] = createSignal<"all" | "open" | "mine" | "waiting">("all");
+  const [reviewSort, setReviewSort] = createSignal<"number" | "title">("number");
+  const [aggregatedStatuses] = createResource(
+    () => ({ reviews: reviews() ?? [], profileId: actingProfileId() }),
+    async ({ reviews, profileId }) => {
+      if (!profileId) return {} as Record<string, string>;
+      const entries = await Promise.all(reviews.map(async (review) => [review.id, await reviewApi.aggregatedStatus(review.id, profileId)] as const));
+      return Object.fromEntries(entries);
+    },
+  );
+  const visibleReviews = createMemo(() => {
+    const statuses = aggregatedStatuses() ?? {};
+    return (reviews() ?? []).filter((review) => {
+      const status = statuses[review.id];
+      return quickFilter() === "all" ||
+        (quickFilter() === "open" && review.state === "Opened") ||
+        (quickFilter() === "mine" && (status === "NEEDS_MY_REVIEW" || status === "NEEDS_MY_ATTENTION")) ||
+        (quickFilter() === "waiting" && (status === "WAITING_FOR_REVIEW" || status === "WAITING_FOR_UPDATES"));
+    }).sort((left, right) => reviewSort() === "title"
+      ? left.title.localeCompare(right.title)
+      : right.number - left.number);
+  });
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   // Default to the first review once, on load only. After that the URL is the source of
   // truth for the selection, so back-navigating to the view-only URL (which clears the
@@ -565,12 +588,20 @@ export default function Reviews() {
 
       <div class="reviews-body">
         <aside class="reviews-list">
+          <div class="review-list-controls">
+            <div class="quick-filters" aria-label="Review quick filters">
+              <For each={["all", "open", "mine", "waiting"] as const}>
+                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{filter === "mine" ? "Needs me" : filter}</button>}
+              </For>
+            </div>
+            <label>Sort <select value={reviewSort()} onChange={(event) => setReviewSort(event.currentTarget.value as "number" | "title")}><option value="number">Newest</option><option value="title">Title</option></select></label>
+          </div>
           <Show
-            when={reviews()?.length}
-            fallback={<p class="hint pad">No reviews yet — open one above.</p>}
+            when={visibleReviews().length}
+            fallback={<p class="hint pad">No reviews match this filter.</p>}
           >
             <ul>
-              <For each={reviews()}>
+              <For each={visibleReviews()}>
                 {(r) => (
                   <li classList={{ active: r.id === selectedId() }}>
                     <a
