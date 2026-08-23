@@ -358,6 +358,7 @@ pub fn run() {
             pipelines::create_job_artifact,
             pipelines::list_job_artifacts,
             pipelines::save_test_report,
+            pipelines::ingest_teamcity_test_messages,
             pipelines::list_test_reports,
             pipelines::trigger_pipeline_script,
             pipelines::trigger_pipeline_on_push,

@@ -84,6 +84,22 @@ pub struct Job {
     pub trigger_type: String,
     pub archived: bool,
 }
+/// A TeamCity-service-message log attached to one run. The server parses only test-suite and
+/// test-result messages; unrelated build output is deliberately ignored.
+#[derive(Debug, Deserialize)]
+pub struct TeamCityTestReportInput {
+    pub job_run_id: String,
+    pub messages: String,
+}
+
+#[derive(Debug, PartialEq)]
+struct ParsedTestReport {
+    suite: String,
+    test_name: String,
+    status: String,
+    duration_ms: Option<i64>,
+    message: Option<String>,
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Worker {
     pub id: String,
@@ -559,6 +575,145 @@ pub fn list_job_artifacts(job_run_id: String) -> Result<Vec<JobArtifact>> {
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
+/// Parses the TeamCity subset documented in KB §2.3: suite start/end, test pass/fail/ignore,
+/// and optional finish duration. TeamCity escapes attribute values with `|` sequences.
+fn teamcity_attributes(message: &str) -> std::collections::HashMap<String, String> {
+    let mut attributes = std::collections::HashMap::new();
+    let mut rest = message.trim();
+    while let Some(eq) = rest.find('=') {
+        let key = rest[..eq].trim();
+        let after = rest[eq + 1..].trim_start();
+        if key.is_empty() || !after.starts_with('\'') {
+            break;
+        }
+        let mut value = String::new();
+        let mut escaped = false;
+        let mut end = None;
+        for (idx, ch) in after[1..].char_indices() {
+            if escaped {
+                value.push(match ch {
+                    'n' => '\n',
+                    'r' => '\r',
+                    '|' => '|',
+                    '\'' => '\'',
+                    '[' => '[',
+                    ']' => ']',
+                    other => other,
+                });
+                escaped = false;
+            } else if ch == '|' {
+                escaped = true;
+            } else if ch == '\'' {
+                end = Some(idx + 2);
+                break;
+            } else {
+                value.push(ch);
+            }
+        }
+        let Some(end) = end else {
+            break;
+        };
+        attributes.insert(key.to_string(), value);
+        rest = &after[end..];
+    }
+    attributes
+}
+
+fn parse_teamcity_test_messages(messages: &str) -> Vec<ParsedTestReport> {
+    let mut suite = String::new();
+    let mut tests: std::collections::HashMap<String, ParsedTestReport> =
+        std::collections::HashMap::new();
+    let mut order = Vec::new();
+    for line in messages.lines().map(str::trim) {
+        let Some(body) = line
+            .strip_prefix("##teamcity[")
+            .and_then(|s| s.strip_suffix(']'))
+        else {
+            continue;
+        };
+        let (kind, attrs) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
+        let attrs = teamcity_attributes(attrs);
+        match kind {
+            "testSuiteStarted" => suite = attrs.get("name").cloned().unwrap_or_default(),
+            "testSuiteFinished" => suite.clear(),
+            "testStarted" => {
+                if let Some(name) = attrs.get("name") {
+                    let key = format!("{suite}\u{0}{name}");
+                    order.push(key.clone());
+                    tests.insert(
+                        key,
+                        ParsedTestReport {
+                            suite: suite.clone(),
+                            test_name: name.clone(),
+                            status: "PASSED".into(),
+                            duration_ms: None,
+                            message: None,
+                        },
+                    );
+                }
+            }
+            "testFinished" | "testFailed" | "testIgnored" => {
+                if let Some(name) = attrs.get("name") {
+                    let key = format!("{suite}\u{0}{name}");
+                    let report = tests.entry(key.clone()).or_insert_with(|| {
+                        order.push(key);
+                        ParsedTestReport {
+                            suite: suite.clone(),
+                            test_name: name.clone(),
+                            status: "PASSED".into(),
+                            duration_ms: None,
+                            message: None,
+                        }
+                    });
+                    if kind == "testFinished" {
+                        report.duration_ms = attrs.get("duration").and_then(|v| v.parse().ok());
+                    }
+                    if kind == "testFailed" {
+                        report.status = "FAILED".into();
+                        report.message = attrs.get("message").cloned();
+                    }
+                    if kind == "testIgnored" {
+                        report.status = "SKIPPED".into();
+                        report.message = attrs.get("message").cloned();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|key| tests.remove(&key))
+        .collect()
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn ingest_teamcity_test_messages(input: TeamCityTestReportInput) -> Result<Vec<TestReport>> {
+    let parsed = parse_teamcity_test_messages(&input.messages);
+    let now = now_secs();
+    let reports: Vec<TestReport> = parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, parsed)| TestReport {
+            id: format!("teamcity-{}-{index}", now_nanos()),
+            job_run_id: input.job_run_id.clone(),
+            suite: parsed.suite,
+            test_name: parsed.test_name,
+            status: parsed.status,
+            duration_ms: parsed.duration_ms,
+            message: parsed.message,
+            created_at: now,
+        })
+        .collect();
+    let c = db::conn()?;
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    for report in &reports {
+        tx.execute("INSERT INTO test_reports(id,job_run_id,suite,test_name,status,duration_ms,message,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![report.id, report.job_run_id, report.suite, report.test_name, report.status, report.duration_ms, report.message, report.created_at]).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(reports)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_test_report(report: TestReport) -> Result<()> {
     if !matches!(report.status.as_str(), "PASSED" | "FAILED" | "SKIPPED") {
@@ -2239,6 +2394,32 @@ mod tests {
     fn sweep(path: &Path) {
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn teamcity_messages_preserve_suite_status_duration_and_escapes() {
+        let reports = parse_teamcity_test_messages("##teamcity[testSuiteStarted name='unit']\n##teamcity[testStarted name='works']\n##teamcity[testFinished name='works' duration='12']\n##teamcity[testStarted name='fails']\n##teamcity[testFailed name='fails' message='bad |'quote|'' ]\n##teamcity[testIgnored name='skipped' message='later']\n##teamcity[testSuiteFinished name='unit']");
+        assert_eq!(reports.len(), 3);
+        assert_eq!(
+            reports[0],
+            ParsedTestReport {
+                suite: "unit".into(),
+                test_name: "works".into(),
+                status: "PASSED".into(),
+                duration_ms: Some(12),
+                message: None
+            }
+        );
+        assert_eq!(reports[1].status, "FAILED");
+        assert_eq!(reports[1].message.as_deref(), Some("bad 'quote'"));
+        assert_eq!(reports[2].status, "SKIPPED");
+    }
+    #[test]
+    fn teamcity_parser_ignores_unrelated_and_malformed_output() {
+        assert!(parse_teamcity_test_messages(
+            "compile\n##teamcity[testStarted name='unterminated]"
+        )
+        .is_empty());
     }
 
     #[test]

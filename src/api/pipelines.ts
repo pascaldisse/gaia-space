@@ -27,6 +27,7 @@ export type Worker = { id: string; name: string; os: string; tags_json: string; 
 export type JobArtifact = { id: string; job_run_id: string; name: string; size_bytes: number; created_at: number };
 export type JobArtifactInput = { id: string; job_run_id: string; name: string; content: number[] };
 export type TestReport = { id: string; job_run_id: string; suite: string; test_name: string; status: "PASSED" | "FAILED" | "SKIPPED"; duration_ms: number | null; message: string | null; created_at: number };
+export type TeamCityTestReportInput = { job_run_id: string; messages: string };
 
 export const JOB_TRIGGER_TYPES = ["MANUAL", "GIT_PUSH", "SCHEDULE", "GIT_BRANCH_DELETED", "CODE_REVIEW_OPENED", "CODE_REVIEW_CLOSED", "SAFE_MERGE"] as const;
 export const RUN_TERMINAL_STATUSES = ["FINISHED", "TERMINATED", "FAILED", "SKIPPED"];
