@@ -1903,7 +1903,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_board" | "create_issue" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
-        "get_project" | "list_boards" | "list_issue_statuses" => CommandPolicy::ProjectRead,
+        "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
         "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
@@ -2058,6 +2058,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_sprints"
         | "list_subscription_settings"
         | "list_subscription_scopes"
+        | "list_subscription_deliveries"
+        | "list_follows"
+        | "get_channel_notification_preference"
+        | "private_feed"
         | "list_marketplace_apps"
         | "list_app_installs"
         | "list_swimlanes" => CommandPolicy::Session,
@@ -2130,6 +2134,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "save_subscription_setting"
         | "save_subscription_scope"
         | "delete_subscription_scope"
+        | "save_subscription_delivery"
+        | "delete_subscription_delivery"
+        | "save_follow"
+        | "delete_follow"
+        | "save_channel_notification_preference"
         | "save_swimlane" => CommandPolicy::Session,
         "save_time_tracking_entry"
         | "schedule_deployment"
@@ -4314,6 +4323,13 @@ async fn cmd(
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
     "dashboard_aggregate" => personal::dashboard_aggregate(profile_id: String),
+    "project_dashboard_aggregate" => personal::project_dashboard_aggregate(project_id: String),
+    "list_follows" => personal::list_follows(profile_id: String),
+    "save_follow" => personal::save_follow(follow: personal::Follow),
+    "delete_follow" => personal::delete_follow(follow: personal::Follow),
+    "list_subscription_deliveries" => personal::list_subscription_deliveries(profile_id: String),
+    "save_subscription_delivery" => personal::save_subscription_delivery(d: personal::SubscriptionDeliveryTarget),
+    "delete_subscription_delivery" => personal::delete_subscription_delivery(profile_id: String, event_type: String, target_kind: String, target_id: String),
     "get_dashboard_preferences" => personal::get_dashboard_preferences_http(profile_id: String),
     "set_dashboard_preferences" => personal::set_dashboard_preferences_http(preferences: personal::DashboardPreferences),
     "delete_board" => issues::delete_board(id: String),
@@ -4341,6 +4357,9 @@ async fn cmd(
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
     "expand_meeting_occurrences" => meetings::expand_meeting_occurrences_scoped(range_start: i64, range_end: i64, profile_id: String),
     "get_channel" => chat::get_channel(id: String),
+    "private_feed" => chat::private_feed(profile_id: String),
+    "get_channel_notification_preference" => chat::get_channel_notification_preference(profile_id: String, channel_id: String),
+    "save_channel_notification_preference" => chat::save_channel_notification_preference(preference: chat::ChannelNotificationPreference),
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_issue" => issues::get_issue(id: String),

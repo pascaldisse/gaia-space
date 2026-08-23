@@ -674,7 +674,7 @@ fn read_notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> 
         read_at: row.get(8)?,
     })
 }
-fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Option<Notification>> {
+pub(crate) fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Option<Notification>> {
     if input.recipient_id.trim().is_empty()
         || input.event_type.trim().is_empty()
         || input.title.trim().is_empty()
@@ -695,6 +695,14 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
     let id = input.id.clone().unwrap_or_else(|| new_id("notification"));
     err(c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, input.recipient_id, input.event_type, input.title.trim(), input.body, input.entity_type, input.entity_id]))?;
     let notification = err(c.query_row("SELECT id,recipient_id,event_type,title,body,entity_type,entity_id,created_at,read_at FROM notifications WHERE id=?1", [id], read_notification))?;
+    // Feed is a channel projection of this canonical notification record.
+    let feed = crate::chat::private_feed_for_on(c, &notification.recipient_id)?;
+    err(c.execute("INSERT OR IGNORE INTO messages(id,channel_id,author_id,text,created_at,archived) VALUES(?1,?2,NULL,?3,?4,0)", params![format!("notification:{}", notification.id), feed.id, notification.body.as_ref().map(|body| format!("{}\n{}", notification.title, body)).unwrap_or_else(|| notification.title.clone()), notification.created_at]))?;
+    for delivery in subscription_deliveries_on(c, &notification.recipient_id, &notification.event_type)? {
+        if !delivery.enabled || delivery.target_kind == "feed" { continue; }
+        if delivery.target_kind == "channel" { err(c.execute("INSERT OR IGNORE INTO messages(id,channel_id,author_id,text,created_at,archived) VALUES(?1,?2,NULL,?3,?4,0)", params![format!("subscription:{}:{}", notification.id, delivery.target_id), delivery.target_id, notification.title, notification.created_at]))?; }
+        else { crate::applications::enqueue_webhook_delivery(&delivery.target_id, &serde_json::json!({"event_type":notification.event_type,"notification":notification}))?; }
+    }
     Ok(Some(notification))
 }
 /// A domain supplies only recipients it has already authorized to read its entity.
@@ -1014,6 +1022,24 @@ pub fn delete_subscription_setting(profile_id: String, event_type: String) -> Re
     Ok(())
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SubscriptionDeliveryTarget { pub profile_id:String, pub event_type:String, pub target_kind:String, pub target_id:String, pub application_id:Option<String>, pub enabled:bool }
+fn read_subscription_delivery(r:&rusqlite::Row<'_>)->rusqlite::Result<SubscriptionDeliveryTarget>{Ok(SubscriptionDeliveryTarget{profile_id:r.get(0)?,event_type:r.get(1)?,target_kind:r.get(2)?,target_id:r.get(3)?,application_id:r.get(4)?,enabled:r.get(5)?})}
+fn subscription_deliveries_on(c: &Connection, profile_id: &str, event_type: &str) -> Result<Vec<SubscriptionDeliveryTarget>> { let mut statement=err(c.prepare("SELECT profile_id,event_type,target_kind,target_id,application_id,enabled FROM subscription_deliveries WHERE profile_id=?1 AND event_type IN (?2,'*') ORDER BY event_type='*'"))?; let rows=err(statement.query_map(params![profile_id,event_type],read_subscription_delivery))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn list_subscription_deliveries(profile_id:String)->Result<Vec<SubscriptionDeliveryTarget>> { let c=db::conn()?; let mut statement=err(c.prepare("SELECT profile_id,event_type,target_kind,target_id,application_id,enabled FROM subscription_deliveries WHERE profile_id=?1 ORDER BY event_type,target_kind,target_id"))?; let rows=err(statement.query_map([profile_id],read_subscription_delivery))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn save_subscription_delivery(d:SubscriptionDeliveryTarget)->Result<SubscriptionDeliveryTarget>{if d.profile_id.trim().is_empty()||d.event_type.trim().is_empty()||d.target_id.trim().is_empty()||!matches!(d.target_kind.as_str(),"feed"|"channel"|"webhook"){return Err("Invalid subscription delivery target".into())}let c=db::conn()?;if d.target_kind=="feed"&&d.target_id!=d.profile_id{return Err("Feed target must be the recipient profile".into())}if d.target_kind=="channel"&&!crate::chat::channel_readable_by(&d.target_id,&d.profile_id)?{return Err("Subscription channel access denied".into())}if d.target_kind=="webhook"{let app=d.application_id.as_deref().ok_or("Webhook delivery needs an application")?;let exists:bool=err(c.query_row("SELECT EXISTS(SELECT 1 FROM webhook_subscriptions WHERE id=?1 AND application_id=?2)",params![d.target_id,app],|r|r.get(0)))?;if !exists{return Err("Webhook is not owned by application".into())}}err(c.execute("INSERT INTO subscription_deliveries(profile_id,event_type,target_kind,target_id,application_id,enabled) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(profile_id,event_type,target_kind,target_id) DO UPDATE SET application_id=excluded.application_id,enabled=excluded.enabled",params![d.profile_id,d.event_type,d.target_kind,d.target_id,d.application_id,d.enabled]))?;Ok(d)}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn delete_subscription_delivery(profile_id:String,event_type:String,target_kind:String,target_id:String)->Result<()>{let c=db::conn()?;err(c.execute("DELETE FROM subscription_deliveries WHERE profile_id=?1 AND event_type=?2 AND target_kind=?3 AND target_id=?4",params![profile_id,event_type,target_kind,target_id]))?;Ok(())}
+#[derive(Clone,Debug,Deserialize,Serialize)] pub struct Follow{pub profile_id:String,pub subject_type:String,pub subject_id:String}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn list_follows(profile_id:String)->Result<Vec<Follow>> { let c=db::conn()?; let mut statement=err(c.prepare("SELECT profile_id,subject_type,subject_id FROM follows WHERE profile_id=?1 ORDER BY subject_type,subject_id"))?; let rows=err(statement.query_map([profile_id],|r|Ok(Follow{profile_id:r.get(0)?,subject_type:r.get(1)?,subject_id:r.get(2)?})))?.collect::<std::result::Result<Vec<_>,_>>().map_err(|e|e.to_string())?; Ok(rows) }
+#[cfg_attr(feature="desktop",tauri::command)] pub fn save_follow(f:Follow)->Result<Follow>{if f.profile_id.trim().is_empty()||f.subject_id.trim().is_empty()||!matches!(f.subject_type.as_str(),"profile"|"team"){return Err("Follow needs a profile or team subject".into())}let c=db::conn()?;let table=if f.subject_type=="profile"{"profiles"}else{"teams"};let exists:bool=err(c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1 AND archived=0)"),[&f.subject_id],|r|r.get(0)))?;if !exists{return Err("Follow subject not found".into())}err(c.execute("INSERT OR IGNORE INTO follows(profile_id,subject_type,subject_id) VALUES(?1,?2,?3)",params![f.profile_id,f.subject_type,f.subject_id]))?;Ok(f)}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn delete_follow(f:Follow)->Result<()>{err(db::conn()?.execute("DELETE FROM follows WHERE profile_id=?1 AND subject_type=?2 AND subject_id=?3",params![f.profile_id,f.subject_type,f.subject_id]))?;Ok(())}
+#[derive(Clone,Debug,Serialize)] pub struct ProjectDashboard{pub project_id:String,pub open_issues:i64,pub open_todos:i64,pub member_count:i64,pub deadline:Option<String>}
+#[cfg_attr(feature="desktop",tauri::command)] pub fn project_dashboard_aggregate(project_id:String)->Result<ProjectDashboard>{let c=db::conn()?;let open_issues:i64=err(c.query_row("SELECT count(*) FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.project_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0",[&project_id],|r|r.get(0)))?;let open_todos:i64=err(c.query_row("SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",[&project_id],|r|r.get(0)))?;let member_count:i64=err(c.query_row("SELECT count(*) FROM (SELECT created_by FROM projects WHERE id=?1 UNION SELECT profile_id FROM project_members WHERE project_id=?1)",[&project_id],|r|r.get(0)))?;let deadline:Option<String>=err(c.query_row("SELECT deadline FROM projects WHERE id=?1",[&project_id],|r|r.get(0)))?;Ok(ProjectDashboard{project_id,open_issues,open_todos,member_count,deadline})}
+/// Provider seam: domains register one source instead of extending one monolithic union.
+pub trait GotoSource: Send + Sync { fn key(&self) -> &'static str; fn sql(&self) -> &'static str; }
+pub struct SqlGotoSource { pub source_key:&'static str, pub source_sql:&'static str }
+impl GotoSource for SqlGotoSource { fn key(&self)->&'static str{self.source_key} fn sql(&self)->&'static str{self.source_sql} }
+pub fn goto_source_registry() -> Vec<Box<dyn GotoSource>> { vec![Box::new(SqlGotoSource{source_key:"profiles",source_sql:"SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1"}),Box::new(SqlGotoSource{source_key:"projects",source_sql:"SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)"})] }
 #[derive(Clone, Debug, Serialize)]
 pub struct GotoResult {
     pub id: String,
