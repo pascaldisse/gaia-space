@@ -84,6 +84,8 @@ export type PackageRepositoryAcl = { repository_id: string; profile_id: string; 
 export type PackageVersion = { id: string; repository_id: string; package_name: string; version: string; metadata_json: string | null; format_metadata_json: string | null; created_at: number; accessed_at: number | null; downloads: number; pinned: boolean; immutable: boolean };
 export type PackageVulnerability = { id: string; package_version_id: string; cve_id: string; severity: string; affected_range: string; title: string | null; description: string | null };
 export type DependencyOverview = { version: PackageVersion; vulnerabilities: PackageVulnerability[] };
+/** One version a retention policy would delete; `reason` names the limb that matched. */
+export type RetentionCandidate = { id: string; package_name: string; version: string; created_at: number; downloads: number; reason: "age" | "count" | "age+count" };
 
 export const pipelinesApi = {
   // scripts
@@ -124,6 +126,8 @@ export const pipelinesApi = {
   setPackageRepositoryAcl: (entry: PackageRepositoryAcl) => invoke<void>("set_package_repository_acl", { entry }),
   removePackageRepositoryAcl: (repositoryId: string, profileId: string) => invoke<void>("remove_package_repository_acl", { repositoryId, profileId }),
   applyPackageRetention: (repositoryId: string) => invoke<number>("apply_package_retention", { repositoryId }),
+  packageRetentionCandidates: (repositoryId: string) => invoke<RetentionCandidate[]>("package_retention_candidates", { repositoryId }),
+  repositoryVulnerabilityReport: (repositoryId: string, minSeverity?: string) => invoke<DependencyOverview[]>("repository_vulnerability_report", { repositoryId, minSeverity: minSeverity ?? null }),
 
   // package versions
   addPackageVulnerability: (vulnerability: PackageVulnerability) => invoke<void>("add_package_vulnerability", { vulnerability }),

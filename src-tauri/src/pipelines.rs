@@ -1325,6 +1325,8 @@ fn typed_format_metadata(
 /// — never a fixed/guessed location). Payload is stored as UTF-8 text (this local registry
 /// has no upload transport for arbitrary binaries yet; real Space's binary artifact storage is
 /// future work — noted here rather than faked).
+/// Distinguishes concurrent publishes of the same file within one process.
+static STAGING_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 // Transactional core of the `publish_package_version` tauri command; its arguments are
 // that command's IPC parameters plus the connection/base-dir it must run inside.
 #[allow(clippy::too_many_arguments)]
@@ -1348,6 +1350,21 @@ fn publish_package_version_tx(
     if payload_filename.is_some() != payload_content.is_some() {
         return Err("payload filename and content must be supplied together".into());
     }
+    // Read-check-write is one critical section: two publishers could otherwise both see
+    // "not published yet" and the second would overwrite the first (☎Kali-VIII B1 second
+    // half). `IMMEDIATE` takes the write lock up front, so the loser waits instead of
+    // racing. A caller that is already inside a transaction keeps its own.
+    let guard: Option<rusqlite::Transaction<'_>> = conn.unchecked_transaction().ok();
+    // The write lock is taken unconditionally, not only when this call opened the
+    // transaction: a caller that is already inside one (npm packument publish) would
+    // otherwise run the whole check→write→upsert with no lock at all (☎Kali-VIII round 4).
+    // A deferred transaction only locks at its first write, so this no-op write promotes
+    // it now and a concurrent publisher of the same version waits instead of overwriting.
+    conn.execute(
+        "UPDATE package_repositories SET id=id WHERE id=?1",
+        params![repository_id],
+    )
+    .map_err(|e| e.to_string())?;
     let format: String = conn
         .query_row(
             "SELECT format FROM package_repositories WHERE id=?1",
@@ -1355,6 +1372,42 @@ fn publish_package_version_tx(
             |r| r.get(0),
         )
         .map_err(|_| format!("unknown package repository '{repository_id}'"))?;
+    // Immutability is decided BEFORE a single byte is written: the refusal used to come
+    // after the payload had already overwritten the stored file, so a rejected republish
+    // still changed what the tag served (☎Kali-VIII B1).
+    let version_id_guard = format!("{repository_id}::{package_name}::{version}");
+    let existing_immutable: Option<bool> = conn
+        .query_row(
+            "SELECT immutable FROM package_versions WHERE id=?1",
+            params![&version_id_guard],
+            |r| r.get(0),
+        )
+        .ok();
+    let stored_files = conn
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE id=?1",
+            params![&version_id_guard],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+        .and_then(|v| v.get("_files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+    if existing_immutable == Some(true) {
+        // Immutable means "published bytes never change", not "one file per version": a
+        // Maven deploy of the same GAV ships .pom, .jar and checksums as separate requests,
+        // and with an immutable-by-default repository the second one used to be refused
+        // outright (☎Kali-VIII B1 regression). A brand-new asset name is therefore allowed;
+        // replacing an asset already stored, or a metadata-only republish, is not.
+        let adds_new_asset = payload_filename
+            .is_some_and(|filename| !stored_files.contains_key(filename));
+        if !adds_new_asset {
+            return Err(format!(
+                "package version {package_name}@{version} is immutable and cannot be republished"
+            ));
+        }
+    }
     let mut meta: serde_json::Value = match metadata_json {
         Some(s) if !s.trim().is_empty() => {
             serde_json::from_str(s).map_err(|e| format!("invalid metadata JSON: {e}"))?
@@ -1372,6 +1425,7 @@ fn publish_package_version_tx(
     // Assets already stored for this version survive a metadata-only or additional-file
     // publish (Maven uploads .pom and .jar as separate requests for the same version).
     let version_id = format!("{repository_id}::{package_name}::{version}");
+    let mut pending_rename: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
     let previous_files = conn
         .query_row(
             "SELECT metadata_json FROM package_versions WHERE id=?1",
@@ -1392,8 +1446,21 @@ fn publish_package_version_tx(
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         canonical_path_within(base_dir, &dir)?;
         let file_path = dir.join(filename);
-        fs::write(&file_path, content).map_err(|e| e.to_string())?;
-        let canonical_file_path = canonical_path_within(base_dir, &file_path)?;
+        // Written under a temporary name and renamed only once the row is committed: the
+        // payload used to land on disk before metadata validation and the upsert, so a
+        // rejected publish left an orphan file the version never referenced
+        // (☎Kali-VIII round 4).
+        // The staged name must be unique per publish, not per process: two publishes of the
+        // same file inside one server would otherwise share a staging path and race between
+        // commit and rename (☎Kali-VIII round 5).
+        let staged_path = dir.join(format!(
+            ".{filename}.staged-{}-{}",
+            std::process::id(),
+            STAGING_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        fs::write(&staged_path, content).map_err(|e| e.to_string())?;
+        pending_rename = Some((staged_path, file_path.clone()));
+        let canonical_file_path = canonical_path_within(base_dir, &dir)?.join(filename);
         meta["_file_path"] = serde_json::Value::String(canonical_file_path.display().to_string());
         meta["_file_size"] = serde_json::Value::from(content.len());
         // Real Maven deploys ship several assets per version (.pom, .jar, checksums) and npm
@@ -1412,32 +1479,53 @@ fn publish_package_version_tx(
     } else if !previous_files.is_empty() {
         meta["_files"] = Value::Object(previous_files.clone());
     }
-    let format_metadata = typed_format_metadata(&format, package_name, version, &meta)?;
+    // From here every failure must take the staged payload with it.
+    let cleanup = |result: Result<()>| -> Result<()> {
+        if result.is_err() {
+            if let Some((staged, _)) = pending_rename.as_ref() {
+                let _ = fs::remove_file(staged);
+            }
+        }
+        result
+    };
+    let format_metadata = match typed_format_metadata(&format, package_name, version, &meta) {
+        Ok(value) => value,
+        Err(e) => {
+            cleanup(Err(e))?;
+            unreachable!("cleanup returns the error it was given")
+        }
+    };
     meta["_format"] = serde_json::Value::String(format);
-    let id = format!("{repository_id}::{package_name}::{version}");
-    let existing_immutable: Option<bool> = conn
-        .query_row(
-            "SELECT immutable FROM package_versions WHERE id=?1",
-            params![&id],
-            |r| r.get(0),
-        )
-        .ok();
-    if existing_immutable == Some(true) {
-        return Err(format!(
-            "package version {package_name}@{version} is immutable and cannot be republished"
-        ));
-    }
+    let id = version_id_guard;
     // Deployment policy is parameterized; callers may override it per publish.
     let immutable = immutable.unwrap_or_else(package_immutable_default);
     conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,metadata_json,format_metadata_json,immutable) VALUES(?1,?2,?3,?4,?5,?6,?7)
-         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json,format_metadata_json=excluded.format_metadata_json,immutable=excluded.immutable", params![id, repository_id, package_name, version, meta.to_string(), format_metadata.to_string(), immutable]).map_err(|e| e.to_string())?;
-    let created_at: i64 = conn
-        .query_row(
-            "SELECT created_at FROM package_versions WHERE id=?1",
-            params![id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+         ON CONFLICT(id) DO UPDATE SET metadata_json=excluded.metadata_json,format_metadata_json=excluded.format_metadata_json,immutable=excluded.immutable", params![id, repository_id, package_name, version, meta.to_string(), format_metadata.to_string(), immutable]).map_err(|e| e.to_string()).or_else(|e| -> Result<usize> { cleanup(Err(e))?; Ok(0) })?;
+    let created_at: i64 = match conn.query_row(
+        "SELECT created_at FROM package_versions WHERE id=?1",
+        params![id],
+        |r| r.get(0),
+    ) {
+        Ok(value) => value,
+        Err(e) => {
+            cleanup(Err(e.to_string()))?;
+            unreachable!("cleanup returns the error it was given")
+        }
+    };
+    if let Some(guard) = guard {
+        if let Err(e) = guard.commit() {
+            cleanup(Err(e.to_string()))?;
+        }
+    }
+    // The row is durable, so the bytes may take their final name.
+    if let Some((staged, final_path)) = pending_rename.take() {
+        if let Err(e) = fs::rename(&staged, &final_path) {
+            let _ = fs::remove_file(&staged);
+            return Err(format!(
+                "published row committed but payload could not be stored: {e}"
+            ));
+        }
+    }
     Ok(PackageVersion {
         id,
         repository_id: repository_id.into(),
@@ -1847,6 +1935,11 @@ pub fn add_package_vulnerability(vulnerability: PackageVulnerability) -> Result<
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn dependency_overview(version_id: String) -> Result<DependencyOverview> {
     let c = db::conn()?;
+    dependency_overview_conn(&c, &version_id)
+}
+
+/// Connection-scoped core of `dependency_overview`.
+pub fn dependency_overview_conn(c: &Connection, version_id: &str) -> Result<DependencyOverview> {
     let version=c.query_row("SELECT id,repository_id,package_name,version,metadata_json,format_metadata_json,created_at,accessed_at,downloads,pinned,immutable FROM package_versions WHERE id=?1",params![version_id],|r| Ok(PackageVersion{id:r.get(0)?,repository_id:r.get(1)?,package_name:r.get(2)?,version:r.get(3)?,metadata_json:r.get(4)?,format_metadata_json:r.get(5)?,created_at:r.get(6)?,accessed_at:r.get(7)?,downloads:r.get(8)?,pinned:r.get(9)?,immutable:r.get(10)?})).map_err(|_|"package version not found".to_string())?;
     let mut q=c.prepare("SELECT id,package_version_id,cve_id,severity,affected_range,title,description FROM package_vulnerabilities WHERE package_version_id=?1").map_err(|e|e.to_string())?;
     let vulnerabilities = q
@@ -1868,6 +1961,69 @@ pub fn dependency_overview(version_id: String) -> Result<DependencyOverview> {
         version,
         vulnerabilities,
     })
+}
+
+/// Repository-wide CVE ledger query: every stored version that carries at least one recorded
+/// vulnerability, most severe first. Reads only the local ledger populated by
+/// `add_package_vulnerability` — no scanner is invoked and no network call is made here.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repository_vulnerability_report(
+    repository_id: String,
+    min_severity: Option<String>,
+) -> Result<Vec<DependencyOverview>> {
+    let c = db::conn()?;
+    repository_vulnerability_report_conn(&c, &repository_id, min_severity.as_deref())
+}
+
+/// Connection-scoped core of `repository_vulnerability_report`.
+pub fn repository_vulnerability_report_conn(
+    c: &Connection,
+    repository_id: &str,
+    min_severity: Option<&str>,
+) -> Result<Vec<DependencyOverview>> {
+    let floor = min_severity
+        .map(severity_rank)
+        .unwrap_or(i64::MIN);
+    let mut statement = c
+        .prepare("SELECT DISTINCT package_version_id FROM package_vulnerabilities WHERE package_version_id IN (SELECT id FROM package_versions WHERE repository_id=?1)")
+        .map_err(|e| e.to_string())?;
+    let ids = statement
+        .query_map(params![repository_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(statement);
+    let mut report = Vec::new();
+    for id in ids {
+        let mut overview = dependency_overview_conn(c, &id)?;
+        overview
+            .vulnerabilities
+            .retain(|v| severity_rank(&v.severity) >= floor);
+        if !overview.vulnerabilities.is_empty() {
+            report.push(overview);
+        }
+    }
+    report.sort_by_key(|overview| {
+        -overview
+            .vulnerabilities
+            .iter()
+            .map(|v| severity_rank(&v.severity))
+            .max()
+            .unwrap_or(0)
+    });
+    Ok(report)
+}
+
+/// CVSS qualitative severity ordering. Unknown spellings rank lowest so an unrecognised
+/// label never silently outranks a real CRITICAL.
+fn severity_rank(severity: &str) -> i64 {
+    match severity.to_ascii_uppercase().as_str() {
+        "CRITICAL" => 4,
+        "HIGH" => 3,
+        "MEDIUM" | "MODERATE" => 2,
+        "LOW" => 1,
+        _ => 0,
+    }
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1927,39 +2083,91 @@ pub fn remove_package_repository_acl(repository_id: String, profile_id: String) 
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// One version a retention policy would delete, with the rule that condemned it. Computing
+/// candidates is separated from deleting them so the UI can preview a policy (Space shows the
+/// cleanup preview before it runs) and so the rule can be tested without destroying rows.
+#[derive(Debug, Clone, Serialize)]
+pub struct RetentionCandidate {
+    pub id: String,
+    pub package_name: String,
+    pub version: String,
+    pub created_at: i64,
+    pub downloads: i64,
+    /// `"age"`, `"count"` or `"age+count"` — which policy limb matched.
+    pub reason: String,
+}
+
+/// Versions the repository's retention policy would delete, newest-first per package.
+/// Pinned versions are excluded by the query; downloaded ones are excluded when the policy
+/// says `retain_downloaded`. Grouping is by `package_name` — a version's identity, not its
+/// row id spelling.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn apply_package_retention(repository_id: String) -> Result<usize> {
+pub fn package_retention_candidates(repository_id: String) -> Result<Vec<RetentionCandidate>> {
     let c = db::conn()?;
+    package_retention_candidates_conn(&c, &repository_id)
+}
+
+/// Connection-scoped core of `package_retention_candidates` — pure read, no deletion.
+///
+/// The ordering carries a stable secondary key: two versions published in the same second
+/// otherwise kept or deleted by SQLite's row order, so the same repository could answer
+/// differently on two runs (☎Kali-VIII B3).
+pub fn package_retention_candidates_conn(
+    c: &Connection,
+    repository_id: &str,
+) -> Result<Vec<RetentionCandidate>> {
     let (days,count,retain):(Option<i64>,Option<i64>,bool)=c.query_row("SELECT retention_days,retention_version_count,retain_downloaded FROM package_repositories WHERE id=?1",params![repository_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"package repository not found".to_string())?;
     let cutoff = days
         .filter(|value| *value >= 0)
         .map(|value| now_secs() - value * 86_400);
-    let mut statement=c.prepare("SELECT id,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC").map_err(|e|e.to_string())?;
+    let mut statement=c.prepare("SELECT id,package_name,version,created_at,downloads FROM package_versions WHERE repository_id=?1 AND pinned=0 ORDER BY package_name,created_at DESC,id DESC").map_err(|e|e.to_string())?;
     let versions = statement
         .query_map(params![repository_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
             ))
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    let mut seen = std::collections::HashMap::<String, usize>::new();
-    let mut removed = 0;
-    for (id, created, downloads) in versions {
-        let ordinal = seen
-            .entry(id.rsplit("::").nth(1).unwrap_or("").to_string())
-            .or_default();
+    let mut seen = std::collections::HashMap::<String, i64>::new();
+    let mut candidates = Vec::new();
+    for (id, package_name, version, created_at, downloads) in versions {
+        let ordinal = seen.entry(package_name.clone()).or_default();
         *ordinal += 1;
-        let old_by_days = cutoff.is_some_and(|time| created < time);
-        let old_by_count = count.is_some_and(|limit| *ordinal as i64 > limit.max(0));
-        if (old_by_days || old_by_count) && !(retain && downloads > 0) {
-            c.execute("DELETE FROM package_versions WHERE id=?1", params![id])
-                .map_err(|e| e.to_string())?;
-            removed += 1;
+        let old_by_days = cutoff.is_some_and(|time| created_at < time);
+        let old_by_count = count.is_some_and(|limit| *ordinal > limit.max(0));
+        if !(old_by_days || old_by_count) || (retain && downloads > 0) {
+            continue;
         }
+        let reason = match (old_by_days, old_by_count) {
+            (true, true) => "age+count",
+            (true, false) => "age",
+            _ => "count",
+        };
+        candidates.push(RetentionCandidate {
+            id,
+            package_name,
+            version,
+            created_at,
+            downloads,
+            reason: reason.into(),
+        });
+    }
+    Ok(candidates)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn apply_package_retention(repository_id: String) -> Result<usize> {
+    let candidates = package_retention_candidates(repository_id)?;
+    let mut removed = 0;
+    for candidate in candidates {
+        delete_package_version(candidate.id)?;
+        removed += 1;
     }
     Ok(removed)
 }
@@ -2251,6 +2459,207 @@ mod tests {
             d1_after, "OBSOLETE",
             "promoting deploy-2 to CURRENT must supersede deploy-1"
         );
+        sweep(&db_path);
+    }
+
+    /// Retention preview: the policy names exactly the versions it would delete and why.
+    /// The count limit is per package (never per repository), and pinned or still-downloaded
+    /// versions survive when the policy says so.
+    #[test]
+    fn retention_candidates_group_per_package_and_carry_a_reason() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode,retention_version_count,retain_downloaded) VALUES('repo-r','r','npm','HOSTING',1,1)", []).unwrap();
+        let now = now_secs();
+        for (id, name, version, created, downloads, pinned) in [
+            ("v-a1", "alpha", "1.0.0", now, 0, 0),
+            ("v-a2", "alpha", "0.9.0", now - 10, 0, 0),
+            ("v-b1", "beta", "2.0.0", now, 0, 0),
+            ("v-b2", "beta", "1.9.0", now - 10, 7, 0),
+            ("v-b3", "beta", "1.8.0", now - 20, 0, 1),
+        ] {
+            conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,created_at,downloads,pinned) VALUES(?1,'repo-r',?2,?3,?4,?5,?6)", params![id,name,version,created,downloads,pinned]).unwrap();
+        }
+        let candidates = package_retention_candidates_conn(&conn, "repo-r").unwrap();
+        let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
+        // alpha keeps 1 newest → 0.9.0 condemned. beta keeps 1: 1.9.0 has downloads and the
+        // policy retains downloaded; 1.8.0 is pinned and never enters the query.
+        assert_eq!(ids, vec!["v-a2"]);
+        assert_eq!(candidates[0].package_name, "alpha");
+        assert_eq!(candidates[0].reason, "count");
+
+        // Age limb: an explicit day cutoff condemns by age, independently of the count rule.
+        conn.execute("UPDATE package_repositories SET retention_version_count=NULL,retention_days=0,retain_downloaded=0 WHERE id='repo-r'", []).unwrap();
+        conn.execute(
+            "UPDATE package_versions SET created_at=?1 WHERE id='v-a2'",
+            params![now - 86_400],
+        )
+        .unwrap();
+        let aged = package_retention_candidates_conn(&conn, "repo-r").unwrap();
+        assert!(aged.iter().any(|c| c.id == "v-a2" && c.reason == "age"));
+        assert!(
+            !aged.iter().any(|c| c.id == "v-b3"),
+            "pinned versions are never candidates"
+        );
+        sweep(&db_path);
+    }
+
+    /// The CVE ledger query reports only versions of the requested repository, filters by
+    /// severity floor and orders most severe first. It reads the local ledger only.
+    #[test]
+    fn vulnerability_report_filters_by_severity_and_repository() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-v','v','npm','HOSTING'),('repo-other','o','npm','HOSTING')", []).unwrap();
+        conn.execute("INSERT INTO package_versions(id,repository_id,package_name,version,created_at) VALUES('pv-low','repo-v','a','1.0.0',1),('pv-crit','repo-v','b','1.0.0',1),('pv-out','repo-other','c','1.0.0',1)", []).unwrap();
+        conn.execute("INSERT INTO package_vulnerabilities(id,package_version_id,cve_id,severity,affected_range) VALUES('x1','pv-low','CVE-1','LOW','<1'),('x2','pv-crit','CVE-2','CRITICAL','<1'),('x3','pv-out','CVE-3','HIGH','<1')", []).unwrap();
+        let all = repository_vulnerability_report_conn(&conn, "repo-v", None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].version.id, "pv-crit", "most severe first");
+        let high = repository_vulnerability_report_conn(&conn, "repo-v", Some("HIGH")).unwrap();
+        assert_eq!(high.len(), 1);
+        assert_eq!(high[0].vulnerabilities[0].cve_id, "CVE-2");
+        assert_eq!(severity_rank("moderate"), severity_rank("MEDIUM"));
+        assert_eq!(severity_rank("nonsense"), 0);
+        sweep(&db_path);
+    }
+
+    /// ☎Kali-VIII round 4: a publish that is rejected after the bytes arrived must leave
+    /// nothing behind — an orphan file no version references is still a file the next
+    /// republish, retention pass and disk quota have to reason about.
+    #[test]
+    fn a_rejected_publish_leaves_no_orphan_payload_on_disk() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-mvn','demo-maven','maven','HOSTING')", []).unwrap();
+        let base_dir = temp_dir("packages-orphan");
+        let refused = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-mvn",
+            "com.example:demo",
+            "1.0.0",
+            Some(r#"{"formatMetadata":{"groupId":1}}"#),
+            Some("demo-1.0.0.jar"),
+            Some(b"jar-bytes"),
+            None,
+        );
+        assert!(refused.is_err(), "invalid typed metadata must be refused");
+        let dir = base_dir
+            .join("repo-mvn")
+            .join(package_name_dir("com.example:demo"))
+            .join("1.0.0");
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .map(|entries| entries.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        assert!(
+            leftovers.is_empty(),
+            "a refused publish must not leave bytes behind, found {leftovers:?}"
+        );
+        sweep(&db_path);
+        sweep(&base_dir);
+    }
+
+    /// ☎Kali-VIII B1: the immutable refusal used to arrive after the payload had already
+    /// been written, so a rejected republish still changed the bytes the tag served.
+    #[test]
+    fn a_refused_republish_does_not_touch_the_stored_bytes() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode) VALUES('repo-im','demo-oci','container','HOSTING')", []).unwrap();
+        let base_dir = temp_dir("packages-immutable");
+        let first = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("manifest.json"),
+            Some(b"manifest-A"),
+            Some(true),
+        )
+        .unwrap();
+        let meta: serde_json::Value = serde_json::from_str(&first.metadata_json.unwrap()).unwrap();
+        let file_path = meta["_file_path"].as_str().unwrap().to_string();
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "manifest-A");
+
+        let refused = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("manifest.json"),
+            Some(b"manifest-B"),
+            Some(true),
+        );
+        assert!(refused.is_err());
+        assert_eq!(
+            fs::read_to_string(&file_path).unwrap(),
+            "manifest-A",
+            "an immutable tag must still serve the bytes it was published with"
+        );
+
+        // A Maven deploy of one GAV arrives as several requests. Immutable means the
+        // published bytes never change, not that a version may hold a single file, so a
+        // brand-new asset name is accepted while a metadata-only republish is not.
+        let second_asset = publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            None,
+            Some("app.pom"),
+            Some(b"pom-bytes"),
+            Some(true),
+        )
+        .expect("a new asset for an immutable version is part of the same deploy");
+        let meta: serde_json::Value =
+            serde_json::from_str(&second_asset.metadata_json.unwrap()).unwrap();
+        assert!(meta["_files"]["manifest.json"].is_object());
+        assert!(meta["_files"]["app.pom"].is_object());
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "manifest-A");
+        assert!(publish_package_version_tx(
+            &conn,
+            &base_dir,
+            "repo-im",
+            "app",
+            "latest",
+            Some(r#"{"license":"MIT"}"#),
+            None,
+            None,
+            Some(true),
+        )
+        .is_err());
+        sweep(&db_path);
+        sweep(&base_dir);
+    }
+
+    /// ☎Kali-VIII B3: two versions published in the same second must not be kept or deleted
+    /// by SQLite's row order — the answer has to be the same on every run.
+    #[test]
+    fn retention_candidates_are_stable_when_two_versions_share_a_timestamp() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO package_repositories(id,name,format,mode,retention_version_count) VALUES('repo-ret','demo-npm','npm','HOSTING',1)", []).unwrap();
+        for id in ["repo-ret::pkg::1.0.0", "repo-ret::pkg::1.0.1"] {
+            conn.execute(
+                "INSERT INTO package_versions(id,repository_id,package_name,version,created_at) VALUES(?1,'repo-ret','pkg',?2,1000)",
+                params![id, id.rsplit("::").next().unwrap()],
+            )
+            .unwrap();
+        }
+        let first = package_retention_candidates_conn(&conn, "repo-ret").unwrap();
+        let second = package_retention_candidates_conn(&conn, "repo-ret").unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            first.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+            second.iter().map(|c| c.id.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(first[0].id, "repo-ret::pkg::1.0.0");
         sweep(&db_path);
     }
 

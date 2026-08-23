@@ -1,6 +1,6 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
 import { api } from "../api";
-import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type PackageRepository, type PackageVersion } from "../api/pipelines";
+import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type RetentionCandidate } from "../api/pipelines";
 import "./Packages.css";
 
 export default function Packages() {
@@ -89,6 +89,8 @@ export default function Packages() {
   const [pubContent, setPubContent] = createSignal("");
 const [pubImmutable, setPubImmutable] = createSignal(false);
 const [overview, setOverview] = createSignal<{ cve_id: string; severity: string; affected_range: string }[] | null>(null);
+  const [candidates, setCandidates] = createSignal<RetentionCandidate[] | null>(null);
+  const [repoReport, setRepoReport] = createSignal<DependencyOverview[] | null>(null);
 
   async function publish(e: SubmitEvent) {
     e.preventDefault();
@@ -123,6 +125,17 @@ setPubImmutable(false);
     const repo = selected();
     if (!repo) return;
     try { const removed = await pipelinesApi.applyPackageRetention(repo.id); setError(removed ? `Retention removed ${removed} version(s)` : "Retention found no removable versions"); refetchVersions(); } catch (err) { setError(String(err)); }
+  }
+  /// Preview before deleting: retention candidates are computed and shown, never applied here.
+  async function previewRetention() {
+    const repo = selected();
+    if (!repo) return;
+    try { setCandidates(await pipelinesApi.packageRetentionCandidates(repo.id)); } catch (err) { setError(String(err)); }
+  }
+  async function showRepoCves() {
+    const repo = selected();
+    if (!repo) return;
+    try { setRepoReport(await pipelinesApi.repositoryVulnerabilityReport(repo.id)); } catch (err) { setError(String(err)); }
   }
   async function showOverview(v: PackageVersion) { try { setOverview((await pipelinesApi.dependencyOverview(v.id)).vulnerabilities); } catch (err) { setError(String(err)); } }
 async function togglePinned(v: PackageVersion) {
@@ -194,7 +207,27 @@ async function togglePinned(v: PackageVersion) {
                 </div>
               </header>
               <p class="hint">{repo().description ?? "no description"} · {repo().access_level}</p>
-              <button class="ghost small" onClick={applyRetention}>Apply retention</button>
+              <div class="repo-actions">
+                <button class="ghost small" onClick={previewRetention}>Preview retention</button>
+                <button class="ghost small" onClick={applyRetention}>Apply retention</button>
+                <button class="ghost small" onClick={showRepoCves}>Repository CVEs</button>
+              </div>
+              <Show when={candidates()}>
+                <div class="metadata-view">
+                  <header><strong>Retention would delete {candidates()!.length} version(s)</strong><button class="ghost small" onClick={() => setCandidates(null)}>×</button></header>
+                  <Show when={candidates()!.length} fallback={<p class="hint pad">Nothing matches this policy.</p>}>
+                    <ul><For each={candidates()!}>{(c) => <li>{c.package_name} <code>{c.version}</code> · {c.reason} · {c.downloads} download(s)</li>}</For></ul>
+                  </Show>
+                </div>
+              </Show>
+              <Show when={repoReport()}>
+                <div class="metadata-view">
+                  <header><strong>Repository CVE ledger</strong><button class="ghost small" onClick={() => setRepoReport(null)}>×</button></header>
+                  <Show when={repoReport()!.length} fallback={<p class="hint pad">No local CVEs recorded (no-op scanner).</p>}>
+                    <ul><For each={repoReport()!}>{(o) => <li>{o.version.package_name} <code>{o.version.version}</code> · {o.vulnerabilities.map((v) => `${v.cve_id} (${v.severity})`).join(", ")}</li>}</For></ul>
+                  </Show>
+                </div>
+              </Show>
 
               <section class="publish-section">
                 <h3>Publish version</h3>
