@@ -339,6 +339,7 @@ export default function Reviews() {
     }
   }
   // ---------- protected branches ----------
+  const [editingProtectionId, setEditingProtectionId] = createSignal<string | null>(null);
   const [protectionPattern, setProtectionPattern] = createSignal("main");
   const [protectionRegex, setProtectionRegex] = createSignal(false);
   const [protectionCreate, setProtectionCreate] = createSignal("");
@@ -348,28 +349,48 @@ export default function Reviews() {
   const [protectionMerge, setProtectionMerge] = createSignal("");
   const [protectionBypass, setProtectionBypass] = createSignal("");
   const [protectionLinear, setProtectionLinear] = createSignal(false);
+  function principalList(json: string | null): string {
+    try { return json ? (JSON.parse(json) as string[]).join(", ") : ""; }
+    catch { return ""; }
+  }
+  function editProtection(rule: ProtectedBranchRule) {
+    setEditingProtectionId(rule.id);
+    setProtectionPattern(rule.branch_pattern); setProtectionRegex(rule.regex);
+    setProtectionCreate(principalList(rule.allow_create_json));
+    setProtectionPush(principalList(rule.allow_push_json));
+    setProtectionDelete(principalList(rule.allow_delete_json));
+    setProtectionForcePush(principalList(rule.allow_force_push_json));
+    setProtectionMerge(principalList(rule.allow_merge_json));
+    setProtectionBypass(principalList(rule.bypass_quality_gate_json));
+    setProtectionLinear(rule.linear_history);
+  }
+  function resetProtectionForm() {
+    setEditingProtectionId(null); setProtectionPattern("main"); setProtectionRegex(false);
+    setProtectionCreate(""); setProtectionPush(""); setProtectionDelete("");
+    setProtectionForcePush(""); setProtectionMerge(""); setProtectionBypass("");
+    setProtectionLinear(false);
+  }
   async function saveProtection(e: SubmitEvent) {
     e.preventDefault();
     const projectId = selected()?.project_id;
     if (!projectId) return;
     const rule: ProtectedBranchRule = {
-      id: newId("protection"), project_id: projectId,
+      id: editingProtectionId() ?? newId("protection"), project_id: projectId,
       branch_pattern: protectionPattern().trim() || "*", regex: protectionRegex(),
       allow_create_json: jsonList(protectionCreate()), allow_push_json: jsonList(protectionPush()),
       allow_delete_json: jsonList(protectionDelete()), allow_force_push_json: jsonList(protectionForcePush()),
       allow_merge_json: jsonList(protectionMerge()), linear_history: protectionLinear(),
       bypass_quality_gate_json: jsonList(protectionBypass()),
     };
-    try {
-      await reviewApi.saveProtectedBranchRule(rule);
-      setProtectionCreate(""); setProtectionPush(""); setProtectionDelete("");
-      setProtectionForcePush(""); setProtectionMerge(""); setProtectionBypass("");
-      refetchProtectedRules();
-    } catch (err) { setError(String(err)); }
+    try { await reviewApi.saveProtectedBranchRule(rule); resetProtectionForm(); refetchProtectedRules(); }
+    catch (err) { setError(String(err)); }
   }
   async function deleteProtection(id: string) {
-    try { await reviewApi.deleteProtectedBranchRule(id); refetchProtectedRules(); }
-    catch (err) { setError(String(err)); }
+    try {
+      await reviewApi.deleteProtectedBranchRule(id);
+      if (editingProtectionId() === id) resetProtectionForm();
+      refetchProtectedRules();
+    } catch (err) { setError(String(err)); }
   }
 
   // ---------- stacked merge requests (cherry-pick / restack) ----------
@@ -883,7 +904,8 @@ async function removeExternalIssueLink(id: string) {
                           {rule.allow_merge_json
                             ? ` · merge: ${(JSON.parse(rule.allow_merge_json) as string[]).join(", ")}`
                             : " · merge: nobody"}
-                          <button class="ghost small" onClick={() => deleteProtection(rule.id)}>×</button>
+                          <button class="ghost small" onClick={() => editProtection(rule)}>Edit</button>
+                          <button class="ghost small" aria-label={`Delete protection ${rule.branch_pattern}`} onClick={() => deleteProtection(rule.id)}>×</button>
                         </li>
                       )}
                     </For>
@@ -898,7 +920,10 @@ async function removeExternalIssueLink(id: string) {
                     <input placeholder="force-push principals" value={protectionForcePush()} onInput={(e) => setProtectionForcePush(e.currentTarget.value)} />
                     <input placeholder="merge principals" value={protectionMerge()} onInput={(e) => setProtectionMerge(e.currentTarget.value)} />
                     <input placeholder="gate-bypass principals" value={protectionBypass()} onInput={(e) => setProtectionBypass(e.currentTarget.value)} />
-                    <button class="ghost">Protect branch</button>
+                    <button class="ghost">{editingProtectionId() ? "Save protection" : "Protect branch"}</button>
+                    <Show when={editingProtectionId()}>
+                      <button type="button" class="ghost" onClick={resetProtectionForm}>Cancel</button>
+                    </Show>
                   </form>
                 </details>
 
