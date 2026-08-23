@@ -53,13 +53,15 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V117 → feat/w11-chat (message polls: `message_polls` · `message_poll_options` · `message_poll_votes`) ☀Ganga
 - V118 → feat/w11-chat (history paging + link unfurling: `message_links` · `link_previews` cache) ☀Surya
 - V119 → feat/w12-chatdocs (§04 partial昇格: mentions group/team targets · thread scheduled/paging UI · article comment channel) ☀wave12
-- V120 → feat/w12-fields (§02: board column reorder UI · swimlane deepening · bulk edit) ☀wave12
-- V121 → feat/w12-review (§01 git/review core: MR diff UI · branch protection · external checks remainder) ☀wave12
+- V120 → feat/w12-fields (§02: board column reorder UI · swimlane deepening · bulk edit) ☀wave12 — 2026-08-23 reservation confirmed · unused by §08 calls · fields/boards scope
+- V121 → feat/w12-review (§01 git/review core: MR diff UI · branch protection · external checks remainder) ☀wave12 — 2026-08-23 reservation confirmed · unused by §08 calls · review scope
 - V122 → feat/w12-personal (§06 stub2+missing5 personal/org remainder) ☀wave12
 - V123 → feat/w12-registry (§03 non-CI/CD registry protocol per-format detail) ☀wave12
-- V124 → feat/w12-api (§07 non-devenv HTTP API remainder) ☀wave12
+- V124 → feat/w12-api (§07 non-devenv HTTP API remainder) ☀wave12 — 2026-08-23 reservation confirmed · unused by §08 calls · HTTP API scope
 - V126 → feat/w13-chatdocs (§04 entity mentions; migration-only slot) ☀Terra
 - V127 → feat/w13-directory (§06 Advanced Directory feed/calendar + profile separation) ☀Terra
+- V128 → feat/w13-api (§07 application parameters + owner) ☀Terra
+- V129 → feat/w13-calls (§08 call lifecycle audit facts + recording completion evidence) ☀Surya
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 359 rows): done 109 · partial 198 · stub 3 · missing 49. Matrix NOT green — steering loop active.

@@ -771,7 +771,7 @@ pub fn end_meeting_call(app: AppHandle, meeting_id: String) -> Result<bool> {
     if meeting.organizer_id.as_deref() != Some(participant_id.as_str()) {
         return Err("Only the meeting organizer can end the call".into());
     }
-    meetings::end_call_on(&connection, &meeting_id)
+    meetings::end_call_on(&connection, &meeting_id, &participant_id)
 }
 
 /// LiveKit room-composite Egress handle as Gaia records it. The Egress worker writes

@@ -39,7 +39,7 @@ const { default: CallPanel } = await import("./CallPanel");
 
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
-const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled" };
+const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null };
 afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; ipcCommands.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
 
 test("joining exposes native media controls, device selectors, and a clean leave", async () => {
@@ -78,7 +78,7 @@ expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("start_meeting_recording");
-  expect(host.textContent).toContain("Recording in progress");
+  expect(host.textContent).toContain("Recording recording");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Stop recording") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("stop_meeting_recording");
@@ -103,12 +103,14 @@ test("a persisted running egress job is shown on join, so a restart cannot stran
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("list_meeting_recordings");
-  expect(host.textContent).toContain("Recording in progress");
+  expect(host.textContent).toContain("Recording recording");
+  expect(host.textContent).toContain("Recording history");
+  expect(host.textContent).toContain("recordings/meeting-meeting-1.mp4");
   // The organizer can stop the job they never started in this process.
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Stop recording") as HTMLButtonElement).click();
   await settle();
   expect(ipcCommands).toContain("stop_meeting_recording");
-  expect(host.textContent).not.toContain("Recording in progress");
+  expect(host.textContent).not.toContain("Recording recording");
 });
 
 // The backend refuses recording when it cannot name the acting profile. The UI must
@@ -168,10 +170,13 @@ test("only the organizer can end the call, and a non-organizer sees leave alone"
 
 test("a meeting that already has a bound room shows it before anyone joins", async () => {
   const host = document.createElement("div"); document.body.append(host);
-  dispose = render(() => <CallPanel meeting={{ ...meeting, video_provider: "livekit", video_room_id: "meeting-meeting-1", join_url: "ws://livekit.test", video_status: "live" }} identity="me" displayName="Me" />, host);
+  dispose = render(() => <CallPanel meeting={{ ...meeting, video_provider: "livekit", video_room_id: "meeting-meeting-1", join_url: "ws://livekit.test", video_status: "ended", video_started_at: 1, video_ended_at: 2, video_ended_by: "me" }} identity="me" displayName="Me" />, host);
   await settle();
   expect(host.textContent).toContain("meeting-meeting-1");
-  expect(host.textContent).toContain("live");
+  expect(host.textContent).toContain("ended");
+  expect(host.textContent).toContain("Started");
+  expect(host.textContent).toContain("Ended");
+  expect(host.textContent).toContain("by me");
 });
 
 test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {

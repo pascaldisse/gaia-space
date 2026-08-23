@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 // `video_room_id`/`join_url` are read-only here: the native join path writes them and
 // `update_meeting` ignores them, so the webview cannot repoint a call at another room.
 export type VideoStatus = "scheduled"|"live"|"ended"|"cancelled";
-export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; visibility:"public"|"private"|"participants"; modification_preference:"organizer-only"|"participants"; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus };
+export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; visibility:"public"|"private"|"participants"; modification_preference:"organizer-only"|"participants"; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus; video_started_at:number|null; video_ended_at:number|null; video_ended_by:string|null };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
 export type MeetingRoom = { id:string; name:string; location:string|null; capacity:number; archived:boolean; equipment:string[] };
 export type MeetingAvailability = { rooms: Array<MeetingRoom & { available:boolean }>; conflicts: Array<{ kind:"room"|"meeting"|"absence"; profile_id:string|null; meeting_id:string|null; room_id:string|null; message:string }>; suggestions: MeetingRoom[] };

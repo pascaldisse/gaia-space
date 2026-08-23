@@ -99,6 +99,9 @@ export default function Meetings() {
         video_room_id: null,
         join_url: null,
         video_status: "scheduled",
+        video_started_at: null,
+        video_ended_at: null,
+        video_ended_by: null,
       };
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);

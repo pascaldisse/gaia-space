@@ -903,6 +903,9 @@ async fn app_create_room(
         video_room_id: None,
         join_url: None,
         video_status: input.video_status,
+        video_started_at: None,
+        video_ended_at: None,
+        video_ended_by: None,
     };
     meetings::create_meeting(room.clone())
         .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;

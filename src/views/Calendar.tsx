@@ -79,7 +79,7 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled"};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null};
 await meetingsApi.create(meeting);
 const channel_id = await meetingsApi.attachChannel(meeting.id);
 const created = { ...meeting, channel_id };
@@ -242,7 +242,7 @@ return <section class="calendar-view">
 <label>Visibility<select value={item().visibility} onChange={e=>setDraft({...item(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={item().modification_preference} onChange={e=>setDraft({...item(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <label>Repeat<input value={item().rrule??""} onInput={e=>setDraft({...item(),rrule:e.currentTarget.value||null})}/></label>
-<label>Call status<select aria-label="Call status" value={item().video_status} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option><option value="cancelled">Cancelled</option></select></label>
+<label>Call status<select aria-label="Call status" value={item().video_status} disabled={item().video_status !== "scheduled"} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="cancelled">Cancelled</option></select></label>
 <Show when={item().video_room_id}>{room=><p class="hint" data-meeting-room>Call room: {room()} · {item().join_url}</p>}</Show>
 <a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a><Show when={item().channel_id} fallback={<button onClick={async()=>{ try { const channel_id=await meetingsApi.attachChannel(item().id); setDraft({...item(),channel_id}); reloadMeetings(); } catch(reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({view:"Chat",entityType:"channel",entityId:item().channel_id!})}>Open discussion</a></Show>
 <section class="rsvp">
