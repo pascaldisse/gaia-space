@@ -371,6 +371,8 @@ pub fn run() {
             documents::create_document_folder,
             documents::update_document_folder,
             documents::move_document_folder,
+            documents::attach_document_discussion,
+            documents::get_document_discussion,
             meetings::list_meetings,
             meetings::get_meeting,
             meetings::create_meeting,

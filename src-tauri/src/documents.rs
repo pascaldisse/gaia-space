@@ -45,6 +45,12 @@ pub struct Document {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentDiscussion {
+    pub document_id: String,
+    pub channel_id: String,
+    pub meeting_id: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DocVersion {
     pub id: String,
     pub document_id: String,
@@ -432,6 +438,70 @@ fn document_event(event_type: &str, doc: &Document) {
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
         eprintln!("webhook fan-out for {event_type} failed: {e}");
     }
+}
+
+fn discussion_row(r: &rusqlite::Row) -> rusqlite::Result<DocumentDiscussion> {
+    Ok(DocumentDiscussion {
+        document_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        meeting_id: r.get(2)?,
+    })
+}
+fn document_discussion_on(
+    c: &rusqlite::Connection,
+    document_id: &str,
+) -> Result<Option<DocumentDiscussion>> {
+    c.query_row(
+        "SELECT document_id,channel_id,meeting_id FROM document_discussions WHERE document_id=?1",
+        [document_id],
+        discussion_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+fn attach_document_discussion_on(
+    c: &rusqlite::Connection,
+    document_id: &str,
+    meeting_id: Option<&str>,
+) -> Result<DocumentDiscussion> {
+    let title: String = c
+        .query_row(
+            "SELECT title FROM documents WHERE id=?1",
+            [document_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "document not found".to_string())?;
+    if let Some(meeting_id) = meeting_id {
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM meetings WHERE id=?1 AND archived=0)",
+                [meeting_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err("meeting not found".into());
+        }
+    }
+    let channel = crate::chat::create_entity_channel_impl(
+        c,
+        "document",
+        document_id,
+        Some(format!("{title} discussion")),
+    )?;
+    c.execute("INSERT INTO document_discussions(document_id,channel_id,meeting_id) VALUES(?1,?2,?3) ON CONFLICT(document_id) DO UPDATE SET meeting_id=excluded.meeting_id", rusqlite::params![document_id, channel.id, meeting_id]).map_err(|e| e.to_string())?;
+    document_discussion_on(c, document_id)?.ok_or_else(|| "discussion missing after attach".into())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn attach_document_discussion(
+    document_id: String,
+    meeting_id: Option<String>,
+) -> Result<DocumentDiscussion> {
+    attach_document_discussion_on(&db::conn()?, &document_id, meeting_id.as_deref())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_document_discussion(document_id: String) -> Result<Option<DocumentDiscussion>> {
+    document_discussion_on(&db::conn()?, &document_id)
 }
 
 fn row_to_doc_version(r: &rusqlite::Row) -> rusqlite::Result<DocVersion> {

@@ -31,6 +31,9 @@ fn save_on(c: &Connection, value: &ChannelSubscription) -> Result<ChannelSubscri
     if !channel_exists(c, &value.channel_id)? || !profile_exists(c, &value.profile_id)? {
         return Err("channel or profile not found".into());
     }
+    if !crate::chat::channel_allows_profile(c, &value.channel_id, &value.profile_id)? {
+        return Err("channel access denied".into());
+    }
     c.execute("INSERT INTO channel_subscriptions(channel_id,profile_id,enabled) VALUES(?1,?2,?3) ON CONFLICT(channel_id,profile_id) DO UPDATE SET enabled=excluded.enabled", rusqlite::params![value.channel_id, value.profile_id, value.enabled]).map_err(|e| e.to_string())?;
     Ok(value.clone())
 }
