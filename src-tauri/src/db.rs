@@ -470,7 +470,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     // V61: quality-gate application/role principals.  These are nullable JSON
     // principal lists so every existing rule keeps its prior meaning.
-    if version < 61 {
+    if version < 61 && table_exists(&tx, "quality_gate_rules")? {
         add_column_if_missing(&tx, "quality_gate_rules", "applications_json", "TEXT")?;
         add_column_if_missing(&tx, "quality_gate_rules", "roles_json", "TEXT")?;
     }
