@@ -9,6 +9,8 @@ import {
   type ProfileEmailStatus,
   type MessengerContact,
 } from "../api/platform";
+import { personalApi, type Absence, type CalendarItem } from "../api/personal";
+import { blogsApi, type BlogPost } from "../api/blogs";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
@@ -32,14 +34,30 @@ export default function Members() {
   );
   const [roles] = createResource(() => platformApi.roles());
   const [allMemberships] = createResource(() => platformApi.memberships());
-  const [locations, { refetch: refetchLocations }] = createResource(() => platformApi.memberLocations());
+  const [locations, { refetch: refetchLocations }] = createResource(() =>
+    platformApi.memberLocations(),
+  );
   const [profileDraft, setProfileDraft] = createSignal(newProfile());
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
   );
-  const [emailStatus, { refetch: refetchEmailStatus }] = createResource(() => profileEditing()?.id, (id) => id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null));
-  const [contacts, { refetch: refetchContacts }] = createResource(() => profileEditing()?.id, (id) => id ? platformApi.messengerContacts(id) : Promise.resolve([] as MessengerContact[]));
-  const [contactDraft, setContactDraft] = createSignal({ contact_type: "", login: "", deep_link: "" });
+  const [emailStatus, { refetch: refetchEmailStatus }] = createResource(
+    () => profileEditing()?.id,
+    (id) =>
+      id ? platformApi.getProfileEmailStatus(id) : Promise.resolve(null),
+  );
+  const [contacts, { refetch: refetchContacts }] = createResource(
+    () => profileEditing()?.id,
+    (id) =>
+      id
+        ? platformApi.messengerContacts(id)
+        : Promise.resolve([] as MessengerContact[]),
+  );
+  const [contactDraft, setContactDraft] = createSignal({
+    contact_type: "",
+    login: "",
+    deep_link: "",
+  });
   const [teamDraft, setTeamDraft] = createSignal(newTeam());
   const [activeTeam, setActiveTeam] = createSignal<Team | null>(null);
   const [memberId, setMemberId] = createSignal("");
@@ -52,6 +70,38 @@ export default function Members() {
   const [locationProfileId, setLocationProfileId] = createSignal("");
   const [locationDraft, setLocationDraft] = createSignal("");
   const [locationType, setLocationType] = createSignal("Building");
+  const today = new Date().toISOString().slice(0, 10);
+  const [absences] = createResource(() => personalApi.currentAbsences(today));
+  const [feed] = createResource(
+    () => activeTeam()?.id ?? "",
+    (teamId) => blogsApi.list(teamId ? { team_id: teamId } : {}),
+  );
+  const [profileCalendar] = createResource(
+    () => profileEditing()?.id,
+    (id) => {
+      if (!id) return Promise.resolve([] as CalendarItem[]);
+      const start = Math.floor(Date.now() / 1000);
+      const end = start + 14 * 86400;
+      return personalApi.calendar(
+        id,
+        start,
+        end,
+        today,
+        new Date(end * 1000).toISOString().slice(0, 10),
+      );
+    },
+  );
+  const absenceFor = (profileId: string) =>
+    (absences() ?? []).find(
+      (absence: Absence) => absence.profile_id === profileId,
+    );
+  const recentFeed = createMemo(() =>
+    [...((feed() ?? []) as BlogPost[])]
+      .filter((post) => !post.archived)
+      .sort((a, b) => b.published_at - a.published_at)
+      .slice(0, 8),
+  );
+  const stamp = (seconds: number) => new Date(seconds * 1000).toLocaleString();
   const [memberships, { refetch: refetchMemberships }] = createResource(
     () => activeTeam()?.id,
     (id) =>
@@ -60,19 +110,52 @@ export default function Members() {
         : Promise.resolve([] as TeamMembership[]),
   );
 
-  const positions = createMemo(() => [...new Set((allMemberships() ?? []).flatMap((membership) => {
-    const role = roles()?.find((item: Role) => item.id === membership.role_id);
-    return role ? [role.name] : [];
-  }))].sort());
-  const locationNames = createMemo(() => [...new Set((locations() ?? []).map((location) => location.location))].sort());
+  const positions = createMemo(() =>
+    [
+      ...new Set(
+        (allMemberships() ?? []).flatMap((membership) => {
+          const role = roles()?.find(
+            (item: Role) => item.id === membership.role_id,
+          );
+          return role ? [role.name] : [];
+        }),
+      ),
+    ].sort(),
+  );
+  const locationNames = createMemo(() =>
+    [
+      ...new Set((locations() ?? []).map((location) => location.location)),
+    ].sort(),
+  );
   const listedProfiles = createMemo(() => {
     const query = directoryQuery().trim().toLocaleLowerCase();
     return (profiles() ?? []).filter((profile) => {
       if (!includeArchived() && profile.archived) return false;
-      if (query && ![profile.display_name, profile.username, profile.email ?? ""].some((value) => value.toLocaleLowerCase().includes(query))) return false;
-      const membershipsForProfile = (allMemberships() ?? []).filter((item) => item.profile_id === profile.id);
-      if (positionFilter() && !membershipsForProfile.some((item) => roleName(item.role_id) === positionFilter())) return false;
-      return !locationFilter() || (locations() ?? []).some((item) => item.profile_id === profile.id && item.location === locationFilter());
+      if (
+        query &&
+        ![profile.display_name, profile.username, profile.email ?? ""].some(
+          (value) => value.toLocaleLowerCase().includes(query),
+        )
+      )
+        return false;
+      const membershipsForProfile = (allMemberships() ?? []).filter(
+        (item) => item.profile_id === profile.id,
+      );
+      if (
+        positionFilter() &&
+        !membershipsForProfile.some(
+          (item) => roleName(item.role_id) === positionFilter(),
+        )
+      )
+        return false;
+      return (
+        !locationFilter() ||
+        (locations() ?? []).some(
+          (item) =>
+            item.profile_id === profile.id &&
+            item.location === locationFilter(),
+        )
+      );
     });
   });
   const listedTeams = createMemo(() =>
@@ -156,15 +239,62 @@ export default function Members() {
   };
   const addLocation = async () => {
     if (!locationProfileId() || !locationDraft().trim()) return;
-    try { await platformApi.addMemberLocation(locationProfileId(), locationDraft().trim(), locationType()); setLocationDraft(""); setProblem(""); refetchLocations(); }
-    catch (error) { setProblem(String(error)); }
+    try {
+      await platformApi.addMemberLocation(
+        locationProfileId(),
+        locationDraft().trim(),
+        locationType(),
+      );
+      setLocationDraft("");
+      setProblem("");
+      refetchLocations();
+    } catch (error) {
+      setProblem(String(error));
+    }
   };
   const removeLocation = async (location: MemberLocation) => {
-    try { await platformApi.removeMemberLocation(location.id); setProblem(""); refetchLocations(); }
-    catch (error) { setProblem(String(error)); }
+    try {
+      await platformApi.removeMemberLocation(location.id);
+      setProblem("");
+      refetchLocations();
+    } catch (error) {
+      setProblem(String(error));
+    }
   };
-  const setEmailVerification = async (status: ProfileEmailStatus["status"]) => { const profile = profileEditing(); if (!profile) return; try { await platformApi.setProfileEmailStatus({ profile_id: profile.id, status, verified_at: status === "verified" ? Math.floor(Date.now() / 1000) : null }); refetchEmailStatus(); setProblem(""); } catch (error) { setProblem(String(error)); } };
-  const saveContact = async () => { const profile = profileEditing(); const value = contactDraft(); if (!profile || !value.contact_type.trim() || !value.login.trim()) return; try { await platformApi.saveMessengerContact({ profile_id: profile.id, contact_type: value.contact_type.trim(), login: value.login.trim(), deep_link: value.deep_link.trim() || null }); setContactDraft({ contact_type: "", login: "", deep_link: "" }); refetchContacts(); setProblem(""); } catch (error) { setProblem(String(error)); } };
+  const setEmailVerification = async (status: ProfileEmailStatus["status"]) => {
+    const profile = profileEditing();
+    if (!profile) return;
+    try {
+      await platformApi.setProfileEmailStatus({
+        profile_id: profile.id,
+        status,
+        verified_at:
+          status === "verified" ? Math.floor(Date.now() / 1000) : null,
+      });
+      refetchEmailStatus();
+      setProblem("");
+    } catch (error) {
+      setProblem(String(error));
+    }
+  };
+  const saveContact = async () => {
+    const profile = profileEditing();
+    const value = contactDraft();
+    if (!profile || !value.contact_type.trim() || !value.login.trim()) return;
+    try {
+      await platformApi.saveMessengerContact({
+        profile_id: profile.id,
+        contact_type: value.contact_type.trim(),
+        login: value.login.trim(),
+        deep_link: value.deep_link.trim() || null,
+      });
+      setContactDraft({ contact_type: "", login: "", deep_link: "" });
+      refetchContacts();
+      setProblem("");
+    } catch (error) {
+      setProblem(String(error));
+    }
+  };
   const archiveProfile = async (profile: Profile) => {
     try {
       await platformApi.updateProfile({
@@ -269,9 +399,32 @@ export default function Members() {
             </Show>
           </div>
           <div class="org-form">
-            <input aria-label="Search directory" placeholder="Search people" value={directoryQuery()} onInput={(event) => setDirectoryQuery(event.currentTarget.value)} />
-            <select aria-label="Filter by position" value={positionFilter()} onChange={(event) => setPositionFilter(event.currentTarget.value)}><option value="">All positions</option><For each={positions()}>{(position) => <option value={position}>{position}</option>}</For></select>
-            <select aria-label="Filter by location" value={locationFilter()} onChange={(event) => setLocationFilter(event.currentTarget.value)}><option value="">All locations</option><For each={locationNames()}>{(location) => <option value={location}>{location}</option>}</For></select>
+            <input
+              aria-label="Search directory"
+              placeholder="Search people"
+              value={directoryQuery()}
+              onInput={(event) => setDirectoryQuery(event.currentTarget.value)}
+            />
+            <select
+              aria-label="Filter by position"
+              value={positionFilter()}
+              onChange={(event) => setPositionFilter(event.currentTarget.value)}
+            >
+              <option value="">All positions</option>
+              <For each={positions()}>
+                {(position) => <option value={position}>{position}</option>}
+              </For>
+            </select>
+            <select
+              aria-label="Filter by location"
+              value={locationFilter()}
+              onChange={(event) => setLocationFilter(event.currentTarget.value)}
+            >
+              <option value="">All locations</option>
+              <For each={locationNames()}>
+                {(location) => <option value={location}>{location}</option>}
+              </For>
+            </select>
           </div>
           <form class="org-form" onSubmit={saveProfile}>
             <input
@@ -317,18 +470,161 @@ export default function Members() {
           </form>
           <div class="org-form">
             <Show when={profileEditing()}>
-            <section class="org-form" aria-label="Profile communication">
-              <label>Email status <select value={emailStatus()?.status ?? "unverified"} onChange={(event) => setEmailVerification(event.currentTarget.value as ProfileEmailStatus["status"])}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
-              <For each={contacts() ?? []}>{(contact) => <p class="org-sub">{contact.contact_type}: {contact.deep_link ? <a href={contact.deep_link}>{contact.login}</a> : contact.login}</p>}</For>
-              <div class="org-form-inline"><input aria-label="Messenger type" placeholder="Messenger" value={contactDraft().contact_type} onInput={(event) => setContactDraft({ ...contactDraft(), contact_type: event.currentTarget.value })} /><input aria-label="Messenger login" placeholder="Login" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })} /><input aria-label="Messenger deep link" placeholder="Deep link (optional)" value={contactDraft().deep_link} onInput={(event) => setContactDraft({ ...contactDraft(), deep_link: event.currentTarget.value })} /><button type="button" class="ghost" onClick={saveContact}>Add contact</button></div>
-            </section>
-          </Show>
-          <select aria-label="Person location" value={locationProfileId()} onChange={(event) => setLocationProfileId(event.currentTarget.value)}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></select>
-            <input aria-label="Location name" placeholder="Location" value={locationDraft()} onInput={(event) => setLocationDraft(event.currentTarget.value)} />
-            <select aria-label="Location type" value={locationType()} onChange={(event) => setLocationType(event.currentTarget.value)}><For each={["Region", "Campus", "Building", "Floor", "Room", "ConferenceRoom"]}>{(type) => <option value={type}>{type}</option>}</For></select>
-            <button type="button" class="ghost" disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</button>
+              <section class="org-form" aria-label="Profile communication">
+                <label>
+                  Email status{" "}
+                  <select
+                    value={emailStatus()?.status ?? "unverified"}
+                    onChange={(event) =>
+                      setEmailVerification(
+                        event.currentTarget
+                          .value as ProfileEmailStatus["status"],
+                      )
+                    }
+                  >
+                    <option value="unverified">Unverified</option>
+                    <option value="verified">Verified</option>
+                    <option value="bounced">Bounced</option>
+                  </select>
+                </label>
+                <For each={contacts() ?? []}>
+                  {(contact) => (
+                    <p class="org-sub">
+                      {contact.contact_type}:{" "}
+                      {contact.deep_link ? (
+                        <a href={contact.deep_link}>{contact.login}</a>
+                      ) : (
+                        contact.login
+                      )}
+                    </p>
+                  )}
+                </For>
+                <div class="org-form-inline">
+                  <input
+                    aria-label="Messenger type"
+                    placeholder="Messenger"
+                    value={contactDraft().contact_type}
+                    onInput={(event) =>
+                      setContactDraft({
+                        ...contactDraft(),
+                        contact_type: event.currentTarget.value,
+                      })
+                    }
+                  />
+                  <input
+                    aria-label="Messenger login"
+                    placeholder="Login"
+                    value={contactDraft().login}
+                    onInput={(event) =>
+                      setContactDraft({
+                        ...contactDraft(),
+                        login: event.currentTarget.value,
+                      })
+                    }
+                  />
+                  <input
+                    aria-label="Messenger deep link"
+                    placeholder="Deep link (optional)"
+                    value={contactDraft().deep_link}
+                    onInput={(event) =>
+                      setContactDraft({
+                        ...contactDraft(),
+                        deep_link: event.currentTarget.value,
+                      })
+                    }
+                  />
+                  <button type="button" class="ghost" onClick={saveContact}>
+                    Add contact
+                  </button>
+                </div>
+              </section>
+            </Show>
+            <Show
+              when={profileEditing() && (profileCalendar() ?? []).length > 0}
+            >
+              <section class="org-form" aria-label="Upcoming calendar">
+                <p class="org-sub">
+                  <strong>Next 14 days</strong>
+                </p>
+                <For each={profileCalendar() ?? []}>
+                  {(item) => (
+                    <p class="org-sub">
+                      {stamp(item.starts_at)} · {item.kind} · {item.title}
+                    </p>
+                  )}
+                </For>
+              </section>
+            </Show>
+            <select
+              aria-label="Person location"
+              value={locationProfileId()}
+              onChange={(event) =>
+                setLocationProfileId(event.currentTarget.value)
+              }
+            >
+              <option value="">Assign location to…</option>
+              <For each={listedProfiles()}>
+                {(profile) => (
+                  <option value={profile.id}>{profile.display_name}</option>
+                )}
+              </For>
+            </select>
+            <input
+              aria-label="Location name"
+              placeholder="Location"
+              value={locationDraft()}
+              onInput={(event) => setLocationDraft(event.currentTarget.value)}
+            />
+            <select
+              aria-label="Location type"
+              value={locationType()}
+              onChange={(event) => setLocationType(event.currentTarget.value)}
+            >
+              <For
+                each={[
+                  "Region",
+                  "Campus",
+                  "Building",
+                  "Floor",
+                  "Room",
+                  "ConferenceRoom",
+                ]}
+              >
+                {(type) => <option value={type}>{type}</option>}
+              </For>
+            </select>
+            <button
+              type="button"
+              class="ghost"
+              disabled={!locationProfileId() || !locationDraft().trim()}
+              onClick={addLocation}
+            >
+              Add location
+            </button>
           </div>
-          <Show when={(locations() ?? []).length > 0}><ul class="org-list"><For each={locations()}>{(location) => <li><div class="org-list-text"><strong>{location.location}</strong><span class="org-sub">{personName(location.profile_id)} · {location.location_type}</span></div><button class="ghost small" onClick={() => removeLocation(location)}>Remove</button></li>}</For></ul></Show>
+          <Show when={(locations() ?? []).length > 0}>
+            <ul class="org-list">
+              <For each={locations()}>
+                {(location) => (
+                  <li>
+                    <div class="org-list-text">
+                      <strong>{location.location}</strong>
+                      <span class="org-sub">
+                        {personName(location.profile_id)} ·{" "}
+                        {location.location_type}
+                      </span>
+                    </div>
+                    <button
+                      class="ghost small"
+                      onClick={() => removeLocation(location)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
           <Show when={profiles.loading}>
             <p class="org-hint">Loading…</p>
           </Show>
@@ -368,6 +664,21 @@ export default function Members() {
                       <Show when={profile.email}>
                         <span class="dot">·</span>
                         <span class="muted">{profile.email}</span>
+                      </Show>
+                      <Show when={absenceFor(profile.id)}>
+                        {(absence) => (
+                          <>
+                            <span class="dot">·</span>
+                            <span class="role-pill">
+                              {absence().availability === "away"
+                                ? "Away"
+                                : absence().availability === "partial"
+                                  ? "Partly away"
+                                  : "Available"}{" "}
+                              · {absence().reason_type}
+                            </span>
+                          </>
+                        )}
                       </Show>
                     </span>
                   </div>
@@ -545,6 +856,28 @@ export default function Members() {
               </>
             )}
           </Show>
+          <div class="panel-title">
+            <h2>
+              {activeTeam() ? `${activeTeam()!.name} feed` : "Company feed"}
+            </h2>
+          </div>
+          <Show when={recentFeed().length === 0}>
+            <p class="org-hint">No posts published yet.</p>
+          </Show>
+          <ul class="org-list">
+            <For each={recentFeed()}>
+              {(post) => (
+                <li>
+                  <div class="org-list-text">
+                    <strong>{post.title}</strong>
+                    <span class="org-sub">
+                      {personName(post.author_id)} · {stamp(post.published_at)}
+                    </span>
+                  </div>
+                </li>
+              )}
+            </For>
+          </ul>
         </section>
       </div>
     </section>
