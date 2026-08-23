@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 68;
+pub const SCHEMA_VERSION: i64 = 75;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -581,6 +581,22 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
+    // V75: the video call is a durable fact of the meeting, not something invented
+    // per join. `video_provider` names who serves the media, `video_room_id`/`join_url`
+    // are the addressable room (so a second client, a deep link, or a restarted app
+    // reaches the SAME room), and `video_status` carries the call lifecycle that
+    // `archived` could never express (scheduled/live/ended/cancelled).
+    if version < 75 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "video_provider", "TEXT")?;
+        add_column_if_missing(&tx, "meetings", "video_room_id", "TEXT")?;
+        add_column_if_missing(&tx, "meetings", "join_url", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "meetings",
+            "video_status",
+            "TEXT NOT NULL DEFAULT 'scheduled'",
+        )?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -664,7 +680,7 @@ CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT N
 CREATE TABLE IF NOT EXISTS doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
 CREATE TABLE IF NOT EXISTS document_permissions (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(document_id, recipient_type, recipient_id));
 CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
-CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), video_provider TEXT, video_room_id TEXT, join_url TEXT, video_status TEXT NOT NULL DEFAULT 'scheduled');
 CREATE TABLE IF NOT EXISTS meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
 CREATE TABLE IF NOT EXISTS pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, script_id TEXT NOT NULL REFERENCES pipeline_scripts(id), name TEXT NOT NULL, trigger_type TEXT NOT NULL DEFAULT 'MANUAL', archived INTEGER NOT NULL DEFAULT 0);
@@ -1375,7 +1391,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 68);
+        assert_eq!(SCHEMA_VERSION, 75);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

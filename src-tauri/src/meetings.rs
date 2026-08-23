@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, String>;
 const RSVP_STATUSES: [&str; 3] = ["invited", "accepted", "declined"];
+/// Call lifecycle. `archived` is a shelf flag on the calendar entry; THIS is the state
+/// of the conference itself, and the two are independent facts.
+pub const VIDEO_STATUSES: [&str; 4] = ["scheduled", "live", "ended", "cancelled"];
+/// Providers Gaia can actually mint a join for. An unknown provider is refused rather
+/// than stored, so no row can promise a room nothing serves.
+pub const VIDEO_PROVIDERS: [&str; 1] = ["livekit"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meeting {
@@ -19,6 +25,17 @@ pub struct Meeting {
     pub organizer_id: Option<String>,
     pub channel_id: Option<String>,
     pub archived: bool,
+    #[serde(default)]
+    pub video_provider: Option<String>,
+    #[serde(default)]
+    pub video_room_id: Option<String>,
+    #[serde(default)]
+    pub join_url: Option<String>,
+    #[serde(default = "default_video_status")]
+    pub video_status: String,
+}
+fn default_video_status() -> String {
+    "scheduled".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +67,10 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         organizer_id: r.get(7)?,
         channel_id: r.get(8)?,
         archived: r.get(9)?,
+        video_provider: r.get(10)?,
+        video_room_id: r.get(11)?,
+        join_url: r.get(12)?,
+        video_status: r.get(13)?,
     })
 }
 
@@ -63,10 +84,18 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     if let Some(rule) = &meeting.rrule {
         parse_rule(rule)?;
     }
+    if !VIDEO_STATUSES.contains(&meeting.video_status.as_str()) {
+        return Err("Meeting video status must be scheduled, live, ended, or cancelled".into());
+    }
+    if let Some(provider) = &meeting.video_provider {
+        if !VIDEO_PROVIDERS.contains(&provider.as_str()) {
+            return Err("Unsupported meeting video provider".into());
+        }
+    }
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.archived";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status";
 /// Meeting read scope: organizer, explicitly invited participant, or a member of
 /// the project attached through the meeting's channel.
 const MEETING_READ_SCOPE: &str = "(m.organizer_id=?1 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))))";
@@ -147,7 +176,7 @@ pub fn get_meeting(id: String, profile_id: String) -> Result<Option<Meeting>> {
 pub fn create_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived,video_provider,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -155,7 +184,10 @@ pub fn create_meeting(meeting: Meeting) -> Result<()> {
 pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,archived=?10 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
+    // The live room address is NOT caller-writable: `video_room_id`/`join_url` are
+    // written only by the native join path (`record_call_room_on`), so a webview edit
+    // cannot repoint an existing meeting at a room it controls.
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,archived=?10,video_provider=?11,video_status=?12 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -193,6 +225,52 @@ pub fn delete_meeting(id: String) -> Result<()> {
         return Err("Meeting not found".into());
     }
     tx.commit().map_err(|e| e.to_string())
+}
+
+/// Native-only writer: the join path records the room it actually minted a token for,
+/// and marks the call live. Idempotent — a second joiner writes the same address.
+/// Returns the room id now bound to the meeting, which is the FIRST recorded one:
+/// once a room exists, later joins reuse it instead of splitting the call in two.
+pub fn record_call_room_on(
+    c: &rusqlite::Connection,
+    meeting_id: &str,
+    provider: &str,
+    room_id: &str,
+    join_url: &str,
+) -> Result<String> {
+    if !VIDEO_PROVIDERS.contains(&provider) {
+        return Err("Unsupported meeting video provider".into());
+    }
+    if room_id.trim().is_empty() || join_url.trim().is_empty() {
+        return Err("Call room id and join URL are required".into());
+    }
+    let changed = c
+        .execute(
+            "UPDATE meetings SET video_provider=?2, video_room_id=COALESCE(video_room_id,?3), join_url=?4, video_status='live' WHERE id=?1",
+            rusqlite::params![meeting_id, provider, room_id, join_url],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("Meeting not found".into());
+    }
+    c.query_row(
+        "SELECT video_room_id FROM meetings WHERE id=?1",
+        rusqlite::params![meeting_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Meeting has no recorded call room".into())
+}
+
+/// Native-only writer for the end of a call. `ended` is only reachable from `live`,
+/// so a stale leave cannot retro-end a meeting that never started or was cancelled.
+pub fn end_call_on(c: &rusqlite::Connection, meeting_id: &str) -> Result<bool> {
+    c.execute(
+        "UPDATE meetings SET video_status='ended' WHERE id=?1 AND video_status='live'",
+        rusqlite::params![meeting_id],
+    )
+    .map(|changed| changed > 0)
+    .map_err(|e| e.to_string())
 }
 
 fn row_to_participant(r: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingParticipant> {
@@ -432,6 +510,10 @@ mod tests {
             organizer_id: Some("default-org".into()),
             channel_id: None,
             archived: false,
+            video_provider: None,
+            video_room_id: None,
+            join_url: None,
+            video_status: default_video_status(),
         }
     }
     #[test]
@@ -540,6 +622,101 @@ mod tests {
         let status: String = conn.query_row("SELECT status FROM meeting_participants WHERE meeting_id='m-1' AND profile_id='p-1'", [], |row| row.get(0)).unwrap();
         assert_eq!(status, "accepted");
         assert!(RSVP_STATUSES.contains(&status.as_str()));
+    }
+
+    /// The call room is a persisted fact, not a per-join invention: the SECOND joiner
+    /// must land in the room the first one created, even if the caller proposes a
+    /// different one. Without the COALESCE this test splits the call in two.
+    #[test]
+    fn the_second_joiner_is_bound_to_the_first_recorded_room() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-owner','p-owner','p-owner',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('m-1','Call',1000,4600,'p-owner',0)",
+            [],
+        )
+        .unwrap();
+
+        let first =
+            record_call_room_on(&c, "m-1", "livekit", "meeting-m-1", "ws://127.0.0.1:7880").unwrap();
+        let second =
+            record_call_room_on(&c, "m-1", "livekit", "attacker-room", "ws://127.0.0.1:7880")
+                .unwrap();
+        assert_eq!(first, "meeting-m-1");
+        assert_eq!(
+            second, "meeting-m-1",
+            "a later join reuses the bound room instead of opening a second one"
+        );
+
+        let (provider, room, url, status): (Option<String>, Option<String>, Option<String>, String) =
+            c.query_row(
+                "SELECT video_provider,video_room_id,join_url,video_status FROM meetings WHERE id='m-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(provider.as_deref(), Some("livekit"));
+        assert_eq!(room.as_deref(), Some("meeting-m-1"));
+        assert_eq!(url.as_deref(), Some("ws://127.0.0.1:7880"));
+        assert_eq!(status, "live", "joining makes the call live");
+    }
+
+    /// `ended` is reachable only from `live`. A leave arriving for a meeting that was
+    /// cancelled (or never started) must not rewrite that decision.
+    #[test]
+    fn ending_a_call_only_moves_a_live_meeting() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-owner','p-owner','p-owner',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived,video_status) VALUES('m-c','Call',1,2,'p-owner',0,'cancelled')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !end_call_on(&c, "m-c").unwrap(),
+            "a cancelled meeting is not ended by a stale leave"
+        );
+        let status: String = c
+            .query_row("SELECT video_status FROM meetings WHERE id='m-c'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "cancelled");
+
+        record_call_room_on(&c, "m-c", "livekit", "meeting-m-c", "ws://127.0.0.1:7880").unwrap();
+        assert!(end_call_on(&c, "m-c").unwrap());
+        let status: String = c
+            .query_row("SELECT video_status FROM meetings WHERE id='m-c'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "ended");
+        assert!(VIDEO_STATUSES.contains(&status.as_str()));
+    }
+
+    /// An unknown provider is refused at both doors — the model writer and the
+    /// native join writer — so no row can name media nothing serves.
+    #[test]
+    fn an_unsupported_video_provider_is_refused() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-owner','p-owner','p-owner',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived) VALUES('m-p','Call',1,2,'p-owner',0)",
+            [],
+        )
+        .unwrap();
+        assert!(record_call_room_on(&c, "m-p", "zoom", "r", "ws://x").is_err());
+
+        let mut m = meeting(1000, None);
+        m.video_provider = Some("zoom".into());
+        assert!(validate_meeting(&m).is_err());
+        m.video_provider = Some("livekit".into());
+        assert!(validate_meeting(&m).is_ok());
+        m.video_status = "whenever".into();
+        assert!(validate_meeting(&m).is_err());
     }
 }
 
