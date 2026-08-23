@@ -48,6 +48,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V76 → feat/w11-chat (chat core: attachments lifecycle · mentions · pinning · drafts/typing · scheduled · polls) ☀crownA
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
 - V114 → feat/w11-chat (message pinning durable index) ☀Lakshmi-II
+- V115 → feat/w11-chat (per-channel message drafts · channel typing presence) ☀Vishnu
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 356 rows): done 94 · partial 199 · stub 4 · missing 59. Matrix NOT green — steering loop active.
