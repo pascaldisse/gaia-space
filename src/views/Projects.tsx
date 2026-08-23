@@ -4,7 +4,6 @@ import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, projectId as sessionProject, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
-import ProjectHome from "./ProjectHome";
 import "./Projects.css";
 import "./Portfolio.css";
 
@@ -158,7 +157,7 @@ export default function Projects() {
   // profile is the identity there — the same rule the desktop authorizer applies.
   const actor = () => (isWeb() ? currentUser()?.profile_id ?? "" : profileId());
   const mayEditDeadline = (project: Project) =>
-    (isWeb() && currentUser()?.role === "admin") || (!!actor() && project.created_by === actor());
+    (isWeb() && currentUser()?.role === "GlobalAdmin") || (!!actor() && project.created_by === actor());
   // Per-project write state: idle -> saving -> saved | failed. Keyed by project id so two
   // cards never share one spinner or one error.
   const [deadlineState, setDeadlineState] = createSignal<Record<string, { status: "saving" | "saved" | "failed"; message?: string }>>({});
