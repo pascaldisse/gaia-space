@@ -206,6 +206,8 @@ pub fn run() {
             git::repo_stage,
             git::repo_commit,
             platform::list_profiles,
+            platform::list_directory_feed,
+            platform::list_directory_calendar,
             platform::create_profile,
             platform::update_profile,
             platform::get_profile_email_status,

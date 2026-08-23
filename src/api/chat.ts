@@ -86,7 +86,7 @@ export type ScheduledMessage = {
   updated_at: number;
 };
 // UNVERIFIED: V119 currently creates team rows; chat command serialization must accept this wire shape.
-export type MentionPayload = { target_type: "profile" | "team"; target_id: string };
+export type MentionPayload = { target_type: "profile" | "team" | "issue" | "document"; target_id: string };
 export type Message = {
   id: string;
   channel_id: string;

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type DirectoryFeedEvent = { id:string; event_type:"member.joined"|"member.left"|"team.joined"|"team.left"|"role.changed"; profile_id:string; profile_name:string; team_id:string|null; team_name:string|null; role_id:string|null; role_name:string|null; created_at:number };
+export type DirectoryCalendarEntry = { id:string; profile_id:string; profile_name:string; reason_type:string; date_from:string; date_to:string; availability:string };
 export type ProfileEmailStatus = { profile_id: string; status: "unverified" | "verified" | "bounced"; verified_at: number | null };
 export type MessengerContact = { id?: string; profile_id: string; contact_type: string; login: string; deep_link: string | null };
 export type Principal = { id: string; kind: "profile" | "application" | "external"; profile_id: string | null; label: string };
@@ -51,6 +53,8 @@ export const platformApi = {
   updateOrgSettings: (value: OrgSettings) => call<OrgSettings>("update_org_settings", { value }),
   // Profiles
   profiles: () => call<Profile[]>("list_profiles"),
+  directoryFeed: (limit = 50) => call<DirectoryFeedEvent[]>("list_directory_feed", { limit }),
+  directoryCalendar: () => call<DirectoryCalendarEntry[]>("list_directory_calendar"),
   createProfile: (profile: Profile) => call<void>("create_profile", { profile }),
   updateProfile: (profile: Profile) => call<void>("update_profile", { profile }),
 getProfileEmailStatus: (profile_id: string) => call<ProfileEmailStatus>("get_profile_email_status", { profileId: profile_id }),

@@ -58,6 +58,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V122 → feat/w12-personal (§06 stub2+missing5 personal/org remainder) ☀wave12
 - V123 → feat/w12-registry (§03 non-CI/CD registry protocol per-format detail) ☀wave12
 - V124 → feat/w12-api (§07 non-devenv HTTP API remainder) ☀wave12
+- V126 → feat/w13-chatdocs (§04 entity mentions; migration-only slot) ☀Terra
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 TOTALS (8/8 audited, 359 rows): done 105 · partial 198 · stub 5 · missing 51. Matrix NOT green — steering loop active.
