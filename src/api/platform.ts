@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type ProfileEmailStatus = { profile_id: string; status: "unverified" | "verified" | "bounced"; verified_at: number | null };
+export type MessengerContact = { id?: string; profile_id: string; contact_type: string; login: string; deep_link: string | null };
+export type Principal = { id: string; kind: "profile" | "application" | "external"; profile_id: string | null; label: string };
 export type Organization = { id:string; name:string; slogan:string|null; logo_id:string|null; timezone:string; onboarding_required:boolean; allow_domains_edit:boolean };
 export type OrgSettings = { org_id:string; available_right_codes:string[]; is_space_code:boolean; is_space_code_only:boolean };
 export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
@@ -49,6 +52,11 @@ export const platformApi = {
   profiles: () => call<Profile[]>("list_profiles"),
   createProfile: (profile: Profile) => call<void>("create_profile", { profile }),
   updateProfile: (profile: Profile) => call<void>("update_profile", { profile }),
+getProfileEmailStatus: (profile_id: string) => call<ProfileEmailStatus>("get_profile_email_status", { profileId: profile_id }),
+setProfileEmailStatus: (value: ProfileEmailStatus) => call<void>("set_profile_email_status", { value }),
+messengerContacts: (profile_id: string) => call<MessengerContact[]>("list_messenger_contacts", { profileId: profile_id }),
+saveMessengerContact: (value: MessengerContact) => call<MessengerContact>("save_messenger_contact", { value }),
+principals: () => call<Principal[]>("list_principals"),
 
   memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
 addMemberLocation: (member_id: string, location: string, location_type: string) => call<MemberLocation>("add_member_location", { memberId: member_id, location, locationType: location_type }),
