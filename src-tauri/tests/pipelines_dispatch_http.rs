@@ -128,6 +128,11 @@ fn start_server() -> Server {
     let child = Command::new(env!("CARGO_BIN_EXE_space-server"))
         .env("SPACE_DB", &db_path)
         .env("SPACE_PORT", port.to_string())
+        // Triggered runs must never write into the developer's real data dir.
+        .env(
+            "SPACE_PIPELINE_WORKDIR",
+            std::env::temp_dir().join(format!("gaia-space-dispatch-work-{port}")),
+        )
         // No resident sweeper during the test: it would race the assertions on job_runs.
         .env("SPACE_WEBHOOK_TICK_SECS", "0")
         .spawn()
@@ -252,7 +257,171 @@ fn ordinary_session_cannot_start_global_schedule_dispatch() {
         "due_scheduled_runs",
         json!({"now": 1_700_000_000i64}),
     );
-    assert_eq!(status, 403, "ordinary session reached global schedule dispatch: {value}");
+    assert_eq!(
+        status, 403,
+        "ordinary session reached global schedule dispatch: {value}"
+    );
+}
+
+/// RED — `trigger_pipeline_event` is gated by `CommandPolicy::Session`, i.e. "any logged-in
+/// user". The only server-side check is that the event's repository equals the script's
+/// repository — a *consistency* check, not an *authorization* check, and it is skipped
+/// entirely for the repository-less event variants (`Manual`, `CodeReview*`, `SafeMerge`).
+/// The seeded member belongs to no project, yet can fire jobs of an admin's script in
+/// `p-test` by guessing its id. Job execution is arbitrary shell — this is remote code
+/// execution for any account.
+#[test]
+fn member_cannot_trigger_jobs_of_a_project_it_does_not_belong_to() {
+    let server = start_server();
+    let (status, value) = server.call(
+        "create_pipeline_script",
+        script_body(
+            "s-foreign",
+            json!({"jobs":[{"name":"manual","trigger_type":"MANUAL","timeout_secs":null,
+                            "steps":[{"type":"Shell","script":"true"}]}]}),
+        ),
+    );
+    assert_eq!(status, 200, "create_pipeline_script: {value}");
+
+    // No repository in the event => the repository consistency check never runs.
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "trigger_pipeline_event",
+        json!({"scriptId":"s-foreign","event":{"type":"Manual"}}),
+    );
+    assert_eq!(
+        status, 403,
+        "a non-member fired jobs of a foreign project's script: {value}"
+    );
+}
+
+/// RED — the authorization fix on `trigger_pipeline_event` (`CommandPolicy::PipelineScriptWrite`,
+/// commit 03c4d29) reads the script's project and demands `project_readable`. That closes the
+/// firing door but leaves the *authoring* door open: `create_pipeline_script` and
+/// `update_pipeline_script` are still plain `CommandPolicy::Session` with no project scoping,
+/// so a non-member can write a script — arbitrary shell steps — into someone else's project.
+/// It is then executed by that project's members, or unattended by the schedule ticker.
+#[test]
+fn member_cannot_author_a_pipeline_script_in_a_foreign_project() {
+    let server = start_server();
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "create_pipeline_script",
+        script_body(
+            "s-implant",
+            json!({"jobs":[{"name":"implant","trigger_type":"SCHEDULE","timeout_secs":null,
+                            "steps":[{"type":"Shell","script":"true"}],
+                            "triggers":[{"type":"Schedule","cron":"* * * * *"}]}]}),
+        ),
+    );
+    assert_eq!(
+        status, 403,
+        "a non-member wrote a shell-executing script into a foreign project: {value}"
+    );
+}
+
+/// RED — MEDIUM: duplicate schedule dispatch.
+///
+/// `due_scheduled_runs` reads the watermark (`MAX(triggered_at)`), drops the connection, and
+/// only then spawns. Read and insert are not in one transaction and `job_runs` carries no
+/// `(job_id, fired_minute)` uniqueness, so two overlapping ticks — two browser tabs, two
+/// server replicas, or the resident sweeper racing a manual click — both see the same empty
+/// watermark and both start the job.
+///
+/// Side effects are held down on purpose so this is a real execution proof and not an
+/// argument: the job's single step is `true`, the workdir root is a per-run temp directory,
+/// and the database is the per-run temp file. `now` is the real clock, which makes the
+/// *sequential* case pass (the first run's `triggered_at` moves the watermark past `now`) —
+/// therefore any duplicate observed here is caused by the concurrency, nothing else.
+///
+/// Measured on this branch: 32 simultaneous ticks started up to 10 runs of the same job in
+/// the same minute. The race is timing-dependent, so the test plays several independent
+/// rounds (fresh script each) and fails if *any* round starts more than one run.
+#[test]
+fn concurrent_schedule_ticks_do_not_start_the_same_job_twice() {
+    let server = start_server();
+    // Both knobs are env-tunable so a slow or a very fast box can widen the window without
+    // a code change; the defaults are what reproduced the duplicate here.
+    let ticks: usize = env_usize("GAIA_TEST_CONCURRENT_TICKS", 32);
+    // Six rounds: measured 6/6 reproductions on this branch, versus 4/5 at three rounds.
+    let rounds: usize = env_usize("GAIA_TEST_RACE_ROUNDS", 6);
+
+    for round in 0..rounds {
+        let script_id = format!("s-sched-{round}");
+        let (status, value) = server.call(
+            "create_pipeline_script",
+            script_body(
+                &script_id,
+                json!({"jobs":[{"name":"tick","trigger_type":"SCHEDULE","timeout_secs":null,
+                                "steps":[{"type":"Shell","script":"true"}],
+                                "triggers":[{"type":"Schedule","cron":"* * * * *"}]}]}),
+            ),
+        );
+        assert_eq!(status, 200, "create_pipeline_script: {value}");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs() as i64;
+
+        let barrier = std::sync::Barrier::new(ticks);
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..ticks)
+                .map(|_| {
+                    let (barrier, server, script_id) = (&barrier, &server, script_id.as_str());
+                    scope.spawn(move || {
+                        // Warm up the TCP connection first: connect + handshake latency would
+                        // otherwise stagger the threads and the race is never even attempted.
+                        let _ =
+                            server.call("list_job_runs_for_script", json!({"scriptId":script_id}));
+                        barrier.wait();
+                        let began = Instant::now();
+                        let (status, value) =
+                            server.call("due_scheduled_runs", json!({"now": now}));
+                        (status, value, began, Instant::now())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("tick thread"))
+                .collect::<Vec<_>>()
+        });
+        for (status, value, ..) in &results {
+            assert_eq!(*status, 200, "due_scheduled_runs: {value}");
+        }
+        // Overlap witness: without it, a green round would only mean the calls never raced.
+        let latest_start = results.iter().map(|r| r.2).max().expect("starts");
+        let earliest_end = results.iter().map(|r| r.3).min().expect("ends");
+        assert!(
+            latest_start < earliest_end,
+            "round {round}: the ticks never overlapped in time, so no duplicate could have \
+             been observed and this round proves nothing"
+        );
+
+        // The database is the witness, not the responses: count what was actually started.
+        let (status, runs) = server.call("list_job_runs_for_script", json!({"scriptId":script_id}));
+        assert_eq!(status, 200, "list_job_runs_for_script: {runs}");
+        let started = runs["value"].as_array().map(Vec::len).unwrap_or(0);
+        assert!(
+            started >= 1,
+            "round {round}: the scheduled job never fired at all, so this proves nothing: {runs}"
+        );
+        assert_eq!(
+            started, 1,
+            "round {round}: the same scheduled minute started {started} runs; \
+             `due_scheduled_runs` needs an atomic reservation or a unique \
+             (job_id, fired_minute) index: {runs}"
+        );
+    }
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .filter(|v| *v > 1)
+        .unwrap_or(default)
 }
 
 /// RED companion: an event whose repository does not match the script must be refused by the
@@ -276,7 +445,10 @@ fn mismatched_event_repository_is_a_domain_error_not_a_policy_denial() {
         json!({"scriptId":"s-mismatch",
                "event":{"type":"Push","repository":"other-repo","branch":"main"}}),
     );
-    assert_eq!(status, 400, "expected a domain rejection, got {status}: {value}");
+    assert_eq!(
+        status, 400,
+        "expected a domain rejection, got {status}: {value}"
+    );
     assert!(
         value["error"]
             .as_str()
