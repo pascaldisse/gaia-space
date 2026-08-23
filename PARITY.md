@@ -35,7 +35,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
 <<<<<<< HEAD
-TOTALS (8/8 audited, 356 rows): done 55 · partial 175 · stub 4 · missing 122. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 58 · partial 172 · stub 4 · missing 122. Matrix NOT green — steering loop active.
 =======
 TOTALS (8/8 audited, 356 rows): done 56 · partial 174 · stub 4 · missing 122. Matrix NOT green — steering loop active.
 >>>>>>> feat/w9-rights
