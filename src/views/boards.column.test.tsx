@@ -63,4 +63,65 @@ describe("board columns accept work", () => {
     expect(moved).toBeGreaterThan(calls.findIndex(c => c.cmd === "save_board_column"));
     expect(calls[moved].body.columnId).toBe("c-prog");
   });
+
+  // Column order is what the board reads left to right; it lived only in the
+  // seed order until now (no UI could change `ordering`).
+  test("moving a column right renumbers the whole run, not just the moved column", async () => {
+    setProjectId("p1");
+    serve();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <Boards />, host);
+    await settle();
+
+    const right = host.querySelector('[aria-label="Move open right"]') as HTMLButtonElement;
+    expect(right).toBeTruthy();
+    expect((host.querySelector('[aria-label="Move open left"]') as HTMLButtonElement).disabled).toBe(true);
+    right.click();
+    await settle();
+
+    const saves = calls.filter(c => c.cmd === "save_board_column").map(c => ({ id: c.body.input.id, ordering: c.body.input.ordering }));
+    expect(saves).toEqual([{ id: "c-prog", ordering: 0 }, { id: "c-open", ordering: 1 }]);
+  });
+
+  test("groups cards into a horizontal assignee swimlane", async () => {
+    setProjectId("p1");
+    serve();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <Boards />, host);
+    await settle();
+
+    const grouping = host.querySelector('[aria-label="Swimlane grouping"]') as HTMLSelectElement;
+    grouping.value = "assignee";
+    grouping.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(host.querySelector(".swimlane-row header")?.textContent).toContain("Unassigned");
+    expect(host.querySelectorAll(".swimlane-row .board-column").length).toBe(2);
+  });
+
+  test("dropping a column header on another column reorders to that slot", async () => {
+    setProjectId("p1");
+    serve();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <Boards />, host);
+    await settle();
+
+    const heads = [...host.querySelectorAll(".column-head")] as HTMLElement[];
+    expect(heads.length).toBe(2);
+    const data = new Map<string, string>();
+    const dataTransfer = { setData: (k: string, v: string) => data.set(k, v), getData: (k: string) => data.get(k) ?? "", effectAllowed: "" };
+    const fire = (node: HTMLElement, type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      node.dispatchEvent(event);
+    };
+    fire(heads[1], "dragstart"); // drag "in progress"
+    fire(heads[0], "drop");      // onto "open"
+    await settle();
+
+    const saves = calls.filter(c => c.cmd === "save_board_column").map(c => ({ id: c.body.input.id, ordering: c.body.input.ordering }));
+    expect(saves).toEqual([{ id: "c-prog", ordering: 0 }, { id: "c-open", ordering: 1 }]);
+  });
 });
