@@ -46,9 +46,9 @@ pub mod auth_security;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod organization;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod oauth;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod organization;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod package_registry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -322,6 +322,8 @@ pub fn run() {
             devenv::hibernate_idle_dev_environments,
             devenv::resume_dev_environment,
             devenv::claim_standby_dev_environment,
+            devenv::save_standby_pool_policy,
+            devenv::refill_standby_pool,
             devenv::delete_dev_environment,
             review::create_review_stack,
             review::list_review_stacks,

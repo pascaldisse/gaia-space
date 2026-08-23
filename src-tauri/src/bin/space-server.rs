@@ -1824,6 +1824,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "hibernate_idle_dev_environments"
         | "resume_dev_environment"
         | "claim_standby_dev_environment"
+        | "save_standby_pool_policy"
+        | "refill_standby_pool"
         | "delete_dev_environment"
         | "list_review_stacks"
         | "list_my_review_stacks"
@@ -4155,6 +4157,8 @@ async fn cmd(
     "hibernate_idle_dev_environments" => devenv::hibernate_idle_dev_environments(),
     "resume_dev_environment" => devenv::resume_dev_environment(id: String, actor_id: Option<String>),
     "claim_standby_dev_environment" => devenv::claim_standby_dev_environment(project_id: String, profile_id: String),
+    "save_standby_pool_policy" => devenv::save_standby_pool_policy(policy: devenv::StandbyPoolPolicy, actor_id: Option<String>),
+    "refill_standby_pool" => devenv::refill_standby_pool(project_id: String, ide: String, instance_type: String),
     "delete_dev_environment" => devenv::delete_dev_environment(id: String, actor_id: Option<String>),
     "list_review_stacks" => review::list_review_stacks(project_id: String),
     "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
