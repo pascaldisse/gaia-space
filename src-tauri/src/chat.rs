@@ -696,6 +696,179 @@ fn list_pinned_messages_impl(
         .collect()
 }
 
+/// Default lifetime of a typing beat. Clients re-beat well inside it; a crashed or
+/// backgrounded client's row simply ages out instead of showing a stuck "typing…".
+/// Callers may override it, so the window is policy, not a constant baked into queries.
+pub const TYPING_TTL_SECS_DEFAULT: i64 = 8;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageDraft {
+    pub channel_id: String,
+    pub author_id: String,
+    /// `""` = channel root composer; otherwise the root message id being replied to.
+    #[serde(default)]
+    pub thread_key: String,
+    pub text: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TypingParticipant {
+    pub channel_id: String,
+    pub profile_id: String,
+    pub updated_at: i64,
+}
+
+fn draft_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDraft> {
+    Ok(MessageDraft {
+        channel_id: r.get(0)?,
+        author_id: r.get(1)?,
+        thread_key: r.get(2)?,
+        text: r.get(3)?,
+        updated_at: r.get(4)?,
+    })
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Saving a draft is an upsert, not an append: the composer holds exactly one unsent body
+/// per (channel, author, thread). An empty/whitespace body means "nothing unsent" and
+/// deletes the row, so a cleared composer never resurrects text on the next reload.
+fn save_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+    text: &str,
+) -> Result<Option<MessageDraft>> {
+    if !channel_allows_actor(c, channel_id, Some(author_id))? {
+        return Err("channel access denied".into());
+    }
+    if text.trim().is_empty() {
+        delete_draft_impl(c, channel_id, author_id, thread_key)?;
+        return Ok(None);
+    }
+    let now = now_secs();
+    c.execute(
+        "INSERT INTO message_drafts(channel_id,author_id,thread_key,text,updated_at) VALUES(?1,?2,?3,?4,?5) \
+         ON CONFLICT(channel_id,author_id,thread_key) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at",
+        rusqlite::params![channel_id, author_id, thread_key, text, now],
+    )
+    .map_err(|e| e.to_string())?;
+    get_draft_impl(c, channel_id, author_id, thread_key)
+}
+
+fn get_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+) -> Result<Option<MessageDraft>> {
+    c.query_row(
+        "SELECT channel_id,author_id,thread_key,text,updated_at FROM message_drafts WHERE channel_id=?1 AND author_id=?2 AND thread_key=?3",
+        rusqlite::params![channel_id, author_id, thread_key],
+        draft_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Newest-first so a client can render "unsent elsewhere" without a second sort.
+fn list_drafts_impl(c: &Connection, author_id: &str) -> Result<Vec<MessageDraft>> {
+    let mut s = c
+        .prepare(
+            "SELECT channel_id,author_id,thread_key,text,updated_at FROM message_drafts WHERE author_id=?1 ORDER BY updated_at DESC, channel_id, thread_key",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([author_id], draft_row)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Idempotent: deleting an absent draft is success, so send-then-clear can be retried.
+fn delete_draft_impl(
+    c: &Connection,
+    channel_id: &str,
+    author_id: &str,
+    thread_key: &str,
+) -> Result<bool> {
+    let changed = c
+        .execute(
+            "DELETE FROM message_drafts WHERE channel_id=?1 AND author_id=?2 AND thread_key=?3",
+            rusqlite::params![channel_id, author_id, thread_key],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed > 0)
+}
+
+/// A typing beat overwrites the profile's previous beat. `typing=false` retracts it
+/// immediately (message sent / composer cleared) rather than waiting for the TTL.
+fn set_typing_impl(c: &Connection, channel_id: &str, profile_id: &str, typing: bool) -> Result<()> {
+    if !channel_allows_actor(c, channel_id, Some(profile_id))? {
+        return Err("channel access denied".into());
+    }
+    if !typing {
+        c.execute(
+            "DELETE FROM channel_typing WHERE channel_id=?1 AND profile_id=?2",
+            rusqlite::params![channel_id, profile_id],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    c.execute(
+        "INSERT INTO channel_typing(channel_id,profile_id,updated_at) VALUES(?1,?2,?3) \
+         ON CONFLICT(channel_id,profile_id) DO UPDATE SET updated_at=excluded.updated_at",
+        rusqlite::params![channel_id, profile_id, now_secs()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Readers see everyone but themselves, and only beats inside the TTL window. Expired rows
+/// are swept here so the table cannot grow without a background job.
+fn list_typing_impl(
+    c: &Connection,
+    channel_id: &str,
+    acting_profile_id: Option<&str>,
+    ttl_secs: i64,
+) -> Result<Vec<TypingParticipant>> {
+    if !channel_allows_actor(c, channel_id, acting_profile_id)? {
+        return Err("channel access denied".into());
+    }
+    let ttl = ttl_secs.max(1);
+    let cutoff = now_secs() - ttl;
+    c.execute("DELETE FROM channel_typing WHERE updated_at < ?1", [cutoff])
+        .map_err(|e| e.to_string())?;
+    let mut s = c
+        .prepare(
+            "SELECT channel_id,profile_id,updated_at FROM channel_typing WHERE channel_id=?1 AND updated_at >= ?2 AND profile_id IS NOT ?3 ORDER BY updated_at DESC, profile_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(
+            rusqlite::params![channel_id, cutoff, acting_profile_id],
+            |r| {
+                Ok(TypingParticipant {
+                    channel_id: r.get(0)?,
+                    profile_id: r.get(1)?,
+                    updated_at: r.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
 /// Pinning is idempotent; a caller may retry a lost response without changing history.
 fn set_message_pinned_impl(c: &Connection, id: &str, pinned: bool) -> Result<MessageView> {
     let changed = c
@@ -1162,6 +1335,68 @@ pub fn set_message_pinned(id: String, pinned: bool) -> Result<MessageView> {
     set_message_pinned_impl(&db::conn()?, &id, pinned)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+    text: String,
+) -> Result<Option<MessageDraft>> {
+    save_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+        &text,
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+) -> Result<Option<MessageDraft>> {
+    get_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_message_drafts(author_id: String) -> Result<Vec<MessageDraft>> {
+    list_drafts_impl(&db::conn()?, &author_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_message_draft(
+    channel_id: String,
+    author_id: String,
+    thread_key: Option<String>,
+) -> Result<bool> {
+    delete_draft_impl(
+        &db::conn()?,
+        &channel_id,
+        &author_id,
+        thread_key.as_deref().unwrap_or(""),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_channel_typing(channel_id: String, profile_id: String, typing: bool) -> Result<()> {
+    set_typing_impl(&db::conn()?, &channel_id, &profile_id, typing)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channel_typing(
+    channel_id: String,
+    acting_profile_id: Option<String>,
+    ttl_secs: Option<i64>,
+) -> Result<Vec<TypingParticipant>> {
+    list_typing_impl(
+        &db::conn()?,
+        &channel_id,
+        acting_profile_id.as_deref(),
+        ttl_secs.unwrap_or(TYPING_TTL_SECS_DEFAULT),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
     thread_of: String,
     acting_profile_id: Option<String>,
@@ -1404,6 +1639,91 @@ mod tests {
             &["default-org".to_string()],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn draft_upserts_per_thread_and_clearing_removes_it() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-draft");
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('default-org','org','Org',unixepoch())",
+            [],
+        )
+        .unwrap();
+
+        let first = save_draft_impl(&c, "chan-draft", "default-org", "", "hello")
+            .unwrap()
+            .expect("draft stored");
+        assert_eq!(first.text, "hello");
+        // a second save is an update, not a second row
+        save_draft_impl(&c, "chan-draft", "default-org", "", "hello there").unwrap();
+        // a thread draft is independent of the channel-root draft
+        save_draft_impl(&c, "chan-draft", "default-org", "root-1", "reply body").unwrap();
+
+        let drafts = list_drafts_impl(&c, "default-org").unwrap();
+        assert_eq!(drafts.len(), 2, "root + thread draft, no duplicates");
+        assert_eq!(
+            get_draft_impl(&c, "chan-draft", "default-org", "")
+                .unwrap()
+                .map(|d| d.text),
+            Some("hello there".into())
+        );
+
+        // clearing the composer must not resurrect the old body on reload
+        assert_eq!(
+            save_draft_impl(&c, "chan-draft", "default-org", "", "   ").unwrap(),
+            None
+        );
+        assert_eq!(
+            get_draft_impl(&c, "chan-draft", "default-org", "").unwrap(),
+            None
+        );
+        // deleting an absent draft is success, so send-then-clear is retry-safe
+        assert!(!delete_draft_impl(&c, "chan-draft", "default-org", "").unwrap());
+        assert!(delete_draft_impl(&c, "chan-draft", "default-org", "root-1").unwrap());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn typing_excludes_self_expires_and_can_be_retracted() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-type");
+        seed_profiles(&c, &["default-org", "other"]);
+
+        set_typing_impl(&c, "chan-type", "default-org", true).unwrap();
+        set_typing_impl(&c, "chan-type", "other", true).unwrap();
+        let seen = list_typing_impl(&c, "chan-type", Some("default-org"), 60).unwrap();
+        assert_eq!(
+            seen.iter()
+                .map(|t| t.profile_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["other"],
+            "a reader never sees their own beat"
+        );
+
+        // an aged beat is swept, not shown: no stuck "typing…" after a client dies
+        c.execute(
+            "UPDATE channel_typing SET updated_at=updated_at-3600 WHERE profile_id='other'",
+            [],
+        )
+        .unwrap();
+        assert!(list_typing_impl(&c, "chan-type", Some("default-org"), 60)
+            .unwrap()
+            .is_empty());
+        let remaining: i64 = c
+            .query_row("SELECT count(*) FROM channel_typing", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1, "expired rows are swept at read time");
+
+        // explicit retraction beats the TTL
+        set_typing_impl(&c, "chan-type", "other", true).unwrap();
+        set_typing_impl(&c, "chan-type", "other", false).unwrap();
+        assert!(list_typing_impl(&c, "chan-type", Some("default-org"), 60)
+            .unwrap()
+            .is_empty());
+        drop(c);
+        drop(path);
     }
 
     fn seed_message(c: &Connection, channel: &str, id: &str) {

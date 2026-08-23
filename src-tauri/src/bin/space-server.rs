@@ -2239,6 +2239,14 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_deploy_target"
         | "delete_issue_status"
         | "delete_message" | "set_message_pinned" => CommandPolicy::Session,
+        // Drafts and typing beats are caller-scoped: `bind_session_identity` rewrites
+        // `author_id`/`profile_id`, and the channel ACL check below still applies.
+        "save_message_draft"
+        | "get_message_draft"
+        | "list_message_drafts"
+        | "delete_message_draft"
+        | "set_channel_typing"
+        | "list_channel_typing" => CommandPolicy::Session,
         // Attachment lifecycle rides the message it belongs to: a session alone is not
         // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
@@ -3555,6 +3563,11 @@ fn authorize_command(
                 name,
                 "list_messages"
                     | "list_pinned_messages"
+                    | "save_message_draft"
+                    | "get_message_draft"
+                    | "delete_message_draft"
+                    | "set_channel_typing"
+                    | "list_channel_typing"
                     | "list_channel_members"
                     | "get_channel"
                     | "mark_channel_read"
@@ -4738,6 +4751,9 @@ async fn cmd(
     "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_pinned_messages" => chat::list_pinned_messages(channel_id: String, acting_profile_id: Option<String>),
+    "list_message_drafts" => chat::list_message_drafts(author_id: String),
+    "get_message_draft" => chat::get_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
+    "list_channel_typing" => chat::list_channel_typing(channel_id: String, acting_profile_id: Option<String>, ttl_secs: Option<i64>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
@@ -4865,6 +4881,9 @@ async fn cmd(
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
     "set_message_pinned" => chat::set_message_pinned(id: String, pinned: bool),
+    "save_message_draft" => chat::save_message_draft(channel_id: String, author_id: String, thread_key: Option<String>, text: String),
+    "delete_message_draft" => chat::delete_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
+    "set_channel_typing" => chat::set_channel_typing(channel_id: String, profile_id: String, typing: bool),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
