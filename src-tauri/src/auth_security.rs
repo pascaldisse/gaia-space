@@ -83,6 +83,18 @@ pub fn list_permanent_tokens(user_id: &str) -> Result<Vec<PermanentToken>> {
 pub fn revoke_permanent_token(user_id: &str, token_id: &str) -> Result<bool> {
     Ok(db::conn()?.execute("UPDATE permanent_tokens SET revoked_at=unixepoch() WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL",params![token_id,user_id]).map_err(|e|e.to_string())?>0)
 }
+#[tauri::command]
+pub fn issue_permanent_token(user_id: String, name: String, expires_at: Option<i64>) -> Result<(PermanentToken, String)> {
+    create_permanent_token(&user_id, &name, expires_at)
+}
+#[tauri::command]
+pub fn permanent_tokens_for_user(user_id: String) -> Result<Vec<PermanentToken>> {
+    list_permanent_tokens(&user_id)
+}
+#[tauri::command]
+pub fn revoke_permanent_token_for_user(user_id: String, token_id: String) -> Result<bool> {
+    revoke_permanent_token(&user_id, &token_id)
+}
 pub fn permanent_token_user(raw: &str) -> Result<Option<String>> {
     if !raw.starts_with("spat_") {
         return Ok(None);
@@ -358,6 +370,18 @@ pub fn revoke_application_password(user_id: &str, id: &str) -> Result<bool> {
         .map_err(|e| e.to_string())?
         > 0)
 }
+#[tauri::command]
+pub fn issue_application_password(user_id: String, name: String) -> Result<(ApplicationPassword, String)> {
+    create_application_password(&user_id, &name)
+}
+#[tauri::command]
+pub fn application_passwords_for_user(user_id: String) -> Result<Vec<ApplicationPassword>> {
+    list_application_passwords(&user_id)
+}
+#[tauri::command]
+pub fn revoke_application_password_for_user(user_id: String, password_id: String) -> Result<bool> {
+    revoke_application_password(&user_id, &password_id)
+}
 /// True when `raw` is a live application password of this account. Such a login
 /// is already a second factor by construction, so it skips the TOTP challenge.
 pub fn verify_application_password(user_id: &str, raw: &str) -> Result<bool> {
@@ -552,6 +576,25 @@ mod tests {
         assert!(consume_scratch_code("totp-user", &scratch[0]).expect("consume"));
         assert!(!consume_scratch_code("totp-user", &scratch[0]).expect("reuse fails"));
         assert_eq!(scratch_codes_remaining("totp-user").expect("remaining"), (SCRATCH_CODE_COUNT - 1) as i64);
+    }
+    #[test]
+    fn permanent_tokens_and_application_passwords_are_individually_revocable() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("auth-security-tokens");
+        let conn = crate::db::migrate_path(&temp).expect("migration");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('token-profile','token-user','Token User',unixepoch())", []).expect("profile");
+        conn.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,created_at) VALUES('token-user','token-user','hash','Token User','token-profile','member',unixepoch())", []).expect("user");
+        std::env::set_var("SPACE_DB", temp.path());
+
+        let (token, token_raw) = create_permanent_token("token-user", "CLI", None).expect("token");
+        assert_eq!(permanent_token_user(&token_raw).expect("verify token"), Some("token-user".into()));
+        assert!(revoke_permanent_token("token-user", &token.id).expect("revoke token"));
+        assert_eq!(permanent_token_user(&token_raw).expect("revoked token"), None);
+
+        let (password, password_raw) = create_application_password("token-user", "Mail").expect("password");
+        assert!(verify_application_password("token-user", &password_raw).expect("verify password"));
+        assert!(revoke_application_password("token-user", &password.id).expect("revoke password"));
+        assert!(!verify_application_password("token-user", &password_raw).expect("revoked password"));
     }
     #[test]
     fn base32_round_trips() {
