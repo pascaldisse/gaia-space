@@ -40,6 +40,11 @@ struct Server {
     child: Child,
     base: String,
     client: reqwest::blocking::Client,
+    /// The per-run database file, so a test can inspect or pre-poison the real storage.
+    db_path: PathBuf,
+    /// Root the spawned server was told to use for run workdirs.
+    #[allow(dead_code)]
+    workdir: PathBuf,
 }
 
 impl Drop for Server {
@@ -71,6 +76,13 @@ impl Server {
 }
 
 fn start_server() -> Server {
+    start_server_with(&[])
+}
+
+/// `start_server`, plus extra SQL executed against the seeded database *before* the server
+/// boots. That is the only way to test an upgrade path or a pre-existing data shape: the
+/// rows have to exist before `migrate` of the running binary ever looks at them.
+fn start_server_with(extra_sql: &[&str]) -> Server {
     let port = free_port();
     let db_path: PathBuf = std::env::temp_dir().join(format!(
         "gaia-space-dispatch-http-{}-{port}.sqlite",
@@ -123,16 +135,32 @@ fn start_server() -> Server {
         [],
     )
     .expect("seed member session");
+    // A second project the member *does* belong to: the control group for every
+    // foreign-project denial below. Without it a 403 could just mean "members may never
+    // author scripts", which is a different (and wrong) conclusion.
+    conn.execute(
+        "INSERT INTO projects(id,name,key,description,created_by,archived,created_at) \
+         VALUES('p-own','Own','OWN',NULL,'p-admin',0,1)",
+        [],
+    )
+    .expect("seed member project");
+    conn.execute(
+        "INSERT INTO project_members(project_id,profile_id) VALUES('p-own','p-member')",
+        [],
+    )
+    .expect("seed member membership");
+    for sql in extra_sql {
+        conn.execute_batch(sql)
+            .unwrap_or_else(|e| panic!("extra seed SQL failed: {e}\n{sql}"));
+    }
     drop(conn);
 
+    let workdir = std::env::temp_dir().join(format!("gaia-space-dispatch-work-{port}"));
     let child = Command::new(env!("CARGO_BIN_EXE_space-server"))
         .env("SPACE_DB", &db_path)
         .env("SPACE_PORT", port.to_string())
         // Triggered runs must never write into the developer's real data dir.
-        .env(
-            "SPACE_PIPELINE_WORKDIR",
-            std::env::temp_dir().join(format!("gaia-space-dispatch-work-{port}")),
-        )
+        .env("SPACE_PIPELINE_WORKDIR", &workdir)
         // No resident sweeper during the test: it would race the assertions on job_runs.
         .env("SPACE_WEBHOOK_TICK_SECS", "0")
         .spawn()
@@ -147,6 +175,8 @@ fn start_server() -> Server {
         child,
         base,
         client,
+        db_path: db_path.clone(),
+        workdir: workdir.clone(),
     };
 
     let deadline = Instant::now() + boot_timeout();
@@ -455,5 +485,255 @@ fn mismatched_event_repository_is_a_domain_error_not_a_policy_denial() {
             .unwrap_or_default()
             .contains("does not match"),
         "unexpected error body: {value}"
+    );
+}
+
+/// Same as `script_body` but the project is the caller's choice — the horizontal-privilege
+/// tests need to name a project other than the seeded default.
+fn script_body_in(id: &str, project_id: &str, source: Value) -> Value {
+    json!({"script":{
+        "id": id,
+        "project_id": project_id,
+        "repository": "repo-a",
+        "path": format!("{id}.json"),
+        "source": source.to_string(),
+        "archived": false,
+    }})
+}
+
+/// Poll `list_job_runs_for_script` until it reports at least `want` runs, or the deadline
+/// passes. Runs are inserted synchronously by the trigger, but reading through HTTP after a
+/// separate connection still deserves a bounded wait rather than a sleep guess.
+fn runs_for(server: &Server, script_id: &str) -> usize {
+    let (status, runs) = server.call("list_job_runs_for_script", json!({"scriptId":script_id}));
+    assert_eq!(status, 200, "list_job_runs_for_script: {runs}");
+    runs["value"].as_array().map(Vec::len).unwrap_or(0)
+}
+
+/// COUNTER-TEST to the duplicate-schedule fix.
+///
+/// The fix for `concurrent_schedule_ticks_do_not_start_the_same_job_twice` is specified as a
+/// unique `(job_id, fired_minute)` reservation. Every trigger path — manual, event and
+/// schedule — funnels through the *same* `spawn_script_jobs` insert, so a `fired_minute`
+/// stamped unconditionally there would silently collapse legitimate repeats: two pushes in
+/// the same minute are two builds, not one. This pins the invariant the deduplication must
+/// not eat.
+#[test]
+fn two_events_in_the_same_minute_each_start_their_own_run() {
+    let server = start_server();
+    let (status, value) = server.call(
+        "create_pipeline_script",
+        script_body(
+            "s-repeat",
+            json!({"jobs":[{"name":"on-push","trigger_type":"GIT_PUSH","timeout_secs":null,
+                            "steps":[{"type":"Shell","script":"true"}]}]}),
+        ),
+    );
+    assert_eq!(status, 200, "create_pipeline_script: {value}");
+
+    // Two pushes, back to back, therefore certainly inside one wall-clock minute.
+    for attempt in 0..2 {
+        let (status, value) = server.call(
+            "trigger_pipeline_event",
+            json!({"scriptId":"s-repeat",
+                   "event":{"type":"Push","repository":"repo-a","branch":"main"}}),
+        );
+        assert_eq!(status, 200, "push {attempt} was refused: {value}");
+        assert_eq!(
+            value["value"].as_array().map(Vec::len).unwrap_or(0),
+            1,
+            "push {attempt} returned no run: {value}"
+        );
+    }
+
+    let started = runs_for(&server, "s-repeat");
+    assert_eq!(
+        started, 2,
+        "two separate pushes in the same minute produced {started} run(s): the duplicate-fire \
+         deduplication is over-reaching and swallowed a real build"
+    );
+}
+
+/// RED — HIGH: horizontal privilege slide through `update_pipeline_script`.
+///
+/// Scoping only the *creation* of a script to its project is not enough while `update` stays
+/// `CommandPolicy::Session`: a member authors legally inside their own project, then rewrites
+/// the row's `project_id` to a project they do not belong to. The shell steps land in the
+/// foreign project exactly as if `create` had never been gated.
+#[test]
+fn a_member_cannot_repoint_their_script_into_a_foreign_project() {
+    let server = start_server();
+    let source = json!({"jobs":[{"name":"slide","trigger_type":"MANUAL","timeout_secs":null,
+                                 "steps":[{"type":"Shell","script":"true"}]}]});
+
+    // Control: authoring inside their OWN project must keep working. If this ever fails the
+    // denial below proves nothing — it would just mean members lost script authoring wholesale.
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "create_pipeline_script",
+        script_body_in("s-slide", "p-own", source.clone()),
+    );
+    assert_eq!(
+        status, 200,
+        "a member could not author a script in their own project: {value}"
+    );
+
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "update_pipeline_script",
+        script_body_in("s-slide", "p-test", source),
+    );
+    assert_eq!(
+        status, 403,
+        "a member moved their shell-executing script into a foreign project: {value}"
+    );
+}
+
+/// RED — HIGH: `delete_pipeline_script` takes a bare `id`, so a project-scoped policy has to
+/// resolve the project from the stored row. If it does not, any session can destroy another
+/// project's CI definition (and, through `pipelines.rs`, its whole run history).
+#[test]
+fn a_member_cannot_delete_a_foreign_projects_script() {
+    let server = start_server();
+    let (status, value) = server.call(
+        "create_pipeline_script",
+        script_body(
+            "s-victim",
+            json!({"jobs":[{"name":"build","trigger_type":"MANUAL","timeout_secs":null,
+                            "steps":[{"type":"Shell","script":"true"}]}]}),
+        ),
+    );
+    assert_eq!(status, 200, "create_pipeline_script: {value}");
+
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "delete_pipeline_script",
+        json!({"id":"s-victim"}),
+    );
+    assert_eq!(
+        status, 403,
+        "a non-member deleted a foreign project's pipeline script: {value}"
+    );
+}
+
+/// RED — MEDIUM: a forged `project_id` must not be a way in. `pipeline_scripts.project_id` is
+/// `NOT NULL REFERENCES projects(id)` with `foreign_keys=ON`, so a bogus id cannot land in
+/// storage — but it must be refused as an *authorization* failure at the gate, not leak
+/// through as a 200 or crash out as a 500 that tells the attacker the gate was never reached.
+#[test]
+fn a_forged_project_id_is_refused_rather_than_accepted() {
+    let server = start_server();
+    let source = json!({"jobs":[{"name":"forge","trigger_type":"SCHEDULE","timeout_secs":null,
+                                 "steps":[{"type":"Shell","script":"true"}],
+                                 "triggers":[{"type":"Schedule","cron":"* * * * *"}]}]});
+    for forged in ["", "no-such-project", "../p-test"] {
+        let (status, value) = server.call_as(
+            "test-member-session",
+            "create_pipeline_script",
+            script_body_in("s-forged", forged, source.clone()),
+        );
+        assert_eq!(
+            status, 403,
+            "project_id {forged:?} was not refused by the project gate (got {status}): {value}"
+        );
+        assert_eq!(
+            runs_for(&server, "s-forged"),
+            0,
+            "project_id {forged:?} left a live script behind"
+        );
+    }
+}
+
+/// RED — HIGH: the upgrade path of the duplicate-fire unique index.
+///
+/// A `CREATE UNIQUE INDEX` over `(job_id, fired_minute)` fails outright on any existing
+/// database that already contains the duplicates this branch just proved are produced. If
+/// `migrate` propagates that error the server does not boot at all: the fix for a MEDIUM
+/// race becomes a total outage for every installation that ever raced. This seeds exactly
+/// that history and demands the server still comes up and still answers.
+#[test]
+fn an_existing_database_with_duplicate_runs_still_boots() {
+    let minute = 1_700_000_000i64; // fixed instant inside one minute; two runs share it
+    let seed = format!(
+        "INSERT INTO pipeline_scripts(id,project_id,repository,path,source,archived,created_at) \
+           VALUES('s-legacy','p-test','repo-a','legacy.json','{{\"jobs\":[]}}',0,1);\n\
+         INSERT INTO jobs(id,script_id,name,trigger_type,archived) \
+           VALUES('s-legacy::legacy','s-legacy','legacy','SCHEDULE',0);\n\
+         INSERT INTO job_runs(id,job_id,status,log,triggered_at) \
+           VALUES('legacy-run-1','s-legacy::legacy','FINISHED',NULL,{minute});\n\
+         INSERT INTO job_runs(id,job_id,status,log,triggered_at) \
+           VALUES('legacy-run-2','s-legacy::legacy','FINISHED',NULL,{minute});\n\
+         INSERT INTO job_runs(id,job_id,status,log,triggered_at) \
+           VALUES('legacy-run-3','s-legacy::legacy','FAILED',NULL,{});",
+        minute + 30
+    );
+    // If the migration aborts, `start_server_with` never sees the port open and fails here
+    // with "space-server never came up" — which is the outage, reported as a test failure.
+    let server = start_server_with(&[seed.as_str()]);
+
+    let (status, value) = server.call("list_job_runs_for_script", json!({"scriptId":"s-legacy"}));
+    assert_eq!(
+        status, 200,
+        "the upgraded database no longer serves its own run history: {value}"
+    );
+    assert_eq!(
+        value["value"].as_array().map(Vec::len).unwrap_or(0),
+        3,
+        "the upgrade destroyed pre-existing run history instead of preserving it: {value}"
+    );
+    assert!(server.db_path.exists(), "the test database vanished");
+}
+
+/// RED — HIGH: `project_readable` is a *read* predicate (admin, owner, or plain member) and it
+/// is what guards `trigger_pipeline_event`. A pipeline step is an arbitrary shell command on
+/// the server host, so "may read this project" is being spent as "may execute code here".
+///
+/// This is measured, not argued: the step writes a marker file at an absolute path outside
+/// any run workdir, and the test asserts the file exists afterwards. If it appears, a caller
+/// holding only project read access achieved arbitrary filesystem writes as the server user.
+#[test]
+fn a_read_tier_project_member_reaches_arbitrary_shell_execution() {
+    let marker = std::env::temp_dir().join(format!(
+        "gaia-space-readtier-proof-{}-{}",
+        std::process::id(),
+        free_port()
+    ));
+    let _ = std::fs::remove_file(&marker);
+    let server = start_server();
+
+    // Authored by the admin inside the project the member merely *belongs to*.
+    let (status, value) = server.call(
+        "create_pipeline_script",
+        script_body_in(
+            "s-readtier",
+            "p-own",
+            json!({"jobs":[{"name":"exec","trigger_type":"MANUAL","timeout_secs":null,
+                            "steps":[{"type":"Shell",
+                                      "script": format!("printf owned > {}", marker.display())}]}]}),
+        ),
+    );
+    assert_eq!(status, 200, "create_pipeline_script: {value}");
+
+    let (status, value) = server.call_as(
+        "test-member-session",
+        "trigger_pipeline_event",
+        json!({"scriptId":"s-readtier","event":{"type":"Manual"}}),
+    );
+    assert_eq!(
+        status, 200,
+        "precondition changed: the read-tier member can no longer fire at all ({status}): {value}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !marker.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let executed = marker.exists();
+    let _ = std::fs::remove_file(&marker);
+    assert!(
+        !executed,
+        "a caller with only project READ access executed an arbitrary shell command on the \
+         server host (marker file was created): firing a pipeline needs a write/execute-tier \
+         predicate, not `project_readable`"
     );
 }
