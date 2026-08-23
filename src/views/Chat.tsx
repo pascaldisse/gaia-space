@@ -112,6 +112,10 @@ export default function Chat() {
   const [messages, { refetch: refetchMessages }] = createResource(messageKey, (k) =>
     chatApi.listMessages(k.ch, k.p),
   );
+  const [pinnedMessages, { refetch: refetchPinnedMessages }] = createResource(messageKey, (k) =>
+    chatApi.listPinnedMessages(k.ch, k.p),
+  );
+  const [showPinned, setShowPinned] = createSignal(false);
 
   // thread panel — only the root message id is pinned; the displayed root object
   // is derived live from the messages() resource so edits/reactions/reply-count
@@ -144,6 +148,7 @@ export default function Chat() {
     const t = setInterval(() => {
       refetchChannels();
       refetchMessages();
+      refetchPinnedMessages();
       if (threadRootId()) refetchThread();
       refetchMembers();
       refetchMentions();
@@ -411,6 +416,14 @@ export default function Chat() {
     }
   }
 
+  async function togglePinned(m: MessageView) {
+    try {
+      await chatApi.setMessagePinned(m.id, !m.pinned);
+      refetchMessages(); refetchPinnedMessages();
+      if (threadRootId()) refetchThread();
+    } catch (e) { fail(e); }
+  }
+
   // ---- reactions ----
   async function toggleReaction(m: MessageView, emoji: string, inThread: boolean) {
     const p = actingProfileId();
@@ -573,6 +586,9 @@ export default function Chat() {
               delete
             </button>
           </Show>
+          <button class="ghost small" onClick={() => togglePinned(m)}>
+            {m.pinned ? "unpin" : "pin"}
+          </button>
           <Show when={!inThread}>
             <button class="ghost small" onClick={() => setThreadRootId(m.id)}>
               reply in thread
@@ -702,6 +718,9 @@ export default function Chat() {
             <span class="branch-chip">{activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">
+            <button class="ghost small" onClick={() => setShowPinned((v) => !v)}>
+              pinned <Show when={pinnedMessages()?.length}><span class="mention-badge">{pinnedMessages()!.length}</span></Show>
+            </button>
             <button class="ghost small" onClick={() => setShowMentions((v) => !v)}>
               mentions
               <Show when={unreadMentions().length}>
@@ -713,7 +732,14 @@ export default function Chat() {
           </div>
         </header>
 
-        <Show when={showMentions()}>
+        <Show when={showPinned()}>
+        <div class="mentions-panel">
+          <Show when={(pinnedMessages() ?? []).length} fallback={<p class="hint pad">No pinned messages.</p>}>
+            <For each={pinnedMessages()}>{(message) => <button type="button" class="mention-item" onClick={() => setThreadRootId(message.id)}><span class="mention-who">{profileName(message.author_id)}</span><span class="mention-what">📌 {message.text}</span><span class="mention-when">{when(message.created_at)}</span></button>}</For>
+          </Show>
+        </div>
+      </Show>
+      <Show when={showMentions()}>
           <div class="mentions-panel">
             <Show when={(mentions() ?? []).length} fallback={<p class="hint pad">Nobody has mentioned you yet.</p>}>
               <For each={mentions()}>{(mention) => (

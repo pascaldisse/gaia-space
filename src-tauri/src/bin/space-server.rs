@@ -2238,7 +2238,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_checklist_item"
         | "delete_deploy_target"
         | "delete_issue_status"
-        | "delete_message" => CommandPolicy::Session,
+        | "delete_message" | "set_message_pinned" => CommandPolicy::Session,
         // Attachment lifecycle rides the message it belongs to: a session alone is not
         // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
@@ -2282,7 +2282,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "list_job_runs_for_script"
         | "list_test_reports"
         | "list_workers" => CommandPolicy::Session,
-        "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_notifications" => {
+        "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_pinned_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
         // Both are scoped to the caller by `bind_session_identity` rewriting `profile_id`,
@@ -3554,6 +3554,7 @@ fn authorize_command(
             if matches!(
                 name,
                 "list_messages"
+                    | "list_pinned_messages"
                     | "list_channel_members"
                     | "get_channel"
                     | "mark_channel_read"
@@ -3589,7 +3590,10 @@ fn authorize_command(
                     return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
                 }
             }
-            if matches!(name, "update_message" | "delete_message") {
+            if matches!(
+                name,
+                "update_message" | "delete_message" | "set_message_pinned"
+            ) {
                 let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
                 if !chat_message_owned(&user.profile_id, &id) {
                     return Err(err(
@@ -4733,6 +4737,7 @@ async fn cmd(
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
+    "list_pinned_messages" => chat::list_pinned_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
@@ -4859,6 +4864,7 @@ async fn cmd(
     "seed_rights" => platform::seed_rights(),
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
     "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
+    "set_message_pinned" => chat::set_message_pinned(id: String, pinned: bool),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),

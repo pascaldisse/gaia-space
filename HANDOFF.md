@@ -1,40 +1,30 @@
-# HANDOFF — w11-chat ☀Lakshmi
+# HANDOFF — w11-chat ☀Lakshmi-II
 
-枝=feat/w11-chat·⚓HEAD=0e045a3。樹=/Users/pascaldisse/projects/gs-w11-chat。主樹不觸。
+枝=feat/w11-chat·⚓HEAD=afeeef2。樹=/Users/pascaldisse/projects/gs-w11-chat。
 
-## 完=§04 atom
+## 完=①message pinning
 
-attachments lifecycle+mentions。
+SHA=`afeeef2`。
 
-SHA列:
-- `45629ab`→`c4b3ed3`: attachments lifecycle。upload_state/error·実測data-url容量gate·CAS遷移·message scope·冪等retry·HTTP author/admin authz·UI upload/failed/retry/remove。
-- `5ba05a4`→`9db9237`: mentions。channel可読target限定·保存/readback·edit diff·inbox/badge·上限100·leave時alert消去。
-- `502e594`+`eb3ec1a`: attachments migration=予約済V76へ訂正。V75非使用。
-- `0e045a3`: parity status+summary整合。
+- V114予約→`PARITY.md`; `messages.pinned`+partial index、旧/部分DB guard。
+- Rust/IPC/HTTP=`set_message_pinned`(author-only web)·`list_pinned_messages`(channel ACL)。
+- UI=message pin/unpin·header pinned panel。
+- test=冪等·newest順·archive除外。
+- parity=`Message pinning` missing→partial; §04=59 rows·done18·partial36·missing5; total=356·done89·partial186·stub4·missing77。
 
-migration=V76のみ。V75=calls予約、V77=issues予約。
+## 次
 
-## 次atom列
-
-pin→draft persistence+typing→scheduled→polls→paging+unfurl。
-
-## parity
-
-§04=59 rows·done10·partial34·missing15。全体=356·done59·partial180·stub4·missing113。attachments/mentions: missing→partial 各1。
+②draft永続+typing indicator→③scheduled→④polls→⑤paging/link-unfurl。schema必要時=未使用V115以降を先PARITY予約。
 
 ## gate
 
-`cargo test --manifest-path src-tauri/Cargo.toml` ✓: lib312/0·space-server60/0。
+`cargo test --manifest-path src-tauri/Cargo.toml` ✓。
 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` ✓。
 `bunx tsc --noEmit` ✓。
-`bun test` ✓:198/0。
-`bun run build` ✓。chunk-size warningのみ。
+`bun test` ✓:201/0。
+`bun run build` ✓; chunk-size warningのみ。
 `python3 scripts/parity_totals.py --check` ✓。
-
-## 死枝
-
-pin/V77未commit差分→死:親寿命令・新atom禁。`reset --hard`非行、attachments/mentions/V76保全。
 
 ## UNVERIFIED
 
-実機desktop/web UI操作・外部upload transport。
+desktop/web実機pin操作·HTTP pin ACL E2E。
