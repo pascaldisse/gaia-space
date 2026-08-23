@@ -904,36 +904,6 @@ pub fn set_dashboard_preferences(
     let c = db::conn()?;
     save_dashboard_preferences_for_actor_on(&c, preferences)
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CalendarOptions {
-pub profile_id: String,
-pub show_weekends: bool,
-pub show_todos: bool,
-pub working_hours_only: bool,
-pub working_hours_start: i64,
-pub working_hours_end: i64,
-pub show_declined: bool,
-}
-pub fn get_calendar_options(profile_id: String) -> Result<CalendarOptions> {
-let c=db::conn()?;
-let (actor_id,_)=actor::resolve(&c)?;
-if actor_id != profile_id { return Err("Calendar options belong to the active profile".into()); }
-calendar_options_on(&c, &profile_id)
-}
-pub fn calendar_options_on(c:&Connection, profile_id:&str) -> Result<CalendarOptions> {
-let values=err(c.query_row("SELECT calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined FROM user_preferences WHERE profile_id=?1",[profile_id],|r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?))).optional())?;
-let (show_weekends,show_todos,working_hours_only,working_hours_start,working_hours_end,show_declined)=values.unwrap_or((1,1,0,9,18,0));
-Ok(CalendarOptions { profile_id:profile_id.into(), show_weekends:show_weekends!=0, show_todos:show_todos!=0, working_hours_only:working_hours_only!=0, working_hours_start, working_hours_end, show_declined:show_declined!=0 })
-}
-#[cfg_attr(feature="desktop", tauri::command)]
-pub fn set_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
-if options.working_hours_start < 0 || options.working_hours_end > 24 || options.working_hours_start >= options.working_hours_end { return Err("Working hours must be within 0..24 and increasing".into()); }
-let c=db::conn()?; let (actor_id,_)=actor::resolve(&c)?;
-if actor_id != options.profile_id { return Err("Calendar options belong to the active profile".into()); }
-err(c.execute("INSERT INTO user_preferences(profile_id,calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(profile_id) DO UPDATE SET calendar_show_weekends=excluded.calendar_show_weekends,calendar_show_todos=excluded.calendar_show_todos,calendar_working_hours_only=excluded.calendar_working_hours_only,calendar_working_hours_start=excluded.calendar_working_hours_start,calendar_working_hours_end=excluded.calendar_working_hours_end,calendar_show_declined=excluded.calendar_show_declined",params![options.profile_id,options.show_weekends as i64,options.show_todos as i64,options.working_hours_only as i64,options.working_hours_start,options.working_hours_end,options.show_declined as i64]))?;
-calendar_options_on(&c,&options.profile_id)
-}
-
 /// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
 pub fn get_dashboard_preferences_http(profile_id: String) -> Result<DashboardPreferences> {
     dashboard_preferences_on(&db::conn()?, &profile_id)
@@ -943,6 +913,127 @@ pub fn set_dashboard_preferences_http(
     preferences: DashboardPreferences,
 ) -> Result<DashboardPreferences> {
     save_dashboard_preferences_on(&db::conn()?, preferences)
+}
+
+/// Per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`): the
+/// hide/show weekends / working-hours / to-dos / declined toggles. Persisted on
+/// the member's preference row so every device sees the same calendar.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct CalendarOptions {
+    pub profile_id: String,
+    pub show_weekends: bool,
+    pub show_todos: bool,
+    pub working_hours_only: bool,
+    pub working_hours_start: i64,
+    pub working_hours_end: i64,
+    pub show_declined: bool,
+}
+fn default_calendar_options(profile_id: &str) -> CalendarOptions {
+    CalendarOptions {
+        profile_id: profile_id.to_string(),
+        show_weekends: true,
+        show_todos: true,
+        working_hours_only: false,
+        working_hours_start: 9,
+        working_hours_end: 18,
+        show_declined: false,
+    }
+}
+/// A window is a half-open hour range inside one day, so an empty or inverted
+/// range can never be stored and silently blank the grid.
+fn clean_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    if options.profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    if !(0..=24).contains(&options.working_hours_start)
+        || !(0..=24).contains(&options.working_hours_end)
+    {
+        return Err("Calendar working hours must be between 0 and 24".into());
+    }
+    if options.working_hours_end <= options.working_hours_start {
+        return Err("Calendar working hours must end after they start".into());
+    }
+    Ok(options)
+}
+pub(crate) fn calendar_options_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    if profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    let stored = err(c
+        .query_row(
+            "SELECT calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined FROM user_preferences WHERE profile_id=?1",
+            [profile_id],
+            |row| {
+                Ok(CalendarOptions {
+                    profile_id: profile_id.to_string(),
+                    show_weekends: row.get(0)?,
+                    show_todos: row.get(1)?,
+                    working_hours_only: row.get(2)?,
+                    working_hours_start: row.get(3)?,
+                    working_hours_end: row.get(4)?,
+                    show_declined: row.get(5)?,
+                })
+            },
+        )
+        .optional())?;
+    // An absent preference row is not an error: it is the documented default view.
+    Ok(stored.unwrap_or_else(|| default_calendar_options(profile_id)))
+}
+pub(crate) fn save_calendar_options_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let options = clean_calendar_options(options)?;
+    // The preference row is shared with the dashboard, so an insert must seed the
+    // dashboard column while an update must leave whatever it already holds.
+    err(c.execute(
+        "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets,calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined) VALUES(?1,'[]',?2,?3,?4,?5,?6,?7) ON CONFLICT(profile_id) DO UPDATE SET calendar_show_weekends=excluded.calendar_show_weekends,calendar_show_todos=excluded.calendar_show_todos,calendar_working_hours_only=excluded.calendar_working_hours_only,calendar_working_hours_start=excluded.calendar_working_hours_start,calendar_working_hours_end=excluded.calendar_working_hours_end,calendar_show_declined=excluded.calendar_show_declined",
+        params![
+            options.profile_id,
+            options.show_weekends,
+            options.show_todos,
+            options.working_hours_only,
+            options.working_hours_start,
+            options.working_hours_end,
+            options.show_declined
+        ],
+    ))?;
+    calendar_options_on(c, &options.profile_id)
+}
+fn calendar_options_for_actor_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    calendar_options_on(c, profile_id)
+}
+fn save_calendar_options_for_actor_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if options.profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    save_calendar_options_on(c, options)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_calendar_options(profile_id: String) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    calendar_options_for_actor_on(&c, &profile_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    save_calendar_options_for_actor_on(&c, options)
+}
+/// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
+pub fn get_calendar_options_http(profile_id: String) -> Result<CalendarOptions> {
+    calendar_options_on(&db::conn()?, &profile_id)
+}
+/// HTTP has already replaced the payload owner at its policy gate.
+pub fn set_calendar_options_http(options: CalendarOptions) -> Result<CalendarOptions> {
+    save_calendar_options_on(&db::conn()?, options)
 }
 
 fn read_scope(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubscriptionScope> {

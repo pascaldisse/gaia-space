@@ -1678,6 +1678,7 @@ enum CommandPolicy {
     CalendarFeedUpsert,
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
+    CalendarOptionsWrite,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -1698,7 +1699,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
-        "calendar_aggregate" => CommandPolicy::CalendarRead,
+        "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
+        "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
@@ -2567,6 +2569,14 @@ fn authorize_command(
                 .and_then(|body| body.get_mut("preferences"))
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| err(StatusCode::BAD_REQUEST, "preferences are required"))?
+                .insert("profile_id".into(), json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::CalendarOptionsWrite => {
+            body.as_object_mut()
+                .and_then(|body| body.get_mut("options"))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "options are required"))?
                 .insert("profile_id".into(), json!(user.profile_id));
             Ok(())
         }
@@ -4060,6 +4070,8 @@ async fn cmd(
     "dashboard_aggregate" => personal::dashboard_aggregate(profile_id: String),
     "get_dashboard_preferences" => personal::get_dashboard_preferences_http(profile_id: String),
     "set_dashboard_preferences" => personal::set_dashboard_preferences_http(preferences: personal::DashboardPreferences),
+    "get_calendar_options" => personal::get_calendar_options_http(profile_id: String),
+    "set_calendar_options" => personal::set_calendar_options_http(options: personal::CalendarOptions),
     "delete_board" => issues::delete_board(id: String),
     "delete_board_column" => issues::delete_board_column(id: String),
     "delete_checklist" => issues::delete_checklist(id: String),
