@@ -76,8 +76,7 @@ Progress (V121): MR diff renders unified and side-by-side hunk line mapping; pro
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ bcaad14)
-33 rows — done 12 · partial 18 · stub 0 · missing 3.
-33 rows — done 10 · partial 18 · stub 0 · missing 5.
+33 rows — done 13 · partial 18 · stub 0 · missing 2.
 Worst gaps: custom-field swimlane grouping · matrix report persistence/arbitrary axes · tracker synchronization/import. · V120: Board UI now renders live horizontal swimlanes grouped by assignee, creator, or due date; named/default placement lanes remain available; selected cards support atomic bulk column move, sprint assignment, and board removal. · V79: tracker links connect issue↔issue, issue↔merge request, and HTTP(S) external targets. · V78: authored issue comments + durable issue activity timeline, API and Issue Detail UI wired.
 
 ## 03 Packages & CI/CD & Deployments (audited ✓ — rows: reports/parity/03-packages-cicd.md @ 2fcf30d)
