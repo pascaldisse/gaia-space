@@ -39,6 +39,8 @@ pub struct PublishBlogDraftInput {
     pub team_id: Option<String>,
     pub project_id: Option<String>,
     pub location_id: Option<String>,
+    pub calendar_event_title: Option<String>,
+    pub calendar_event_date: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct BlogFilter {
@@ -235,6 +237,20 @@ pub fn publish_blog_draft(input: PublishBlogDraftInput) -> Result<BlogPost> {
     }) {
         return Err("blog project target not found".into());
     }
+    if input
+        .calendar_event_title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err("blog calendar event title cannot be blank".into());
+    }
+    if let Some(date) = input.calendar_event_date.as_deref() {
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|_| "blog calendar event date must be YYYY-MM-DD")?;
+    }
+    if input.calendar_event_title.is_some() != input.calendar_event_date.is_some() {
+        return Err("blog calendar event needs both title and date".into());
+    }
     let id = new_id("blog");
     let alias = slug(&title);
     c.execute("INSERT INTO blog_posts(id,draft_id,title,body,author_id,team_id,project_id,location_id,created_at,published_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch(),unixepoch())",params![id,input.draft_id,title,body,input.author_id,input.team_id,input.project_id,input.location_id]).map_err(|e|e.to_string())?;
@@ -243,6 +259,16 @@ pub fn publish_blog_draft(input: PublishBlogDraftInput) -> Result<BlogPost> {
         params![id, alias],
     )
     .map_err(|e| e.to_string())?;
+    if let (Some(title), Some(date)) = (
+        input.calendar_event_title.as_deref(),
+        input.calendar_event_date.as_deref(),
+    ) {
+        c.execute(
+            "INSERT INTO blog_calendar_events(post_id,title,event_date) VALUES(?1,?2,?3)",
+            params![id, title.trim(), date],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     get_blog_post(id)?.ok_or_else(|| "published article vanished".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]

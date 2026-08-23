@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 63;
+pub const SCHEMA_VERSION: i64 = 65;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -42,6 +42,17 @@ pub fn open_in_memory() -> Result<Connection> {
 /// fails when the name is taken. PID+clock names are not exclusive across processes
 /// (PIDs are recycled, clocks are coarse), and deleting a "stale" file would destroy a
 /// live database owned by another process. Dropping the guard removes only our own dir.
+/// V65: Optional date-only calendar event attached to one published blog article.
+pub(crate) const SCHEMA_V65: &str = r#"
+CREATE TABLE IF NOT EXISTS blog_calendar_events (
+    post_id TEXT PRIMARY KEY REFERENCES blog_posts(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    CHECK(event_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+);
+CREATE INDEX IF NOT EXISTS blog_calendar_events_date ON blog_calendar_events(event_date);
+"#;
+
 #[cfg(test)]
 pub struct TempDb {
     dir: PathBuf,
@@ -549,6 +560,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             )?;
             tx.execute_batch("CREATE INDEX IF NOT EXISTS job_runs_worker ON job_runs(worker_id);")?;
         }
+    }
+    // V65: optional date-only calendar events owned by published blog articles.
+    if version < 65 {
+        tx.execute_batch(SCHEMA_V65)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1316,7 +1331,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 63);
+        assert_eq!(SCHEMA_VERSION, 65);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

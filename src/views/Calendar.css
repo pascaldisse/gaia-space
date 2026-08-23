@@ -11,6 +11,7 @@
 .calendar-event.meeting{border-left-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
 .calendar-event.task{border-left-color:var(--cal-task);background:var(--cal-task-bg);color:var(--attn-amber-text)}
 .calendar-event.deadline{border-left-color:var(--cal-deadline);background:var(--cal-deadline-bg);color:var(--cal-deadline-ink);font-weight:600}
+.calendar-event.blog{border-left-color:var(--cal-task);background:var(--cal-task-bg);color:var(--attn-amber-text)}
 .calendar-event.external{border-left-color:var(--cal-external);background:var(--cal-external-bg);color:var(--cal-external-ink)}
 .calendar-event.done{opacity:.55;text-decoration:line-through}
 .cal-tag{display:inline-block;padding:var(--cal-hairline) var(--cal-space-md);border-radius:var(--radius-chip);font-size:.68rem;font-weight:600;vertical-align:middle}

@@ -1238,6 +1238,38 @@ pub fn calendar_aggregate_on(
             date: Some(date),
         });
     }
+    // Blog announcements are date-only events. Project-targeted posts use the same
+    // membership visibility boundary as blog reads, so the calendar cannot leak one.
+    let mut blog_events = err(c.prepare("SELECT b.id,b.project_id,e.title,e.event_date FROM blog_calendar_events e JOIN blog_posts b ON b.id=e.post_id WHERE b.archived=0 AND e.event_date>=?1 AND e.event_date<?2 AND (b.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))"))?;
+    for row in err(
+        blog_events.query_map(params![day_start, day_end, profile_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        }),
+    )? {
+        let (id, project_id, title, date) = row.map_err(|e| e.to_string())?;
+        let starts_at = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map_err(|_| "Invalid blog calendar event date")?
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        items.push(CalendarItem {
+            id: format!("blog-{id}"),
+            source_id: id,
+            kind: "blog".into(),
+            title,
+            starts_at,
+            ends_at: None,
+            project_id,
+            calendar_id: None,
+            date: Some(date),
+        });
+    }
     // Read-only synced feeds (Settings → Connected calendars): own subscriptions only,
     // same overlap/day-window rules as meetings and tasks/deadlines above.
     items.extend(calendar_feeds::external_items_on(
@@ -1653,6 +1685,30 @@ mod tests {
             .unwrap()
             .expect("legacy todo readable");
         assert_eq!(legacy.notes, None);
+    }
+
+    #[test]
+    fn blog_calendar_events_are_date_only_and_project_scoped() {
+        let c = conn();
+        c.execute("INSERT INTO blog_posts(id,title,body,author_id,project_id) VALUES('blog','Announcement','Body','p','project')", []).unwrap();
+        c.execute("INSERT INTO blog_calendar_events(post_id,title,event_date) VALUES('blog','All hands','2030-03-10')", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        let member =
+            calendar_aggregate_on(&c, "q", 0, 86_400, Some("2030-03-10"), Some("2030-03-11"))
+                .unwrap();
+        assert!(member.iter().any(|item| item.id == "blog-blog"
+            && item.kind == "blog"
+            && item.date.as_deref() == Some("2030-03-10")));
+        let outsider = calendar_aggregate_on(
+            &c,
+            "outsider",
+            0,
+            86_400,
+            Some("2030-03-10"),
+            Some("2030-03-11"),
+        )
+        .unwrap();
+        assert!(!outsider.iter().any(|item| item.id == "blog-blog"));
     }
 
     #[test]

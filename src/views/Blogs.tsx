@@ -10,6 +10,7 @@ import "./Blogs.css";
 const date = (seconds:number) => new Date(seconds * 1000).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
 export default function Blogs() {
   const [term,setTerm]=createSignal(""); const [author,setAuthor]=createSignal(""); const [team,setTeam]=createSignal(""); const [project,setProject]=createSignal(""); const [location,setLocation]=createSignal("");
+  const [calendarEventTitle,setCalendarEventTitle]=createSignal(""); const [calendarEventDate,setCalendarEventDate]=createSignal("");
   const [title,setTitle]=createSignal(""); const [body,setBody]=createSignal(""); const [selected,setSelected]=createSignal<string>(); const [error,setError]=createSignal(""); const [publishing,setPublishing]=createSignal(false);
   const [posts,{refetch}]=createResource(()=>blogsApi.list({term:term()||undefined,author_id:author()||undefined,team_id:team()||undefined,project_id:project()||undefined,location_id:location()||undefined}));
   const [profiles]=createResource(()=>platformApi.profiles()); const [teams]=createResource(()=>platformApi.teams()); const [projects]=createResource(()=>platformApi.projects());
@@ -22,8 +23,8 @@ export default function Blogs() {
     try {
       const draft:Document={id:newId("blog-draft"),container_type:"my-docs",container_id:owner,folder_id:null,doc_type:"text",body_format:"text",title:headline,body:body(),version:1,archived:false,created_by:owner};
       await documentsApi.createDocument(draft);
-      const post=await blogsApi.publish({draft_id:draft.id,author_id:owner,team_id:team()||null,project_id:project()||null,location_id:location()||null});
-      setTitle(""); setBody(""); await refetch(); setSelected(post.id); linkEntity("blog",post.id);
+      const post=await blogsApi.publish({draft_id:draft.id,author_id:owner,team_id:team()||null,project_id:project()||null,location_id:location()||null,calendar_event_title:calendarEventTitle().trim()||null,calendar_event_date:calendarEventDate()||null});
+      setTitle(""); setBody(""); setCalendarEventTitle(""); setCalendarEventDate(""); await refetch(); setSelected(post.id); linkEntity("blog",post.id);
     } catch(reason) { setError(humanError(reason)); } finally { setPublishing(false); }
   };
   const result=()=>posts()??[];
@@ -32,6 +33,8 @@ export default function Blogs() {
     <Show when={error()}><p class="blogs-error" role="alert">{error()}</p></Show>
     <div class="blogs-layout">
       <aside class="blogs-compose"><h2>Write &amp; publish</h2><ProfilePicker identity/><input value={title()} onInput={e=>setTitle(e.currentTarget.value)} placeholder="Article title" aria-label="Article title"/><textarea value={body()} onInput={e=>setBody(e.currentTarget.value)} placeholder="Write the article…" aria-label="Article body"/>
+      <input value={calendarEventTitle()} onInput={e=>setCalendarEventTitle(e.currentTarget.value)} placeholder="Calendar event title (optional)" aria-label="Calendar event title"/>
+      <input type="date" value={calendarEventDate()} onInput={e=>setCalendarEventDate(e.currentTarget.value)} aria-label="Calendar event date"/>
         <label>Team<select value={team()} onChange={e=>setTeam(e.currentTarget.value)}><option value="">Organization-wide</option><For each={teams()??[]}>{item=><option value={item.id}>{item.name}</option>}</For></select></label>
         <label>Project<select value={project()} onChange={e=>setProject(e.currentTarget.value)}><option value="">No project target</option><For each={(projects()??[]).filter(p=>!p.archived)}>{item=><option value={item.id}>{item.name}</option>}</For></select></label>
         <label>Location ID<input value={location()} onInput={e=>setLocation(e.currentTarget.value)} placeholder="Optional location"/></label>
