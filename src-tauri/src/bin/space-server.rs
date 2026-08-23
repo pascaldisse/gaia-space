@@ -1012,7 +1012,7 @@ async fn caldav_delete_event(
 
 fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,global_role FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let row = c.query_row("SELECT id,username,password_hash,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE username=?1 AND active=1", [username], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,String>(5)?))).map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     let (id, username, password_hash, display_name, profile_id, role) = row;
     let verified = PasswordHash::new(&password_hash)
         .ok()
@@ -1043,7 +1043,7 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,u.global_role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
+    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,CASE WHEN u.role='admin' THEN 'GlobalAdmin' ELSE u.global_role END FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
     // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
     // (platform::is_admin_on): the account role or the Global.Superadmin right, one
     // meaning on both transports. The raw column alone would leave a rights-model
@@ -1154,7 +1154,7 @@ async fn login(
         Ok(c) => c,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,global_role FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
+    let row=c.query_row("SELECT id,username,password_hash,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE username=?1 AND active=1",[&account],|r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get(3)?,r.get(4)?,r.get(5)?)));
     let Ok((id, username, ph, display_name, profile_id, role)) = row else {
         let locked = app
             .login_limiter
@@ -1493,13 +1493,17 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         )
         .into_response();
     }
-    if !matches!(
-        x.role.as_str(),
-        "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
-    ) {
+    // Legacy wire compat: pre-V90 clients say "admin"/"member"; they mean the
+    // account-global pair. Unknown strings stay invalid.
+    let role = match x.role.as_str() {
+        "admin" => "GlobalAdmin",
+        "member" => "GlobalMember",
+        other => other,
+    };
+    if !matches!(role, "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest") {
         return err(StatusCode::BAD_REQUEST, "invalid role").into_response();
     }
-    if x.role == "GlobalAdmin" && !me.account_admin {
+    if role == "GlobalAdmin" && !me.account_admin {
         return err(
             StatusCode::FORBIDDEN,
             "only a GlobalAdmin can grant GlobalAdmin",
@@ -1544,7 +1548,7 @@ async fn create_user(h: HeaderMap, Json(x): Json<CreateUser>) -> impl IntoRespon
         Ok(v) => v,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
     };
-    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())", params![id, username, password_hash, display_name, pid, if x.role == "GlobalAdmin" { "admin" } else { "member" }, x.role]) {
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())", params![id, username, password_hash, display_name, pid, if role == "GlobalAdmin" { "admin" } else { "member" }, role]) {
         Ok(_) => Json(json!({"id":id})).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
     }
@@ -1606,7 +1610,14 @@ async fn patch_user(
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
-    if let Some(role) = x.role.as_deref() {
+    // Legacy wire compat: pre-V90 clients say "admin"/"member"; they mean the
+    // account-global pair. Unknown strings stay invalid.
+    let normalized_role = x.role.as_deref().map(|r| match r {
+        "admin" => "GlobalAdmin",
+        "member" => "GlobalMember",
+        other => other,
+    });
+    if let Some(role) = normalized_role {
         if !matches!(
             role,
             "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest"
@@ -1652,7 +1663,7 @@ async fn patch_user(
     }
     let removes_active_admin = target.0 == "GlobalAdmin"
         && target.1
-        && (x.role.as_deref() != Some("GlobalAdmin") || x.active == Some(false));
+        && (normalized_role != Some("GlobalAdmin") || x.active == Some(false));
     if removes_active_admin {
         let n: i64 = c
             .query_row(
@@ -1680,7 +1691,7 @@ async fn patch_user(
             return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
         }
     }
-    if let Some(v) = x.role {
+    if let Some(v) = normalized_role {
         if let Err(e) = c.execute(
             "UPDATE users SET role=?1,global_role=?2 WHERE id=?3",
             params![

@@ -594,6 +594,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
         add_column_if_missing(&tx, "users", "global_role", "TEXT NOT NULL DEFAULT 'GlobalMember' CHECK(global_role IN ('GlobalAdmin','GlobalMember','Guest','LightGuest'))")?;
+        // Backfill: a legacy 'admin' account IS a GlobalAdmin; without this, upgrading
+        // strips every existing administrator.
+        tx.execute("UPDATE users SET global_role='GlobalAdmin' WHERE role='admin' AND global_role='GlobalMember'", [])?;
         tx.execute_batch(SCHEMA_V90)?;
     }
     // V91: verified domains are an organization registration policy, never an
