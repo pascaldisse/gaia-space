@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 116;
+pub const SCHEMA_VERSION: i64 = 117;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -631,6 +631,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // `messages` until its delivery run inserts the real row.
     if version < 116 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V116)?;
+    }
+    // V117: a poll is content of the message that carries it — it cascades with that
+    // message, and its options are rows so votes reference them by key, not by index.
+    if version < 117
+        && table_exists(&tx, "messages")?
+        && table_exists(&tx, "channels")?
+        && table_exists(&tx, "profiles")?
+    {
+        tx.execute_batch(SCHEMA_V117)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1554,6 +1563,44 @@ CREATE INDEX IF NOT EXISTS scheduled_messages_channel ON scheduled_messages(chan
 CREATE INDEX IF NOT EXISTS scheduled_messages_author ON scheduled_messages(author_id, scheduled_at, id);
 "#;
 
+/// V117: a poll is channel content, so it hangs off the message that carries it
+/// (`message_id` UNIQUE: one message never shows two polls) and dies with it. Options
+/// are rows, not a serialized blob, so a vote can reference one by foreign key instead
+/// of an index that a later edit would silently repoint. A vote is one row per
+/// (poll, voter, option): single-choice polls are enforced in code by deleting the
+/// voter's other rows in the same transaction, multi-choice keep them.
+pub(crate) const SCHEMA_V117: &str = r#"
+CREATE TABLE IF NOT EXISTS message_polls (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    multiple_choice INTEGER NOT NULL DEFAULT 0 CHECK(multiple_choice IN (0,1)),
+    anonymous INTEGER NOT NULL DEFAULT 0 CHECK(anonymous IN (0,1)),
+    closed_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS message_polls_channel ON message_polls(channel_id, created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS message_poll_options (
+    id TEXT PRIMARY KEY,
+    poll_id TEXT NOT NULL REFERENCES message_polls(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    UNIQUE(poll_id, position)
+);
+CREATE INDEX IF NOT EXISTS message_poll_options_poll ON message_poll_options(poll_id, position);
+CREATE TABLE IF NOT EXISTS message_poll_votes (
+    poll_id TEXT NOT NULL REFERENCES message_polls(id) ON DELETE CASCADE,
+    option_id TEXT NOT NULL REFERENCES message_poll_options(id) ON DELETE CASCADE,
+    voter_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(poll_id, voter_id, option_id)
+);
+CREATE INDEX IF NOT EXISTS message_poll_votes_option ON message_poll_votes(option_id);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1964,7 +2011,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 116);
+        assert_eq!(SCHEMA_VERSION, 117);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

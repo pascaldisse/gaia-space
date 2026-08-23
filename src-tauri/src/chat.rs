@@ -1159,6 +1159,320 @@ fn deliver_due_scheduled_impl(
     Ok(delivered)
 }
 
+// ---------------------------------------------------------------------------
+// Polls (V117) — KB §04 §1.1 `M2PollContent`: a poll IS a message's content.
+// ---------------------------------------------------------------------------
+
+/// A poll needs at least a choice between two things; one option is an announcement.
+pub const POLL_MIN_OPTIONS: usize = 2;
+/// Bound taken from the composer: an unbounded option list is a write amplifier.
+pub const POLL_MAX_OPTIONS: usize = 20;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollOptionResult {
+    pub id: String,
+    pub position: i64,
+    pub text: String,
+    pub vote_count: i64,
+    /// Whether the *reading* profile picked this option. Never other people's ballots.
+    pub me_voted: bool,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollView {
+    pub id: String,
+    pub message_id: String,
+    pub channel_id: String,
+    pub author_id: String,
+    pub question: String,
+    pub multiple_choice: bool,
+    pub anonymous: bool,
+    pub closed_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub options: Vec<PollOptionResult>,
+    /// Distinct voters, not ballots: a multi-choice poll must not report turnout
+    /// larger than its electorate.
+    pub voter_count: i64,
+}
+
+fn poll_message_id(poll_id: &str) -> String {
+    format!("poll-{poll_id}")
+}
+fn poll_option_id(poll_id: &str, position: usize) -> String {
+    format!("{poll_id}-o{position}")
+}
+
+fn validate_poll_options(options: &[String]) -> Result<Vec<String>> {
+    let cleaned: Vec<String> = options.iter().map(|o| o.trim().to_string()).collect();
+    if cleaned.iter().any(|o| o.is_empty()) {
+        return Err("poll options must not be empty".into());
+    }
+    if cleaned.len() < POLL_MIN_OPTIONS {
+        return Err(format!("a poll needs at least {POLL_MIN_OPTIONS} options"));
+    }
+    if cleaned.len() > POLL_MAX_OPTIONS {
+        return Err(format!("a poll accepts at most {POLL_MAX_OPTIONS} options"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for o in &cleaned {
+        if !seen.insert(o.to_lowercase()) {
+            return Err("poll options must be distinct".into());
+        }
+    }
+    Ok(cleaned)
+}
+
+/// Creating a poll writes the carrying message and the poll in ONE transaction: a
+/// half-written poll would show as an empty message nobody can vote on, and a poll row
+/// without its message would be unreachable content.
+#[allow(clippy::too_many_arguments)]
+fn create_poll_impl(
+    c: &Connection,
+    id: &str,
+    channel_id: &str,
+    author_id: &str,
+    question: &str,
+    options: &[String],
+    multiple_choice: bool,
+    anonymous: bool,
+) -> Result<PollView> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("poll question is required".into());
+    }
+    let options = validate_poll_options(options)?;
+    let message_id = poll_message_id(id);
+    let now = now_secs();
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    // The message carries the channel ACL / read-only checks for us.
+    create_message_impl(
+        &tx,
+        &Message {
+            id: message_id.clone(),
+            channel_id: channel_id.to_string(),
+            author_id: Some(author_id.to_string()),
+            text: question.to_string(),
+            created_at: now,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            pinned: false,
+            content_kind: "poll".into(),
+            mention_ids: Vec::new(),
+        },
+    )?;
+    tx.execute(
+        "INSERT INTO message_polls(id,message_id,channel_id,author_id,question,multiple_choice,anonymous,created_at,updated_at) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",
+        rusqlite::params![id, message_id, channel_id, author_id, question, multiple_choice, anonymous, now],
+    )
+    .map_err(|e| e.to_string())?;
+    for (position, text) in options.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO message_poll_options(id,poll_id,position,text) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![poll_option_id(id, position), id, position as i64, text],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    get_poll_impl(c, id, Some(author_id))?.ok_or_else(|| "poll not found".to_string())
+}
+
+/// The read model is an aggregate: counts plus the reader's own ballot. Individual
+/// ballots are never returned, so an anonymous poll cannot be de-anonymized by reading
+/// the API, and a public one still does not leak who voted for what through this seam.
+fn get_poll_impl(
+    c: &Connection,
+    id: &str,
+    acting_profile_id: Option<&str>,
+) -> Result<Option<PollView>> {
+    let head = c
+        .query_row(
+            "SELECT id,message_id,channel_id,author_id,question,multiple_choice,anonymous,closed_at,created_at,updated_at \
+             FROM message_polls WHERE id=?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, bool>(5)?,
+                    r.get::<_, bool>(6)?,
+                    r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, i64>(8)?,
+                    r.get::<_, i64>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(head) = head else {
+        return Ok(None);
+    };
+    let mut s = c
+        .prepare(
+            "SELECT o.id,o.position,o.text, \
+                    (SELECT COUNT(*) FROM message_poll_votes v WHERE v.option_id=o.id), \
+                    (SELECT COUNT(*) FROM message_poll_votes v WHERE v.option_id=o.id AND v.voter_id=?2) \
+             FROM message_poll_options o WHERE o.poll_id=?1 ORDER BY o.position",
+        )
+        .map_err(|e| e.to_string())?;
+    let options = s
+        .query_map(rusqlite::params![id, acting_profile_id], |r| {
+            Ok(PollOptionResult {
+                id: r.get(0)?,
+                position: r.get(1)?,
+                text: r.get(2)?,
+                vote_count: r.get(3)?,
+                me_voted: r.get::<_, i64>(4)? > 0,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let voter_count: i64 = c
+        .query_row(
+            "SELECT COUNT(DISTINCT voter_id) FROM message_poll_votes WHERE poll_id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(Some(PollView {
+        id: head.0,
+        message_id: head.1,
+        channel_id: head.2,
+        author_id: head.3,
+        question: head.4,
+        multiple_choice: head.5,
+        anonymous: head.6,
+        closed_at: head.7,
+        created_at: head.8,
+        updated_at: head.9,
+        options,
+        voter_count,
+    }))
+}
+
+fn poll_head(c: &Connection, id: &str) -> Result<(String, String, Option<i64>, bool, String)> {
+    c.query_row(
+        "SELECT channel_id,author_id,closed_at,multiple_choice,message_id FROM message_polls WHERE id=?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "poll not found".to_string())
+}
+
+fn list_channel_polls_impl(
+    c: &Connection,
+    channel_id: &str,
+    acting_profile_id: Option<&str>,
+) -> Result<Vec<PollView>> {
+    if let Some(profile_id) = acting_profile_id {
+        if !channel_allows_profile(c, channel_id, profile_id)? {
+            return Err("channel access denied".into());
+        }
+    }
+    let mut s = c
+        .prepare("SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC")
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = s
+        .query_map([channel_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(s);
+    let mut out = Vec::new();
+    for id in ids {
+        if let Some(view) = get_poll_impl(c, &id, acting_profile_id)? {
+            out.push(view);
+        }
+    }
+    Ok(out)
+}
+
+/// Casting a ballot replaces the voter's previous one in the same transaction, so a
+/// single-choice poll can never hold two rows for one voter, and the option is checked
+/// to belong to THIS poll — otherwise a hand-written call could add a vote to another
+/// poll's tally through a poll the caller may read.
+fn vote_poll_impl(
+    c: &Connection,
+    poll_id: &str,
+    voter_id: &str,
+    option_ids: &[String],
+) -> Result<PollView> {
+    let (channel_id, _author, closed_at, multiple_choice, _message_id) = poll_head(c, poll_id)?;
+    if closed_at.is_some() {
+        return Err("poll is closed".into());
+    }
+    if is_read_only_channel_on(c, &channel_id)? {
+        return Err("Private feeds are read-only".into());
+    }
+    if !channel_allows_profile(c, &channel_id, voter_id)? {
+        return Err("channel access denied".into());
+    }
+    if !multiple_choice && option_ids.len() > 1 {
+        return Err("poll accepts a single choice".into());
+    }
+    let mut unique = std::collections::HashSet::new();
+    for option_id in option_ids {
+        if !unique.insert(option_id.as_str()) {
+            return Err("duplicate option in ballot".into());
+        }
+        let owner: Option<String> = c
+            .query_row(
+                "SELECT poll_id FROM message_poll_options WHERE id=?1",
+                [option_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        match owner.as_deref() {
+            Some(found) if found == poll_id => {}
+            Some(_) => return Err("option belongs to another poll".into()),
+            None => return Err("poll option not found".into()),
+        }
+    }
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    // Retract first: an empty ballot is a valid "withdraw my vote".
+    tx.execute(
+        "DELETE FROM message_poll_votes WHERE poll_id=?1 AND voter_id=?2",
+        rusqlite::params![poll_id, voter_id],
+    )
+    .map_err(|e| e.to_string())?;
+    for option_id in option_ids {
+        tx.execute(
+            "INSERT INTO message_poll_votes(poll_id,option_id,voter_id,created_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![poll_id, option_id, voter_id, now_secs()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    get_poll_impl(c, poll_id, Some(voter_id))?.ok_or_else(|| "poll not found".to_string())
+}
+
+/// Closing is CAS on `closed_at IS NULL` and author-scoped: a closed tally is final, and
+/// a second close cannot move the closing time (a retry is a no-op, not a rewrite).
+fn close_poll_impl(c: &Connection, poll_id: &str, actor_id: &str) -> Result<PollView> {
+    let (_channel_id, author_id, closed_at, _multi, _message_id) = poll_head(c, poll_id)?;
+    if author_id != actor_id {
+        return Err("only the poll author may close it".into());
+    }
+    if closed_at.is_none() {
+        let now = now_secs();
+        c.execute(
+            "UPDATE message_polls SET closed_at=?2, updated_at=?2 WHERE id=?1 AND closed_at IS NULL",
+            rusqlite::params![poll_id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    get_poll_impl(c, poll_id, Some(actor_id))?.ok_or_else(|| "poll not found".to_string())
+}
+
 /// Pinning is idempotent; a caller may retry a lost response without changing history.
 fn set_message_pinned_impl(c: &Connection, id: &str, pinned: bool) -> Result<MessageView> {
     let changed = c
@@ -1732,6 +2046,52 @@ pub fn deliver_due_scheduled_messages(
     )
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+#[allow(clippy::too_many_arguments)]
+pub fn create_poll(
+    id: String,
+    channel_id: String,
+    author_id: String,
+    question: String,
+    options: Vec<String>,
+    multiple_choice: Option<bool>,
+    anonymous: Option<bool>,
+) -> Result<PollView> {
+    create_poll_impl(
+        &db::conn()?,
+        &id,
+        &channel_id,
+        &author_id,
+        &question,
+        &options,
+        multiple_choice.unwrap_or(false),
+        anonymous.unwrap_or(false),
+    )
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_poll(id: String, acting_profile_id: Option<String>) -> Result<PollView> {
+    get_poll_impl(&db::conn()?, &id, acting_profile_id.as_deref())?
+        .ok_or_else(|| "poll not found".to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_channel_polls(
+    channel_id: String,
+    acting_profile_id: Option<String>,
+) -> Result<Vec<PollView>> {
+    list_channel_polls_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn vote_poll(
+    poll_id: String,
+    voter_id: String,
+    option_ids: Vec<String>,
+) -> Result<PollView> {
+    vote_poll_impl(&db::conn()?, &poll_id, &voter_id, &option_ids)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn close_poll(poll_id: String, actor_id: String) -> Result<PollView> {
+    close_poll_impl(&db::conn()?, &poll_id, &actor_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_channel_typing(channel_id: String, profile_id: String, typing: bool) -> Result<()> {
     set_typing_impl(&db::conn()?, &channel_id, &profile_id, typing)
 }
@@ -2000,6 +2360,173 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    fn seed_poll_voters(c: &Connection, channel: &str) {
+        seed_scheduler(c, channel);
+        for (id, name) in [("voter-a", "A"), ("voter-b", "B")] {
+            c.execute(
+                "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?2,unixepoch())",
+                rusqlite::params![id, name],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_single_choice_ballot_replaces_itself_and_never_stacks() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll");
+
+        assert!(
+            create_poll_impl(
+                &c,
+                "p-thin",
+                "chan-poll",
+                "default-org",
+                "lunch?",
+                &["only".into()],
+                false,
+                false
+            )
+            .is_err(),
+            "one option is an announcement, not a poll"
+        );
+        assert!(create_poll_impl(
+            &c,
+            "p-dup",
+            "chan-poll",
+            "default-org",
+            "lunch?",
+            &["Pizza".into(), "pizza".into()],
+            false,
+            false
+        )
+        .is_err());
+
+        let poll = create_poll_impl(
+            &c,
+            "p-1",
+            "chan-poll",
+            "default-org",
+            "lunch?",
+            &["pizza".into(), "sushi".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(poll.options.len(), 2);
+        // The poll is real channel content: its message exists and names the question.
+        let carrier = get_message_impl(&c, &poll.message_id).unwrap().unwrap();
+        assert_eq!(carrier.content_kind, "poll");
+        assert_eq!(carrier.text, "lunch?");
+
+        let pizza = poll.options[0].id.clone();
+        let sushi = poll.options[1].id.clone();
+        assert!(
+            vote_poll_impl(&c, "p-1", "voter-a", &[pizza.clone(), sushi.clone()]).is_err(),
+            "a single-choice poll refuses a two-option ballot"
+        );
+        vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&pizza)).unwrap();
+        let after = vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&sushi)).unwrap();
+        assert_eq!(after.options[0].vote_count, 0, "the old ballot is retracted");
+        assert_eq!(after.options[1].vote_count, 1);
+        assert_eq!(after.voter_count, 1);
+        assert!(after.options[1].me_voted);
+
+        // An empty ballot withdraws the vote entirely.
+        let withdrawn = vote_poll_impl(&c, "p-1", "voter-a", &[]).unwrap();
+        assert_eq!(withdrawn.voter_count, 0);
+        assert!(!withdrawn.options[1].me_voted);
+        drop(path);
+    }
+
+    #[test]
+    fn a_tally_counts_distinct_voters_and_leaks_no_other_ballot() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll2");
+        let poll = create_poll_impl(
+            &c,
+            "p-multi",
+            "chan-poll2",
+            "default-org",
+            "which days?",
+            &["mon".into(), "tue".into()],
+            true,
+            true,
+        )
+        .unwrap();
+        let other = create_poll_impl(
+            &c,
+            "p-other",
+            "chan-poll2",
+            "default-org",
+            "other",
+            &["x".into(), "y".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let (mon, tue) = (poll.options[0].id.clone(), poll.options[1].id.clone());
+
+        assert!(
+            vote_poll_impl(&c, "p-multi", "voter-a", &[other.options[0].id.clone()]).is_err(),
+            "an option from another poll may never enter this tally"
+        );
+        assert!(vote_poll_impl(&c, "p-multi", "voter-a", &[mon.clone(), mon.clone()]).is_err());
+
+        vote_poll_impl(&c, "p-multi", "voter-a", &[mon.clone(), tue.clone()]).unwrap();
+        let view = vote_poll_impl(&c, "p-multi", "voter-b", std::slice::from_ref(&mon)).unwrap();
+        assert_eq!(view.options[0].vote_count, 2);
+        assert_eq!(view.options[1].vote_count, 1);
+        assert_eq!(
+            view.voter_count, 2,
+            "turnout counts people, not ballots"
+        );
+        // Voter B reads B's own picks only; A's second choice is never attributed.
+        assert!(view.options[0].me_voted && !view.options[1].me_voted);
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(
+            !json.contains("voter-a"),
+            "the read model carries counts, never voter identities: {json}"
+        );
+        drop(path);
+    }
+
+    #[test]
+    fn only_the_author_closes_a_poll_and_a_closed_poll_takes_no_more_votes() {
+        let (c, path) = conn();
+        seed_poll_voters(&c, "chan-poll3");
+        let poll = create_poll_impl(
+            &c,
+            "p-close",
+            "chan-poll3",
+            "default-org",
+            "ship it?",
+            &["yes".into(), "no".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let yes = poll.options[0].id.clone();
+        vote_poll_impl(&c, "p-close", "voter-a", std::slice::from_ref(&yes)).unwrap();
+
+        assert!(close_poll_impl(&c, "p-close", "voter-a").is_err());
+        let closed = close_poll_impl(&c, "p-close", "default-org").unwrap();
+        let at = closed.closed_at.expect("closed");
+        let again = close_poll_impl(&c, "p-close", "default-org").unwrap();
+        assert_eq!(
+            again.closed_at,
+            Some(at),
+            "a retried close never moves the closing time"
+        );
+        assert!(vote_poll_impl(&c, "p-close", "voter-b", &[yes]).is_err());
+        assert_eq!(again.options[0].vote_count, 1, "the tally is final");
+
+        let listed = list_channel_polls_impl(&c, "chan-poll3", Some("voter-b")).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "p-close");
+        drop(path);
     }
 
     #[test]
