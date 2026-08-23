@@ -585,6 +585,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
+    // V71: importer runs are durable audit facts. The stored source is the operator-selected
+    // path (never its contents); counts make partial imports visible after the toast is gone.
+    if version < 71 {
+        tx.execute_batch(SCHEMA_V71)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -602,6 +607,24 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
+/// imported document bodies and attachment payloads remain in their normal stores.
+pub(crate) const SCHEMA_V71: &str = r#"
+CREATE TABLE IF NOT EXISTS document_imports (
+    id TEXT PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    container_type TEXT NOT NULL,
+    container_id TEXT,
+    parent_folder_id TEXT,
+    created_by TEXT REFERENCES profiles(id),
+    folders_created INTEGER NOT NULL DEFAULT 0,
+    documents_created INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS document_imports_container ON document_imports(container_type, container_id, created_at DESC);
+"#;
 
 /// V66: durable room inventory, equipment capabilities and a meeting reservation.
 pub(crate) const SCHEMA_V66: &str = r#"
@@ -1531,7 +1554,7 @@ mod tests {
     /// having run first and neither breaks on a second pass.
     #[test]
     fn the_whole_migration_ladder_is_replayable_from_any_prior_version() {
-        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 73] {
+        for start in [0i64, 38, 41, 43, 44, 63, 64, 65, 66, 67, 68, 70, 73] {
             let temp = TempDb::new(&format!("gaia-space-ladder-{start}"));
             let conn = open_at(&temp).expect("database");
             migrate(&conn).expect("first climb to head");
