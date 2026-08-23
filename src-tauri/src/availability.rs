@@ -352,6 +352,10 @@ mod tests {
             organizer_id: Some("p-1".into()),
             channel_id: None,
             archived: false,
+            video_provider: None,
+            video_room_id: None,
+            join_url: None,
+            video_status: "scheduled".into(),
         }
     }
 
