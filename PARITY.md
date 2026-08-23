@@ -46,7 +46,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V75 → feat/w11-calls (call recording completion) ☀wave11
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 62 · partial 183 · stub 4 · missing 107. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 63 · partial 183 · stub 4 · missing 106. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -54,10 +54,10 @@ NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter
 MANUAL-ONLY UNVERIFIED (owner): production ticker delivery to an external receiver, real public DNS/egress, and visible Tauri desktop window startup require owner-operated environment/UI verification. In-process real-socket tests and `space-server` HTTP checks do not verify those deployment/UI facts.
 
 ## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md; Varuna-III stage 3)
-52 rows — done 9 · partial 23 · stub 1 · missing 19.
+52 rows — done 10 · partial 23 · stub 1 · missing 18.
 Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21); ordered MR stacks create/list and retarget open children after parent merge landed (V22; `review::tests::merged_stack_parent_retargets_open_children_only`).
 Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
-Progress (Vishnu-V): review navigation now cycles unresolved discussions/changed files; the list has quick filters, sort, aggregate badges; source-branch CODEOWNERS drives My owned files diff filtering.
+Progress (Vishnu-V): review navigation now cycles unresolved discussions/changed files; the list has quick filters, sort, aggregate badges; source-branch CODEOWNERS drives My owned files diff filtering; webhook catalog covers review/participant/discussion/suggestion transitions.
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ 52f0880)

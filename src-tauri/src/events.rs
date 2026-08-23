@@ -27,6 +27,14 @@ pub const REVIEW_CREATED: &str = "review.created";
 pub const REVIEW_UPDATED: &str = "review.updated";
 /// Review merged (`review::attempt_merge`, on a successful merge).
 pub const REVIEW_MERGED: &str = "review.merged";
+/// Review participants changed state or turn.
+pub const REVIEW_PARTICIPANT_UPDATED: &str = "review.participant_updated";
+/// Inline discussion added to a review.
+pub const REVIEW_DISCUSSION_CREATED: &str = "review.discussion_created";
+/// Inline discussion resolved or reopened.
+pub const REVIEW_DISCUSSION_UPDATED: &str = "review.discussion_updated";
+/// Suggested edit accepted, rejected, or reopened.
+pub const REVIEW_SUGGESTION_UPDATED: &str = "review.suggestion_updated";
 
 /// Deployment status changed (`pipelines::transition_deployment`).
 pub const DEPLOYMENT_STATUS_CHANGED: &str = "deployment.status_changed";
@@ -44,6 +52,10 @@ pub const EVENT_TAXONOMY: &[&str] = &[
     REVIEW_CREATED,
     REVIEW_UPDATED,
     REVIEW_MERGED,
+    REVIEW_PARTICIPANT_UPDATED,
+    REVIEW_DISCUSSION_CREATED,
+    REVIEW_DISCUSSION_UPDATED,
+    REVIEW_SUGGESTION_UPDATED,
     DEPLOYMENT_STATUS_CHANGED,
 ];
 
