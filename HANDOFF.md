@@ -1,48 +1,48 @@
-# HANDOFF — w11-chat ☀Saraswati
+# HANDOFF — w11-chat ☀Ganga
 
 枝=feat/w11-chat·樹=/Users/pascaldisse/projects/gs-w11-chat。
 
-## 完=③scheduled/postponed messages (V116)
+## 完=④polls (V117)
 
 SHA列:
-- `d9b3a99` db V116 `scheduled_messages`(前lane骸·救出)
-- `4afe0b3` V116修正:`thread_of REFERENCES messages(id) ON DELETE SET NULL` + `sent_message_id UNIQUE`(☾Durga審指摘)
-- `6a376a9` chat.rs:CRUD + lease式delivery + tests3
-- `9075e7c` lib.rs IPC 6命令·space-server policy/ACL/dispatch·`spawn_chat_schedule_ticker`
-- `5d1a730`+ PARITY row missing→done·totals再計(done96·missing57)
+- `043179a` PARITY:V117予約(先行)
+- `ad32d82` db V117 三表 + chat.rs core(create/vote/close/get/list)+tests3
+- `55b1ec5` lib.rs IPC 5命令·space-server policy/bind/ACL/dispatch+test1
+- `41b360b` src/poll.ts + src/api/chat.ts wrappers + Chat.tsx composer/card + tests6
+- `133f77c` PARITY row分割:polls→done · stickers/saved=missing残。totals再計(357行·done97)
 
 設計要点:
-- intent≠履歴:`scheduled_messages`はmessages外。delivery runが実messages行を挿す。
-- **lease**:`UPDATE ... SET status='sent', sent_message_id=? WHERE id=? AND status='pending'` 一文で確保∴二tick同時posting不能。due SELECTは候補列挙のみ、権威は条件付UPDATE。
-- 実message id=`sched-{intent id}`(派生·非乱数)∴replay=messages PK衝突で冪等。
-- insert失敗→leaseを`pending`へ戻し`error`記録(次tickで再試)。
-- edit/cancel=CAS on `pending`·author限定(`owned_scheduled`)。cancel冪等。
-- 未来時刻必須(`scheduled_at<=now`拒否)。thread root=同channel実在必須。時刻=UTC epoch秒のみ(UI datetime-localが境界で変換)。
-- ticker:`SPACE_CHAT_SCHEDULE_TICK_SECS`(既定30·0/不正=無効)·`SPACE_CHAT_SCHEDULE_TICK_BATCH`(既定`SCHEDULED_TICK_LIMIT_DEFAULT`=100)。
-- web ACL:5命令=Session(`bind_session_identity`が`author_id`をsessionへ)+ `schedule_message`はchannel ACL + `Right::PostMessage`。`deliver_due_scheduled_messages`=AppAdmin。
-- UI:composer 🕒 → datetime-local + Schedule/Reschedule/Dismiss。pending一覧=Edit/Cancel。
+- poll=**運ぶmessageの内容**:`message_polls.message_id UNIQUE REFERENCES messages(id) ON DELETE CASCADE`∴message死→poll死。message id=`poll-{poll id}`(派生)。作成=message+poll+options 一txn。
+- content_kind=`poll`(message text=question)。ACL/read-only検査=`create_message_impl`が担う(重複実装せず)。
+- option=行(blob非)∴票はFKでoption指名。`vote_poll_impl`は該option所属pollを実測検証→他poll集計への注入不能。
+- 票=`PRIMARY KEY(poll_id,voter_id,option_id)`。投票=同txnで**先に自票全削除→再挿入**∴単選が積み上がらぬ·空ballot=撤回。単選+2option要求=拒否。
+- close=author限定 CAS on `closed_at IS NULL`∴再試行が締切時刻を動かさぬ。closed→投票拒否。
+- 読=集計のみ:`options[].vote_count`+`me_voted`(読者自身)+`voter_count=COUNT(DISTINCT voter_id)`。個票非返∴匿名/非匿名問わずAPIから誰が何に投じたか復元不能。turnout=人数(票数非)。
+- web:5命令=Session。`bind_session_identity`に`voter_id`追加(polls専用語)∴他人名義の投票不能·`author_id`既存binding∴他人名義close不能。`create_poll`=channel ACL+`Right::PostMessage`。vote/close/get=`chat_poll_channel`でserver側にchannel解決(caller提供channel_id不信)。
+- UI:composer 📊 → question+option行(add/remove·multiple/anonymous)。card=message行内、bar幅=`optionShare`(**電子数割**∴多選は合計>100%可)、author のみ Close。
 
 ## gate
 
-`cargo test --manifest-path src-tauri/Cargo.toml` ✓ 345+63+1+6+13+2 pass/0 fail。
+`cargo test --manifest-path src-tauri/Cargo.toml` ✓ 348+64+1+6+13+2 pass/0 fail。
 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` ✓。
-`bunx tsc --noEmit` ✓ · `bun test` ✓ 204/0 · `bun run build` ✓(chunk-size警告のみ)。
-`python3 scripts/parity_totals.py --check` ✓ 356 rows·done96·partial199·stub4·missing57。
+`bunx tsc --noEmit` ✓ · `bun test` ✓ 210/0 · `bun run build` ✓(chunk-size警告のみ)。
+`python3 scripts/parity_totals.py --check` ✓ 357 rows·done97·partial199·stub4·missing57。
 
 ## UNVERIFIED
 
-- 実機tickerの走行(env未設定の既定30s経路は未実走)。
-- 多client同時deliveryのE2E(lease正しさはunit水準のみ)。
-- UI:thread composerからのschedule=未配線(backendは`thread_of`対応済)。sent/cancelled履歴のUI表示無(pendingのみ)。
-- attachment付きschedule=未対応(text専用)。mention同送=未対応(delivery時`mention_ids`空)。
+- 多client同時投票のE2E(txn正しさはunit水準のみ·実並行未走)。
+- UI実描画=未実機(card/composerはunit水準の論理のみ·`src/poll.ts`テスト済、TSX描画は未テスト)。
+- 匿名flagはUI表示差のみ:読モデルが元より個票を返さぬ∴backend差は無し(意図)。列は将来の個票公開機能の為に保持。
+- thread内poll=未配線(root channelのみ)。poll付きscheduled message=未対応。poll編集(option追加/文言修正)=未実装(closeのみ)。
 
 ## 死枝
 
-- V117追加でFK修正案=死(V116消費者未在·未release∴原地修正で足る)。
-- due SELECT→行毎delivery(lease無)=死:二tick重複投稿(☾Durga BLOCK)。
-- 乱数message id=死:replayが二重投稿になる。派生idはPKで守られる。
-- 失敗時に`status='sent'`維持+error=死:配信されぬまま送信済扱いになる。
+- poll=独立entity(message外)=死:chat履歴に現れぬ内容になる。KB`M2PollContent`は内容型。
+- option=JSON blob列=死:票がindex参照になり、後の編集が黙って票を付け替える。
+- 単選をUNIQUE(poll,voter)で強制=死:多選と同表を共有できぬ∴PKは三つ組·単選は同txn削除で保証。
+- vote時にcaller提供`channel_id`を信用=死:他人のpollを自分の読めるchannel名と対にできる。∴`chat_poll_channel`でserver解決。
+- 個票列挙API(`list_poll_votes`)=死:匿名pollの匿名性がAPI一本で消える。集計のみ返す。
 
 ## 次
 
-④polls → ⑤paging/link-unfurl。schema要=V117以降を先にPARITY予約。
+⑤paging/link-unfurl。schema要=V118以降を先にPARITY予約。stickers/saved messages+labels=missing残(同KB行)。
