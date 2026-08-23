@@ -138,6 +138,19 @@ struct CreateUser {
     profile_id: Option<String>,
 }
 #[derive(Deserialize)]
+struct SelfRegistration {
+    username: String,
+    password: String,
+    display_name: String,
+}
+#[derive(Deserialize, Serialize)]
+struct VerifiedDomain {
+    domain: String,
+    auto_join: bool,
+    self_registration: bool,
+    verified_at: i64,
+}
+#[derive(Deserialize)]
 struct PatchUser {
     display_name: Option<String>,
     role: Option<String>,
@@ -1166,6 +1179,128 @@ async fn login(
     );
     resp
 }
+fn registration_domain(username: &str) -> Option<String> {
+    let (_, domain) = username.trim().rsplit_once('@')?;
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if domain.is_empty() || domain.contains(['/', '@', ' ']) {
+        None
+    } else {
+        Some(domain)
+    }
+}
+async fn register(Json(x): Json<SelfRegistration>) -> impl IntoResponse {
+    let username = x.username.trim();
+    let display_name = x.display_name.trim();
+    if username.is_empty() || display_name.is_empty() {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "username and display name are required",
+        )
+        .into_response();
+    }
+    if x.password.len() < 8 {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters",
+        )
+        .into_response();
+    }
+    let Some(domain) = registration_domain(username) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "registration requires an email username",
+        )
+        .into_response();
+    };
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let permitted: Option<i64> = match c
+        .query_row(
+            "SELECT 1 FROM verified_domains WHERE domain=?1 AND self_registration=1",
+            [&domain],
+            |r| r.get(0),
+        )
+        .optional()
+    {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    if permitted.is_none() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "self-registration is not enabled for this verified domain",
+        )
+        .into_response();
+    }
+    let id = token();
+    let pid = format!("profile-{}", &id[..12]);
+    let password_hash = match hash(&x.password) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    if let Err(e) = c.execute(
+        "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())",
+        params![pid, username, display_name],
+    ) {
+        return err(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
+    }
+    match c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,'member','GlobalMember',unixepoch())",params![id,username,password_hash,display_name,pid]) { Ok(_)=>Json(json!({"id":id})).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response() }
+}
+async fn domains(h: HeaderMap) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    let mut q=match c.prepare("SELECT domain,auto_join,self_registration,verified_at FROM verified_domains WHERE org_id='default' ORDER BY domain"){Ok(q)=>q,Err(e)=>return err(StatusCode::INTERNAL_SERVER_ERROR,&e.to_string()).into_response()};
+    let response = match q.query_map([], |r| {
+        Ok(VerifiedDomain {
+            domain: r.get(0)?,
+            auto_join: r.get::<_, i64>(1)? != 0,
+            self_registration: r.get::<_, i64>(2)? != 0,
+            verified_at: r.get(3)?,
+        })
+    }) {
+        Ok(rows) => Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+    };
+    response
+}
+async fn save_domain(h: HeaderMap, Json(mut x): Json<VerifiedDomain>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    x.domain = x.domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if x.domain.is_empty() || x.domain.contains(['/', '@', ' ']) {
+        return err(StatusCode::BAD_REQUEST, "invalid domain").into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute("INSERT INTO verified_domains(domain,org_id,auto_join,self_registration,verified_at) VALUES(?1,'default',?2,?3,unixepoch()) ON CONFLICT(domain) DO UPDATE SET auto_join=excluded.auto_join,self_registration=excluded.self_registration,verified_at=unixepoch()",params![x.domain,x.auto_join as i32,x.self_registration as i32]){Ok(_)=>Json(x).into_response(),Err(e)=>err(StatusCode::BAD_REQUEST,&e.to_string()).into_response()}
+}
+async fn delete_domain(h: HeaderMap, Path(domain): Path<String>) -> impl IntoResponse {
+    if let Err(e) = admin(&h) {
+        return e.into_response();
+    }
+    let c = match db::conn() {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response(),
+    };
+    match c.execute(
+        "DELETE FROM verified_domains WHERE domain=?1 AND org_id='default'",
+        [domain],
+    ) {
+        Ok(_) => (StatusCode::NO_CONTENT).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
+    }
+}
+
 async fn me(h: HeaderMap) -> impl IntoResponse {
     match user_by_token(&h) {
         Ok(u) => Json(json!({"user":u})).into_response(),
@@ -4537,6 +4672,12 @@ async fn main() {
                 .delete(caldav_delete_event),
         )
         .route("/api/auth/login", post(login))
+        .route("/api/auth/register", post(register))
+        .route("/api/domains", get(domains).post(save_domain))
+        .route(
+            "/api/domains/{domain}",
+            axum::routing::delete(delete_domain),
+        )
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
