@@ -697,6 +697,46 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
     let notification = err(c.query_row("SELECT id,recipient_id,event_type,title,body,entity_type,entity_id,created_at,read_at FROM notifications WHERE id=?1", [id], read_notification))?;
     Ok(Some(notification))
 }
+/// A domain supplies only recipients it has already authorized to read its entity.
+/// Subscription preference decides delivery; it never widens the domain read scope.
+pub(crate) struct NotificationFanout<'a> {
+    pub recipients: Vec<String>,
+    pub event_type: &'a str,
+    pub title: &'a str,
+    pub body: Option<&'a str>,
+    pub entity_type: &'a str,
+    pub entity_id: &'a str,
+    pub target_type: Option<&'a str>,
+    pub target_id: Option<&'a str>,
+}
+
+/// Domain writes use this shared fan-out seam after their durable record exists.
+pub(crate) fn fan_out_notification_on(
+    c: &Connection,
+    input: NotificationFanout<'_>,
+) -> Result<Vec<Notification>> {
+    let mut delivered = Vec::new();
+    for recipient_id in input.recipients {
+        if let Some(notification) = emit_notification_on(
+            c,
+            &NotificationInput {
+                id: None,
+                recipient_id,
+                event_type: input.event_type.into(),
+                title: input.title.into(),
+                body: input.body.map(str::to_owned),
+                entity_type: Some(input.entity_type.into()),
+                entity_id: Some(input.entity_id.into()),
+                target_type: input.target_type.map(str::to_owned),
+                target_id: input.target_id.map(str::to_owned),
+            },
+        )? {
+            delivered.push(notification);
+        }
+    }
+    Ok(delivered)
+}
+
 /// Emits an event into a personal notification feed unless its subscription is disabled.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn emit_notification(input: NotificationInput) -> Result<Option<Notification>> {
@@ -1598,6 +1638,46 @@ mod tests {
             "half a target is an error"
         );
     }
+    #[test]
+    fn fan_out_uses_project_scope_and_per_event_mutes() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        c.execute("INSERT INTO subscription_settings(profile_id,event_type,enabled) VALUES('p','issue.created',0),('r','issue.created',0),('outsider','issue.created',0)", []).unwrap();
+        save_subscription_scope_on(
+            &c,
+            SubscriptionScope {
+                profile_id: "q".into(),
+                event_type: "issue.created".into(),
+                target_type: "project".into(),
+                target_id: "project".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        let delivered = fan_out_notification_on(
+            &c,
+            NotificationFanout {
+                recipients: vec!["p".into(), "q".into(), "r".into(), "outsider".into()],
+                event_type: "issue.created",
+                title: "Ship",
+                body: None,
+                entity_type: "issue",
+                entity_id: "issue-1",
+                target_type: Some("project"),
+                target_id: Some("project"),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            delivered
+                .iter()
+                .map(|n| n.recipient_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["q"]
+        );
+        assert_eq!(delivered[0].entity_type.as_deref(), Some("issue"));
+    }
+
     #[test]
     fn disabled_subscription_suppresses_emit() {
         let c = conn();
