@@ -269,8 +269,9 @@ export function scriptDefErrors(def: ScriptDef): string[] {
     else if (job.steps.length > MAX_STEPS_PER_JOB) errors.push(`job '${job.name}' exceeds max ${MAX_STEPS_PER_JOB} steps/job (has ${job.steps.length})`);
     if (job.timeout_secs != null && (!Number.isInteger(job.timeout_secs) || job.timeout_secs < 1 || job.timeout_secs > MAX_JOB_TIMEOUT_SECS)) errors.push(`job '${job.name}' timeout_secs must be in 1..=${MAX_JOB_TIMEOUT_SECS} (2h max, per Space docs)`);
     for (const step of job.steps ?? []) {
-      if (step.type !== "Shell" && step.type !== "Container") {
-        errors.push(`job '${job.name}': unknown step type '${String((step as { type: unknown }).type)}'`);
+      const stepType = (step as { type?: unknown }).type;
+      if (stepType !== "Shell" && stepType !== "Container") {
+        errors.push(`job '${job.name}': unknown step type '${String(stepType)}'`);
         continue;
       }
       if (!step.script?.trim()) errors.push(`job '${job.name}' has a step with an empty script`);
