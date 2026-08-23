@@ -142,7 +142,7 @@ export default function ProjectSettings() {
   onMount(() => { void reloadProjects().catch(() => undefined); });
   createEffect(() => { const value = project(); setName(value?.name ?? ""); setDescription(value?.description ?? ""); setDeadline(value?.deadline ?? ""); });
   const actor = () => isWeb() ? currentUser()?.profile_id ?? "" : profileId();
-  const canManage = () => !!project() && (currentUser()?.role === "admin" || project()!.created_by === actor());
+  const canManage = () => !!project() && (currentUser()?.role === "GlobalAdmin" || project()!.created_by === actor());
   const save = async (event: SubmitEvent) => {
     event.preventDefault(); const value = project(); if (!value || !canManage()) return;
     setError(""); setBusy(true);

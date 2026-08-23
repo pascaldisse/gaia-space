@@ -57,7 +57,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
-    if(isWeb()&&currentUser()?.role==="admin") list=[...list,usersView];
+    if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView];
     return list;
   };
   const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,projectSteeringView,projectSettingsView,settingsView];

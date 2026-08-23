@@ -90,7 +90,7 @@ export default function Absences() {
   );
   const displayName = (id: string) =>
     sessionProfiles()?.find((profile) => profile.id === id)?.display_name ?? id;
-  const mayApprove = () => !isWeb() || currentUser()?.role === "admin";
+  const mayApprove = () => !isWeb() || currentUser()?.role === "GlobalAdmin";
 
   const openForm = () => {
     setDraft({
