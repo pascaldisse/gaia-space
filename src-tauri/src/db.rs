@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 77;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -574,6 +574,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 67 {
         tx.execute_batch(SCHEMA_V67)?;
     }
+    // V77: first-class issue attachments, including image previews.
+    if version < 77 {
+        tx.execute_batch(SCHEMA_V77)?;
+    }
     // V74: standby pool targets make claims self-replenishing rather than a one-shot row transfer.
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
@@ -608,6 +612,18 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+pub(crate) const SCHEMA_V77: &str = r#"
+CREATE TABLE IF NOT EXISTS issue_attachments (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_length INTEGER NOT NULL CHECK(byte_length >= 0 AND byte_length <= 10485760),
+    data_url TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS issue_attachments_issue ON issue_attachments(issue_id, created_at, id);
+"#;
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
 pub(crate) const SCHEMA_V71: &str = r#"

@@ -152,6 +152,23 @@ pub struct TimeTrackingEntry {
     pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IssueAttachment {
+    pub id: String,
+    pub issue_id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub byte_length: i64,
+    pub data_url: String,
+}
+#[derive(Debug, Deserialize)]
+pub struct IssueAttachmentInput {
+    pub id: Option<String>,
+    pub file_name: String,
+    pub mime_type: String,
+    pub byte_length: i64,
+    pub data_url: String,
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IssueLink {
     pub id: String,
     pub issue_id: String,
@@ -166,6 +183,8 @@ pub struct IssueDetail {
     pub checklists: Vec<Checklist>,
     pub time_total_minutes: i64,
     pub children: Vec<Issue>,
+    #[serde(default)]
+    pub attachments: Vec<IssueAttachment>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1241,6 +1260,51 @@ pub fn remove_issue_link(id: String) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_issue_attachments(issue_id: String) -> Result<Vec<IssueAttachment>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare("SELECT id,issue_id,file_name,mime_type,byte_length,data_url FROM issue_attachments WHERE issue_id=?1 ORDER BY created_at,id"))?;
+    let attachments = err(statement.query_map([issue_id], |row| {
+        Ok(IssueAttachment {
+            id: row.get(0)?,
+            issue_id: row.get(1)?,
+            file_name: row.get(2)?,
+            mime_type: row.get(3)?,
+            byte_length: row.get(4)?,
+            data_url: row.get(5)?,
+        })
+    }))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())?;
+    Ok(attachments)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_issue_attachment(
+    issue_id: String,
+    attachment: IssueAttachmentInput,
+) -> Result<IssueAttachment> {
+    if !attachment.data_url.starts_with("data:")
+        || !(0..=10 * 1024 * 1024).contains(&attachment.byte_length)
+    {
+        return Err("invalid attachment".into());
+    }
+    let c = db::conn()?;
+    let item = IssueAttachment {
+        id: attachment.id.unwrap_or_else(|| new_id("issue-attachment")),
+        issue_id,
+        file_name: attachment.file_name,
+        mime_type: attachment.mime_type,
+        byte_length: attachment.byte_length,
+        data_url: attachment.data_url,
+    };
+    err(c.execute("INSERT INTO issue_attachments(id,issue_id,file_name,mime_type,byte_length,data_url) VALUES(?1,?2,?3,?4,?5,?6)", params![item.id,item.issue_id,item.file_name,item.mime_type,item.byte_length,item.data_url]))?;
+    Ok(item)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_issue_attachment(id: String) -> Result<()> {
+    err(db::conn()?.execute("DELETE FROM issue_attachments WHERE id=?1", [id]))?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     let issue = match get_issue(id.clone())? {
         Some(i) => i,
@@ -1261,6 +1325,7 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     .map_err(|e| e.to_string())?;
     let checklists = list_checklists(id.clone())?;
     let time_total_minutes = issue_time_total(id.clone())?;
+    let attachments = list_issue_attachments(id.clone())?;
     let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
     let mut children = err(child_s.query_map([id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -1272,6 +1337,7 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
         checklists,
         time_total_minutes,
         children,
+        attachments,
     }))
 }
 
