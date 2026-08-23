@@ -1673,10 +1673,13 @@ pub fn trigger_pipeline_event(script_id: String, event: TriggerEvent) -> Result<
     conn.busy_timeout(Duration::from_secs(5))
         .map_err(|e| e.to_string())?;
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) =
-        spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
-            job.fires_for(&event)
-        }, None)?;
+    let (runs, _handles) = spawn_script_jobs(
+        shared,
+        pipeline_workdir_root(),
+        &script_id,
+        &|job| job.fires_for(&event),
+        None,
+    )?;
     Ok(runs)
 }
 
@@ -1700,7 +1703,7 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
             .map_err(|e| e.to_string())?;
         rows
     };
-    let mut due: Vec<(String, String)> = Vec::new(); // (script_id, job name)
+    let mut due: Vec<(String, String, i64)> = Vec::new(); // (script_id, job name, cron fire instant)
     for (script_id, source) in &scripts {
         let Ok(def) = parse_and_validate_script(source) else {
             continue; // a broken script must not stop the whole tick
@@ -1727,22 +1730,25 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
                 )
                 .unwrap_or(None);
             let since = last.unwrap_or(now - 60);
-            if schedule_fired(&crons, since, now) {
-                due.push((script_id.clone(), job.name.clone()));
+            if let Some(fire_at) = schedule_fire_at(&crons, since, now) {
+                due.push((script_id.clone(), job.name.clone(), fire_at));
             }
         }
     }
     drop(conn);
     let mut runs = Vec::new();
-    for (script_id, job_name) in due {
+    for (script_id, job_name, fire_at) in due {
         let conn = db::conn()?;
         conn.busy_timeout(Duration::from_secs(5))
             .map_err(|e| e.to_string())?;
         let shared = Arc::new(Mutex::new(conn));
-        let (mut spawned, _handles) =
-            spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
-                job.name == job_name
-            }, Some(now.div_euclid(60) * 60))?;
+        let (mut spawned, _handles) = spawn_script_jobs(
+            shared,
+            pipeline_workdir_root(),
+            &script_id,
+            &|job| job.name == job_name,
+            Some(fire_at.div_euclid(60) * 60),
+        )?;
         runs.append(&mut spawned);
     }
     Ok(runs)
@@ -1751,13 +1757,18 @@ pub fn due_scheduled_runs(now: i64) -> Result<Vec<JobRun>> {
 /// watermark rule is testable without global database state. `next_after` is strictly after
 /// `since`, so once a run exists at the fired minute a second tick in that same minute finds
 /// nothing — no duplicate dispatch.
-fn schedule_fired(crons: &[String], since: i64, now: i64) -> bool {
-    crons.iter().any(|c| {
-        CronSpec::parse(c)
-            .ok()
-            .and_then(|spec| spec.next_after(since))
-            .is_some_and(|next| next <= now)
-    })
+/// The instant the cron actually fired, or `None` when nothing was due.
+///
+/// The reservation key must come from the schedule itself, never from the caller's `now`:
+/// otherwise two ticks naming two different minutes reserve the same cron fire twice.
+/// When several crons are due in the same tick the earliest fire wins, deterministically.
+fn schedule_fire_at(crons: &[String], since: i64, now: i64) -> Option<i64> {
+    crons
+        .iter()
+        .filter_map(|c| CronSpec::parse(c).ok())
+        .filter_map(|spec| spec.next_after(since))
+        .filter(|next| *next <= now)
+        .min()
 }
 
 /// Repository push entry point. The caller supplies the repository + branch rather than a
@@ -1786,10 +1797,13 @@ pub fn trigger_pipeline_on_push(
         .map_err(|e| e.to_string())?;
     let event = TriggerEvent::Push { repository, branch };
     let shared = Arc::new(Mutex::new(conn));
-    let (runs, _handles) =
-        spawn_script_jobs(shared, pipeline_workdir_root(), &script_id, &|job| {
-            job.fires_for(&event)
-        }, None)?;
+    let (runs, _handles) = spawn_script_jobs(
+        shared,
+        pipeline_workdir_root(),
+        &script_id,
+        &|job| job.fires_for(&event),
+        None,
+    )?;
     Ok(runs)
 }
 
@@ -4485,17 +4499,17 @@ mod tests {
     fn schedule_does_not_double_fire_within_one_minute() {
         let crons = vec!["0 0 * * *".to_string()];
         let midnight = 86_400; // 1970-01-02 00:00:00 UTC
-        assert!(schedule_fired(&crons, midnight - 60, midnight));
+        assert!(schedule_fire_at(&crons, midnight - 60, midnight).is_some());
         // watermark advanced to the run we just created, ticked again 1s and 59s later
-        assert!(!schedule_fired(&crons, midnight, midnight));
-        assert!(!schedule_fired(&crons, midnight, midnight + 1));
-        assert!(!schedule_fired(&crons, midnight, midnight + 59));
+        assert!(schedule_fire_at(&crons, midnight, midnight).is_none());
+        assert!(schedule_fire_at(&crons, midnight, midnight + 1).is_none());
+        assert!(schedule_fire_at(&crons, midnight, midnight + 59).is_none());
         // the next day's occurrence still fires exactly once
-        assert!(schedule_fired(&crons, midnight, midnight + 86_400));
+        assert!(schedule_fire_at(&crons, midnight, midnight + 86_400).is_some());
         // a missed tick is not lost: a stale watermark still reports the elapsed occurrence
-        assert!(schedule_fired(&crons, midnight - 86_400, midnight + 3_600));
+        assert!(schedule_fire_at(&crons, midnight - 86_400, midnight + 3_600).is_some());
         // an unparsable cron is ignored rather than firing or panicking
-        assert!(!schedule_fired(&["*/0 * * * *".to_string()], 0, midnight));
+        assert!(schedule_fire_at(&["*/0 * * * *".to_string()], 0, midnight).is_none());
     }
 
     /// Adversarial inputs for the hand-written glob/cron: no panic, no unbounded loop.

@@ -135,12 +135,13 @@ fn start_server_with(extra_sql: &[&str]) -> Server {
         [],
     )
     .expect("seed member session");
-    // A second project the member *does* belong to: the control group for every
-    // foreign-project denial below. Without it a 403 could just mean "members may never
-    // author scripts", which is a different (and wrong) conclusion.
+    // A second project the member *owns*: the control group for every foreign-project denial
+    // below. Without it a 403 could just mean "members may never author scripts", which is a
+    // different (and wrong) conclusion. Ownership, not bare membership, is the authoring tier:
+    // writing a script body is deferred shell execution on the server host.
     conn.execute(
         "INSERT INTO projects(id,name,key,description,created_by,archived,created_at) \
-         VALUES('p-own','Own','OWN',NULL,'p-admin',0,1)",
+         VALUES('p-own','Own','OWN',NULL,'p-member',0,1)",
         [],
     )
     .expect("seed member project");

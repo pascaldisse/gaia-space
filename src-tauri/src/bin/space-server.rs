@@ -2302,7 +2302,9 @@ fn authorize_command(
                     project_ids.push(payload_project.ok_or_else(|| err(StatusCode::BAD_REQUEST, "script.project_id is required"))?.to_owned());
                 }
             }
-            let allowed = project_ids.iter().map(|project_id| project_readable(user, project_id)).collect::<Result<Vec<_>, _>>().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.into_iter().all(|allowed| allowed);
+            // Authoring is execution deferred: whoever writes a script body runs it later,
+            // so writes take the execute-tier predicate (owner|admin), not `project_readable`.
+            let allowed = project_ids.iter().map(|project_id| project_pipeline_executable(user, project_id)).collect::<Result<Vec<_>, _>>().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?.into_iter().all(|allowed| allowed);
             if allowed { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "project access denied")) }
         }
         CommandPolicy::PipelineScriptExecute => {
