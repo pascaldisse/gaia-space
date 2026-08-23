@@ -3,7 +3,7 @@ import { platformApi, type Role, type Right, type RoleAssignment, type ScopeType
 import "./Admin.css";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 
-const SCOPE_TYPES: ScopeType[] = ["global", "project", "team", "channel", "document"];
+const SCOPE_TYPES: ScopeType[] = ["global", "project", "team", "profile", "channel", "document", "documentFolder"];
 const CF_ENTITY_TYPES = ["issue", "profile", "team", "membership"];
 const CF_TYPES: CfType[] = ["text", "text_list", "int", "int_list", "enum", "enum_list", "open_enum", "open_enum_list", "bool", "date", "datetime", "percentage", "fraction", "profile", "profile_list", "team", "location", "project", "url", "contact", "contact_list", "autonumber", "issue", "issue_list"];
 const blankRole = () => ({ name: "", description: "" });
@@ -23,10 +23,22 @@ export default function Admin() {
     () => selectedRole()?.id,
     (id) => (id ? platformApi.roleRights(id) : Promise.resolve([] as string[])),
   );
-  const groupedRights = () => {
+  const [rightGroups] = createResource(() => platformApi.rightGroups());
+  // Rights are grouped by their KB `RightGroup`, in the registry's display order; the
+  // group code is only a key, so an unregistered code still renders under its own code
+  // rather than disappearing from the matrix.
+  const groupedRights = (): [string, Right[]][] => {
+    const registry = new Map((rightGroups() ?? []).map((g, index) => [g.code, { title: g.title, order: index }]));
     const groups = new Map<string, Right[]>();
-    for (const r of rights() ?? []) { const list = groups.get(r.right_type) ?? []; list.push(r); groups.set(r.right_type, list); }
-    return [...groups.entries()];
+    for (const r of rights() ?? []) {
+      const key = r.right_group ?? "Ungrouped";
+      const list = groups.get(key) ?? [];
+      list.push(r);
+      groups.set(key, list);
+    }
+    return [...groups.entries()]
+      .sort((a, b) => (registry.get(a[0])?.order ?? 999) - (registry.get(b[0])?.order ?? 999) || a[0].localeCompare(b[0]))
+      .map(([code, list]) => [registry.get(code)?.title ?? code, list.sort((a, b) => a.title.localeCompare(b.title))] as [string, Right[]]);
   };
   const saveRole = async (e: SubmitEvent) => {
     e.preventDefault();
@@ -133,7 +145,10 @@ export default function Admin() {
             <p class="muted">{role().name}</p>
             <div class="matrix-groups"><For each={groupedRights()}>{([type, list]) =>
               <div class="matrix-group"><h3>{type}</h3><For each={list}>{right =>
-                <label class="matrix-row"><input type="checkbox" checked={(roleRightCodes() ?? []).includes(right.code)} onChange={() => toggleRight(right.code)} /><span>{right.title}</span><code>{right.code}</code></label>
+                <label class="matrix-row"><input type="checkbox" checked={(roleRightCodes() ?? []).includes(right.code)} onChange={() => toggleRight(right.code)} /><span>{right.title}</span><code>{right.code}</code>
+                  <Show when={right.propagation === "NONE"}><span class="muted">exact scope only</span></Show>
+                  <Show when={right.feature_gate}>{gate => <span class="muted">feature: {gate()}</span>}</Show>
+                </label>
               }</For></div>
             }</For></div>
           </>}
