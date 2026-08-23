@@ -4,10 +4,10 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 
 |feature|src(KB/legacy)|status|evidence|note|
 |---|---|---|---|---|
-|Atomic Right model; seven `RightType`s; metadata/dependencies/propagation|KB §2.1|partial|`src-tauri/src/db.rs:192`; `src-tauri/src/platform.rs:267-319`; `src/api/platform.ts:10,56`; `src/views/Admin.tsx:129-140`|Rows expose only code/title/description/type/group; no flags, implied rights, feature gates, propagation, or descriptor metadata.|
-|Right-group taxonomy|KB §2.1|partial|`src-tauri/src/platform.rs:270-319`; `src-tauri/src/db.rs:192`|Catalog has a small subset of groups, not KB’s 56 categories.|
-|Concrete ~150-right catalog|KB §2.1|partial|`src-tauri/src/platform.rs:267-319,351-364`|Explicitly representative; 48 seeded rows, not the full catalog.|
-|Permission checking by global/project/team/profile/channel/document context|KB §1, §2.1|partial|`src-tauri/src/platform.rs:557-615`; `src-tauri/src/lib.rs:104-116`; `src/api/platform.ts:62-70`; `src/views/Admin.tsx:76-86,167-175`|Checker, API, and Admin tester exist; scopes omit `profile` and `documentFolder`; generic domain commands are mostly session/owner gates rather than right checks.|
+|Atomic Right model; seven `RightType`s; metadata/dependencies/propagation|KB §2.1|done|`src-tauri/src/rights.rs`; `src-tauri/src/db.rs:459-501`; `src-tauri/src/platform.rs:345-445`; `src/api/platform.ts:10-16`; `src/views/Admin.tsx`|164 catalog descriptors expose flags, implied rights, feature gates, propagation, and metadata.|
+|Right-group taxonomy|KB §2.1|done|`src-tauri/src/rights.rs`; `src-tauri/src/platform.rs:391-410`; `src/views/Admin.tsx`|Registered `RightGroup` codes provide ordered Admin matrix headings.|
+|Concrete ~150-right catalog|KB §2.1|done|`src-tauri/src/rights.rs`; `src-tauri/src/platform.rs:413-456`|164 concrete catalog rows seed idempotently.|
+|Permission checking by global/project/team/profile/channel/document context|KB §1, §2.1|partial|`src-tauri/src/rights.rs:1326-1336`; `src-tauri/src/platform.rs:696-823`; `src/api/platform.ts:15,64-72`; `src/views/Admin.tsx`|Checker/API/Admin tester cover all seven scopes, including profile and documentFolder; some domain operations retain owner/session gates.|
 |Role record; custom role CRUD; role↔right matrix|KB §1, §2.2|done|`src-tauri/src/platform.rs:371-488`; `src-tauri/src/lib.rs:104-112`; `src/api/platform.ts:50-60`; `src/views/Admin.tsx:17-46,114-140`|Current custom role and rights-matrix path is wired end-to-end.|
 |Predefined roles and editability rules (System Admin, Team Admin/Lead, Manager, Member, External User)|KB §2.2|partial|`src-tauri/src/rights.rs:544-584`; `src-tauri/src/platform.rs:405-441,1432-1479`; `src-tauri/src/bin/space-server.rs:3222-3227`|Bootstrap seeds idempotent SYSTEM Admin, Member, and read-only Guest roles with tested persisted grants. Names/coverage differ from KB; roles remain editable and lack `membersEditable`/`rightsEditable`, reset-to-defaults, and comparison matrix.|
 |GlobalRole account mapping (`GlobalAdmin`/`GlobalMember`/Guest/LightGuest)|KB §2.2|missing|`src/api/auth.ts:5-13`; `src-tauri/src/db.rs:171`; `src/views/Users.tsx:113-116`|Separate web account field is only `admin|member`; no guest/light-guest role model.|
@@ -35,10 +35,10 @@ Scope: current `src/` + `src-tauri/src/`; KB §5 ignored. `done` requires a curr
 |Brute-force throttled-login records and admin management|KB §3.7|partial|`src-tauri/src/bin/space-server.rs:11-23,50-59,1159-1163`; `src/api/auth.ts:37-45`; `src/components/Login.tsx:5-46`|Live in-memory username/IP limiter is invoked by Login; not persistent `ThrottledLogin`, no admin list/clear UI.|
 |Access/refresh-token session model and server logout URL|KB §3.8|partial|`src-tauri/src/db.rs:171-173`; `src-tauri/src/bin/space-server.rs:41-62`; `src/api/auth.ts:37-45`|Opaque cookie session expires after 30 days; no access-token DTO, refresh token, or federated logout URL.|
 |Verified domain auto-join/self-registration rules|KB §2.4, §3.2|missing|`src-tauri/src/db.rs:171-194`; `src-tauri/src/bin/space-server.rs:95-120`|Admin-only account creation; no domain status/settings or registration rules.|
-|Right enforcement across operational commands|KB §1, §2.1|partial|`src-tauri/src/rights.rs:3-26`; `src-tauri/src/platform.rs:574-587`; `src-tauri/src/bin/space-server.rs:538-550,594,730,743`|Catalog enforcement helper gates issue creation, document creation, and message posting; remaining operations retain their existing scope/owner policies.|
+|Right enforcement across operational commands|KB §1, §2.1|partial|`src-tauri/src/rights.rs`; `src-tauri/src/platform.rs:802-826`; `src-tauri/src/devenv.rs`; `src-tauri/src/bin/space-server.rs:1872-1908,2028-2034,2378-2385,2402-2419,2572-2580,2628-2657`|Catalog enforcement gates rights administration, issues/documents/messages, document edits, channel management, and dev-environment operations; remaining operations retain existing scope/owner policies.|
 
 ## Counts
 
-- done: 4
-- partial: 16
+- done: 7
+- partial: 13
 - missing: 12
