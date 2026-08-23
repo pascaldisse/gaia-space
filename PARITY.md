@@ -46,9 +46,10 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V75 → feat/w11-calls (call recording completion) ☀wave11
 - V76 → feat/w11-chat (chat core: attachments lifecycle · mentions · pinning · drafts/typing · scheduled · polls) ☀crownA
 - V77 → feat/w11-issues (issue comments/timeline · attachments+preview · tracker links · clone/move) ☀crownA
+- V114 → feat/w11-chat (message pinning durable index) ☀Lakshmi-II
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 89 · partial 185 · stub 4 · missing 78. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 89 · partial 186 · stub 4 · missing 77. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -73,7 +74,7 @@ Worst gaps: per-format typed detail models (Dart still generic) · retention/imm
 Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining formats in `src-tauri/src/package_registry.rs` — NuGet V3 (lower-cased id coordinates, service index, flat-container version list), PyPI (PEP 503 normalization, simple project page, distribution resolve), Composer (`packages.json` + `p2/{vendor}/{package}.json`), OCI distribution v2 (verb-driven name split, tagged manifest PUT/GET, tag list, referrers by `subject.digest`). Routes `/api/registry/{repo}/{nuget|pypi|composer|v2}/*` reuse the existing `registry_auth` seam. Retention gained a preview seam: `package_retention_candidates` returns the exact rows cleanup would delete with an `age`/`count`/`age+count` reason grouped per package name (previously grouped by parsing the row id — a real mis-grouping, now fixed), and `apply_package_retention` deletes that set through `delete_package_version` so payload files go too. CVE ledger gained `repository_vulnerability_report(repository_id, min_severity)` — repository-wide, severity-ranked, local ledger only (no scanner, no network). UI: Preview retention / Repository CVEs actions in `src/views/Packages.tsx`. Tests: `package_registry::tests::*` (6), `pipelines::tests::{retention_candidates_group_per_package_and_carry_a_reason,vulnerability_report_filters_by_severity_and_repository}`, `space-server::tests::format_registry_protocols_are_reachable_over_http` (publish→resolve per format + 401 on unauthenticated). No migration needed at w8 time; V60 was later consumed by feat/w9-caldav (CalDAV-owned VEVENTs). UNVERIFIED (updated w9): real `pip install` verified against a live server (scripts/registry_format_check.sh); dotnet/composer/docker CLIs absent on this machine — those formats curl-verified only. OCI blob (digest) addressing implemented in w9 (content-addressed store), 501 resolved.
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ d287ca8)
-59 rows — done 18 · partial 35 · missing 6.
+59 rows — done 18 · partial 36 · missing 5.
 Progress: CalDAV named-calendar discovery + VEVENT PUT/DELETE write-back landed (V60); Google exposure remains absent. · document sharing+KB permissions/search remains UNVERIFIED. · document importer (local/Confluence export: `.md` editable; all other files preserved) landed V71; publish/rich-types remain partial. · meeting rooms/equipment/external attendees.
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 109;
+pub const SCHEMA_VERSION: i64 = 114;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -590,6 +590,38 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V85: transcript segments are durable, source-attributed call facts. The
+    // transcriber remains external; this boundary deliberately stores no audio.
+    if version < 110 {
+        tx.execute_batch(SCHEMA_V110)?;
+    }
+    // V86/V87: legacy calls-lane lifecycle/provider guards. V75 owns the canonical
+    // column names and constraints; these version slots intentionally remain no-ops.
+    if version < 111 && table_exists(&tx, "meetings")? {
+        tx.execute_batch(SCHEMA_V111)?;
+    }
+    if version < 112 && table_exists(&tx, "meetings")? {
+        tx.execute_batch(SCHEMA_V112)?;
+    }
+    // V88: public normal-room admission remains inert unless server policy enables it.
+    if version < 113 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(
+            &tx,
+            "meetings",
+            "access_level",
+            "TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(access_level IN ('PRIVATE','PUBLIC'))",
+        )?;
+    }
+    // V114: channel message pins survive reloads and remain queryable without parsing text.
+    if version < 114 && table_exists(&tx, "messages")? {
+        add_column_if_missing(
+            &tx,
+            "messages",
+            "pinned",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1))",
+        )?;
+        tx.execute_batch(SCHEMA_V114)?;
+    }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
     if version < 90 && table_exists(&tx, "users")? {
@@ -651,6 +683,56 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 68 && table_exists(&tx, "job_runs")? {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
+    }
+    // V83: repository-level merge governance. Strategy allow-lists and message modes are
+    // durable project facts so a merge request cannot bypass an owner policy in UI state.
+    if version < 83 && table_exists(&tx, "projects")? {
+        tx.execute_batch(SCHEMA_V83)?;
+    }
+    // V84: a review may reference multiple externally hosted issues without copying
+    // tracker data into the local issue model. Removing the review removes its links.
+    if version < 84 && table_exists(&tx, "reviews")? {
+        tx.execute_batch(SCHEMA_V84)?;
+    }
+    // V82: view/collapse is per reviewer and per file, never a shared review mutation.
+    if version < 82 && table_exists(&tx, "reviews")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
+    }
+    // V81: merge action preferences are per-review facts. They keep source deletion and
+    // linked-issue transitions coupled to the successful merge, never a later UI chore.
+    if version < 81 && table_exists(&tx, "reviews")? {
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS review_merge_preferences (review_id TEXT PRIMARY KEY REFERENCES reviews(id) ON DELETE CASCADE, delete_source_branch INTEGER NOT NULL DEFAULT 0, linked_issue_statuses_json TEXT NOT NULL DEFAULT '[]');")?;
+    }
+    // V80: inline suggested-edit lifecycle. A suggestion remains an immutable proposal;
+    // accepting it records review intent only and never writes to a registered repository.
+    if version < 80 && table_exists(&tx, "review_discussions")? {
+        add_column_if_missing(&tx, "review_discussions", "suggestion_commit_id", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_status",
+            "TEXT CHECK(suggestion_status IN ('OPEN','ACCEPTED','REJECTED'))",
+        )?;
+        add_column_if_missing(&tx, "review_discussions", "suggestion_content", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_has_conflicts",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_identical_contents",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_resolved_by",
+            "TEXT REFERENCES profiles(id)",
+        )?;
+        tx.execute_batch("CREATE INDEX IF NOT EXISTS review_discussions_suggestion_status ON review_discussions(review_id, suggestion_status);")?;
     }
     // V75: the video call is a durable fact of the meeting, not something invented
     // per join. `video_provider` names who serves the media, `video_room_id`/`join_url`
@@ -785,6 +867,29 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+/// V84: external issue references belong to a review; the URL remains the external
+/// system's canonical navigation target and title is only a local display label.
+pub(crate) const SCHEMA_V84: &str = r#"
+CREATE TABLE IF NOT EXISTS review_external_issue_links (
+    id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+    external_url TEXT NOT NULL,
+    title TEXT,
+    UNIQUE(review_id, external_url)
+);
+CREATE INDEX IF NOT EXISTS review_external_issue_links_review ON review_external_issue_links(review_id);
+"#;
+
+pub(crate) const SCHEMA_V83: &str = r#"
+CREATE TABLE IF NOT EXISTS review_merge_policies (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    allow_merge INTEGER NOT NULL DEFAULT 1,
+    allow_rebase INTEGER NOT NULL DEFAULT 1,
+    allow_squash INTEGER NOT NULL DEFAULT 1,
+    merge_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(merge_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION')),
+    squash_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(squash_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION','TITLE_AND_COMMITS'))
+);
+"#;
 /// V79: target is an issue, a code review, or a validated external URL.
 pub(crate) const SCHEMA_V79: &str = r#"
 CREATE TABLE IF NOT EXISTS issue_tracker_links (
@@ -1364,6 +1469,31 @@ CREATE INDEX IF NOT EXISTS meeting_participants_profile_meeting ON meeting_parti
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+/// V85: durable transcription substrate; captions and summaries derive from these segments.
+pub(crate) const SCHEMA_V110: &str = r#"
+CREATE TABLE IF NOT EXISTS call_transcript_segments (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker_id TEXT REFERENCES profiles(id),
+    text TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'external' CHECK(source IN ('external','manual')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK(length(trim(text)) > 0),
+    CHECK(ended_at >= started_at)
+);
+CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
+"#;
+
+/// V86/V87 are retained migration slots; V75 supplies the canonical call columns.
+pub(crate) const SCHEMA_V111: &str = "";
+pub(crate) const SCHEMA_V112: &str = "";
+/// V114: newest-first channel pinned-message lookup.
+pub(crate) const SCHEMA_V114: &str = r#"
+CREATE INDEX IF NOT EXISTS messages_channel_pinned_created ON messages(channel_id, pinned, created_at DESC, id DESC) WHERE archived=0 AND pinned=1;
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1774,7 +1904,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 109);
+        assert_eq!(SCHEMA_VERSION, 114);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
