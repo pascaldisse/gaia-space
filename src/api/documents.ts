@@ -145,7 +145,7 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   listDocumentAccess: (documentId: string) =>
     invoke<DocumentAccessRecipient[]>("list_document_access", { documentId }),
   updateDocumentAccess: (documentId: string, permissions: DocumentAccessRecipient[]) =>
-    invoke<void>("update_document_access", { documentId, permissions }),
+    invoke<void>("update_document_access", { documentId, permissions: permissions.map(({ recipient_id, ...permission }) => ({ ...permission, member_id: recipient_id })) }),
 
   // publication (public links) — unpublishing keeps the slug so the link can be reopened.
   getPublication: (documentId: string) =>
@@ -156,7 +156,7 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   listBookAccess: (bookId: string) =>
     invoke<DocumentAccessRecipient[]>("list_book_access", { bookId }),
   updateBookAccess: (bookId: string, permissions: DocumentAccessRecipient[]) =>
-    invoke<void>("update_book_access", { bookId, permissions }),
+    invoke<void>("update_book_access", { bookId, permissions: permissions.map(({ recipient_id, ...permission }) => ({ ...permission, member_id: recipient_id })) }),
   searchBookDocuments: (bookId: string, query: string) =>
     invoke<DocumentSearchResult[]>("search_book_documents", { bookId, query }),
 
@@ -191,7 +191,7 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
 
   // folders
   listDocumentFolders: () => invoke<DocumentFolder[]>("list_document_folders"),
-  createDocumentFolder: (folder: DocumentFolder) => invoke<void>("create_document_folder", { folder }),
+  createDocumentFolder: (folder: DocumentFolder, ownerId: string | null = null) => invoke<void>("create_document_folder", { folder, ownerId }),
   updateDocumentFolder: (folder: DocumentFolder) => invoke<void>("update_document_folder", { folder }),
   moveDocumentFolder: (id: string, parentId: string | null) =>
     invoke<void>("move_document_folder", { id, parentId }),

@@ -2194,6 +2194,8 @@ enum CommandPolicy {
     DocumentFolderCreate,
     DocumentFolderReadList,
     DocumentFolderWrite,
+    BookRead,
+    BookManage,
     MeetingReadList,
     MeetingRead,
     MeetingWrite,
@@ -2360,7 +2362,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "search_book_documents" | "list_book_access" | "update_book_access" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
+        "search_book_documents" => CommandPolicy::BookRead,
+        "list_book_access" | "update_book_access" => CommandPolicy::BookManage,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -2755,13 +2759,12 @@ fn bind_document_create(user: &User, body: &mut Value) -> Result<(), String> {
         d.insert("container_id".into(), json!(user.profile_id));
     }
     if t == "project" {
-        let p = d
-            .get("container_id")
-            .and_then(Value::as_str)
-            .ok_or("project document requires container_id")?;
-        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? {
-            return Err("project access denied".into());
-        }
+        let p = d.get("container_id").and_then(Value::as_str).ok_or("project document requires container_id")?;
+        if user.role != "GlobalAdmin" && !personal::project_member_by(p, &user.profile_id)? { return Err("project access denied".into()); }
+    }
+    if t == "kb" {
+        let book_id = d.get("container_id").and_then(Value::as_str).ok_or("knowledge-base document requires book id")?;
+        if !documents::book_writable_by(book_id, &user.profile_id, user.role == "GlobalAdmin")? { return Err("knowledge-base book write denied".into()); }
     }
     Ok(())
 }
@@ -2788,7 +2791,14 @@ fn bind_folder_create(user: &User, body: &mut Value) -> Result<(), String> {
         }
     }
     if t == "kb" {
-        return Err("knowledge-base folders require a project attachment in web mode".into());
+        let id = f.get("id").and_then(Value::as_str).ok_or("knowledge-base folder requires id")?;
+        let book_id = f.get("container_id").and_then(Value::as_str).ok_or("knowledge-base folder requires book id")?;
+        let is_book = f.get("parent_id").is_some_and(Value::is_null) && id == book_id;
+        if is_book {
+            f.insert("owner_id".into(), json!(user.profile_id));
+        } else if !documents::book_writable_by(book_id, &user.profile_id, user.role == "GlobalAdmin")? {
+            return Err("knowledge-base book write denied".into());
+        }
     }
     Ok(())
 }
@@ -3532,6 +3542,14 @@ fn authorize_command(
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document folder write denied"))
             }
+        }
+        CommandPolicy::BookRead => {
+            let book_id: String = arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if documents::book_readable_by(&book_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "knowledge-base book access denied")) }
+        }
+        CommandPolicy::BookManage => {
+            let book_id: String = arg(body, "book_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if documents::book_manageable_by(&book_id, &user.profile_id, user.role == "GlobalAdmin").map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? { Ok(()) } else { Err(err(StatusCode::FORBIDDEN, "knowledge-base book management denied")) }
         }
         CommandPolicy::MeetingReadList => {
             put_arg(body, "profile_id", json!(user.profile_id));
@@ -4775,7 +4793,7 @@ async fn cmd(
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
     "ensure_project_document_root" => documents::ensure_project_document_root(project_id: String),
     "create_document" => documents::create_document(document: documents::Document),
-    "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder),
+    "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder, owner_id: Option<String>),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
     "ensure_thread_channel" => chat::ensure_thread_channel(root_message_id: String, title: Option<String>, acting_profile_id: Option<String>),
     "create_issue" => issues::create_issue(input: issues::IssueInput),
@@ -7949,7 +7967,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{value}");
 
         let grants = json!({"document_id":"shared-private-doc","permissions":[
-            {"recipient_type":"profile","recipient_id":"pb","access_level":"viewer"},
+            {"recipient_type":"profile","member_id":"pb","access_level":"viewer"},
             {"recipient_type":"team","recipient_id":"design","access_level":"editor"}
         ]});
         let (status, value) = call(cookie("ta"), "update_document_access", grants).await;
@@ -9788,6 +9806,30 @@ mod tests {
 
     /// The two HTTP endpoints end to end: consent answers with a redirect carrying the
     /// code, and the token endpoint trades that code (plus the PKCE verifier) exactly once.
+    /// Book viewers may navigate/search, editors may author, and only the owner manages grants.
+    #[tokio::test]
+    async fn kb_book_permissions_bind_reads_writes_and_grant_management_to_the_session() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book-perms','kb','book-perms',NULL,'Permissions'); INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book-perms','pa');").unwrap();
+        let (status, value) = call(cookie("ta"), "update_book_access", json!({"book_id":"book-perms","permissions":[{"recipient_type":"profile","member_id":"pb","access_level":"viewer"}]})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let grants: Vec<(String, String, String)> = c.prepare("SELECT recipient_type,recipient_id,access_level FROM document_folder_permissions WHERE folder_id='book-perms'").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<std::result::Result<_, _>>().unwrap();
+        assert_eq!(grants, vec![("profile".into(), "pb".into(), "viewer".into())], "grant persistence");
+        assert!(documents::book_readable_by("book-perms", "pb").unwrap(), "grant must make pb readable");
+        assert_eq!(call(cookie("tb"), "list_book_access", json!({"book_id":"book-perms"})).await.0, StatusCode::FORBIDDEN, "a viewer cannot enumerate grants");
+        let (status, value) = call(cookie("tb"), "search_book_documents", json!({"book_id":"book-perms","query":"rules"})).await;
+        assert_eq!(status, StatusCode::OK, "a viewer can search its book: {value}");
+        let (status, _) = call(cookie("tb"), "create_document", json!({"document":{"id":"viewer-kb-write","container_type":"kb","container_id":"book-perms","folder_id":"book-perms","doc_type":"text","title":"Denied","body":"","version":1,"archived":false}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "viewer cannot author");
+        let (status, value) = call(cookie("ta"), "update_book_access", json!({"book_id":"book-perms","permissions":[{"recipient_type":"profile","member_id":"pb","access_level":"editor"}]})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, value) = call(cookie("tb"), "create_document", json!({"document":{"id":"editor-kb-write","container_type":"kb","container_id":"book-perms","folder_id":"book-perms","doc_type":"text","title":"Allowed","body":"","version":1,"archived":false}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(c.query_row("SELECT created_by FROM documents WHERE id='editor-kb-write'", [], |r| r.get::<_, String>(0)).unwrap(), "pb");
+    }
+
     #[tokio::test]
     async fn oauth_authorization_code_round_trips_over_http_and_refuses_a_replay() {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};

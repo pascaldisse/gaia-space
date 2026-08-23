@@ -1683,6 +1683,13 @@ CREATE TABLE IF NOT EXISTS thread_channels (
     always_show INTEGER NOT NULL DEFAULT 0 CHECK(always_show IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS thread_channels_parent ON thread_channels(parent_channel_id);
+-- Book ownership is separate from editor grants: editors may change content but cannot
+-- grant their team wider access. The creator owns a new book until ownership changes.
+CREATE TABLE IF NOT EXISTS kb_book_owners (
+    book_id TEXT PRIMARY KEY REFERENCES document_folders(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS kb_book_owners_profile ON kb_book_owners(profile_id);
 "#;
 pub(crate) const SCHEMA_V123: &str = "SELECT 1;";
 
