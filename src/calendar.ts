@@ -24,7 +24,7 @@ export const itemsOnDay = (items: readonly CalendarItem[], day: Date) => {
   return items.filter((item) => itemDayKey(item) === key);
 };
 
-export const kindLabels: Record<CalendarItem["kind"], string> = { meeting: "Meeting", task: "Task", deadline: "Deadline", external: "External" };
+export const kindLabels: Record<CalendarItem["kind"], string> = { meeting: "Meeting", task: "Task", deadline: "Deadline", blog: "Blog", external: "External" };
 
 /** `datetime-local` value for an instant, in the viewer's own zone. */
 export const localInput = (seconds: number) => {

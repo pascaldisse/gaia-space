@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type TodoContentKind = "text"|"markdown";
 export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind };
-export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
+export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"blog"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
 export type AbsenceAvailability = "away"|"partial"|"available";
 // `reason_type` arrives as "Private" when the owner marked it confidential and the
 // reader is neither the owner nor an admin; the server redacts, the view never does.

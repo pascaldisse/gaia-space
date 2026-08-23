@@ -33,6 +33,22 @@ fn issue_event(event_type: &str, issue: &Issue) {
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
         eprintln!("webhook fan-out for {event_type} failed: {e}");
     }
+    let result = crate::db::conn().and_then(|c| {
+        let mut recipients = c.prepare("SELECT created_by FROM projects WHERE id=?1 UNION SELECT profile_id FROM project_members WHERE project_id=?1")
+            .map_err(|e| e.to_string())?
+            .query_map([&issue.project_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        recipients.sort();
+        crate::personal::fan_out_notification_on(&c, crate::personal::NotificationFanout {
+            recipients, event_type, title: &issue.title, body: issue.description.as_deref(),
+            entity_type: "issue", entity_id: &issue.id, target_type: Some("project"), target_id: Some(&issue.project_id),
+        })
+    });
+    if let Err(e) = result {
+        eprintln!("personal feed fan-out for {event_type} failed: {e}");
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

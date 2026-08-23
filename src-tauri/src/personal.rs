@@ -697,6 +697,46 @@ fn emit_notification_on(c: &Connection, input: &NotificationInput) -> Result<Opt
     let notification = err(c.query_row("SELECT id,recipient_id,event_type,title,body,entity_type,entity_id,created_at,read_at FROM notifications WHERE id=?1", [id], read_notification))?;
     Ok(Some(notification))
 }
+/// A domain supplies only recipients it has already authorized to read its entity.
+/// Subscription preference decides delivery; it never widens the domain read scope.
+pub(crate) struct NotificationFanout<'a> {
+    pub recipients: Vec<String>,
+    pub event_type: &'a str,
+    pub title: &'a str,
+    pub body: Option<&'a str>,
+    pub entity_type: &'a str,
+    pub entity_id: &'a str,
+    pub target_type: Option<&'a str>,
+    pub target_id: Option<&'a str>,
+}
+
+/// Domain writes use this shared fan-out seam after their durable record exists.
+pub(crate) fn fan_out_notification_on(
+    c: &Connection,
+    input: NotificationFanout<'_>,
+) -> Result<Vec<Notification>> {
+    let mut delivered = Vec::new();
+    for recipient_id in input.recipients {
+        if let Some(notification) = emit_notification_on(
+            c,
+            &NotificationInput {
+                id: None,
+                recipient_id,
+                event_type: input.event_type.into(),
+                title: input.title.into(),
+                body: input.body.map(str::to_owned),
+                entity_type: Some(input.entity_type.into()),
+                entity_id: Some(input.entity_id.into()),
+                target_type: input.target_type.map(str::to_owned),
+                target_id: input.target_id.map(str::to_owned),
+            },
+        )? {
+            delivered.push(notification);
+        }
+    }
+    Ok(delivered)
+}
+
 /// Emits an event into a personal notification feed unless its subscription is disabled.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn emit_notification(input: NotificationInput) -> Result<Option<Notification>> {
@@ -1238,6 +1278,38 @@ pub fn calendar_aggregate_on(
             date: Some(date),
         });
     }
+    // Blog announcements are date-only events. Project-targeted posts use the same
+    // membership visibility boundary as blog reads, so the calendar cannot leak one.
+    let mut blog_events = err(c.prepare("SELECT b.id,b.project_id,e.title,e.event_date FROM blog_calendar_events e JOIN blog_posts b ON b.id=e.post_id WHERE b.archived=0 AND e.event_date>=?1 AND e.event_date<?2 AND (b.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))))"))?;
+    for row in err(
+        blog_events.query_map(params![day_start, day_end, profile_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        }),
+    )? {
+        let (id, project_id, title, date) = row.map_err(|e| e.to_string())?;
+        let starts_at = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map_err(|_| "Invalid blog calendar event date")?
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        items.push(CalendarItem {
+            id: format!("blog-{id}"),
+            source_id: id,
+            kind: "blog".into(),
+            title,
+            starts_at,
+            ends_at: None,
+            project_id,
+            calendar_id: None,
+            date: Some(date),
+        });
+    }
     // Read-only synced feeds (Settings → Connected calendars): own subscriptions only,
     // same overlap/day-window rules as meetings and tasks/deadlines above.
     items.extend(calendar_feeds::external_items_on(
@@ -1567,6 +1639,46 @@ mod tests {
         );
     }
     #[test]
+    fn fan_out_uses_project_scope_and_per_event_mutes() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        c.execute("INSERT INTO subscription_settings(profile_id,event_type,enabled) VALUES('p','issue.created',0),('r','issue.created',0),('outsider','issue.created',0)", []).unwrap();
+        save_subscription_scope_on(
+            &c,
+            SubscriptionScope {
+                profile_id: "q".into(),
+                event_type: "issue.created".into(),
+                target_type: "project".into(),
+                target_id: "project".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        let delivered = fan_out_notification_on(
+            &c,
+            NotificationFanout {
+                recipients: vec!["p".into(), "q".into(), "r".into(), "outsider".into()],
+                event_type: "issue.created",
+                title: "Ship",
+                body: None,
+                entity_type: "issue",
+                entity_id: "issue-1",
+                target_type: Some("project"),
+                target_id: Some("project"),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            delivered
+                .iter()
+                .map(|n| n.recipient_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["q"]
+        );
+        assert_eq!(delivered[0].entity_type.as_deref(), Some("issue"));
+    }
+
+    #[test]
     fn disabled_subscription_suppresses_emit() {
         let c = conn();
         c.execute("INSERT INTO subscription_settings(profile_id,event_type,enabled) VALUES('p','absence.created',0)", []).unwrap();
@@ -1653,6 +1765,30 @@ mod tests {
             .unwrap()
             .expect("legacy todo readable");
         assert_eq!(legacy.notes, None);
+    }
+
+    #[test]
+    fn blog_calendar_events_are_date_only_and_project_scoped() {
+        let c = conn();
+        c.execute("INSERT INTO blog_posts(id,title,body,author_id,project_id) VALUES('blog','Announcement','Body','p','project')", []).unwrap();
+        c.execute("INSERT INTO blog_calendar_events(post_id,title,event_date) VALUES('blog','All hands','2030-03-10')", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        let member =
+            calendar_aggregate_on(&c, "q", 0, 86_400, Some("2030-03-10"), Some("2030-03-11"))
+                .unwrap();
+        assert!(member.iter().any(|item| item.id == "blog-blog"
+            && item.kind == "blog"
+            && item.date.as_deref() == Some("2030-03-10")));
+        let outsider = calendar_aggregate_on(
+            &c,
+            "outsider",
+            0,
+            86_400,
+            Some("2030-03-10"),
+            Some("2030-03-11"),
+        )
+        .unwrap();
+        assert!(!outsider.iter().any(|item| item.id == "blog-blog"));
     }
 
     #[test]
