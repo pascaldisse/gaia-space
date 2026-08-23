@@ -12,6 +12,7 @@ import {
   type Review,
   type ReviewDiscussion,
   type ExternalCheckStatus,
+  type ProtectedBranchRule,
   type RestackStep,
 } from "../api/review";
 import { Diff } from "../Diff";
@@ -138,6 +139,10 @@ export default function Reviews() {
   const [gateEval, { refetch: refetchGateEval }] = createResource(
     selectedId,
     (id) => (id ? reviewApi.evaluateGate(id) : Promise.resolve(null)),
+  );
+  const [protectedRules, { refetch: refetchProtectedRules }] = createResource(
+    () => selected()?.project_id,
+    (id) => (id ? reviewApi.listProtectedBranchRules(id) : Promise.resolve([])),
   );
   const [mergeRuns, { refetch: refetchMergeRuns }] = createResource(
     selectedId,
@@ -271,6 +276,39 @@ export default function Reviews() {
     } catch (err) {
       setError(String(err));
     }
+  }
+  // ---------- protected branches ----------
+  const [protectionPattern, setProtectionPattern] = createSignal("main");
+  const [protectionRegex, setProtectionRegex] = createSignal(false);
+  const [protectionCreate, setProtectionCreate] = createSignal("");
+  const [protectionPush, setProtectionPush] = createSignal("");
+  const [protectionDelete, setProtectionDelete] = createSignal("");
+  const [protectionForcePush, setProtectionForcePush] = createSignal("");
+  const [protectionMerge, setProtectionMerge] = createSignal("");
+  const [protectionBypass, setProtectionBypass] = createSignal("");
+  const [protectionLinear, setProtectionLinear] = createSignal(false);
+  async function saveProtection(e: SubmitEvent) {
+    e.preventDefault();
+    const projectId = selected()?.project_id;
+    if (!projectId) return;
+    const rule: ProtectedBranchRule = {
+      id: newId("protection"), project_id: projectId,
+      branch_pattern: protectionPattern().trim() || "*", regex: protectionRegex(),
+      allow_create_json: jsonList(protectionCreate()), allow_push_json: jsonList(protectionPush()),
+      allow_delete_json: jsonList(protectionDelete()), allow_force_push_json: jsonList(protectionForcePush()),
+      allow_merge_json: jsonList(protectionMerge()), linear_history: protectionLinear(),
+      bypass_quality_gate_json: jsonList(protectionBypass()),
+    };
+    try {
+      await reviewApi.saveProtectedBranchRule(rule);
+      setProtectionCreate(""); setProtectionPush(""); setProtectionDelete("");
+      setProtectionForcePush(""); setProtectionMerge(""); setProtectionBypass("");
+      refetchProtectedRules();
+    } catch (err) { setError(String(err)); }
+  }
+  async function deleteProtection(id: string) {
+    try { await reviewApi.deleteProtectedBranchRule(id); refetchProtectedRules(); }
+    catch (err) { setError(String(err)); }
   }
 
   // ---------- stacked merge requests (cherry-pick / restack) ----------
@@ -740,6 +778,38 @@ export default function Reviews() {
                       onInput={(e) => setRuleRoles(e.currentTarget.value)}
                     />
                     <button class="ghost">Add rule</button>
+                  </form>
+                </details>
+
+                <details class="gate-rules protected-branches">
+                  <summary>Protected branches ({protectedRules()?.length ?? 0})</summary>
+                  <p class="hint">Matching rules compose restrictively; empty lists deny. Merge permission is enforced now; direct branch mutation UI is not available.</p>
+                  <ul>
+                    <For each={protectedRules()}>
+                      {(rule) => (
+                        <li>
+                          <code>{rule.branch_pattern}</code>
+                          {rule.regex ? " · regex" : " · glob"}
+                          {rule.linear_history ? " · linear history" : ""}
+                          {rule.allow_merge_json
+                            ? ` · merge: ${(JSON.parse(rule.allow_merge_json) as string[]).join(", ")}`
+                            : " · merge: nobody"}
+                          <button class="ghost small" onClick={() => deleteProtection(rule.id)}>×</button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <form class="new-rule-form" onSubmit={saveProtection}>
+                    <input placeholder="branch pattern" value={protectionPattern()} onInput={(e) => setProtectionPattern(e.currentTarget.value)} />
+                    <label><input type="checkbox" checked={protectionRegex()} onChange={(e) => setProtectionRegex(e.currentTarget.checked)} /> regex</label>
+                    <label><input type="checkbox" checked={protectionLinear()} onChange={(e) => setProtectionLinear(e.currentTarget.checked)} /> linear history</label>
+                    <input placeholder="create principals" value={protectionCreate()} onInput={(e) => setProtectionCreate(e.currentTarget.value)} />
+                    <input placeholder="push principals" value={protectionPush()} onInput={(e) => setProtectionPush(e.currentTarget.value)} />
+                    <input placeholder="delete principals" value={protectionDelete()} onInput={(e) => setProtectionDelete(e.currentTarget.value)} />
+                    <input placeholder="force-push principals" value={protectionForcePush()} onInput={(e) => setProtectionForcePush(e.currentTarget.value)} />
+                    <input placeholder="merge principals" value={protectionMerge()} onInput={(e) => setProtectionMerge(e.currentTarget.value)} />
+                    <input placeholder="gate-bypass principals" value={protectionBypass()} onInput={(e) => setProtectionBypass(e.currentTarget.value)} />
+                    <button class="ghost">Protect branch</button>
                   </form>
                 </details>
 
