@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 61;
+pub const SCHEMA_VERSION: i64 = 63;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -473,6 +473,30 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 61 && table_exists(&tx, "quality_gate_rules")? {
         add_column_if_missing(&tx, "quality_gate_rules", "applications_json", "TEXT")?;
         add_column_if_missing(&tx, "quality_gate_rules", "roles_json", "TEXT")?;
+    }
+    // V63: self-hosted worker lifecycle (KB §03 §2.3 `WorkerDTO`, §1.2 worker pools).
+    // Three facts the previous `workers` row could not carry:
+    //   * `suspended` — an admin disabling a worker is NOT the same fact as the worker
+    //     going OFFLINE by a missed heartbeat; collapsing them would let a heartbeat
+    //     silently return a worker an admin took out of rotation.
+    //   * `job_runs.worker_id` — which worker owns a run. Without it a claim cannot be
+    //     exclusive and two workers can execute the same run.
+    //   * `job_runs.required_tags_json` — the run's worker-tag requirement, so assignment
+    //     is a query over stored facts, not a runtime guess.
+    if version < 63 {
+        if table_exists(&tx, "workers")? {
+            add_column_if_missing(&tx, "workers", "suspended", "INTEGER NOT NULL DEFAULT 0")?;
+        }
+        if table_exists(&tx, "job_runs")? {
+            add_column_if_missing(&tx, "job_runs", "worker_id", "TEXT")?;
+            add_column_if_missing(
+                &tx,
+                "job_runs",
+                "required_tags_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )?;
+            tx.execute_batch("CREATE INDEX IF NOT EXISTS job_runs_worker ON job_runs(worker_id);")?;
+        }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -1213,7 +1237,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 61);
+        assert_eq!(SCHEMA_VERSION, 63);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

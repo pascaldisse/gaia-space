@@ -84,22 +84,6 @@ pub struct Job {
     pub trigger_type: String,
     pub archived: bool,
 }
-/// A TeamCity-service-message log attached to one run. The server parses only test-suite and
-/// test-result messages; unrelated build output is deliberately ignored.
-#[derive(Debug, Deserialize)]
-pub struct TeamCityTestReportInput {
-    pub job_run_id: String,
-    pub messages: String,
-}
-
-#[derive(Debug, PartialEq)]
-struct ParsedTestReport {
-    suite: String,
-    test_name: String,
-    status: String,
-    duration_ms: Option<i64>,
-    message: Option<String>,
-}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Worker {
     pub id: String,
@@ -109,6 +93,35 @@ pub struct Worker {
     pub status: String,
     pub registered_at: i64,
     pub last_seen_at: i64,
+    /// Admin-held flag (V63). Independent of `status`: a suspended worker that keeps
+    /// heart-beating stays ONLINE-and-suspended and is still refused every assignment.
+    #[serde(default)]
+    pub suspended: bool,
+}
+
+/// Columns of `workers` in the order every `Worker` row mapper below expects.
+const WORKER_COLUMNS: &str =
+    "id,name,os,tags_json,status,registered_at,last_seen_at,COALESCE(suspended,0)";
+
+fn worker_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Worker> {
+    Ok(Worker {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        os: r.get(2)?,
+        tags_json: r.get(3)?,
+        status: r.get(4)?,
+        registered_at: r.get(5)?,
+        last_seen_at: r.get(6)?,
+        suspended: r.get::<_, i64>(7)? != 0,
+    })
+}
+
+/// A worker is eligible for work only while every one of these holds. Kept as one
+/// function so the heartbeat view and the assignment path cannot drift apart.
+fn worker_is_assignable(worker: &Worker, now: i64, heartbeat_timeout_secs: i64) -> bool {
+    worker.status == "ONLINE"
+        && !worker.suspended
+        && now.saturating_sub(worker.last_seen_at) <= heartbeat_timeout_secs
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobArtifact {
@@ -136,6 +149,23 @@ pub struct TestReport {
     pub message: Option<String>,
     pub created_at: i64,
 }
+
+/// A TeamCity-service-message log attached to one run. The server parses only test-suite and
+/// test-result messages; unrelated build output is deliberately ignored.
+#[derive(Debug, Deserialize)]
+pub struct TeamCityTestReportInput {
+    pub job_run_id: String,
+    pub messages: String,
+}
+
+#[derive(Debug, PartialEq)]
+struct ParsedTestReport {
+    suite: String,
+    test_name: String,
+    status: String,
+    duration_ms: Option<i64>,
+    message: Option<String>,
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JobRun {
     pub id: String,
@@ -145,6 +175,12 @@ pub struct JobRun {
     pub triggered_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    /// Owning worker once claimed (V63). `None` = unclaimed, still assignable.
+    #[serde(default)]
+    pub worker_id: Option<String>,
+    /// Worker tags this run requires; JSON string array, `[]` = any worker.
+    #[serde(default)]
+    pub required_tags_json: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeployTarget {
@@ -446,19 +482,9 @@ pub fn list_jobs_for_script(script_id: String) -> Result<Vec<Job>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_job_runs() -> Result<Vec<JobRun>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at FROM job_runs ORDER BY triggered_at DESC").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,job_id,status,log,triggered_at,started_at,finished_at,worker_id,required_tags_json FROM job_runs ORDER BY triggered_at DESC").map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(JobRun {
-                id: r.get(0)?,
-                job_id: r.get(1)?,
-                status: r.get(2)?,
-                log: r.get(3)?,
-                triggered_at: r.get(4)?,
-                started_at: r.get(5)?,
-                finished_at: r.get(6)?,
-            })
-        })
+        .query_map([], job_run_from_row)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -469,26 +495,167 @@ pub fn list_job_runs_for_script(script_id: String) -> Result<Vec<JobRun>> {
     let c = db::conn()?;
     let mut s = c
         .prepare(
-            "SELECT job_runs.id,job_runs.job_id,job_runs.status,job_runs.log,job_runs.triggered_at,job_runs.started_at,job_runs.finished_at
+            "SELECT job_runs.id,job_runs.job_id,job_runs.status,job_runs.log,job_runs.triggered_at,job_runs.started_at,job_runs.finished_at,job_runs.worker_id,job_runs.required_tags_json
              FROM job_runs JOIN jobs ON jobs.id=job_runs.job_id WHERE jobs.script_id=?1 ORDER BY job_runs.triggered_at DESC",
         )
         .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map(params![script_id], |r| {
-            Ok(JobRun {
-                id: r.get(0)?,
-                job_id: r.get(1)?,
-                status: r.get(2)?,
-                log: r.get(3)?,
-                triggered_at: r.get(4)?,
-                started_at: r.get(5)?,
-                finished_at: r.get(6)?,
-            })
-        })
+        .query_map(params![script_id], job_run_from_row)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+
+fn job_run_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<JobRun> {
+    Ok(JobRun {
+        id: r.get(0)?,
+        job_id: r.get(1)?,
+        status: r.get(2)?,
+        log: r.get(3)?,
+        triggered_at: r.get(4)?,
+        started_at: r.get(5)?,
+        finished_at: r.get(6)?,
+        worker_id: r.get(7)?,
+        required_tags_json: r.get(8)?,
+    })
+}
+
+/// A worker that has not reported within this many seconds counts as gone. Space's agent
+/// heart-beats on a much shorter period; this is the grace window, not the period.
+pub const DEFAULT_WORKER_HEARTBEAT_TIMEOUT_SECS: i64 = 120;
+
+fn parse_tags(json: &str) -> Result<Vec<String>> {
+    serde_json::from_str::<Vec<String>>(json)
+        .map_err(|_| "worker tags must be a JSON string array".to_string())
+}
+
+fn read_worker(c: &Connection, worker_id: &str) -> Result<Worker> {
+    c.query_row(
+        &format!("SELECT {WORKER_COLUMNS} FROM workers WHERE id=?1"),
+        params![worker_id],
+        |r| worker_from_row(r),
+    )
+    .map_err(|_| format!("unknown worker {worker_id}"))
+}
+
+/// Record a heartbeat. Returns the worker as stored afterwards.
+///
+/// A heartbeat proves liveness and nothing else: it revives an OFFLINE worker (it is
+/// demonstrably back) but never clears `suspended` and never revives a DISABLED worker,
+/// because those are administrative decisions the agent has no authority over.
+pub fn worker_heartbeat_conn(c: &Connection, worker_id: &str, now: i64) -> Result<Worker> {
+    let current = read_worker(c, worker_id)?;
+    let status = if current.status == "DISABLED" {
+        "DISABLED"
+    } else {
+        "ONLINE"
+    };
+    c.execute(
+        "UPDATE workers SET last_seen_at=?2,status=?3 WHERE id=?1",
+        params![worker_id, now, status],
+    )
+    .map_err(|e| e.to_string())?;
+    read_worker(c, worker_id)
+}
+
+/// Flip every ONLINE worker whose last heartbeat is older than the grace window to
+/// OFFLINE. Returns how many rows changed. DISABLED rows are left alone: an admin's
+/// decision outranks a timer.
+pub fn expire_stale_workers_conn(c: &Connection, now: i64, timeout_secs: i64) -> Result<usize> {
+    c.execute(
+        "UPDATE workers SET status='OFFLINE' WHERE status='ONLINE' AND last_seen_at < ?1",
+        params![now.saturating_sub(timeout_secs)],
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_worker_suspended_conn(c: &Connection, worker_id: &str, suspended: bool) -> Result<Worker> {
+    read_worker(c, worker_id)?;
+    c.execute(
+        "UPDATE workers SET suspended=?2 WHERE id=?1",
+        params![worker_id, i64::from(suspended)],
+    )
+    .map_err(|e| e.to_string())?;
+    read_worker(c, worker_id)
+}
+
+/// Claim the oldest unassigned run this worker is capable of running.
+///
+/// Exclusivity comes from the UPDATE's own `worker_id IS NULL` guard, not from the SELECT:
+/// two agents polling concurrently both see the row, but only one UPDATE reports a changed
+/// row, so the loser transparently tries the next candidate instead of double-running a job.
+/// Tag matching is a superset test — the worker must carry every tag the run demands.
+pub fn assign_job_run_conn(
+    c: &Connection,
+    worker_id: &str,
+    now: i64,
+    timeout_secs: i64,
+) -> Result<Option<JobRun>> {
+    let worker = read_worker(c, worker_id)?;
+    if !worker_is_assignable(&worker, now, timeout_secs) {
+        return Ok(None);
+    }
+    let worker_tags = parse_tags(&worker.tags_json)?;
+    let mut q = c
+        .prepare(
+            "SELECT id,job_id,status,log,triggered_at,started_at,finished_at,worker_id,required_tags_json
+             FROM job_runs WHERE worker_id IS NULL AND status IN ('SCHEDULED','PENDING','READY_TO_START')
+             ORDER BY triggered_at ASC, id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let candidates: Vec<JobRun> = q
+        .query_map([], job_run_from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(q);
+    for run in candidates {
+        let required = parse_tags(run.required_tags_json.as_deref().unwrap_or("[]"))?;
+        if !required.iter().all(|tag| worker_tags.contains(tag)) {
+            continue;
+        }
+        let changed = c
+            .execute(
+                "UPDATE job_runs SET worker_id=?2,status='RUNNING',started_at=?3
+                 WHERE id=?1 AND worker_id IS NULL",
+                params![run.id, worker_id, now],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 1 {
+            return c
+                .query_row(
+                    "SELECT id,job_id,status,log,triggered_at,started_at,finished_at,worker_id,required_tags_json FROM job_runs WHERE id=?1",
+                    params![run.id],
+                    job_run_from_row,
+                )
+                .map(Some)
+                .map_err(|e| e.to_string());
+        }
+    }
+    Ok(None)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn worker_heartbeat(worker_id: String) -> Result<Worker> {
+    let c = db::conn()?;
+    let now = now_secs();
+    expire_stale_workers_conn(&c, now, DEFAULT_WORKER_HEARTBEAT_TIMEOUT_SECS)?;
+    worker_heartbeat_conn(&c, &worker_id, now)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_worker_suspended(worker_id: String, suspended: bool) -> Result<Worker> {
+    let c = db::conn()?;
+    set_worker_suspended_conn(&c, &worker_id, suspended)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn assign_job_run(worker_id: String) -> Result<Option<JobRun>> {
+    let c = db::conn()?;
+    let now = now_secs();
+    expire_stale_workers_conn(&c, now, DEFAULT_WORKER_HEARTBEAT_TIMEOUT_SECS)?;
+    assign_job_run_conn(&c, &worker_id, now, DEFAULT_WORKER_HEARTBEAT_TIMEOUT_SECS)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -500,40 +667,21 @@ pub fn register_worker(worker: Worker) -> Result<Worker> {
         .map_err(|_| "worker tags_json must be a JSON string array")?;
     let c = db::conn()?;
     let now = now_secs();
+    // Re-registration never touches `suspended`: an agent restarting is not an appeal
+    // against an admin's suspension.
     c.execute("INSERT INTO workers(id,name,os,tags_json,status,registered_at,last_seen_at) VALUES(?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name,os=excluded.os,tags_json=excluded.tags_json,status=excluded.status,last_seen_at=excluded.last_seen_at",params![worker.id,worker.name,worker.os,worker.tags_json,worker.status,now]).map_err(|e|e.to_string())?;
-    c.query_row(
-        "SELECT id,name,os,tags_json,status,registered_at,last_seen_at FROM workers WHERE id=?1",
-        params![worker.id],
-        |r| {
-            Ok(Worker {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                os: r.get(2)?,
-                tags_json: r.get(3)?,
-                status: r.get(4)?,
-                registered_at: r.get(5)?,
-                last_seen_at: r.get(6)?,
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
+    read_worker(&c, &worker.id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_workers() -> Result<Vec<Worker>> {
     let c = db::conn()?;
-    let mut q=c.prepare("SELECT id,name,os,tags_json,status,registered_at,last_seen_at FROM workers ORDER BY name").map_err(|e|e.to_string())?;
+    let mut q = c
+        .prepare(&format!(
+            "SELECT {WORKER_COLUMNS} FROM workers ORDER BY name"
+        ))
+        .map_err(|e| e.to_string())?;
     let rows = q
-        .query_map([], |r| {
-            Ok(Worker {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                os: r.get(2)?,
-                tags_json: r.get(3)?,
-                status: r.get(4)?,
-                registered_at: r.get(5)?,
-                last_seen_at: r.get(6)?,
-            })
-        })
+        .query_map([], |r| worker_from_row(r))
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
@@ -556,6 +704,15 @@ pub fn create_job_artifact(input: JobArtifactInput) -> Result<JobArtifact> {
         created_at: now,
     })
 }
+/// Returns an artifact's exact bytes for client-side download. Metadata remains available through
+/// `list_job_artifacts`; this command deliberately authorizes by the run-owned artifact id.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn download_job_artifact(id: String) -> Result<Vec<u8>> {
+    let c = db::conn()?;
+    c.query_row("SELECT content FROM job_artifacts WHERE id=?1", params![id], |r| r.get(0))
+        .map_err(|_| "artifact not found".to_string())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_job_artifacts(job_run_id: String) -> Result<Vec<JobArtifact>> {
     let c = db::conn()?;
@@ -926,6 +1083,8 @@ fn spawn_script_jobs(
             triggered_at,
             started_at: None,
             finished_at: None,
+            worker_id: None,
+            required_tags_json: Some("[]".into()),
         });
         let conn2 = conn.clone();
         let run_dir = workdir_root.join(&run_id);
@@ -1555,8 +1714,8 @@ fn publish_package_version_tx(
         // and with an immutable-by-default repository the second one used to be refused
         // outright (☎Kali-VIII B1 regression). A brand-new asset name is therefore allowed;
         // replacing an asset already stored, or a metadata-only republish, is not.
-        let adds_new_asset = payload_filename
-            .is_some_and(|filename| !stored_files.contains_key(filename));
+        let adds_new_asset =
+            payload_filename.is_some_and(|filename| !stored_files.contains_key(filename));
         if !adds_new_asset {
             return Err(format!(
                 "package version {package_name}@{version} is immutable and cannot be republished"
@@ -2136,9 +2295,7 @@ pub fn repository_vulnerability_report_conn(
     repository_id: &str,
     min_severity: Option<&str>,
 ) -> Result<Vec<DependencyOverview>> {
-    let floor = min_severity
-        .map(severity_rank)
-        .unwrap_or(i64::MIN);
+    let floor = min_severity.map(severity_rank).unwrap_or(i64::MIN);
     let mut statement = c
         .prepare("SELECT DISTINCT package_version_id FROM package_vulnerabilities WHERE package_version_id IN (SELECT id FROM package_versions WHERE repository_id=?1)")
         .map_err(|e| e.to_string())?;
@@ -2420,6 +2577,153 @@ mod tests {
             "compile\n##teamcity[testStarted name='unterminated]"
         )
         .is_empty());
+    }
+
+    /// Seeds one worker + one job run pair the assignment tests can claim against.
+    fn seed_worker_and_run(
+        conn: &Connection,
+        worker_id: &str,
+        tags: &str,
+        run_id: &str,
+        required_tags: &str,
+        triggered_at: i64,
+    ) {
+        conn.execute("INSERT OR IGNORE INTO workers(id,name,os,tags_json,status,registered_at,last_seen_at,suspended) VALUES(?1,?1,'linux',?2,'ONLINE',?3,?3,0)", params![worker_id, tags, triggered_at]).unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO pipeline_scripts(id,project_id,path,source,archived) VALUES('s-w','demo-project','.space.kts','',0)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT OR IGNORE INTO jobs(id,script_id,name,trigger_type,archived) VALUES('j-w','s-w','build','manual',0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO job_runs(id,job_id,status,triggered_at,required_tags_json) VALUES(?1,'j-w','SCHEDULED',?2,?3)", params![run_id, triggered_at, required_tags]).unwrap();
+    }
+
+    #[test]
+    fn a_heartbeat_revives_offline_but_never_lifts_an_admin_decision() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        let now = now_secs();
+        seed_worker_and_run(&conn, "w-hb", "[]", "run-hb", "[]", now);
+        conn.execute(
+            "UPDATE workers SET status='OFFLINE',last_seen_at=?2 WHERE id='w-hb'",
+            params![now, now - 10_000],
+        )
+        .unwrap();
+        let revived = worker_heartbeat_conn(&conn, "w-hb", now).unwrap();
+        assert_eq!(revived.status, "ONLINE", "a live agent comes back online");
+        assert_eq!(revived.last_seen_at, now);
+
+        // Suspension survives heartbeats: liveness is not an appeal.
+        let suspended = set_worker_suspended_conn(&conn, "w-hb", true).unwrap();
+        assert!(suspended.suspended);
+        let after = worker_heartbeat_conn(&conn, "w-hb", now + 1).unwrap();
+        assert!(after.suspended, "a heartbeat never un-suspends");
+        assert!(
+            assign_job_run_conn(&conn, "w-hb", now + 1, 120)
+                .unwrap()
+                .is_none(),
+            "a suspended worker receives no work even while ONLINE"
+        );
+
+        // DISABLED is likewise administrative and a heartbeat must not clear it.
+        conn.execute("UPDATE workers SET status='DISABLED',suspended=0 WHERE id='w-hb'", [])
+            .unwrap();
+        let disabled = worker_heartbeat_conn(&conn, "w-hb", now + 2).unwrap();
+        assert_eq!(disabled.status, "DISABLED");
+        assert_eq!(
+            disabled.last_seen_at,
+            now + 2,
+            "liveness is still recorded for a disabled worker"
+        );
+        assert!(worker_heartbeat_conn(&conn, "ghost", now).is_err());
+        sweep(&db_path);
+    }
+
+    #[test]
+    fn stale_workers_expire_and_lose_eligibility() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        let now = now_secs();
+        seed_worker_and_run(&conn, "w-stale", "[]", "run-stale", "[]", now);
+        conn.execute(
+            "UPDATE workers SET last_seen_at=?1 WHERE id='w-stale'",
+            params![now - 300],
+        )
+        .unwrap();
+        // Independent path from the SQL sweep: the eligibility predicate refuses it on age
+        // alone, before any status column has been rewritten.
+        let before = read_worker(&conn, "w-stale").unwrap();
+        assert_eq!(before.status, "ONLINE", "nothing has swept yet");
+        assert!(!worker_is_assignable(&before, now, 120));
+        assert!(assign_job_run_conn(&conn, "w-stale", now, 120)
+            .unwrap()
+            .is_none());
+
+        assert_eq!(expire_stale_workers_conn(&conn, now, 120).unwrap(), 1);
+        assert_eq!(read_worker(&conn, "w-stale").unwrap().status, "OFFLINE");
+        assert_eq!(
+            expire_stale_workers_conn(&conn, now, 120).unwrap(),
+            0,
+            "sweeping twice changes nothing"
+        );
+        sweep(&db_path);
+    }
+
+    #[test]
+    fn assignment_matches_tags_is_exclusive_and_takes_the_oldest_run() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        let now = now_secs();
+        // linux worker carries {linux, docker}; gpu worker carries {linux, gpu}.
+        seed_worker_and_run(
+            &conn,
+            "w-linux",
+            r#"["linux","docker"]"#,
+            "run-gpu",
+            r#"["gpu"]"#,
+            now - 100,
+        );
+        conn.execute("INSERT INTO workers(id,name,os,tags_json,status,registered_at,last_seen_at,suspended) VALUES('w-gpu','gpu','linux','[\"linux\",\"gpu\"]','ONLINE',?1,?1,0)", params![now]).unwrap();
+        conn.execute("INSERT INTO job_runs(id,job_id,status,triggered_at,required_tags_json) VALUES('run-old','j-w','SCHEDULED',?1,'[\"docker\"]')", params![now - 50]).unwrap();
+        conn.execute("INSERT INTO job_runs(id,job_id,status,triggered_at,required_tags_json) VALUES('run-new','j-w','SCHEDULED',?1,'[]')", params![now - 10]).unwrap();
+
+        // The oldest run (`run-gpu`) demands a tag this worker lacks, so it is skipped
+        // rather than claimed-and-failed; next oldest matching run wins.
+        let claimed = assign_job_run_conn(&conn, "w-linux", now, 120)
+            .unwrap()
+            .expect("a matching run");
+        assert_eq!(claimed.id, "run-old");
+        assert_eq!(claimed.worker_id.as_deref(), Some("w-linux"));
+        assert_eq!(claimed.status, "RUNNING");
+        assert_eq!(claimed.started_at, Some(now));
+
+        // Exclusivity: a second poll cannot re-claim it; it moves to the untagged run.
+        let second = assign_job_run_conn(&conn, "w-linux", now, 120)
+            .unwrap()
+            .expect("the untagged run");
+        assert_eq!(second.id, "run-new");
+
+        // The gpu worker gets the run only it can serve; then the queue is empty for it.
+        let gpu = assign_job_run_conn(&conn, "w-gpu", now, 120)
+            .unwrap()
+            .expect("gpu run");
+        assert_eq!(gpu.id, "run-gpu");
+        assert!(assign_job_run_conn(&conn, "w-gpu", now, 120).unwrap().is_none());
+
+        // Independent check: exactly three runs are owned, each by one worker.
+        let owned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM job_runs WHERE worker_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(owned, 3);
+        sweep(&db_path);
     }
 
     #[test]
@@ -2731,7 +3035,12 @@ mod tests {
             .join(package_name_dir("com.example:demo"))
             .join("1.0.0");
         let leftovers: Vec<_> = fs::read_dir(&dir)
-            .map(|entries| entries.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name())
+                    .collect()
+            })
             .unwrap_or_default();
         assert!(
             leftovers.is_empty(),
