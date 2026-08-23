@@ -2088,8 +2088,8 @@ pub fn vote_poll(
     vote_poll_impl(&db::conn()?, &poll_id, &voter_id, &option_ids)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn close_poll(poll_id: String, actor_id: String) -> Result<PollView> {
-    close_poll_impl(&db::conn()?, &poll_id, &actor_id)
+pub fn close_poll(poll_id: String, author_id: String) -> Result<PollView> {
+    close_poll_impl(&db::conn()?, &poll_id, &author_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_channel_typing(channel_id: String, profile_id: String, typing: bool) -> Result<()> {

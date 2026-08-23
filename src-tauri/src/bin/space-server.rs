@@ -2064,6 +2064,18 @@ fn chat_message_channel(message_id: &str) -> Option<String> {
         )
         .ok()
 }
+/// The channel a poll lives in — the web chokepoint resolves it server-side instead of
+/// trusting a `channel_id` the caller could pair with somebody else's poll.
+fn chat_poll_channel(poll_id: &str) -> Option<String> {
+    db::conn()
+        .ok()?
+        .query_row(
+            "SELECT channel_id FROM message_polls WHERE id=?1",
+            [poll_id],
+            |r| r.get(0),
+        )
+        .ok()
+}
 fn chat_message_owned(profile_id: &str, message_id: &str) -> bool {
     let Ok(c) = db::conn() else { return false };
     c.query_row(
@@ -2256,6 +2268,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "cancel_scheduled_message" => CommandPolicy::Session,
         // Firing due intents is a server duty, not a client action.
         "deliver_due_scheduled_messages" => CommandPolicy::AppAdmin,
+        // A poll is channel content: identity binding forces `author_id`/`voter_id` to
+        // the session, the channel ACL check below applies, and creating one also needs
+        // the right to post (the poll IS a message).
+        "create_poll" | "get_poll" | "list_channel_polls" | "vote_poll" | "close_poll" => {
+            CommandPolicy::Session
+        }
         // Attachment lifecycle rides the message it belongs to: a session alone is not
         // enough, the caller must own that message (or administer its channel).
         "add_message_attachment" | "set_message_attachment_state" | "remove_message_attachment" => {
@@ -2529,6 +2547,10 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
                         | "authorId"
                         | "acting_profile_id"
                         | "actingProfileId"
+                        // Only polls carry `voter_id`: a ballot is always cast by the
+                        // session that sends it, never on somebody else's behalf.
+                        | "voter_id"
+                        | "voterId"
                         | "recipient_id"
                         | "recipientId"
                         | "organizer_id"
@@ -3607,6 +3629,39 @@ fn authorize_command(
                     "channel",
                     Some(&channel_id),
                 )?;
+            }
+            if name == "create_poll" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+                // A poll is posted as a message, so it needs the posting right.
+                require_catalog_right(
+                    user,
+                    gaia_space_lib::rights::Right::PostMessage,
+                    "channel",
+                    Some(&channel_id),
+                )?;
+            }
+            if name == "list_channel_polls" {
+                let channel_id: String =
+                    arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                if !chat_channel_access(&user.profile_id, &channel_id) {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
+            }
+            if matches!(name, "vote_poll" | "close_poll" | "get_poll") {
+                let key = if name == "get_poll" { "id" } else { "poll_id" };
+                let poll_id: String =
+                    arg(body, key).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                // A poll is readable/votable only from inside its channel; chat.rs still
+                // owns the author-only close and the closed/ownership rules.
+                if !chat_poll_channel(&poll_id)
+                    .is_some_and(|channel_id| chat_channel_access(&user.profile_id, &channel_id))
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "channel access denied"));
+                }
             }
             if name == "list_thread_replies" {
                 let thread_of: String =
@@ -4779,6 +4834,8 @@ async fn cmd(
     "list_channel_typing" => chat::list_channel_typing(channel_id: String, acting_profile_id: Option<String>, ttl_secs: Option<i64>),
     "list_scheduled_messages" => chat::list_scheduled_messages(author_id: String, channel_id: Option<String>, status: Option<String>),
     "get_scheduled_message" => chat::get_scheduled_message(id: String, author_id: String),
+    "get_poll" => chat::get_poll(id: String, acting_profile_id: Option<String>),
+    "list_channel_polls" => chat::list_channel_polls(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
@@ -4913,6 +4970,9 @@ async fn cmd(
     "update_scheduled_message" => chat::update_scheduled_message(id: String, author_id: String, text: Option<String>, scheduled_at: Option<i64>),
     "cancel_scheduled_message" => chat::cancel_scheduled_message(id: String, author_id: String),
     "deliver_due_scheduled_messages" => chat::deliver_due_scheduled_messages(now: Option<i64>, limit: Option<i64>),
+    "create_poll" => chat::create_poll(id: String, channel_id: String, author_id: String, question: String, options: Vec<String>, multiple_choice: Option<bool>, anonymous: Option<bool>),
+    "vote_poll" => chat::vote_poll(poll_id: String, voter_id: String, option_ids: Vec<String>),
+    "close_poll" => chat::close_poll(poll_id: String, author_id: String),
     "set_package_repository_acl" => pipelines::set_package_repository_acl(entry: pipelines::PackageRepositoryAcl),
     "set_package_version_pinned" => pipelines::set_package_version_pinned(id: String, pinned: bool),
     "set_meeting_participant_status" => meetings::set_meeting_participant_status(meeting_id: String, profile_id: String, status: String),
@@ -5350,6 +5410,30 @@ mod tests {
         assert_eq!(chat_schedule_ticker_config(Some("0"), None), None);
         assert_eq!(chat_schedule_ticker_config(Some("nope"), None), None);
         assert_eq!(chat_schedule_ticker_config(None, Some("0")), None);
+    }
+
+    #[test]
+    fn poll_commands_are_session_scoped_and_a_ballot_is_bound_to_its_sender() {
+        for name in [
+            "create_poll",
+            "get_poll",
+            "list_channel_polls",
+            "vote_poll",
+            "close_poll",
+        ] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        // A client naming another voter/author is rewritten to the session identity, so
+        // no ballot can be cast — and no poll closed — on somebody else's behalf.
+        let mut body = json!({"poll_id": "p-1", "voter_id": "someone-else", "option_ids": ["p-1-o0"]});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["voter_id"], json!("me"));
+        let mut close = json!({"poll_id": "p-1", "author_id": "someone-else"});
+        bind_session_identity(&mut close, "me");
+        assert_eq!(close["author_id"], json!("me"));
     }
 
     #[test]
