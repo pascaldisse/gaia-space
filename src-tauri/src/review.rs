@@ -2,14 +2,11 @@
 //! Code review persistence; discussions deliberately reuse chat channels.
 //!
 //! Merge safety (hard constraint, see docs/space-knowledge-base/01-git-code-review.md):
-//! nothing reachable from the UI ever checks out, writes a ref, or commits into a
-//! user-registered repository. `merge_preview` (used by both `dry_run_merge` and
-//! `attempt_merge`) only ever calls `Repository::merge_commits`, which builds an
-//! in-memory `git2::Index` and touches neither the working directory nor any ref.
-//! The one function that performs a *real* merge commit + ref update
-//! (`execute_real_merge_in_test`) is `#[cfg(test)]`-gated — it does not exist in the
-//! shipped binary at all — and is only ever invoked in this file's test module
-//! against disposable repos created under `target/test-repos/`.
+//! `merge_preview` (used by both `dry_run_merge` and `attempt_merge`) only calls
+//! `Repository::merge_commits`, which builds an in-memory `git2::Index` and touches
+//! neither the working directory nor any ref. Suggested-edit application is the narrow
+//! exception: it verifies an immutable base blob, creates one source-branch commit, and
+//! compare-and-swaps that ref without checking out or writing a working tree.
 use crate::db;
 use git2::{DiffOptions, Repository};
 use rusqlite::Connection;
