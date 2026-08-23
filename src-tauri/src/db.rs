@@ -612,7 +612,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V96: organization locations, schedules, equipment catalog, and rooms.
     if version < 96 { tx.execute_batch(SCHEMA_V96)?; }
     // V97: typed absence cards in chat.
-    if version < 97 { add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?; }
+    if version < 97 && table_exists(&tx, "messages")? {
+        add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+    }
     // V98: profile email status and messenger contacts.
     if version < 98 { tx.execute_batch(SCHEMA_V98)?; }
     // V99: principals unify people, applications, and external identities.
