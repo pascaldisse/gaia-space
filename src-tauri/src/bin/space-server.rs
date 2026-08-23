@@ -5077,7 +5077,7 @@ async fn cmd(
     "update_issue" => issues::update_issue(issue: issues::Issue),
     "update_issue_status" => issues::update_issue_status(status: issues::IssueStatus),
     "update_meeting" => meetings::update_meeting(meeting: meetings::Meeting),
-    "update_message" => chat::update_message(id: String, text: String, mention_ids: Option<Vec<String>>, mention_team_ids: Option<Vec<String>>),
+    "update_message" => chat::update_message(id: String, text: String, mention_ids: Option<Vec<String>>, mention_team_ids: Option<Vec<String>>, mention_targets: Option<Vec<chat::MentionTarget>>),
     "list_mentions_for_profile" => chat::list_mentions_for_profile(profile_id: String, unread_only: Option<bool>),
     "count_unread_mentions" => chat::count_unread_mentions(profile_id: String),
     "update_package_repository" => pipelines::update_package_repository(repo: pipelines::PackageRepository),

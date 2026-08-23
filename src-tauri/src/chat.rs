@@ -57,6 +57,11 @@ fn read_notification_preference(
         thread_scope: r.get(4)?,
     })
 }
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct MentionTarget {
+    pub target_type: String,
+    pub target_id: String,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
@@ -78,6 +83,10 @@ pub struct Message {
     /// derived from its membership at write time.
     #[serde(default)]
     pub mention_team_ids: Vec<String>,
+    /// Typed wire targets preserve the `EntityMention` fact; profile/team fields remain
+    /// for old clients and are synthesized on reads.
+    #[serde(default)]
+    pub mention_targets: Vec<MentionTarget>,
 }
 /// Upload lifecycle of an attachment row (KB §04: LoadingAttachment /
 /// AttachmentIsUploading / AttachmentUploadCompleted / AttachmentUploadFailed).
@@ -619,6 +628,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         content_kind: r.get(9)?,
         mention_ids: Vec::new(),
         mention_team_ids: Vec::new(),
+        mention_targets: Vec::new(),
     })
 }
 fn reply_count_impl(c: &Connection, message_id: &str) -> Result<i64> {
@@ -689,6 +699,20 @@ fn mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<String>> {
 
 /// The teams a message named, as stored rows (same reasoning as `mentions_for_impl`:
 /// the row is the fact, the `@name` spelling in the text is not).
+fn entity_mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<MentionTarget>> {
+    let mut s = c.prepare("SELECT entity_type,entity_id FROM message_entity_mentions WHERE message_id=?1 ORDER BY entity_type,entity_id").map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([message_id], |r| {
+            Ok(MentionTarget {
+                target_type: r.get(0)?,
+                target_id: r.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
 fn team_mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<String>> {
     let mut s = c
         .prepare("SELECT team_id FROM message_team_mentions WHERE message_id=?1 ORDER BY team_id")
@@ -708,6 +732,19 @@ fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Resul
     let mut m = m;
     m.mention_ids = mentions_for_impl(c, &m.id)?;
     m.mention_team_ids = team_mentions_for_impl(c, &m.id)?;
+    m.mention_targets = m
+        .mention_ids
+        .iter()
+        .map(|id| MentionTarget {
+            target_type: "profile".into(),
+            target_id: id.clone(),
+        })
+        .chain(m.mention_team_ids.iter().map(|id| MentionTarget {
+            target_type: "team".into(),
+            target_id: id.clone(),
+        }))
+        .chain(entity_mentions_for_impl(c, &m.id)?)
+        .collect();
     let links = crate::chat_links::links_for(c, &m.id)?;
     Ok(MessageView {
         message: m,
@@ -1282,6 +1319,7 @@ fn deliver_one_scheduled(c: &Connection, id: &str) -> Result<Option<ScheduledMes
         content_kind: default_message_content_kind(),
         mention_ids: Vec::new(),
         mention_team_ids: Vec::new(),
+        mention_targets: Vec::new(),
     };
     match create_message_impl(c, &message) {
         Ok(()) => Ok(Some(row)),
@@ -1427,6 +1465,7 @@ fn create_poll_impl(
             content_kind: "poll".into(),
             mention_ids: Vec::new(),
             mention_team_ids: Vec::new(),
+            mention_targets: Vec::new(),
         },
     )?;
     tx.execute(
@@ -1546,7 +1585,9 @@ fn list_channel_polls_impl(
         }
     }
     let mut s = c
-        .prepare("SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC")
+        .prepare(
+            "SELECT id FROM message_polls WHERE channel_id=?1 ORDER BY created_at DESC, id DESC",
+        )
         .map_err(|e| e.to_string())?;
     let ids: Vec<String> = s
         .query_map([channel_id], |r| r.get(0))
@@ -1689,8 +1730,12 @@ fn list_thread_replies_impl(
 }
 const MAX_MENTION_TARGETS: usize = 100;
 
-fn validate_mention_count(mention_ids: &[String], mention_team_ids: &[String]) -> Result<()> {
-    if mention_ids.len() + mention_team_ids.len() > MAX_MENTION_TARGETS {
+fn validate_mention_count(
+    mention_ids: &[String],
+    mention_team_ids: &[String],
+    entity_mentions: &[MentionTarget],
+) -> Result<()> {
+    if mention_ids.len() + mention_team_ids.len() + entity_mentions.len() > MAX_MENTION_TARGETS {
         return Err(format!(
             "at most {MAX_MENTION_TARGETS} mention targets are allowed"
         ));
@@ -1698,8 +1743,35 @@ fn validate_mention_count(mention_ids: &[String], mention_team_ids: &[String]) -
     Ok(())
 }
 
+fn split_mention_targets(
+    legacy_profiles: &[String],
+    legacy_teams: &[String],
+    targets: &[MentionTarget],
+) -> Result<(Vec<String>, Vec<String>, Vec<MentionTarget>)> {
+    let mut profiles = legacy_profiles.to_vec();
+    let mut teams = legacy_teams.to_vec();
+    let mut entities = Vec::new();
+    for target in targets {
+        if target.target_id.trim().is_empty() {
+            return Err("invalid mention target".into());
+        }
+        match target.target_type.as_str() {
+            "profile" => profiles.push(target.target_id.clone()),
+            "team" => teams.push(target.target_id.clone()),
+            "issue" | "document" => entities.push(target.clone()),
+            _ => return Err("invalid mention target type".into()),
+        }
+    }
+    Ok((profiles, teams, entities))
+}
+
 fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
-    validate_mention_count(&message.mention_ids, &message.mention_team_ids)?;
+    let (mention_ids, mention_team_ids, entity_mentions) = split_mention_targets(
+        &message.mention_ids,
+        &message.mention_team_ids,
+        &message.mention_targets,
+    )?;
+    validate_mention_count(&mention_ids, &mention_team_ids, &entity_mentions)?;
     if is_read_only_channel_on(c, &message.channel_id)? {
         return Err("Private feeds are read-only".into());
     }
@@ -1723,8 +1795,9 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         &message.channel_id,
         message.author_id.as_deref(),
         &message.text,
-        &message.mention_ids,
-        &message.mention_team_ids,
+        &mention_ids,
+        &mention_team_ids,
+        &entity_mentions,
     )?;
     crate::chat_links::sync_links_on(c, &message.id, &message.text)?;
     crate::channel_feeds::route_message_on(
@@ -1765,6 +1838,7 @@ fn mention_target_allowed(
 /// append): dropped targets lose both their row and their unread mention notification,
 /// added targets get both. A target that survives the edit keeps its existing
 /// notification, read or unread — re-notifying someone for a typo fix would be noise.
+#[allow(clippy::too_many_arguments)]
 fn sync_mentions_impl(
     c: &Connection,
     message_id: &str,
@@ -1773,6 +1847,7 @@ fn sync_mentions_impl(
     text: &str,
     mention_ids: &[String],
     mention_team_ids: &[String],
+    entity_mentions: &[MentionTarget],
 ) -> Result<()> {
     let mut wanted: Vec<String> = Vec::new();
     for profile_id in mention_ids {
@@ -1806,7 +1881,8 @@ fn sync_mentions_impl(
         .map_err(|e| e.to_string())?;
         c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{message_id}:{profile_id}"), profile_id, text, message_id]).map_err(|e| e.to_string())?;
     }
-    sync_team_mentions_impl(c, message_id, channel_id, author_id, text, mention_team_ids)
+    sync_team_mentions_impl(c, message_id, channel_id, author_id, text, mention_team_ids)?;
+    sync_entity_mentions_impl(c, message_id, entity_mentions)
 }
 
 /// How many members a single team mention may alert. A mention is an interruption, so
@@ -1923,18 +1999,51 @@ fn like_prefix(prefix: &str) -> String {
         .replace('_', "\\_")
 }
 
-fn update_message_impl(
+fn sync_entity_mentions_impl(
+    c: &Connection,
+    message_id: &str,
+    targets: &[MentionTarget],
+) -> Result<()> {
+    let mut wanted = Vec::new();
+    for target in targets {
+        if !matches!(target.target_type.as_str(), "issue" | "document")
+            || target.target_id.trim().is_empty()
+        {
+            return Err("invalid entity mention".into());
+        }
+        if !wanted.iter().any(|item: &MentionTarget| item == target) {
+            wanted.push(target.clone());
+        }
+    }
+    c.execute(
+        "DELETE FROM message_entity_mentions WHERE message_id=?1",
+        [message_id],
+    )
+    .map_err(|e| e.to_string())?;
+    for target in wanted {
+        c.execute("INSERT INTO message_entity_mentions(message_id,entity_type,entity_id) VALUES(?1,?2,?3)", rusqlite::params![message_id, target.target_type, target.target_id]).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+fn update_message_with_targets_impl(
     c: &Connection,
     id: &str,
     text: &str,
     mention_ids: Option<&[String]>,
     mention_team_ids: Option<&[String]>,
+    mention_targets: Option<&[MentionTarget]>,
 ) -> Result<()> {
-    if mention_ids.is_some() || mention_team_ids.is_some() {
-        validate_mention_count(
-            mention_ids.unwrap_or(&[]),
-            mention_team_ids.unwrap_or(&[]),
-        )?;
+    if mention_ids.is_some() || mention_team_ids.is_some() || mention_targets.is_some() {
+        let (profiles, teams, entities) = if let Some(targets) = mention_targets {
+            split_mention_targets(&[], &[], targets)?
+        } else {
+            (
+                mention_ids.unwrap_or(&[]).to_vec(),
+                mention_team_ids.unwrap_or(&[]).to_vec(),
+                Vec::new(),
+            )
+        };
+        validate_mention_count(&profiles, &teams, &entities)?;
     }
     let changed = c
         .execute(
@@ -1951,23 +2060,45 @@ fn update_message_impl(
     crate::chat_links::sync_links_on(c, id, text)?;
     // Omitting `mention_ids` leaves the mentions untouched: an old client that only
     // knows how to edit text must not silently strip everyone off the message.
-    if mention_ids.is_some() || mention_team_ids.is_some() {
+    if mention_ids.is_some() || mention_team_ids.is_some() || mention_targets.is_some() {
         let message = get_message_impl(c, id)?.ok_or_else(|| "message not found".to_string())?;
         // An omitted list means "leave that kind of target alone", so the current rows
         // are re-sent for the side the caller did not speak about.
         let current_profiles = mentions_for_impl(c, id)?;
         let current_teams = team_mentions_for_impl(c, id)?;
+        let current_entities = entity_mentions_for_impl(c, id)?;
+        let (profiles, teams, entities) = if let Some(targets) = mention_targets {
+            split_mention_targets(&[], &[], targets)?
+        } else {
+            (
+                mention_ids.unwrap_or(&current_profiles).to_vec(),
+                mention_team_ids.unwrap_or(&current_teams).to_vec(),
+                current_entities,
+            )
+        };
         sync_mentions_impl(
             c,
             id,
             &message.channel_id,
             message.author_id.as_deref(),
             text,
-            mention_ids.unwrap_or(&current_profiles),
-            mention_team_ids.unwrap_or(&current_teams),
+            &profiles,
+            &teams,
+            &entities,
         )?;
     }
     Ok(())
+}
+
+/// Compatibility seam for existing callers that only know profile/team mention lists.
+fn update_message_impl(
+    c: &Connection,
+    id: &str,
+    text: &str,
+    mention_ids: Option<&[String]>,
+    mention_team_ids: Option<&[String]>,
+) -> Result<()> {
+    update_message_with_targets_impl(c, id, text, mention_ids, mention_team_ids, None)
 }
 
 /// One mention as its recipient sees it: the message, where it was said, and whether the
@@ -2461,11 +2592,7 @@ pub fn list_channel_polls(
     list_channel_polls_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn vote_poll(
-    poll_id: String,
-    voter_id: String,
-    option_ids: Vec<String>,
-) -> Result<PollView> {
+pub fn vote_poll(poll_id: String, voter_id: String, option_ids: Vec<String>) -> Result<PollView> {
     vote_poll_impl(&db::conn()?, &poll_id, &voter_id, &option_ids)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2650,14 +2777,16 @@ pub fn update_message(
     text: String,
     mention_ids: Option<Vec<String>>,
     mention_team_ids: Option<Vec<String>>,
+    mention_targets: Option<Vec<MentionTarget>>,
 ) -> Result<MessageView> {
     let c = db::conn()?;
-    update_message_impl(
+    update_message_with_targets_impl(
         &c,
         &id,
         &text,
         mention_ids.as_deref(),
         mention_team_ids.as_deref(),
+        mention_targets.as_deref(),
     )?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
@@ -2817,7 +2946,10 @@ mod tests {
         );
         vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&pizza)).unwrap();
         let after = vote_poll_impl(&c, "p-1", "voter-a", std::slice::from_ref(&sushi)).unwrap();
-        assert_eq!(after.options[0].vote_count, 0, "the old ballot is retracted");
+        assert_eq!(
+            after.options[0].vote_count, 0,
+            "the old ballot is retracted"
+        );
         assert_eq!(after.options[1].vote_count, 1);
         assert_eq!(after.voter_count, 1);
         assert!(after.options[1].me_voted);
@@ -2867,10 +2999,7 @@ mod tests {
         let view = vote_poll_impl(&c, "p-multi", "voter-b", std::slice::from_ref(&mon)).unwrap();
         assert_eq!(view.options[0].vote_count, 2);
         assert_eq!(view.options[1].vote_count, 1);
-        assert_eq!(
-            view.voter_count, 2,
-            "turnout counts people, not ballots"
-        );
+        assert_eq!(view.voter_count, 2, "turnout counts people, not ballots");
         // Voter B reads B's own picks only; A's second choice is never attributed.
         assert!(view.options[0].me_voted && !view.options[1].me_voted);
         let json = serde_json::to_string(&view).unwrap();
@@ -3048,6 +3177,7 @@ mod tests {
                 content_kind: default_message_content_kind(),
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
             },
         )
         .unwrap();
@@ -3177,6 +3307,7 @@ mod tests {
                 pinned: false,
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3302,6 +3433,7 @@ mod tests {
                 pinned: false,
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3429,6 +3561,7 @@ mod tests {
                 pinned: false,
                 mention_ids: mentions.iter().map(|s| s.to_string()).collect(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3524,6 +3657,7 @@ mod tests {
                 pinned: false,
                 mention_ids: Vec::new(),
                 mention_team_ids: teams.iter().map(|s| s.to_string()).collect(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -3556,8 +3690,14 @@ mod tests {
             [],
         )
         .unwrap();
-        post_teams(&c, "chan-tm", "msg-tm1", "alice", &["team-a", "team-a", "ghost-team"])
-            .unwrap();
+        post_teams(
+            &c,
+            "chan-tm",
+            "msg-tm1",
+            "alice",
+            &["team-a", "team-a", "ghost-team"],
+        )
+        .unwrap();
         // duplicates collapse, an unknown team is ignored, the row records the utterance
         assert_eq!(
             team_mentions_for_impl(&c, "msg-tm1").unwrap(),
@@ -3666,6 +3806,133 @@ mod tests {
     }
 
     #[test]
+    fn typed_entity_mention_is_durable_and_returned_with_profile_targets() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-entity");
+        seed_profiles(&c, &["alice", "bob"]);
+        let message = Message {
+            id: "msg-entity".into(),
+            channel_id: "chan-entity".into(),
+            author_id: Some("alice".into()),
+            text: "See this".into(),
+            created_at: 1,
+            edited_at: None,
+            thread_of: None,
+            archived: false,
+            pinned: false,
+            content_kind: "text".into(),
+            mention_ids: Vec::new(),
+            mention_team_ids: Vec::new(),
+            mention_targets: vec![
+                MentionTarget {
+                    target_type: "profile".into(),
+                    target_id: "bob".into(),
+                },
+                MentionTarget {
+                    target_type: "issue".into(),
+                    target_id: "issue-7".into(),
+                },
+            ],
+        };
+        create_message_impl(&c, &message).unwrap();
+        let view = to_view(
+            &c,
+            get_message_impl(&c, "msg-entity").unwrap().unwrap(),
+            Some("alice"),
+        )
+        .unwrap();
+        assert!(view
+            .message
+            .mention_targets
+            .iter()
+            .any(|target| target.target_type == "profile" && target.target_id == "bob"));
+        assert!(view
+            .message
+            .mention_targets
+            .iter()
+            .any(|target| target.target_type == "issue" && target.target_id == "issue-7"));
+        assert_eq!(
+            c.query_row(
+                "SELECT COUNT(*) FROM message_entity_mentions WHERE message_id='msg-entity'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn typed_entity_mention_update_replaces_the_whole_typed_set() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-entity-update");
+        seed_profiles(&c, &["alice", "bob"]);
+        create_message_impl(
+            &c,
+            &Message {
+                id: "msg-entity-update".into(),
+                channel_id: "chan-entity-update".into(),
+                author_id: Some("alice".into()),
+                text: "first".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: "text".into(),
+                mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
+                mention_targets: vec![MentionTarget {
+                    target_type: "issue".into(),
+                    target_id: "issue-old".into(),
+                }],
+            },
+        )
+        .unwrap();
+        update_message_with_targets_impl(
+            &c,
+            "msg-entity-update",
+            "second",
+            None,
+            None,
+            Some(&[
+                MentionTarget {
+                    target_type: "profile".into(),
+                    target_id: "bob".into(),
+                },
+                MentionTarget {
+                    target_type: "document".into(),
+                    target_id: "doc-new".into(),
+                },
+            ]),
+        )
+        .unwrap();
+        let view = to_view(
+            &c,
+            get_message_impl(&c, "msg-entity-update").unwrap().unwrap(),
+            Some("alice"),
+        )
+        .unwrap();
+        assert_eq!(
+            view.message.mention_targets,
+            vec![
+                MentionTarget {
+                    target_type: "profile".into(),
+                    target_id: "bob".into()
+                },
+                MentionTarget {
+                    target_type: "document".into(),
+                    target_id: "doc-new".into()
+                },
+            ]
+        );
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
     fn profile_and_team_mention_targets_share_one_bound() {
         let (c, path) = conn();
         seed_channel(&c, "chan-tb");
@@ -3685,6 +3952,7 @@ mod tests {
             pinned: false,
             mention_ids: vec!["alice".to_string()],
             mention_team_ids: teams,
+            mention_targets: Vec::new(),
             content_kind: "text".into(),
         };
         assert!(create_message_impl(&c, &message)
@@ -3756,6 +4024,7 @@ mod tests {
             pinned: false,
             mention_ids: too_many.clone(),
             mention_team_ids: Vec::new(),
+            mention_targets: Vec::new(),
             content_kind: "text".into(),
         };
         assert!(create_message_impl(&c, &message)
@@ -3800,7 +4069,14 @@ mod tests {
             vec!["bob".to_string()]
         );
         // an explicit list is the whole truth: bob leaves, carol arrives
-        update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()]), None).unwrap();
+        update_message_impl(
+            &c,
+            "msg-m3",
+            "now carol",
+            Some(&["carol".to_string()]),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             mentions_for_impl(&c, "msg-m3").unwrap(),
             vec!["carol".to_string()]
@@ -3983,6 +4259,7 @@ mod tests {
             content_kind: "text".into(),
             mention_ids: Vec::new(),
             mention_team_ids: Vec::new(),
+            mention_targets: Vec::new(),
         };
         create_message_impl(&c, &root).unwrap();
         let reply = Message {
@@ -3998,6 +4275,7 @@ mod tests {
             content_kind: "text".into(),
             mention_ids: Vec::new(),
             mention_team_ids: Vec::new(),
+            mention_targets: Vec::new(),
         };
         create_message_impl(&c, &reply).unwrap();
 
@@ -4035,6 +4313,7 @@ mod tests {
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
             },
         )
         .unwrap();
@@ -4071,6 +4350,7 @@ mod tests {
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
             },
         )
         .unwrap();
@@ -4150,6 +4430,7 @@ mod tests {
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
             }
         )
         .is_err());
@@ -4296,8 +4577,8 @@ mod tests {
         )
         .unwrap();
         post(&c, "chan-private", "m-secret", "alice", &[]).unwrap();
-        let page =
-            list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice")).unwrap();
+        let page = list_messages_page_impl(&c, "chan-private", None, None, Some(1), Some("alice"))
+            .unwrap();
         assert_eq!(page.messages.len(), 1);
         // Same channel, same (absent) cursor, different reader: the ACL is re-checked on
         // every page, so holding a cursor grants nothing.
@@ -4376,6 +4657,7 @@ mod tests {
                 pinned: false,
                 mention_ids: vec![],
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -4435,6 +4717,7 @@ mod tests {
                 pinned: false,
                 mention_ids: vec![],
                 mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
                 content_kind: "text".into(),
             },
         )
@@ -4453,7 +4736,11 @@ mod tests {
             .unwrap_err(),
             "channel access denied"
         );
-        assert_eq!(calls.get(), 0, "a denied request must not reach the network");
+        assert_eq!(
+            calls.get(),
+            0,
+            "a denied request must not reach the network"
+        );
 
         // The member's request runs, the guard refuses the link-local address, and the
         // refusal is terminal: a second request does not re-dial.
