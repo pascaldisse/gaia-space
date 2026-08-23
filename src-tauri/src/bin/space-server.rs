@@ -459,6 +459,203 @@ async fn app_create_issue(
     .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
 }
 
+/// External room API scopes intentionally match the upstream Meet application API.
+/// Generic `read`/`write` grants are not aliases: a token must explicitly carry the
+/// capability for this endpoint (or `*`).
+#[allow(clippy::result_large_err)]
+fn app_room_scope(
+    token: &applications::AppToken,
+    required: &str,
+) -> Result<(), axum::response::Response> {
+    if token
+        .scope
+        .split_whitespace()
+        .any(|scope| scope == required || scope == "*")
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            [(
+                header::WWW_AUTHENTICATE,
+                format!("Bearer error=\"insufficient_scope\", scope=\"{required}\""),
+            )],
+            Json(json!({"ok": false, "error": "insufficient_scope"})),
+        )
+            .into_response())
+    }
+}
+
+fn app_room_project_id(
+    c: &rusqlite::Connection,
+    room_id: &str,
+) -> Result<String, axum::response::Response> {
+    c.query_row(
+        "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
+        [room_id],
+        |row| row.get(0),
+    ).map_err(|_| err(StatusCode::NOT_FOUND, "room not found").into_response())
+}
+
+fn app_has_project_right(
+    c: &rusqlite::Connection,
+    application_id: &str,
+    project_id: &str,
+    right: &str,
+) -> Result<bool, axum::response::Response> {
+    app_rights::app_has_right_anywhere(
+        c,
+        application_id,
+        &app_rights::app_project_contexts(project_id),
+        right,
+    )
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "rights lookup failed").into_response())
+}
+
+async fn app_list_rooms(
+    headers: HeaderMap,
+) -> Result<Json<Vec<meetings::Meeting>>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_room_scope(&token, "rooms:list")?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    // Channel-less/public rooms have no project authorization context, so are never
+    // exposed to applications. This is deliberately narrower than the human API.
+    let mut rooms = Vec::new();
+    for room in meetings::list_meetings_scoped_for_application(&c)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())?
+    {
+        let project_id = app_room_project_id(&c, &room.id)?;
+        if app_has_project_right(&c, &application.id, &project_id, "Project.ViewMeetings")? {
+            rooms.push(room);
+        }
+    }
+    Ok(Json(rooms))
+}
+
+async fn app_get_room(
+    headers: HeaderMap,
+    Path(room_id): Path<String>,
+) -> Result<Json<meetings::Meeting>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_room_scope(&token, "rooms:retrieve")?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    let project_id = app_room_project_id(&c, &room_id)?;
+    if !app_has_project_right(&c, &application.id, &project_id, "Project.ViewMeetings")? {
+        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.ViewMeetings"}))).into_response());
+    }
+    meetings::get_meeting_unscoped(&c, &room_id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())?
+        .map(Json)
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "room not found").into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppRoomInput {
+    id: String,
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    starts_at: i64,
+    ends_at: i64,
+    #[serde(default)]
+    rrule: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+    project_id: String,
+    channel_id: String,
+    #[serde(default = "app_native_provider")]
+    video_provider: String,
+    #[serde(default = "app_scheduled_status")]
+    video_status: String,
+    #[serde(default = "app_private_access")]
+    access_level: String,
+}
+fn app_native_provider() -> String {
+    "native".into()
+}
+fn app_scheduled_status() -> String {
+    "scheduled".into()
+}
+fn app_private_access() -> String {
+    "PRIVATE".into()
+}
+
+async fn app_create_room(
+    headers: HeaderMap,
+    Json(input): Json<AppRoomInput>,
+) -> Result<Json<meetings::Meeting>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_room_scope(&token, "rooms:create")?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    let channel_project: String = c
+        .query_row(
+            "SELECT project_id FROM channels WHERE id=?1 AND project_id IS NOT NULL",
+            [&input.channel_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            err(StatusCode::BAD_REQUEST, "channel must belong to project").into_response()
+        })?;
+    if channel_project != input.project_id {
+        return Err(err(StatusCode::BAD_REQUEST, "channel project mismatch").into_response());
+    }
+    if !app_has_project_right(
+        &c,
+        &application.id,
+        &input.project_id,
+        "Project.CreateMeetings",
+    )? {
+        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.CreateMeetings"}))).into_response());
+    }
+    drop(c);
+    let room = meetings::Meeting {
+        id: input.id,
+        title: input.title,
+        description: input.description,
+        starts_at: input.starts_at,
+        ends_at: input.ends_at,
+        rrule: input.rrule,
+        location: input.location,
+        organizer_id: None,
+        channel_id: Some(input.channel_id),
+        video_provider: input.video_provider,
+        video_status: input.video_status,
+        access_level: input.access_level,
+        archived: false,
+    };
+    meetings::create_meeting(room.clone())
+        .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
+    Ok(Json(room))
+}
+
+/// An application joins only as its own fixed, non-admin identity. Public access
+/// needs both the persisted room flag and the server-wide anonymous-admission opt-in.
+async fn app_join_room(
+    headers: HeaderMap,
+    Path(room_id): Path<String>,
+) -> Result<Json<calls::CallJoin>, axum::response::Response> {
+    let (token, application) = app_bearer(&headers)?;
+    app_room_scope(&token, "rooms:join")?;
+    let c = db::conn().map_err(|_| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable").into_response()
+    })?;
+    let project_id = app_room_project_id(&c, &room_id)?;
+    if !app_has_project_right(&c, &application.id, &project_id, "Project.JoinMeetings")? {
+        return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "right_not_authorized", "right": "Project.JoinMeetings"}))).into_response());
+    }
+    drop(c);
+    calls::join_application_public_meeting_call(room_id, application.id, application.name)
+        .map(Json)
+        .map_err(|_| err(StatusCode::FORBIDDEN, "room_join_denied").into_response())
+}
+
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
     let t = headers
         .get(header::COOKIE)
@@ -4537,6 +4734,9 @@ async fn main() {
         .route("/api/documents/files/{document_id}", get(document_download))
         .route("/api/app/me", get(app_me))
         .route("/api/app/projects", get(app_projects))
+        .route("/api/app/rooms", get(app_list_rooms).post(app_create_room))
+        .route("/api/app/rooms/{room_id}", get(app_get_room))
+        .route("/api/app/rooms/{room_id}/join", post(app_join_room))
         .route(
             "/api/app/projects/{project_id}/issues",
             post(app_create_issue),
@@ -5493,6 +5693,90 @@ mod tests {
         assert_eq!(
             invalid.headers()[header::WWW_AUTHENTICATE],
             "Bearer error=\"invalid_token\""
+        );
+    }
+
+    #[tokio::test]
+    async fn app_room_api_requires_room_scope_and_project_rights_before_join() {
+        let _serial = test_lock();
+        setup();
+        platform::seed_rights().unwrap();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-room','Room App','Application','client-room',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('room-project','Rooms','ROOM','pa',1); INSERT INTO channels(id,content_type,name,project_id) VALUES('room-channel','entity-bound','Rooms','room-project'); INSERT INTO meetings(id,title,starts_at,ends_at,channel_id,video_provider,video_status,access_level) VALUES('room-live','Live',1,2,'room-channel','native','scheduled','PUBLIC'),('room-ended','Ended',1,2,'room-channel','native','ended','PUBLIC'),('room-archived','Archived',1,2,'room-channel','native','scheduled','PUBLIC'); UPDATE meetings SET archived=1 WHERE id='room-archived';").unwrap();
+        drop(c);
+        let secret = applications::rotate_app_secret("app-room".into()).unwrap();
+        let mint = |scope: &str| {
+            applications::issue_app_token(
+                "client-room".into(),
+                secret.client_secret.clone(),
+                Some(scope.into()),
+                Some(60),
+            )
+            .unwrap()
+            .access_token
+            .unwrap()
+        };
+        // Generic read is never a room-join capability.
+        assert_eq!(
+            app_join_room(bearer(&mint("read")), Path("room-live".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let join = mint("rooms:join");
+        // A declared/issued scope is still insufficient without the dedicated stage-2 grant.
+        assert_eq!(
+            app_join_room(bearer(&join), Path("room-live".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        app_rights::update_authorized_rights(
+            "app-room".into(),
+            "project:room-project".into(),
+            vec!["Project.JoinMeetings".into()],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        // Lifecycle and archival both fail before a non-admin LiveKit token can be minted.
+        assert_eq!(
+            app_join_room(bearer(&join), Path("room-ended".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            app_join_room(bearer(&join), Path("room-archived".into()))
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let list = mint("rooms:list");
+        let rooms = app_list_rooms(bearer(&list)).await.unwrap().0;
+        assert!(
+            rooms.is_empty(),
+            "join authority must not imply list authority"
+        );
+        app_rights::update_authorized_rights(
+            "app-room".into(),
+            "project:room-project".into(),
+            vec!["Project.ViewMeetings".into(), "Project.JoinMeetings".into()],
+            None,
+            Some("test".into()),
+        )
+        .unwrap();
+        let rooms = app_list_rooms(bearer(&list)).await.unwrap().0;
+        assert_eq!(
+            rooms
+                .iter()
+                .map(|room| room.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["room-live", "room-ended"]
         );
     }
 

@@ -626,6 +626,40 @@ pub(crate) fn join_public_meeting_call_with_config(
     })
 }
 
+/// Application API admission has no user profile. Its identity derives solely from
+/// the authenticated application and it never receives the LiveKit room-admin grant.
+pub fn join_application_public_meeting_call(
+    meeting_id: String,
+    application_id: String,
+    application_name: String,
+) -> Result<CallJoin> {
+    if application_id.trim().is_empty() || application_name.trim().is_empty() {
+        return Err("Application identity is required".into());
+    }
+    let config = LivekitConfig::default();
+    if !config.allow_unregistered_rooms() {
+        return Err("Unregistered application rooms are disabled".into());
+    }
+    let meeting = meetings::get_public_meeting(meeting_id)?.ok_or("Public room not found")?;
+    if meeting.video_provider != "native" {
+        return Err("External Meet rooms are not configured".into());
+    }
+    meetings::video_status_after_join(&meeting.video_status)?;
+    let status = ensure_server(config.clone())?;
+    let room = room_for_meeting(&meeting.id);
+    Ok(CallJoin {
+        url: status.url,
+        token: token_for(
+            &config,
+            room.clone(),
+            format!("application-{application_id}"),
+            application_name,
+            false,
+        )?,
+        room,
+    })
+}
+
 /// Public IPC surface: the webview names the meeting and nothing else. Who is joining
 /// comes from native state (`actor::resolve`) and their display name from that profile
 /// row; the LiveKit endpoint and signing keys from native config/env. A caller that could

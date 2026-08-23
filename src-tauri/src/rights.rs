@@ -194,6 +194,27 @@ pub const CATALOG: &[(&str, &str, &str, &str, &str)] = &[
         "Project",
     ),
     (
+        "Project.ViewMeetings",
+        "View meetings",
+        "List and retrieve project video rooms.",
+        "Project",
+        "Meetings",
+    ),
+    (
+        "Project.CreateMeetings",
+        "Create meetings",
+        "Create project video rooms.",
+        "Project",
+        "Meetings",
+    ),
+    (
+        "Project.JoinMeetings",
+        "Join meetings",
+        "Join explicitly public project video rooms as an application participant.",
+        "Project",
+        "Meetings",
+    ),
+    (
         "Project.AdminProject",
         "Administer project",
         "Manage project settings and membership.",
