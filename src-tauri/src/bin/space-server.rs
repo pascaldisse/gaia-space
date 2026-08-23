@@ -5457,6 +5457,23 @@ mod tests {
     }
 
     #[test]
+    fn paging_and_unfurl_are_session_scoped_and_read_as_the_session() {
+        for name in ["list_messages_page", "unfurl_message_links"] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+        // The reader is always the session: a client cannot page or unfurl "as" someone
+        // whose channel membership it does not have.
+        let mut body = json!({"channel_id": "c-1", "cursor": "abc", "acting_profile_id": "someone-else"});
+        bind_session_identity(&mut body, "me");
+        assert_eq!(body["acting_profile_id"], json!("me"));
+        // The cursor is untouched data, never an identity.
+        assert_eq!(body["cursor"], json!("abc"));
+    }
+
+    #[test]
     fn scheduled_message_commands_are_session_scoped() {
         for name in [
             "schedule_message",
