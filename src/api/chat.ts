@@ -30,6 +30,21 @@ export type ChannelMember = {
 
 export type Reaction = { emoji: string; count: number; mine: boolean };
 
+// `thread_key` is "" for the channel-root composer, else the root message id.
+export type MessageDraft = {
+  channel_id: string;
+  author_id: string;
+  thread_key: string;
+  text: string;
+  updated_at: number;
+};
+
+export type TypingParticipant = {
+  channel_id: string;
+  profile_id: string;
+  updated_at: number;
+};
+
 export type Message = {
   id: string;
   channel_id: string;
@@ -97,6 +112,22 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<MessageView[]>("list_pinned_messages", { channelId, actingProfileId: actingProfileId ?? null }),
   setMessagePinned: (id: string, pinned: boolean) =>
     invoke<MessageView>("set_message_pinned", { id, pinned }),
+
+  // drafts: one unsent body per (channel, author, thread); saving "" clears it
+  saveMessageDraft: (channelId: string, authorId: string, text: string, threadKey?: string | null) =>
+    invoke<MessageDraft | null>("save_message_draft", { channelId, authorId, text, threadKey: threadKey ?? "" }),
+  getMessageDraft: (channelId: string, authorId: string, threadKey?: string | null) =>
+    invoke<MessageDraft | null>("get_message_draft", { channelId, authorId, threadKey: threadKey ?? "" }),
+  listMessageDrafts: (authorId: string) =>
+    invoke<MessageDraft[]>("list_message_drafts", { authorId }),
+  deleteMessageDraft: (channelId: string, authorId: string, threadKey?: string | null) =>
+    invoke<boolean>("delete_message_draft", { channelId, authorId, threadKey: threadKey ?? "" }),
+
+  // typing presence: beats expire server-side, so a dead client cannot stick
+  setChannelTyping: (channelId: string, profileId: string, typing: boolean) =>
+    invoke<void>("set_channel_typing", { channelId, profileId, typing }),
+  listChannelTyping: (channelId: string, actingProfileId?: string | null, ttlSecs?: number | null) =>
+    invoke<TypingParticipant[]>("list_channel_typing", { channelId, actingProfileId: actingProfileId ?? null, ttlSecs: ttlSecs ?? null }),
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),

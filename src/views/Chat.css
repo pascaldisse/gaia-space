@@ -352,6 +352,8 @@
 }
 
 .composer-wrap { flex-wrap: wrap; position: relative; }
+/* Sits directly above the composer so it reads as "about to arrive", not as history. */
+.typing-indicator { padding: 2px 12px; font-size: 12px; font-style: italic; opacity: 0.7; }
 .attachment-button { display: grid; place-items: center; cursor: pointer; color: var(--text-muted); padding: .35em; }
 .attachment-button:hover { color: #5fe6d4; }
 .attachment-button input { display: none; }

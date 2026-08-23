@@ -179,6 +179,89 @@ export default function Chat() {
   type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
+
+  // ---- draft persistence + typing presence ----
+  // Intervals are tunable, not baked in: a slower poll trades freshness for load.
+  const DRAFT_SAVE_DELAY_MS = Number(import.meta.env.VITE_CHAT_DRAFT_SAVE_MS ?? 600);
+  const TYPING_POLL_MS = Number(import.meta.env.VITE_CHAT_TYPING_POLL_MS ?? 3000);
+  // Re-beat well inside the server TTL so a live typist never flickers off.
+  const TYPING_BEAT_MS = Number(import.meta.env.VITE_CHAT_TYPING_BEAT_MS ?? 4000);
+  let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastBeatAt = 0;
+  // Guards the load→save race: restoring a draft into the box must not be echoed back
+  // as a save, and a channel switch must not write the old body into the new channel.
+  let restoring = false;
+
+  // Restore the persisted body whenever the (channel, profile) pair changes.
+  createEffect(() => {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p) return;
+    restoring = true;
+    setDraft("");
+    chatApi
+      .getMessageDraft(ch, p)
+      .then((stored) => {
+        if (activeChannelId() === ch && actingProfileId() === p) setDraft(stored?.text ?? "");
+      })
+      .catch(fail)
+      .finally(() => { restoring = false; });
+  });
+
+  function onDraftInput(value: string) {
+    setDraft(value);
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (!ch || !p || restoring) return;
+    // Debounced: one write per pause, not one per keystroke.
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => {
+      chatApi.saveMessageDraft(ch, p, value).catch(fail);
+    }, DRAFT_SAVE_DELAY_MS);
+    const now = Date.now();
+    if (now - lastBeatAt >= TYPING_BEAT_MS) {
+      lastBeatAt = now;
+      chatApi.setChannelTyping(ch, p, true).catch(fail);
+    }
+  }
+
+  // Sent or cleared: drop the stored draft and retract the beat at once, so nobody
+  // sees "typing…" from someone who already pressed Send.
+  function clearDraftState() {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    lastBeatAt = 0;
+    if (!ch || !p) return;
+    chatApi.deleteMessageDraft(ch, p).catch(fail);
+    chatApi.setChannelTyping(ch, p, false).catch(fail);
+  }
+
+  const [typingUsers, setTypingUsers] = createSignal<string[]>([]);
+  createEffect(() => {
+    const ch = activeChannelId();
+    const p = actingProfileId();
+    setTypingUsers([]);
+    if (!ch || !p) return;
+    const poll = () =>
+      chatApi
+        .listChannelTyping(ch, p)
+        .then((rows) => {
+          if (activeChannelId() === ch && actingProfileId() === p)
+            setTypingUsers(rows.map((r) => r.profile_id));
+        })
+        .catch(() => {});
+    void poll();
+    const timer = setInterval(poll, TYPING_POLL_MS);
+    onCleanup(() => clearInterval(timer));
+  });
+  const typingLabel = () => {
+    const names = typingUsers().map((id) => profileName(id));
+    if (!names.length) return "";
+    if (names.length === 1) return `${names[0]} is typing…`;
+    if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+    return `${names.length} people are typing…`;
+  };
   const [draftMentionIds, setDraftMentionIds] = createSignal<string[]>([]);
   const [threadAttachments, setThreadAttachments] = createSignal<PendingAttachment[]>([]);
   const [threadMentionIds, setThreadMentionIds] = createSignal<string[]>([]);
@@ -331,6 +414,7 @@ export default function Chat() {
       const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
       setDraftMessageId(ok ? null : message.id);
       setDraft(""); setDraftMentionIds([]);
+      clearDraftState();
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -763,11 +847,14 @@ export default function Chat() {
         </div>
 
         <Show when={activeChannelId() && !activeChannel()?.read_only} fallback={<Show when={activeChannelId() && activeChannel()?.read_only}><p class="hint pad">This private feed is read-only. Notifications arrive here automatically.</p></Show>}>
+          <Show when={typingLabel()}>
+            <div class="typing-indicator" aria-live="polite">{typingLabel()}</div>
+          </Show>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Message…"
               value={draft()}
-              onInput={(e) => setDraft(e.currentTarget.value)}
+              onInput={(e) => onDraftInput(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
