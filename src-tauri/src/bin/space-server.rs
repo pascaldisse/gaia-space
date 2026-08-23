@@ -4148,6 +4148,7 @@ async fn cmd(
     "list_profiles" => platform::list_profiles(),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),
+    "save_merge_preferences" => review::save_merge_preferences(preferences: review::MergePreferences),
     "save_protected_branch_rule" => review::save_protected_branch_rule(rule: review::ProtectedBranchRule),
     "delete_protected_branch_rule" => review::delete_protected_branch_rule(id: String),
     "list_quality_gate_rules" => review::list_quality_gate_rules(project_id: String),

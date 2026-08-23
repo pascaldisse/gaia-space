@@ -76,6 +76,18 @@ pub struct QualityGateRule {
     pub roles_json: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MergePreferences {
+    pub review_id: String,
+    pub delete_source_branch: bool,
+    /// JSON list of {"issue_id":"…","status_id":"…"}; validated against review project on merge.
+    pub linked_issue_statuses_json: String,
+}
+#[derive(Debug, Deserialize)]
+struct LinkedIssueStatus {
+    issue_id: String,
+    status_id: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SafeMergeRun {
     pub id: String,
     pub review_id: String,
@@ -1766,6 +1778,34 @@ fn advance_verified_ref(
     Ok(())
 }
 
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_merge_preferences(preferences: MergePreferences) -> Result<()> {
+    serde_json::from_str::<Vec<LinkedIssueStatus>>(&preferences.linked_issue_statuses_json)
+        .map_err(|_| "linked issue transitions must be a JSON list".to_string())?;
+    db::conn()?.execute("INSERT INTO review_merge_preferences(review_id,delete_source_branch,linked_issue_statuses_json) VALUES(?1,?2,?3) ON CONFLICT(review_id) DO UPDATE SET delete_source_branch=excluded.delete_source_branch,linked_issue_statuses_json=excluded.linked_issue_statuses_json", rusqlite::params![preferences.review_id, preferences.delete_source_branch, preferences.linked_issue_statuses_json]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn merge_preferences_tx(c: &Connection, review_id: &str) -> Result<(bool, String)> {
+    c.query_row("SELECT delete_source_branch,linked_issue_statuses_json FROM review_merge_preferences WHERE review_id=?1", rusqlite::params![review_id], |r| Ok((r.get(0)?, r.get(1)?))).or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok((false, "[]".into())) } else { Err(e) }).map_err(|e|e.to_string())
+}
+fn transition_linked_issues_tx(
+    c: &Connection,
+    project_id: &str,
+    transitions_json: &str,
+) -> Result<usize> {
+    let transitions: Vec<LinkedIssueStatus> = serde_json::from_str(transitions_json)
+        .map_err(|_| "stored linked issue transitions are invalid".to_string())?;
+    let mut changed = 0;
+    for transition in transitions {
+        changed += c
+            .execute(
+                "UPDATE issues SET status_id=?1 WHERE id=?2 AND project_id=?3",
+                rusqlite::params![transition.status_id, transition.issue_id, project_id],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(changed)
+}
 /// Final merge is deliberate, ref-only Git plumbing: no checkout or worktree mutation.
 /// It rechecks CI and both branch tips immediately before updating the target ref.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1781,6 +1821,7 @@ pub fn attempt_merge(
         merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
     let project_id = review_project_tx(&c, &review_id)?;
+    let (delete_source_branch, linked_issue_statuses_json) = merge_preferences_tx(&c, &review_id)?;
     enforce_merge_permission_tx(&c, &project_id, &target_branch, &actor_id)?;
     let bypassed = bypasses_quality_gate_tx(&c, &project_id, &target_branch, &actor_id)?;
     if !bypassed {
@@ -1861,6 +1902,13 @@ pub fn attempt_merge(
         rusqlite::params![review_id],
     )
     .map_err(|e| e.to_string())?;
+    let transitioned = transition_linked_issues_tx(&c, &project_id, &linked_issue_statuses_json)?;
+    if delete_source_branch && source_branch != target_branch {
+        repo.find_reference(&format!("refs/heads/{source_branch}"))
+            .map_err(|e| e.to_string())?
+            .delete()
+            .map_err(|e| e.to_string())?;
+    }
     let retargeted = retarget_stacked_children_tx(&c, &review_id)?;
     review_event_by_id(crate::events::REVIEW_MERGED, &review_id);
     record_merge_run_tx(
@@ -1869,7 +1917,7 @@ pub fn attempt_merge(
         &review_id,
         "SUCCEEDED",
         false,
-        format!("merged as {merge_oid}; CI green; quality gate {}; retargeted {retargeted} stacked review(s)", if bypassed { "bypassed by protected-branch permission" } else { "satisfied" }),
+        format!("merged as {merge_oid}; CI green; quality gate {}; retargeted {retargeted} stacked review(s); transitioned {transitioned} linked issue(s)", if bypassed { "bypassed by protected-branch permission" } else { "satisfied" }),
         Some(&source_oid),
         Some(&target_oid),
         Some(&merge_oid.to_string()),
