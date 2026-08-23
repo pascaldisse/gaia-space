@@ -1794,7 +1794,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" => CommandPolicy::Session,
         "list_channels_with_meta"
         | "list_checklist_items"
         | "list_checklists"
@@ -4132,7 +4132,12 @@ async fn cmd(
     "list_jobs" => pipelines::list_jobs(),
     "list_jobs_for_script" => pipelines::list_jobs_for_script(script_id: String),
     "list_meeting_participants" => meetings::list_meeting_participants_scoped(meeting_id: String, profile_id: String),
+    "list_meeting_rooms" => meetings::list_meeting_rooms(),
+    "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
+    "list_locations" => platform::list_locations(),
+    "save_location" => platform::save_location(location: platform::Location),
+    "location_channel" => platform::location_channel(location_id: String),
     "list_messages" => chat::list_messages(channel_id: String, acting_profile_id: Option<String>),
     "list_notifications" => personal::list_notifications(recipient_id: String, unread_only: Option<bool>),
     "list_package_repositories" => pipelines::list_package_repositories(),

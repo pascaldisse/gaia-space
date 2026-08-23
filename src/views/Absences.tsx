@@ -4,6 +4,7 @@ import {
   type Absence,
   type AbsenceAvailability,
 } from "../api/personal";
+import { platformApi, type CfDefinition } from "../api/platform";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
@@ -67,6 +68,8 @@ export default function Absences() {
   const [draft, setDraft] = createSignal(emptyAbsence());
   const [message, setMessage] = createSignal("");
   const [formOpen, setFormOpen] = createSignal(false);
+  const [customValues, setCustomValues] = createSignal<Record<string, string>>({});
+  const [customFields] = createResource<CfDefinition[]>(() => platformApi.cfDefinitions("absence"));
   const [records, { refetch }] = createResource(filterProfileId, (id) =>
     personalApi.absences(id || undefined),
   );
@@ -94,6 +97,7 @@ export default function Absences() {
       ...emptyAbsence(),
       profile_id: filterProfileId() || sessionProfile(),
     });
+    setCustomValues({});
     setFormOpen(true);
   };
   const dismissForm = () => setFormOpen(false);
@@ -111,11 +115,12 @@ export default function Absences() {
         throw new Error("Person, reason, and both dates are required.");
       if (value.date_to < value.date_from)
         throw new Error("The end date can’t be before the start date.");
-      await personalApi.createAbsence({
+      const created = await personalApi.createAbsence({
         ...value,
         profile_id,
         reason_type: value.reason_type.trim(),
       });
+      await Promise.all(Object.entries(customValues()).filter(([, raw]) => raw.trim()).map(([definition_id, raw]) => platformApi.cfSetValue(definition_id, created.id, raw)));
       setDraft(emptyAbsence());
       setMessage("");
       dismissForm();
@@ -268,6 +273,7 @@ export default function Absences() {
               Keep the reason private (colleagues see only the availability)
             </label>
           </div>
+          <Show when={customFields()?.length}><div class="timeoff-form-grid" aria-label="Custom fields"><For each={customFields()}>{field => <label class="fld">{field.name}<input placeholder="JSON value" value={customValues()[field.id] ?? ""} onInput={event => setCustomValues({ ...customValues(), [field.id]: event.currentTarget.value })}/></label>}</For></div></Show>
           <div class="timeoff-form-foot">
             <Show when={mayApprove()}>
               <label class="fld-check">

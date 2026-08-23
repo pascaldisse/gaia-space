@@ -376,8 +376,12 @@ export default function Chat() {
     return profiles()?.find((p) => p.id === id)?.display_name ?? id;
   }
 
+  function absenceCard(text: string) {
+    try { const card = JSON.parse(text) as { profile_id:string; date_from:string; date_to:string; availability:string; action:string }; return card; } catch { return null; }
+  }
   function renderMessage(m: MessageView, inThread: boolean) {
     const mine = () => m.author_id === actingProfileId();
+    const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
     return (
       <div class="message-row">
         <Show
@@ -391,7 +395,9 @@ export default function Chat() {
                   <span class="message-edited">(edited)</span>
                 </Show>
               </div>
-              <div class="message-text">{m.text}</div>
+              <Show when={card()} fallback={<div class="message-text">{m.text}</div>}>
+                {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
+              </Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>

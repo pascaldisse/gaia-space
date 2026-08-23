@@ -177,6 +177,61 @@ pub fn remove_member_location(id: String) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Organization locations
+// ---------------------------------------------------------------------------
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Location {
+    pub id: String,
+    pub name: String,
+    pub location_type: String,
+    pub parent_id: Option<String>,
+    pub timezone: String,
+    pub work_schedule_json: String,
+    pub channel_id: Option<String>,
+    pub archived: bool,
+    #[serde(default)]
+    pub equipment: Vec<String>,
+}
+fn location_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Location> {
+    Ok(Location { id: row.get(0)?, name: row.get(1)?, location_type: row.get(2)?, parent_id: row.get(3)?, timezone: row.get(4)?, work_schedule_json: row.get(5)?, channel_id: row.get(6)?, archived: row.get(7)?, equipment: Vec::new() })
+}
+fn hydrate_location_equipment(c: &Connection, location: &mut Location) -> Result<()> {
+    let mut statement = err(c.prepare("SELECT equipment FROM location_equipment WHERE location_id=?1 ORDER BY equipment"))?;
+    let rows = statement.query_map([&location.id], |row| row.get(0)).map_err(|error| error.to_string())?;
+    location.equipment = rows.collect::<std::result::Result<Vec<String>, _>>().map_err(|error| error.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_locations() -> Result<Vec<Location>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare("SELECT id,name,location_type,parent_id,timezone,work_schedule_json,channel_id,archived FROM locations WHERE archived=0 ORDER BY name"))?;
+    let rows = statement.query_map([], location_row).map_err(|error| error.to_string())?;
+    let mut locations = rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for location in &mut locations { hydrate_location_equipment(&c, location)?; }
+    Ok(locations)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_location(mut location: Location) -> Result<Location> {
+    if location.id.trim().is_empty() { location.id = new_id("location"); }
+    if location.name.trim().is_empty() || location.timezone.trim().is_empty() { return Err("Location name and timezone are required".into()); }
+    let _: serde_json::Value = serde_json::from_str(&location.work_schedule_json).map_err(|_| "Location work schedule must be JSON")?;
+    let channel_id = format!("entity:location:{}", location.id);
+    let mut c = db::conn()?;
+    let tx = err(c.transaction())?;
+    err(tx.execute("INSERT OR IGNORE INTO channels(id,content_type,name,description,archived) VALUES(?1,'entity-bound',?2,?3,0)", params![channel_id, format!("{} chat", location.name.trim()), format!("location:{}", location.id)]))?;
+    err(tx.execute("INSERT INTO locations(id,name,location_type,parent_id,timezone,work_schedule_json,channel_id,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET name=excluded.name,location_type=excluded.location_type,parent_id=excluded.parent_id,timezone=excluded.timezone,work_schedule_json=excluded.work_schedule_json,channel_id=excluded.channel_id,archived=excluded.archived", params![location.id, location.name.trim(), location.location_type.trim(), location.parent_id, location.timezone.trim(), location.work_schedule_json, channel_id, location.archived]))?;
+    err(tx.execute("DELETE FROM location_equipment WHERE location_id=?1", [&location.id]))?;
+    for equipment in &location.equipment { let equipment = equipment.trim(); if !equipment.is_empty() { err(tx.execute("INSERT INTO location_equipment(location_id,equipment) VALUES(?1,?2)", params![location.id, equipment]))?; } }
+    err(tx.commit())?;
+    location.channel_id = Some(channel_id);
+    Ok(location)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn location_channel(location_id: String) -> Result<Option<String>> {
+    let c = db::conn()?;
+    err(c.query_row("SELECT channel_id FROM locations WHERE id=?1 AND archived=0", [location_id], |row| row.get(0)).optional())
+}
+// ---------------------------------------------------------------------------
 // Teams + memberships
 // ---------------------------------------------------------------------------
 

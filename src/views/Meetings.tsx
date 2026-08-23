@@ -38,6 +38,9 @@ export default function Meetings() {
   const [invitee, setInvitee] = createSignal("");
   const [error, setError] = createSignal("");
   const [notice, setNotice] = createSignal("");
+  const [equipmentFilter, setEquipmentFilter] = createSignal("");
+  const [roomId, setRoomId] = createSignal("");
+  const [rooms] = createResource(() => meetingsApi.rooms());
   const [participants, { refetch: reloadParticipants }] = createResource(
     () => [selected()?.id, profileId()] as const,
     ([meetingId, personId]) => meetingId && personId ? meetingsApi.participants(meetingId, personId) : Promise.resolve([]),
@@ -137,6 +140,8 @@ export default function Meetings() {
       setError(humanError(reason));
     }
   };
+  const reserveRoom = async () => { const meeting = selected(); if (!meeting || !roomId()) return; try { await meetingsApi.reserveRoom(meeting.id, roomId()); setNotice("Room reserved."); } catch (reason) { setError(humanError(reason)); } };
+  const filteredRooms = () => { const required = equipmentFilter().split(",").map(x => x.trim().toLowerCase()).filter(Boolean); return (rooms() ?? []).filter(room => required.every(item => room.equipment.some(equipment => equipment.toLowerCase() === item))); };
   const rsvp = async (participant: MeetingParticipant, status: MeetingParticipant["status"]) => {
     setError("");
     try {
@@ -191,6 +196,7 @@ export default function Meetings() {
             <div class="meeting-detail-when"><label>Start<input type="datetime-local" value={localInput(meeting().starts_at)} onInput={(event) => setMeetingField("starts_at", epoch(event.currentTarget.value))}/></label><label>End<input type="datetime-local" value={localInput(meeting().ends_at)} onInput={(event) => setMeetingField("ends_at", epoch(event.currentTarget.value))}/></label></div>
             <label>Location<input value={meeting().location ?? ""} onInput={(event) => setMeetingField("location", event.currentTarget.value || null)}/></label>
             <label>RRULE<input placeholder="FREQ=WEEKLY;COUNT=4" value={meeting().rrule ?? ""} onInput={(event) => setMeetingField("rrule", event.currentTarget.value || null)}/></label>
+            <section class="rsvp"><div class="section-heading"><div><h3>Room booking</h3><p>Filter by equipment; overlaps are rejected.</p></div></div><input aria-label="Required equipment" placeholder="Projector, Whiteboard" value={equipmentFilter()} onInput={event => setEquipmentFilter(event.currentTarget.value)}/><div class="inline-form"><select aria-label="Meeting room" value={roomId()} onChange={event => setRoomId(event.currentTarget.value)}><option value="">Select room</option><For each={filteredRooms()}>{room => <option value={room.id}>{room.name} · {room.equipment.join(", ") || "No equipment"}</option>}</For></select><button type="button" onClick={reserveRoom}>Reserve</button></div></section>
             <section class="rsvp"><div class="section-heading"><div><h3>Participants</h3><p>Invite people and record their response.</p></div></div><div class="inline-form"><ProfilePicker label="Participant" value={invitee()} onChange={setInvitee}/><button type="button" onClick={invite}>Invite</button></div><Show when={participants.loading}><p class="meeting-empty">Loading participants…</p></Show><For each={participants()}>{(participant) => <div class="participant"><span>{participant.profile_id}</span><select aria-label={`RSVP for ${participant.profile_id}`} value={participant.status} onChange={(event) => rsvp(participant, event.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For></section>
             <Show when={!isWeb()}><CallPanel meeting={meeting()} identity={profileId()} displayName={profileId()}/></Show>
           </>}

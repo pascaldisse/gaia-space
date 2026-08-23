@@ -1,5 +1,5 @@
 //! Personal productivity, organization availability, notifications, and Goto search.
-use crate::{actor, calendar_feeds, db, meetings};
+use crate::{actor, calendar_feeds, chat, db, meetings};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -551,6 +551,15 @@ pub fn list_absences(profile_id: Option<String>) -> Result<Vec<Absence>> {
         .map_err(|error| error.to_string())?;
     Ok(absences)
 }
+fn emit_absence_lifecycle_on(c: &Connection, absence: &Absence, event_type: &str) -> Result<()> {
+    let mut statement = err(c.prepare("SELECT id FROM profiles WHERE archived=0 AND id<>?1"))?;
+    let rows = statement.query_map([&absence.profile_id], |row| row.get(0)).map_err(|error| error.to_string())?;
+    let recipients = rows.collect::<std::result::Result<Vec<String>, _>>().map_err(|error| error.to_string())?;
+    let title = match event_type { "absence.created" => "New time off", "absence.approved" => "Time off approved", "absence.deleted" => "Time off removed", _ => "Time off updated" };
+    let body = format!("{} to {} · {}", absence.date_from, absence.date_to, absence.availability);
+    fan_out_notification_on(c, NotificationFanout { recipients, event_type, title, body: Some(&body), entity_type: "absence", entity_id: &absence.id, target_type: Some("profile"), target_id: Some(&absence.profile_id) })?;
+    chat::post_absence_card_on(c, &absence.id, &absence.profile_id, &absence.date_from, &absence.date_to, &absence.availability, event_type)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_absence(input: AbsenceInput) -> Result<Absence> {
     let absence = Absence {
@@ -567,14 +576,19 @@ pub fn create_absence(input: AbsenceInput) -> Result<Absence> {
     let c = db::conn()?;
     // `RETURNING` answers with the row this statement wrote; a separate `SELECT id=?` could
     // pick up somebody else's row if the id changed hands in between.
-    err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, absence.availability], read_absence))
+    let created = err(c.query_row("INSERT INTO absences(id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, absence.availability], read_absence))?;
+    emit_absence_lifecycle_on(&c, &created, if created.approved { "absence.approved" } else { "absence.created" })?;
+    Ok(created)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_absence(absence: Absence) -> Result<Absence> {
     validate_absence(&absence)?;
     let c = db::conn()?;
+    let before = absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".to_string())?;
     if err(c.execute("UPDATE absences SET profile_id=?2,reason_type=?3,date_from=?4,date_to=?5,approved=?6,reason_confidential=?7,availability=?8 WHERE id=?1", params![absence.id, absence.profile_id, absence.reason_type, absence.date_from, absence.date_to, absence.approved, absence.reason_confidential, normalized_availability(&absence.availability)?]))? == 0 { return Err("Absence not found".into()); }
-    absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".into())
+    let updated = absence_on(&c, &absence.id)?.ok_or_else(|| "Absence not found".to_string())?;
+    emit_absence_lifecycle_on(&c, &updated, if !before.approved && updated.approved { "absence.approved" } else { "absence.updated" })?;
+    Ok(updated)
 }
 /// Member update. Check, write, and readback are one statement, so the row cannot change
 /// identity between them: ownership lives in the `WHERE` clause, neither `approved` nor
@@ -586,29 +600,30 @@ pub fn update_absence(absence: Absence) -> Result<Absence> {
 pub fn update_absence_details(absence: Absence, owner: &str) -> Result<Option<Absence>> {
     validate_absence(&absence)?;
     let c = db::conn()?;
-    err(c.query_row(
+    let updated = err(c.query_row(
         "UPDATE absences SET reason_type=?3,date_from=?4,date_to=?5,reason_confidential=?6,availability=?7 WHERE id=?1 AND profile_id=?2 \
          RETURNING id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability",
         params![absence.id, owner, absence.reason_type, absence.date_from, absence.date_to, absence.reason_confidential, normalized_availability(&absence.availability)?],
         read_absence,
-    ).optional())
+    ).optional())?;
+    if let Some(ref value) = updated { emit_absence_lifecycle_on(&c, value, "absence.updated")?; }
+    Ok(updated)
 }
 /// Member delete, conditional for the same reason: an id authorized a moment ago may have
 /// been deleted and recreated for another profile since. `Ok(false)` means nothing matched.
 pub fn delete_absence_owned(id: &str, owner: &str) -> Result<bool> {
     let c = db::conn()?;
-    Ok(err(c.execute(
-        "DELETE FROM absences WHERE id=?1 AND profile_id=?2",
-        params![id, owner],
-    ))? > 0)
+    let absence = absence_on(&c, id)?;
+    let deleted = err(c.execute("DELETE FROM absences WHERE id=?1 AND profile_id=?2", params![id, owner]))? > 0;
+    if deleted { if let Some(value) = absence { emit_absence_lifecycle_on(&c, &value, "absence.deleted")?; } }
+    Ok(deleted)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_absence(id: String) -> Result<()> {
     let c = db::conn()?;
-    if err(c.execute("DELETE FROM absences WHERE id=?1", [id]))? == 0 {
-        return Err("Absence not found".into());
-    }
-    Ok(())
+    let absence = absence_on(&c, &id)?.ok_or_else(|| "Absence not found".to_string())?;
+    if err(c.execute("DELETE FROM absences WHERE id=?1", [id]))? == 0 { return Err("Absence not found".into()); }
+    emit_absence_lifecycle_on(&c, &absence, "absence.deleted")
 }
 fn current_absences_on(c: &Connection, date: &str) -> Result<Vec<Absence>> {
     let mut statement = err(c.prepare("SELECT id,profile_id,reason_type,date_from,date_to,approved,reason_confidential,availability FROM absences WHERE approved=1 AND date_from<=?1 AND date_to>=?1 ORDER BY date_from,profile_id"))?;

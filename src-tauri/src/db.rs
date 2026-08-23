@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 97;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V96: first-class organization locations, schedules, equipment catalog, and rooms.
+    if version < 96 {
+        tx.execute_batch(SCHEMA_V96)?;
+    }
+    // V97: typed absence cards in chat.
+    if version < 97 {
+        add_column_if_missing(&tx, "messages", "content_kind", "TEXT NOT NULL DEFAULT 'text'")?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -610,6 +618,27 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
+/// V96: organization locations are separate from a person's historical location assignment.
+pub(crate) const SCHEMA_V96: &str = r#"
+CREATE TABLE IF NOT EXISTS locations (
+id TEXT PRIMARY KEY,
+name TEXT NOT NULL,
+location_type TEXT NOT NULL DEFAULT 'Office',
+parent_id TEXT REFERENCES locations(id) ON DELETE SET NULL,
+timezone TEXT NOT NULL DEFAULT 'UTC',
+work_schedule_json TEXT NOT NULL DEFAULT '{\"workdays\":[1,2,3,4,5]}',
+channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+archived INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS locations_parent ON locations(parent_id);
+CREATE TABLE IF NOT EXISTS location_equipment (
+location_id TEXT NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+equipment TEXT NOT NULL,
+PRIMARY KEY(location_id,equipment)
+);
+CREATE INDEX IF NOT EXISTS location_equipment_name ON location_equipment(equipment);
+"#;
+/// V97: `messages.content_kind` is added through add_column_if_missing above.
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,

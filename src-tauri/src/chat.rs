@@ -46,6 +46,8 @@ pub struct Message {
     pub edited_at: Option<i64>,
     pub thread_of: Option<String>,
     pub archived: bool,
+    #[serde(default = "default_message_content_kind")]
+    pub content_kind: String,
     #[serde(default)]
     pub mention_ids: Vec<String>,
 }
@@ -271,6 +273,16 @@ fn create_entity_channel_impl(
     get_channel_impl(c, &id)?.ok_or_else(|| "entity channel missing after insert".to_string())
 }
 
+fn default_message_content_kind() -> String { "text".into() }
+/// Durable system card for an absence lifecycle event. The entity-bound channel is
+/// intentionally public like other entity discussions; sensitive reasons are never put in it.
+pub(crate) fn post_absence_card_on(c: &Connection, absence_id: &str, profile_id: &str, date_from: &str, date_to: &str, availability: &str, action: &str) -> Result<()> {
+    let channel = create_entity_channel_impl(c, "absence", absence_id, Some(format!("Time off · {profile_id}")))?;
+    let id = format!("absence-card:{absence_id}:{action}:{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+    let payload = serde_json::json!({"absence_id":absence_id,"profile_id":profile_id,"date_from":date_from,"date_to":date_to,"availability":availability,"action":action}).to_string();
+    c.execute("INSERT INTO messages(id,channel_id,author_id,text,thread_of,archived,content_kind) VALUES(?1,?2,NULL,?3,NULL,0,'absence-card')", rusqlite::params![id, channel.id, payload]).map_err(|e| e.to_string())?;
+    Ok(())
+}
 fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
     Ok(Message {
         id: r.get(0)?,
@@ -281,6 +293,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         edited_at: r.get(5)?,
         thread_of: r.get(6)?,
         archived: r.get(7)?,
+        content_kind: r.get(8)?,
         mention_ids: Vec::new(),
     })
 }
@@ -355,7 +368,7 @@ fn list_messages_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE channel_id=?1 AND thread_of IS NULL AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -386,7 +399,7 @@ fn list_thread_replies_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE thread_of=?1 AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -410,8 +423,8 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         return Err("channel access denied".to_string());
     }
     c.execute(
-        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
+        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.content_kind],
     )
     .map_err(|e| e.to_string())?;
     for profile_id in &message.mention_ids {
@@ -455,7 +468,7 @@ fn delete_message_impl(c: &Connection, id: &str) -> Result<()> {
 }
 fn get_message_impl(c: &Connection, id: &str) -> Result<Option<Message>> {
     c.query_row(
-        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived FROM messages WHERE id=?1",
+        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages WHERE id=?1",
         [id],
         message_row,
     )
@@ -697,6 +710,7 @@ mod tests {
             edited_at: None,
             thread_of: None,
             archived: false,
+            content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
         create_message_impl(&c, &root).unwrap();
@@ -709,6 +723,7 @@ mod tests {
             edited_at: None,
             thread_of: Some("msg-root".into()),
             archived: false,
+            content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
         create_message_impl(&c, &reply).unwrap();
@@ -743,6 +758,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
         )
@@ -776,6 +792,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
         )
@@ -851,6 +868,7 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
+                content_kind: "text".into(),
                 mention_ids: Vec::new(),
             }
         )
