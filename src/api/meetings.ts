@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; archived:boolean };
+// `video_room_id`/`join_url` are read-only here: the native join path writes them and
+// `update_meeting` ignores them, so the webview cannot repoint a call at another room.
+export type VideoStatus = "scheduled"|"live"|"ended"|"cancelled";
+export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
 export type MeetingOccurrence = { id:string; meeting_id:string; title:string; starts_at:number; ends_at:number; location:string|null };
 export type LivekitConfig = { server_path?:string; host?:string; port?:number; api_key?:string; api_secret?:string; egress_url?:string; recording_filepath?:string; egress_timeout_ms?:number; recording_reservation_ttl_seconds?:number; recording_max_stop_attempts?:number };
@@ -25,6 +28,8 @@ export const meetingsApi = {
   // and keys come from native config/env, the joining profile from `actor::resolve`.
   startServer: () => call<LivekitStatus>("start_livekit_server"), status: () => call<LivekitStatus>("livekit_server_status"),
   joinCall: (meeting_id:string) => call<CallJoin>("join_meeting_call", {meetingId:meeting_id}),
+  // Organizer-only: leaving is a client act, ending is a recorded decision about the call.
+  endCall: (meeting_id:string) => call<boolean>("end_meeting_call", {meetingId:meeting_id}),
   // Recording carries NO identity and NO config over IPC. The acting profile is resolved
   // natively (`actor::resolve`) and the Egress endpoint/filepath/timeouts come from
   // LIVEKIT_* env / native defaults, so a compromised webview can neither record as
