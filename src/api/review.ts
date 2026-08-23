@@ -102,6 +102,7 @@ export type QualityGateEvaluation = {
   required_checks: string[];
 };
 
+export type ExternalIssueLink = { id: string; review_id: string; external_url: string; title: string | null };
 export type ExternalCheckStatus = "PENDING" | "SUCCEEDED" | "FAILED";
 export type ExternalCheck = {
   review_id: string;
@@ -244,6 +245,12 @@ export const reviewApi = {
   evaluateGate: (reviewId: string) =>
     invoke<QualityGateEvaluation>("evaluate_quality_gate", { reviewId }),
 
+  listExternalIssueLinks: (reviewId: string) =>
+    invoke<ExternalIssueLink[]>("list_external_issue_links", { reviewId }),
+  createExternalIssueLink: (link: ExternalIssueLink) =>
+    invoke<void>("create_external_issue_link", { link }),
+  deleteExternalIssueLink: (id: string) =>
+    invoke<void>("delete_external_issue_link", { id }),
   listExternalChecks: (reviewId: string) =>
     invoke<ExternalCheck[]>("list_external_checks", { reviewId }),
   recordExternalCheck: (check: ExternalCheck) =>

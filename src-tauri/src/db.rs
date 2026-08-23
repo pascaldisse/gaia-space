@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 83;
+pub const SCHEMA_VERSION: i64 = 84;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -590,6 +590,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 83 && table_exists(&tx, "projects")? {
         tx.execute_batch(SCHEMA_V83)?;
     }
+    // V84: a review may reference multiple externally hosted issues without copying
+    // tracker data into the local issue model. Removing the review removes its links.
+    if version < 84 && table_exists(&tx, "reviews")? {
+        tx.execute_batch(SCHEMA_V84)?;
+    }
     // V82: view/collapse is per reviewer and per file, never a shared review mutation.
     if version < 82 && table_exists(&tx, "reviews")? && table_exists(&tx, "profiles")? {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
@@ -653,6 +658,18 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     Ok(conn)
 }
 
+/// V84: external issue references belong to a review; the URL remains the external
+/// system's canonical navigation target and title is only a local display label.
+pub(crate) const SCHEMA_V84: &str = r#"
+CREATE TABLE IF NOT EXISTS review_external_issue_links (
+    id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+    external_url TEXT NOT NULL,
+    title TEXT,
+    UNIQUE(review_id, external_url)
+);
+CREATE INDEX IF NOT EXISTS review_external_issue_links_review ON review_external_issue_links(review_id);
+"#;
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
 

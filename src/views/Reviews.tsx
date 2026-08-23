@@ -171,6 +171,10 @@ export default function Reviews() {
     selectedId,
     (id) => (id ? reviewApi.listMergeRuns(id) : Promise.resolve([])),
   );
+  const [externalIssueLinks, { refetch: refetchExternalIssueLinks }] = createResource(
+    selectedId,
+    (id) => (id ? reviewApi.listExternalIssueLinks(id) : Promise.resolve([])),
+  );
   const [externalChecks, { refetch: refetchExternalChecks }] = createResource(
     selectedId,
     (id) => (id ? reviewApi.listExternalChecks(id) : Promise.resolve([])),
@@ -406,7 +410,27 @@ export default function Reviews() {
     }
   }
 
-  // ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
+  // ---------- external issue links (canonical URLs stay in their tracker) ----------
+const [externalIssueUrl, setExternalIssueUrl] = createSignal("");
+const [externalIssueTitle, setExternalIssueTitle] = createSignal("");
+async function addExternalIssueLink(e: SubmitEvent) {
+  e.preventDefault();
+  const reviewId = selectedId();
+  if (!reviewId || !externalIssueUrl().trim()) return;
+  try {
+    await reviewApi.createExternalIssueLink({
+      id: newId("external-issue"), review_id: reviewId,
+      external_url: externalIssueUrl().trim(), title: externalIssueTitle().trim() || null,
+    });
+    setExternalIssueUrl(""); setExternalIssueTitle("");
+    refetchExternalIssueLinks();
+  } catch (err) { setError(String(err)); }
+}
+async function removeExternalIssueLink(id: string) {
+  try { await reviewApi.deleteExternalIssueLink(id); refetchExternalIssueLinks(); }
+  catch (err) { setError(String(err)); }
+}
+// ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
   const [checkName, setCheckName] = createSignal("");
   const [checkStatus, setCheckStatus] =
     createSignal<ExternalCheckStatus>("PENDING");
@@ -878,7 +902,20 @@ export default function Reviews() {
                   </form>
                 </details>
 
-                <details class="gate-rules external-checks" open>
+                <section class="external-issue-links">
+<h3>External issues ({externalIssueLinks()?.length ?? 0})</h3>
+<ul>
+<For each={externalIssueLinks()} fallback={<li class="hint">No external issues linked.</li>}>
+{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external issue ${link.title || link.external_url}`} onClick={() => removeExternalIssueLink(link.id)}>×</button></li>}
+</For>
+</ul>
+<form class="new-rule-form" onSubmit={addExternalIssueLink}>
+<input class="grow" type="url" placeholder="https://tracker.example/PROJ-42" value={externalIssueUrl()} onInput={(e) => setExternalIssueUrl(e.currentTarget.value)} />
+<input placeholder="Issue title (optional)" value={externalIssueTitle()} onInput={(e) => setExternalIssueTitle(e.currentTarget.value)} />
+<button class="ghost">Link issue</button>
+</form>
+</section>
+<details class="gate-rules external-checks" open>
                   <summary>
                     External checks ({externalChecks()?.length ?? 0})
                   </summary>

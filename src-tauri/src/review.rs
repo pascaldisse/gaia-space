@@ -167,6 +167,13 @@ pub struct ReviewStack {
     pub review_ids: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalIssueLink {
+    pub id: String,
+    pub review_id: String,
+    pub external_url: String,
+    pub title: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCheck {
     pub review_id: String,
     pub check_name: String,
@@ -235,6 +242,61 @@ pub struct QualityGateEvaluation {
     /// job that has not posted anything yet.
     #[serde(default)]
     pub required_checks: Vec<String>,
+}
+
+fn validate_external_issue_link(link: &ExternalIssueLink) -> Result<()> {
+    let url = link.external_url.trim();
+    if url.is_empty() || !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("external issue URL must start with http:// or https://".into());
+    }
+    if link
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err("external issue title cannot be blank".into());
+    }
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_external_issue_links(review_id: String) -> Result<Vec<ExternalIssueLink>> {
+    let c = db::conn()?;
+    let mut statement = c.prepare("SELECT id,review_id,external_url,title FROM review_external_issue_links WHERE review_id=?1 ORDER BY id").map_err(|e| e.to_string())?;
+    let links = statement
+        .query_map(rusqlite::params![review_id], |row| {
+            Ok(ExternalIssueLink {
+                id: row.get(0)?,
+                review_id: row.get(1)?,
+                external_url: row.get(2)?,
+                title: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(links)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_external_issue_link(link: ExternalIssueLink) -> Result<()> {
+    validate_external_issue_link(&link)?;
+    let c = db::conn()?;
+    c.execute("INSERT INTO review_external_issue_links(id,review_id,external_url,title) VALUES(?1,?2,?3,?4)", rusqlite::params![link.id, link.review_id, link.external_url.trim(), link.title.as_deref().map(str::trim)])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_external_issue_link(id: String) -> Result<()> {
+    let c = db::conn()?;
+    if c.execute(
+        "DELETE FROM review_external_issue_links WHERE id=?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?
+        == 0
+    {
+        return Err("external issue link not found".into());
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2187,6 +2249,47 @@ mod tests {
             "main-change\n",
         );
         (dir, repo)
+    }
+
+    #[test]
+    fn external_issue_links_are_review_scoped_and_validate_urls() {
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,target_branch,title) VALUES('review-1','demo-project',1,'MR','Opened','main','Review')", []).unwrap();
+        let link = ExternalIssueLink {
+            id: "link-1".into(),
+            review_id: "review-1".into(),
+            external_url: "https://tracker.example/PROJ-42".into(),
+            title: Some("PROJ-42".into()),
+        };
+        validate_external_issue_link(&link).expect("valid external issue URL");
+        conn.execute("INSERT INTO review_external_issue_links(id,review_id,external_url,title) VALUES(?1,?2,?3,?4)", rusqlite::params![link.id, link.review_id, link.external_url, link.title]).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_external_issue_links WHERE review_id='review-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(validate_external_issue_link(&ExternalIssueLink {
+            id: "bad".into(),
+            review_id: "review-1".into(),
+            external_url: "tracker.example/PROJ-42".into(),
+            title: None
+        })
+        .is_err());
+        conn.execute("DELETE FROM reviews WHERE id='review-1'", [])
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_external_issue_links",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "review deletion cascades to external links");
+        drop(db_path);
     }
 
     #[test]
