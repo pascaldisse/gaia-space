@@ -763,7 +763,7 @@ pub fn update_book_access(
 // versioning, permissions and search for free.
 
 fn default_import_extensions() -> Vec<String> {
-    vec!["md".into(), "markdown".into(), "html".into(), "htm".into()]
+    vec!["md".into()]
 }
 fn default_max_file_bytes() -> u64 {
     2 * 1024 * 1024
@@ -901,7 +901,7 @@ fn imported_title(raw: &str, text: &str, stem: &str) -> String {
     stem.to_string()
 }
 
-/// Imports a directory tree of markdown/HTML pages, preserving the folder hierarchy.
+/// Imports a directory tree: Markdown pages stay editable; all other files stay files.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn import_document_folder(request: DocumentImportRequest) -> Result<DocumentImportSummary> {
     let c = db::conn()?;
@@ -970,9 +970,6 @@ fn import_document_folder_tx(
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            if !extensions.contains(&ext) {
-                continue;
-            }
             if meta.len() > request.max_file_bytes {
                 summary.skipped.push(format!(
                     "{}: {} bytes exceeds max_file_bytes {}",
@@ -982,38 +979,46 @@ fn import_document_folder_tx(
                 ));
                 continue;
             }
-            let raw = match std::fs::read_to_string(&path) {
-                Ok(raw) => raw,
-                Err(e) => {
-                    summary.skipped.push(format!("{}: {e}", path.display()));
-                    continue;
-                }
-            };
-            let is_html = ext == "html" || ext == "htm";
-            let body = if is_html {
-                html_to_text(&raw)
+            if extensions.contains(&ext) {
+                let raw = match std::fs::read_to_string(&path) {
+                    Ok(raw) => raw,
+                    Err(e) => {
+                        summary.skipped.push(format!("{}: {e}", path.display()));
+                        continue;
+                    }
+                };
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or(name);
+                let title = imported_title(&raw, &raw, &stem);
+                let doc_id = generated_id("doc");
+                c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'text',?5,?6,1,0,?7)", rusqlite::params![doc_id, request.container_type, request.container_id, parent_id, title, raw, request.created_by]).map_err(|e| e.to_string())?;
+                c.execute("INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)", rusqlite::params![format!("{doc_id}-v1"), doc_id, raw, request.created_by]).map_err(|e| e.to_string())?;
             } else {
-                raw.clone()
-            };
-            let stem = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or(name);
-            let title = imported_title(&raw, &body, &stem);
-            let doc_id = generated_id("doc");
-            c.execute(
-                "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,archived,created_by) VALUES(?1,?2,?3,?4,'text',?5,?6,1,0,?7)",
-                rusqlite::params![doc_id, request.container_type, request.container_id, parent_id, title, body, request.created_by],
-            )
-            .map_err(|e| e.to_string())?;
-            c.execute(
-                "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
-                rusqlite::params![format!("{doc_id}-v1"), doc_id, body, request.created_by],
-            )
-            .map_err(|e| e.to_string())?;
+                // KB §2.1: everything but .md remains an uneditable file document.
+                upload_document_file_tx(
+                    c,
+                    &db::data_dir()
+                        .map(|dir| dir.join("document_files"))
+                        // Unit-test connections deliberately have no global data path; a
+                        // hidden source sibling remains outside the traversed import tree.
+                        .unwrap_or_else(|_| root.join(".gaia-import-files")),
+                    UploadDocumentFileRequest {
+                        source_path: path.to_string_lossy().to_string(),
+                        container_type: request.container_type.clone(),
+                        container_id: request.container_id.clone(),
+                        folder_id: parent_id.clone(),
+                        title: Some(name),
+                        created_by: request.created_by.clone(),
+                        max_file_bytes: request.max_file_bytes,
+                    },
+                )?;
+            }
             summary.documents_created += 1;
         }
     }
+    c.execute("INSERT INTO document_imports(id,source_path,container_type,container_id,parent_folder_id,created_by,folders_created,documents_created,skipped_count) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", rusqlite::params![generated_id("docimport"), request.source_path, request.container_type, request.container_id, request.parent_folder_id, request.created_by, summary.folders_created, summary.documents_created, summary.skipped.len() as i64]).map_err(|e| e.to_string())?;
     Ok(summary)
 }
 
@@ -1513,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn import_mirrors_the_folder_tree_and_flattens_html() {
+    fn import_mirrors_tree_and_preserves_non_markdown_as_files() {
         let c = test_conn();
         let dir = import_dir("docs-import");
         std::fs::write(dir.join("root.md"), "# Root Page\n\nbody\n").unwrap();
@@ -1541,23 +1546,28 @@ mod tests {
         )
         .expect("import");
         assert_eq!(
-            summary.documents_created, 3,
+            summary.documents_created, 4,
             "skipped: {:?}",
             summary.skipped
         );
         assert_eq!(summary.folders_created, 2);
 
-        let (title, body): (String, String) = c
+        let html_type: String = c
             .query_row(
-                "SELECT title,body FROM documents WHERE title='HTML Page'",
+                "SELECT doc_type FROM documents WHERE title='page.html'",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| r.get(0),
             )
-            .expect("html page imported");
-        assert_eq!(title, "HTML Page");
-        assert!(body.contains("a & b"), "body: {body:?}");
-        assert!(!body.contains("var x=1"), "script body leaked: {body:?}");
-        assert!(!body.contains('<'), "tags leaked: {body:?}");
+            .expect("html file imported");
+        assert_eq!(html_type, "file");
+        let txt_type: String = c
+            .query_row(
+                "SELECT doc_type FROM documents WHERE title='skip.txt'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("text file imported");
+        assert_eq!(txt_type, "file");
 
         // Markdown heading wins over the file stem; the tree is mirrored, not flattened.
         let deep_folder: String = c
@@ -1580,7 +1590,7 @@ mod tests {
         let versions: i64 = c
             .query_row("SELECT COUNT(*) FROM doc_versions", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(versions, 3);
+        assert_eq!(versions, 4);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
