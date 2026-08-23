@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 123;
+pub const SCHEMA_VERSION: i64 = 125;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -652,6 +652,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // no duplicated per-format columns can drift from a publisher's lossless envelope.
     if version < 123 {
         tx.execute_batch(SCHEMA_V123)?;
+    }
+    // V125: an accepted suggested edit records the commit that applied it. The source
+    // revision remains the immutable base for conflict detection; this column is the result.
+    if version < 125 && table_exists(&tx, "review_discussions")? {
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_applied_commit_id",
+            "TEXT",
+        )?;
     }
     // V119: a mention may name a team, not only a person. The team target is its own
     // row set (`message_team_mentions`) rather than a `target_type` column bolted onto
@@ -2097,7 +2107,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 123);
+        assert_eq!(SCHEMA_VERSION, 125);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
