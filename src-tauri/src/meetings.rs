@@ -542,3 +542,110 @@ mod tests {
         assert!(RSVP_STATUSES.contains(&status.as_str()));
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingRoom {
+    pub id: String,
+    pub name: String,
+    pub location: Option<String>,
+    pub capacity: i64,
+    pub archived: bool,
+    #[serde(default)]
+    pub equipment: Vec<String>,
+}
+
+fn validate_room(room: &MeetingRoom) -> Result<()> {
+    if room.id.trim().is_empty() || room.name.trim().is_empty() {
+        return Err("Room ID and name are required".into());
+    }
+    if room.capacity < 1 {
+        return Err("Room capacity must be positive".into());
+    }
+    if room.equipment.iter().any(|item| item.trim().is_empty()) {
+        return Err("Equipment names must not be empty".into());
+    }
+    Ok(())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_meeting_rooms() -> Result<Vec<MeetingRoom>> {
+    let c = db::conn()?;
+    let mut statement = c.prepare("SELECT id,name,location,capacity,archived FROM meeting_rooms WHERE archived=0 ORDER BY name").map_err(|e| e.to_string())?;
+    let mut rooms: Vec<MeetingRoom> = statement
+        .query_map([], |row| {
+            Ok(MeetingRoom {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                location: row.get(2)?,
+                capacity: row.get(3)?,
+                archived: row.get(4)?,
+                equipment: Vec::new(),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(statement);
+    for room in &mut rooms {
+        room.equipment = c
+            .prepare(
+                "SELECT equipment FROM meeting_room_equipment WHERE room_id=?1 ORDER BY equipment",
+            )
+            .map_err(|e| e.to_string())?
+            .query_map([&room.id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(rooms)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_meeting_room(room: MeetingRoom) -> Result<()> {
+    validate_room(&room)?;
+    let mut c = db::conn()?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO meeting_rooms(id,name,location,capacity,archived) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,location=excluded.location,capacity=excluded.capacity,archived=excluded.archived", rusqlite::params![room.id,room.name,room.location,room.capacity,room.archived]).map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM meeting_room_equipment WHERE room_id=?1",
+        [&room.id],
+    )
+    .map_err(|e| e.to_string())?;
+    for equipment in room.equipment {
+        tx.execute(
+            "INSERT INTO meeting_room_equipment(room_id,equipment) VALUES(?1,?2)",
+            rusqlite::params![room.id, equipment.trim()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn reserve_meeting_room(meeting_id: String, room_id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let (starts, ends): (i64, i64) = tx
+        .query_row(
+            "SELECT starts_at,ends_at FROM meetings WHERE id=?1 AND archived=0",
+            [&meeting_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "Meeting not found or archived".to_string())?;
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM meeting_rooms WHERE id=?1 AND archived=0)",
+            [&room_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("Room not found or archived".into());
+    }
+    let conflict: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM meeting_room_bookings b JOIN meetings m ON m.id=b.meeting_id WHERE b.room_id=?1 AND b.meeting_id<>?2 AND m.archived=0 AND m.starts_at<?4 AND m.ends_at>?3)", rusqlite::params![room_id,meeting_id,starts,ends], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if conflict {
+        return Err("Room is already booked for this time".into());
+    }
+    tx.execute("INSERT INTO meeting_room_bookings(meeting_id,room_id) VALUES(?1,?2) ON CONFLICT(meeting_id) DO UPDATE SET room_id=excluded.room_id", rusqlite::params![meeting_id,room_id]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
