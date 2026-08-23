@@ -195,9 +195,35 @@ export default function Chat() {
     const id = threadRootId();
     return id ? { id, p: actingProfileId() } : null;
   };
-  const [threadReplies, { refetch: refetchThread }] = createResource(threadKey, (k) =>
-    chatApi.listThreadReplies(k.id, k.p),
-  );
+  // Threads use the same cursor protocol as channel history, avoiding an
+  // unbounded side-pane query for long discussions.
+  const [threadPage, { refetch: refetchThread }] = createResource(threadKey, (k) => {
+    const root = threadRoot();
+    return root ? chatApi.listMessagesPage({ channelId: root.channel_id, threadOf: k.id, limit: PAGE_SIZE, actingProfileId: k.p }) : Promise.resolve(null);
+  });
+  const [threadPaging, setThreadPaging] = createSignal(initialPaging());
+  createEffect(() => {
+    threadKey();
+    setThreadPaging((state) => resetPaging(state));
+  });
+  const shownThreadReplies = () => visibleMessages(threadPaging(), threadPage()?.messages);
+  const olderThreadCursor = () => threadPaging().cursor ?? threadPage()?.next_cursor ?? null;
+  const canLoadOlderThread = () => threadPaging().hasMore && olderThreadCursor() !== null;
+  const loadOlderThread = async () => {
+    const key = threadKey();
+    const root = threadRoot();
+    const cursor = olderThreadCursor();
+    if (!key || !root || !cursor) return;
+    const started = beginLoad(threadPaging());
+    if (!started.started) return;
+    setThreadPaging(started.state);
+    try {
+      const page = await chatApi.listMessagesPage({ channelId: root.channel_id, threadOf: key.id, cursor, limit: PAGE_SIZE, actingProfileId: key.p });
+      setThreadPaging((state) => applyPage(state, started.ticket, page));
+    } catch (e) {
+      setThreadPaging((state) => failLoad(state, started.ticket, e));
+    }
+  };
 
   // channel members
   const [members, { refetch: refetchMembers }] = createResource(activeChannelId, (id) =>
@@ -1285,8 +1311,16 @@ export default function Chat() {
           <div class="message-pane">
             {renderMessage(threadRoot()!, false)}
             <hr />
-            <Show when={!threadReplies.loading} fallback={<p class="hint">Loading thread…</p>}>
-              <For each={threadReplies()}>{(m) => renderMessage(m, true)}</For>
+            <Show when={canLoadOlderThread() || threadPaging().error}>
+              <div class="history-pager">
+                <Show when={threadPaging().error}><span class="hint" role="alert">Could not load older replies: {threadPaging().error}</span></Show>
+                <button class="ghost small" onClick={loadOlderThread} disabled={threadPaging().loading}>
+                  {threadPaging().loading ? "Loading…" : threadPaging().error ? "Retry" : "Load older replies"}
+                </button>
+              </div>
+            </Show>
+            <Show when={!threadPage.loading} fallback={<p class="hint">Loading thread…</p>}>
+              <For each={shownThreadReplies()}>{(m) => renderMessage(m, true)}</For>
             </Show>
           </div>
           <div class="composer composer-wrap">
