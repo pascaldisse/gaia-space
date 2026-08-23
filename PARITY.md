@@ -38,9 +38,9 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V67 → feat/w10-auth (org settings/multi-workspace · SSO/SAML modules · OAuth2 authz-code ledger correction) ☀wave10
 - V68 → feat/w10-cicd (non-manual triggers + DSL · deployment integrations/webhooks) ☀wave10
 - V69 → feat/w11-review (branch protection remainder · external checks completion) ☀wave11
-- V70 → feat/w11-cicd (remaining trigger types · deployment webhook wiring) ☀wave11
+- V70 → feat/w11-cicd (remaining trigger types · deployment webhook wiring) ☀wave11 — 2026-08-23: lane died mid-wip at c9d875e (uncompiled dispatch wip); branch preserved as-is per no-repair order, worktree removed, NOT merged. CI/CD deprioritized by owner.
 - V71 → feat/w11-collab (document importer completion · meeting remainder) ☀wave11
-- V72 → feat/w11-personal (personal feed remainder · org chart/locations) ☀wave11
+- V72 → feat/w11-personal (personal feed remainder · org chart/locations) ☀wave11 — 2026-08-23 ruling: b3fb4e0 V72 typed locations SUPERSEDED by V96 (richer: schedules/channel/equipment). Merge attempted, aborted (duplicate impls). Branch preserved, not merged. V72 slot = no-op.
 - V73 → feat/w11-auth (OAuth consent UI; implicit/ROPC intentionally excluded: KB §05 deprecated/not recommended) ☀wave11 — no schema migration required
 - V74 → feat/w11-devenv (standby pool live run) ☀wave11
 - V84 → feat/w11b-review (MR external issue links) ☀Vishnu-VI
