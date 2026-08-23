@@ -822,12 +822,22 @@ fn replace_suggestion_lines(base: &str, start: i64, end: i64, replacement: &str)
     Ok(result)
 }
 
+type SuggestedEditTarget = (
+    String,
+    String,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 fn apply_suggested_edit_tx(
     c: &Connection,
     id: &str,
     actor_id: &str,
 ) -> Result<AppliedSuggestedEdit> {
-    let (review_id, file_path, line_start, line_end, base_oid, content, status): (String, String, Option<i64>, Option<i64>, Option<String>, Option<String>, Option<String>) = c.query_row(
+    let (review_id, file_path, line_start, line_end, base_oid, content, status): SuggestedEditTarget = c.query_row(
         "SELECT review_id,file_path,line_start,line_end,revision,suggestion_content,suggestion_status FROM review_discussions WHERE id=?1",
         rusqlite::params![id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
