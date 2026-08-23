@@ -51,6 +51,7 @@ fn parse_settings(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({}))
 }
 
+#[tauri::command]
 pub fn create_module(
     key: &str,
     name: &str,
@@ -99,6 +100,7 @@ pub fn create_module(
 }
 
 /// `with_disabled=false` is the login-page view: enabled and not hidden.
+#[tauri::command]
 pub fn list_modules(with_disabled: bool) -> Result<Vec<AuthModule>> {
     let c = db::conn()?;
     let sql = if with_disabled {
@@ -126,6 +128,7 @@ pub fn list_modules(with_disabled: bool) -> Result<Vec<AuthModule>> {
     Ok(rows)
 }
 
+#[tauri::command]
 pub fn update_module(
     id: &str,
     name: Option<String>,
@@ -177,6 +180,7 @@ pub fn update_module(
     Ok(touched)
 }
 
+#[tauri::command]
 pub fn delete_module(id: &str) -> Result<bool> {
     Ok(db::conn()?
         .execute("DELETE FROM auth_modules WHERE id=?1", [id])
@@ -186,7 +190,8 @@ pub fn delete_module(id: &str) -> Result<bool> {
 
 /// Reorders the login-page buttons. Ids absent from `order` keep their relative
 /// place behind the listed ones.
-pub fn reorder_modules(order: &[String]) -> Result<()> {
+#[tauri::command]
+pub fn reorder_modules(order: Vec<String>) -> Result<()> {
     let c = db::conn()?;
     let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
     for (position, id) in order.iter().enumerate() {
@@ -198,12 +203,13 @@ pub fn reorder_modules(order: &[String]) -> Result<()> {
     }
     tx.execute(
         "UPDATE auth_modules SET position=position+?1 WHERE id NOT IN (SELECT value FROM json_each(?2))",
-        params![order.len() as i64, serde_json::to_string(order).map_err(|e| e.to_string())?],
+        params![order.len() as i64, serde_json::to_string(&order).map_err(|e| e.to_string())?],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
 pub fn config() -> Result<AuthConfig> {
     let stored = db::conn()?
         .query_row(
@@ -222,6 +228,7 @@ pub fn config() -> Result<AuthConfig> {
     Ok(stored.unwrap_or_default())
 }
 
+#[tauri::command]
 pub fn set_config(value: AuthConfig) -> Result<AuthConfig> {
     for ttl in [
         value.dont_remember_me_ttl_secs,
@@ -245,6 +252,7 @@ pub fn set_config(value: AuthConfig) -> Result<AuthConfig> {
     Ok(value)
 }
 
+#[tauri::command]
 pub fn reset_config() -> Result<AuthConfig> {
     db::conn()?
         .execute("DELETE FROM auth_config WHERE id=1", [])
