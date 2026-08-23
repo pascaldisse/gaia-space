@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 91;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V90: account-global roles are distinct from scoped platform roles. The legacy
+    // `role` column remains readable for old servers; `global_role` is authoritative.
+    if version < 90 {
+        add_column_if_missing(&tx, "users", "global_role", "TEXT NOT NULL DEFAULT 'GlobalMember' CHECK(global_role IN ('GlobalAdmin','GlobalMember','Guest','LightGuest'))")?;
+        tx.execute_batch(SCHEMA_V90)?;
+    }
+    // V91: verified domains are an organization registration policy, never an
+    // untrusted client-side email suffix check.
+    if version < 91 {
+        tx.execute_batch(SCHEMA_V91)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -1020,6 +1031,21 @@ CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_right
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+pub(crate) const SCHEMA_V90: &str = r#"
+UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
+WHERE global_role='GlobalMember';
+"#;
+pub(crate) const SCHEMA_V91: &str = r#"
+CREATE TABLE IF NOT EXISTS verified_domains (
+    domain TEXT PRIMARY KEY COLLATE NOCASE,
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    auto_join INTEGER NOT NULL DEFAULT 0,
+    self_registration INTEGER NOT NULL DEFAULT 0,
+    verified_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS verified_domains_org ON verified_domains(org_id);
+"#;
+/// V74: one target per project + IDE + instance type. The pool contains durable
 pub(crate) const SCHEMA_V74: &str = r#"
 CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1415,7 +1441,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 91);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

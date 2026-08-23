@@ -2,7 +2,7 @@
 // bridge — these are plain HTTP under {BASE}api/auth/* and {BASE}api/users*).
 // Never called in Tauri mode.
 
-export type Role = "admin" | "member";
+export type Role = "GlobalAdmin" | "GlobalMember" | "Guest" | "LightGuest";
 export type User = {
   id: string;
   username: string;
