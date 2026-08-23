@@ -67,8 +67,6 @@ pub struct Message {
     pub edited_at: Option<i64>,
     pub thread_of: Option<String>,
     pub archived: bool,
-    #[serde(default)]
-    pub pinned: bool,
     #[serde(default = "default_message_content_kind")]
     pub content_kind: String,
     #[serde(default)]
@@ -566,8 +564,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
         edited_at: r.get(5)?,
         thread_of: r.get(6)?,
         archived: r.get(7)?,
-        pinned: r.get(8)?,
-        content_kind: r.get(9)?,
+        content_kind: r.get(8)?,
         mention_ids: Vec::new(),
     })
 }
@@ -661,7 +658,7 @@ fn list_messages_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE channel_id=?1 AND thread_of IS NULL AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -674,43 +671,6 @@ fn list_messages_impl(
         .map(|m| to_view(c, m, acting_profile_id))
         .collect()
 }
-/// Pinned roots are a channel-level index: archived messages never surface and newest pins
-/// lead, while the stable id makes equally-timed imports deterministic.
-fn list_pinned_messages_impl(
-    c: &Connection,
-    channel_id: &str,
-    acting_profile_id: Option<&str>,
-) -> Result<Vec<MessageView>> {
-    if !channel_allows_actor(c, channel_id, acting_profile_id)? {
-        return Err("channel access denied".into());
-    }
-    let mut s = c.prepare("SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind FROM messages WHERE channel_id=?1 AND thread_of IS NULL AND archived=0 AND pinned=1 ORDER BY created_at DESC,id DESC").map_err(|e| e.to_string())?;
-    let messages = s
-        .query_map([channel_id], message_row)
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    messages
-        .into_iter()
-        .map(|m| to_view(c, m, acting_profile_id))
-        .collect()
-}
-
-/// Pinning is idempotent; a caller may retry a lost response without changing history.
-fn set_message_pinned_impl(c: &Connection, id: &str, pinned: bool) -> Result<MessageView> {
-    let changed = c
-        .execute(
-            "UPDATE messages SET pinned=?2 WHERE id=?1 AND archived=0",
-            rusqlite::params![id, pinned],
-        )
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("message not found or archived".into());
-    }
-    let message = get_message_impl(c, id)?.ok_or_else(|| "message not found".to_string())?;
-    to_view(c, message, None)
-}
-
 fn list_thread_replies_impl(
     c: &Connection,
     thread_of: &str,
@@ -729,7 +689,7 @@ fn list_thread_replies_impl(
     }
     let mut s = c
         .prepare(
-            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind FROM messages \
+            "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages \
              WHERE thread_of=?1 AND archived=0 ORDER BY created_at",
         )
         .map_err(|e| e.to_string())?;
@@ -768,8 +728,8 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         return Err("channel access denied".to_string());
     }
     c.execute(
-        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.pinned, message.content_kind],
+        "INSERT INTO messages(id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.content_kind],
     )
     .map_err(|e| e.to_string())?;
     sync_mentions_impl(
@@ -913,7 +873,7 @@ fn list_mentions_for_profile_impl(
 ) -> Result<Vec<MentionView>> {
     let mut s = c
         .prepare(
-            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived,m.pinned,m.content_kind \
+            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived,m.content_kind \
              FROM message_mentions mm JOIN messages m ON m.id=mm.message_id \
              WHERE mm.profile_id=?1 AND m.archived=0 ORDER BY m.created_at DESC",
         )
@@ -982,7 +942,7 @@ fn delete_message_impl(c: &Connection, id: &str) -> Result<()> {
 }
 fn get_message_impl(c: &Connection, id: &str) -> Result<Option<Message>> {
     c.query_row(
-        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,pinned,content_kind FROM messages WHERE id=?1",
+        "SELECT id,channel_id,author_id,text,created_at,edited_at,thread_of,archived,content_kind FROM messages WHERE id=?1",
         [id],
         message_row,
     )
@@ -1149,17 +1109,6 @@ pub fn list_messages(
     acting_profile_id: Option<String>,
 ) -> Result<Vec<MessageView>> {
     list_messages_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
-}
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_pinned_messages(
-    channel_id: String,
-    acting_profile_id: Option<String>,
-) -> Result<Vec<MessageView>> {
-    list_pinned_messages_impl(&db::conn()?, &channel_id, acting_profile_id.as_deref())
-}
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn set_message_pinned(id: String, pinned: bool) -> Result<MessageView> {
-    set_message_pinned_impl(&db::conn()?, &id, pinned)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_thread_replies(
@@ -1419,7 +1368,6 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 mention_ids: Vec::new(),
                 content_kind: "text".into(),
             },
@@ -1543,7 +1491,6 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 mention_ids: Vec::new(),
                 content_kind: "text".into(),
             },
@@ -1669,49 +1616,12 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 mention_ids: mentions.iter().map(|s| s.to_string()).collect(),
                 content_kind: "text".into(),
             },
         )
     }
 
-    #[test]
-    fn pinning_is_idempotent_and_excludes_archived_messages() {
-        let (c, path) = conn();
-        seed_message(&c, "chan-pin", "older");
-        c.execute("INSERT INTO messages(id,channel_id,author_id,text,created_at,thread_of,archived,pinned,content_kind) VALUES('newer','chan-pin','default-org','new',2,NULL,0,0,'text')", []).unwrap();
-        assert!(
-            set_message_pinned_impl(&c, "older", true)
-                .unwrap()
-                .message
-                .pinned
-        );
-        assert!(
-            set_message_pinned_impl(&c, "older", true)
-                .unwrap()
-                .message
-                .pinned
-        );
-        set_message_pinned_impl(&c, "newer", true).unwrap();
-        assert_eq!(
-            list_pinned_messages_impl(&c, "chan-pin", Some("default-org"))
-                .unwrap()
-                .iter()
-                .map(|m| m.message.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["newer", "older"]
-        );
-        delete_message_impl(&c, "newer").unwrap();
-        assert_eq!(
-            list_pinned_messages_impl(&c, "chan-pin", Some("default-org"))
-                .unwrap()
-                .len(),
-            1
-        );
-        drop(c);
-        drop(path);
-    }
     #[test]
     fn mentions_are_stored_and_read_back_on_the_view() {
         let (c, path) = conn();
@@ -1804,7 +1714,6 @@ mod tests {
             edited_at: None,
             thread_of: None,
             archived: false,
-            pinned: false,
             mention_ids: too_many.clone(),
             content_kind: "text".into(),
         };
@@ -2029,7 +1938,6 @@ mod tests {
             edited_at: None,
             thread_of: None,
             archived: false,
-            pinned: false,
             content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
@@ -2043,7 +1951,6 @@ mod tests {
             edited_at: None,
             thread_of: Some("msg-root".into()),
             archived: false,
-            pinned: false,
             content_kind: "text".into(),
             mention_ids: Vec::new(),
         };
@@ -2079,7 +1986,6 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
@@ -2114,7 +2020,6 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
             },
@@ -2192,7 +2097,6 @@ mod tests {
                 edited_at: None,
                 thread_of: None,
                 archived: false,
-                pinned: false,
                 content_kind: "text".into(),
                 mention_ids: Vec::new(),
             }

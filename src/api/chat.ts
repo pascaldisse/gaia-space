@@ -39,7 +39,6 @@ export type Message = {
   edited_at: number | null;
   thread_of: string | null;
   archived: boolean;
-  pinned?: boolean;
   content_kind?: "text" | "absence-card";
   mention_ids?: string[];
 };
@@ -93,10 +92,6 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   // messages
   listMessages: (channelId: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_messages", { channelId, actingProfileId: actingProfileId ?? null }),
-  listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
-    invoke<MessageView[]>("list_pinned_messages", { channelId, actingProfileId: actingProfileId ?? null }),
-  setMessagePinned: (id: string, pinned: boolean) =>
-    invoke<MessageView>("set_message_pinned", { id, pinned }),
   listThreadReplies: (threadOf: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_thread_replies", { threadOf, actingProfileId: actingProfileId ?? null }),
   createMessage: (message: Message) => invoke<MessageView>("create_message", { message }),
