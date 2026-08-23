@@ -59,6 +59,16 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
     })
 }
 
+/// A room becomes live only after an authorized native join reaches a usable server.
+/// Ended and cancelled rooms are terminal; reopening requires an explicit meeting edit.
+pub fn video_status_after_join(status: &str) -> Result<&'static str> {
+    match status {
+        "scheduled" | "live" => Ok("live"),
+        "ended" | "cancelled" => Err(format!("Cannot join a {status} video room")),
+        _ => Err("Video status must be scheduled, live, ended, or cancelled".into()),
+    }
+}
+
 fn validate_meeting(meeting: &Meeting) -> Result<()> {
     if meeting.title.trim().is_empty() {
         return Err("Meeting title is required".into());
@@ -555,6 +565,14 @@ mod tests {
             validate_meeting(&invalid).unwrap_err(),
             "Video status must be scheduled, live, ended, or cancelled"
         );
+    }
+
+    #[test]
+    fn joining_promotes_scheduled_rooms_and_rejects_terminal_lifecycle_states() {
+        assert_eq!(video_status_after_join("scheduled").unwrap(), "live");
+        assert_eq!(video_status_after_join("live").unwrap(), "live");
+        assert_eq!(video_status_after_join("ended").unwrap_err(), "Cannot join a ended video room");
+        assert_eq!(video_status_after_join("cancelled").unwrap_err(), "Cannot join a cancelled video room");
     }
 
     #[test]

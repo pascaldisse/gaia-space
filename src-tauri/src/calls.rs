@@ -528,6 +528,7 @@ pub(crate) fn join_meeting_call_with_config(
     if meeting.video_provider != "native" {
         return Err("External Meet rooms are not configured; select Native LiveKit or configure the external room API".into());
     }
+    let joined_video_status = meetings::video_status_after_join(&meeting.video_status)?;
     let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection
         .query_row(
@@ -542,6 +543,10 @@ pub(crate) fn join_meeting_call_with_config(
         return Err("Waiting for organizer admission: only accepted participants can join this meeting call".into());
     }
     let status = ensure_server(config.clone())?;
+    connection.execute(
+        "UPDATE meetings SET video_status=?2 WHERE id=?1 AND video_status IN ('scheduled','live')",
+        rusqlite::params![meeting_id, joined_video_status],
+    ).map_err(|e| e.to_string())?;
     let room = room_for_meeting(&meeting_id);
     Ok(CallJoin {
         url: status.url,
