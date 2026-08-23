@@ -103,6 +103,44 @@ pub struct MergePreferences {
     /// JSON list of {"issue_id":"…","status_id":"…"}; validated against review project on merge.
     pub linked_issue_statuses_json: String,
 }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MergePolicy {
+    pub project_id: String,
+    pub allow_merge: bool,
+    pub allow_rebase: bool,
+    pub allow_squash: bool,
+    pub merge_message_option: String,
+    pub squash_message_option: String,
+}
+fn validate_merge_policy(policy: &MergePolicy) -> Result<()> {
+    if !matches!(
+        policy.merge_message_option.as_str(),
+        "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION"
+    ) {
+        return Err("invalid merge message option".into());
+    }
+    if !matches!(
+        policy.squash_message_option.as_str(),
+        "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION" | "TITLE_AND_COMMITS"
+    ) {
+        return Err("invalid squash message option".into());
+    }
+    if !policy.allow_merge && !policy.allow_rebase && !policy.allow_squash {
+        return Err("at least one merge strategy must remain allowed".into());
+    }
+    Ok(())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_merge_policy(project_id: String) -> Result<MergePolicy> {
+    let c = db::conn()?;
+    c.query_row("SELECT project_id,allow_merge,allow_rebase,allow_squash,merge_message_option,squash_message_option FROM review_merge_policies WHERE project_id=?1", rusqlite::params![project_id], |r| Ok(MergePolicy { project_id:r.get(0)?, allow_merge:r.get(1)?, allow_rebase:r.get(2)?, allow_squash:r.get(3)?, merge_message_option:r.get(4)?, squash_message_option:r.get(5)? })).or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(MergePolicy { project_id, allow_merge:true, allow_rebase:true, allow_squash:true, merge_message_option:"DEFAULT".into(), squash_message_option:"DEFAULT".into() }) } else { Err(e) }).map_err(|e| e.to_string())
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_merge_policy(policy: MergePolicy) -> Result<()> {
+    validate_merge_policy(&policy)?;
+    db::conn()?.execute("INSERT INTO review_merge_policies(project_id,allow_merge,allow_rebase,allow_squash,merge_message_option,squash_message_option) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id) DO UPDATE SET allow_merge=excluded.allow_merge,allow_rebase=excluded.allow_rebase,allow_squash=excluded.allow_squash,merge_message_option=excluded.merge_message_option,squash_message_option=excluded.squash_message_option", rusqlite::params![policy.project_id,policy.allow_merge,policy.allow_rebase,policy.allow_squash,policy.merge_message_option,policy.squash_message_option]).map_err(|e|e.to_string())?;
+    Ok(())
+}
 #[derive(Debug, Deserialize)]
 struct LinkedIssueStatus {
     issue_id: String,
@@ -1906,6 +1944,9 @@ pub fn attempt_merge(
         merge_preview(&repo_path, &source_branch, &target_branch)?;
     let c = db::conn()?;
     let project_id = review_project_tx(&c, &review_id)?;
+    if !get_merge_policy(project_id.clone())?.allow_merge {
+        return Err("merge strategy is disabled by repository policy".into());
+    }
     let (delete_source_branch, linked_issue_statuses_json) = merge_preferences_tx(&c, &review_id)?;
     enforce_merge_permission_tx(&c, &project_id, &target_branch, &actor_id)?;
     let bypassed = bypasses_quality_gate_tx(&c, &project_id, &target_branch, &actor_id)?;
@@ -2030,6 +2071,32 @@ mod tests {
     /// across processes; nothing here ever deletes a path it did not create.
     fn temp_db() -> db::TempDb {
         db::TempDb::new("gaia-space-review-test")
+    }
+    #[test]
+    fn merge_policy_rejects_invalid_modes_and_an_empty_allow_list() {
+        let base = MergePolicy {
+            project_id: "p".into(),
+            allow_merge: true,
+            allow_rebase: false,
+            allow_squash: false,
+            merge_message_option: "DEFAULT".into(),
+            squash_message_option: "DEFAULT".into(),
+        };
+        assert!(validate_merge_policy(&base).is_ok());
+        let invalid = MergePolicy {
+            merge_message_option: "COMMITS".into(),
+            ..base
+        };
+        assert!(validate_merge_policy(&invalid).is_err());
+        let none = MergePolicy {
+            project_id: "p".into(),
+            allow_merge: false,
+            allow_rebase: false,
+            allow_squash: false,
+            merge_message_option: "DEFAULT".into(),
+            squash_message_option: "DEFAULT".into(),
+        };
+        assert!(validate_merge_policy(&none).is_err());
     }
 
     /// Builds a commit via plumbing only (blob + treebuilder) — no working-directory

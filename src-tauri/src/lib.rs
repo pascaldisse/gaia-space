@@ -318,6 +318,8 @@ pub fn run() {
             review::set_suggested_edit_status,
             review::list_protected_branch_rules,
             review::save_merge_preferences,
+            review::get_merge_policy,
+            review::save_merge_policy,
             review::save_protected_branch_rule,
             review::delete_protected_branch_rule,
             devenv::list_dev_environments,

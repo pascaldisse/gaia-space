@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 82;
+pub const SCHEMA_VERSION: i64 = 83;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -585,6 +585,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
+    // V83: repository-level merge governance. Strategy allow-lists and message modes are
+    // durable project facts so a merge request cannot bypass an owner policy in UI state.
+    if version < 83 && table_exists(&tx, "projects")? {
+        tx.execute_batch(SCHEMA_V83)?;
+    }
     // V82: view/collapse is per reviewer and per file, never a shared review mutation.
     if version < 82 && table_exists(&tx, "reviews")? && table_exists(&tx, "profiles")? {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
@@ -650,6 +655,18 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
+
+pub(crate) const SCHEMA_V83: &str = r#"
+CREATE TABLE IF NOT EXISTS review_merge_policies (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    allow_merge INTEGER NOT NULL DEFAULT 1,
+    allow_rebase INTEGER NOT NULL DEFAULT 1,
+    allow_squash INTEGER NOT NULL DEFAULT 1,
+    merge_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(merge_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION')),
+    squash_message_option TEXT NOT NULL DEFAULT 'DEFAULT' CHECK(squash_message_option IN ('DEFAULT','TITLE','TITLE_AND_DESCRIPTION','TITLE_AND_COMMITS'))
+);
+"#;
+
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,

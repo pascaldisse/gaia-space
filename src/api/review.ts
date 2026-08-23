@@ -74,6 +74,11 @@ export type QualityGateRule = {
   roles_json: string | null;
 };
 
+export type MergePolicy = {
+  project_id: string; allow_merge: boolean; allow_rebase: boolean; allow_squash: boolean;
+  merge_message_option: "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION";
+  squash_message_option: "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION" | "TITLE_AND_COMMITS";
+};
 export type SafeMergeRun = {
   id: string;
   review_id: string;
@@ -179,6 +184,8 @@ export const reviewApi = {
   setSuggestedEditStatus: (id: string, status: SuggestedEditStatus, actorId: string) =>
     invoke<void>("set_suggested_edit_status", { id, status, actorId }),
 
+  getMergePolicy: (projectId: string) => invoke<MergePolicy>("get_merge_policy", { projectId }),
+  saveMergePolicy: (policy: MergePolicy) => invoke<void>("save_merge_policy", { policy }),
   listProtectedBranchRules: (projectId: string) =>
     invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),
   saveProtectedBranchRule: (rule: ProtectedBranchRule) =>
