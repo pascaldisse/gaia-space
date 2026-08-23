@@ -10,8 +10,8 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, chat, chatbot, db, devenv, documents,
-    events, issues, meetings, oauth, package_registry, payload_dispatch, personal, pipelines,
-    platform, review,
+    events, issues, meetings, oauth, organization, package_registry, payload_dispatch, personal,
+    pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -1681,7 +1681,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
-        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint" => CommandPolicy::Session,
+        "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
+        | "get_organization" | "get_org_settings" | "update_organization" | "update_org_settings" => CommandPolicy::Session,
         "create_cf_definition"
         | "create_channel"
         | "create_deploy_target"
@@ -3986,6 +3987,10 @@ async fn cmd(
     "list_package_versions" => pipelines::list_package_versions(repository_id: String, query: Option<String>),
     "list_pipeline_scripts" => pipelines::list_pipeline_scripts(),
     "list_planning_tags" => issues::list_planning_tags(project_id: String),
+    "get_organization" => organization::get_organization(),
+    "update_organization" => organization::update_organization(value: organization::Organization),
+    "get_org_settings" => organization::get_org_settings(),
+    "update_org_settings" => organization::update_org_settings(value: organization::OrgSettings),
     "list_profiles" => platform::list_profiles(),
     "list_projects" => platform::list_projects(),
     "list_protected_branch_rules" => review::list_protected_branch_rules(project_id: String),

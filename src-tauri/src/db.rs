@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 63;
+pub const SCHEMA_VERSION: i64 = 67;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -550,6 +550,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             tx.execute_batch("CREATE INDEX IF NOT EXISTS job_runs_worker ON job_runs(worker_id);")?;
         }
     }
+    // V67: durable single-tenant organization data. Multi-workspace selection is
+    // client-side and therefore never cross-contaminates server records.
+    if version < 67 {
+        tx.execute_batch(SCHEMA_V67)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -900,6 +905,26 @@ CREATE TABLE IF NOT EXISTS calendar_caldav_events (
  PRIMARY KEY(calendar_id, href)
 );
 CREATE INDEX IF NOT EXISTS calendar_caldav_events_range ON calendar_caldav_events(calendar_id, starts_at);
+"#;
+pub(crate) const SCHEMA_V67: &str = r#"
+CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slogan TEXT,
+    logo_id TEXT,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    onboarding_required INTEGER NOT NULL DEFAULT 0,
+    allow_domains_edit INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS org_settings (
+    org_id TEXT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+    available_right_codes TEXT NOT NULL DEFAULT '[]',
+    is_space_code INTEGER NOT NULL DEFAULT 0,
+    is_space_code_only INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO organizations(id,name) VALUES('default','GAIA Organization');
+INSERT OR IGNORE INTO org_settings(org_id) VALUES('default');
 "#;
 pub(crate) const SCHEMA_V62: &str = r#"
 CREATE TABLE IF NOT EXISTS totp_scratch_codes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, code_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), used_at INTEGER);
@@ -1316,7 +1341,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 63);
+        assert_eq!(SCHEMA_VERSION, 67);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
