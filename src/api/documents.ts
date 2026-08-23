@@ -49,6 +49,11 @@ export type DocVersion = {
   created_at: number;
 };
 
+export type DocumentSearchResult = {
+id: string;
+title: string;
+snippet: string;
+};
 export type DocumentAccessRecipient = {
   recipient_type: "profile" | "team";
   recipient_id: string;
@@ -149,6 +154,8 @@ export const documentsApi = {
     invoke<DocumentAccessRecipient[]>("list_book_access", { bookId }),
   updateBookAccess: (bookId: string, permissions: DocumentAccessRecipient[]) =>
     invoke<void>("update_book_access", { bookId, permissions }),
+  searchBookDocuments: (bookId: string, query: string) =>
+    invoke<DocumentSearchResult[]>("search_book_documents", { bookId, query }),
 
   uploadFile: (request: UploadDocumentFileRequest) =>
     invoke<DocumentFile>("upload_document_file", { request }),

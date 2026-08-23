@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 103;
+pub const SCHEMA_VERSION: i64 = 107;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -617,6 +617,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 98 { tx.execute_batch(SCHEMA_V98)?; }
     // V99: principals unify people, applications, and external identities.
     if version < 99 { tx.execute_batch(SCHEMA_V99)?; }
+    // V107: KB book grants. Guarded: hand-built legacy fixtures can lack documents.
+    if version < 107 && table_exists(&tx, "document_folders")? {
+        tx.execute_batch(SCHEMA_V107)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -974,6 +978,11 @@ CREATE INDEX IF NOT EXISTS oauth_access_tokens_user_active ON oauth_access_token
 /// Document publication (public link) and KB book grants. A book is the top-level
 /// 'kb' folder and a KB document carries its book id in `container_id`, so a grant on
 /// the book row is the whole enforcement surface.
+pub(crate) const SCHEMA_V107: &str = r#"
+CREATE TABLE IF NOT EXISTS document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
+CREATE INDEX IF NOT EXISTS document_folder_permissions_folder ON document_folder_permissions(folder_id);
+"#;
+/// Legacy V34 also created this table for fresh pre-V107 databases.
 pub(crate) const SCHEMA_V34: &str = r#"
 CREATE UNIQUE INDEX IF NOT EXISTS documents_public_slug ON documents(public_slug) WHERE public_slug IS NOT NULL;
 CREATE TABLE IF NOT EXISTS document_folder_permissions (folder_id TEXT NOT NULL REFERENCES document_folders(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(folder_id, recipient_type, recipient_id));
@@ -1632,7 +1641,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 103);
+        assert_eq!(SCHEMA_VERSION, 107);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

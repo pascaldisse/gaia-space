@@ -391,6 +391,7 @@ pub fn run() {
             documents::publish_document,
             documents::get_public_document,
             documents::list_book_access,
+            documents::search_book_documents,
             documents::update_book_access,
             documents::list_document_folders,
             documents::create_document_folder,
