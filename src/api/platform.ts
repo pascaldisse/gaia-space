@@ -7,6 +7,7 @@ export type Principal = { id: string; kind: "profile" | "application" | "externa
 export type Organization = { id:string; name:string; slogan:string|null; logo_id:string|null; timezone:string; onboarding_required:boolean; allow_domains_edit:boolean };
 export type OrgSettings = { org_id:string; available_right_codes:string[]; is_space_code:boolean; is_space_code_only:boolean };
 export type MemberLocation = { id: string; profile_id: string; location: string; location_type: string };
+export type DeskAssignment = { id?:string; profile_id:string; location_id:string; seat_label:string|null; map_x:number; map_y:number; since_date:string; till_date:string|null };
 export type Location = { id:string; name:string; location_type:string; parent_id:string|null; timezone:string; work_schedule_json:string; channel_id:string|null; archived:boolean; equipment:string[] };
 export type Team = { id: string; name: string; description: string | null; parent_id: string | null; archived: boolean };
 export type TeamMembership = {
@@ -58,7 +59,10 @@ messengerContacts: (profile_id: string) => call<MessengerContact[]>("list_messen
 saveMessengerContact: (value: MessengerContact) => call<MessengerContact>("save_messenger_contact", { value }),
 principals: () => call<Principal[]>("list_principals"),
 
-  memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
+  deskAssignments: (profile_id?: string, location_id?: string) => call<DeskAssignment[]>("list_desk_assignments", { profileId: profile_id ?? null, locationId: location_id ?? null }),
+saveDeskAssignment: (value: DeskAssignment) => call<DeskAssignment>("save_desk_assignment", { value }),
+removeDeskAssignment: (id: string) => call<void>("remove_desk_assignment", { id }),
+memberLocations: (profile_id?: string) => call<MemberLocation[]>("list_member_locations", { profileId: profile_id ?? null }),
 addMemberLocation: (member_id: string, location: string, location_type: string) => call<MemberLocation>("add_member_location", { memberId: member_id, location, locationType: location_type }),
 removeMemberLocation: (id: string) => call<void>("remove_member_location", { id }),
 // Organization locations

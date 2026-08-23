@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 118;
+pub const SCHEMA_VERSION: i64 = 122;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -865,6 +865,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 102 && table_exists(&tx, "meeting_participants")? {
         tx.execute_batch(SCHEMA_V102)?;
     }
+    // V122: date-ranged floor-map desk assignments reference typed locations.
+    if version < 122 && table_exists(&tx, "profiles")? && table_exists(&tx, "locations")? {
+        tx.execute_batch(SCHEMA_V122)?;
+    }
     // V108: opt-in per-channel Spacebox delivery. Kept separate from generic
     // notification preferences: membership grants read access, subscription grants feed delivery.
     if version < 108 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
@@ -995,6 +999,23 @@ CREATE TABLE IF NOT EXISTS subscription_deliveries (
  CHECK((target_kind='webhook') = (application_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS subscription_deliveries_profile ON subscription_deliveries(profile_id,event_type);
+"#;
+
+/// V122: physical desk assignments are history, not a mutable profile field.
+pub(crate) const SCHEMA_V122: &str = r#"
+CREATE TABLE IF NOT EXISTS desk_assignments (
+ id TEXT PRIMARY KEY,
+ profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+ location_id TEXT NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+ seat_label TEXT,
+ map_x REAL NOT NULL CHECK(map_x >= 0.0 AND map_x <= 1.0),
+ map_y REAL NOT NULL CHECK(map_y >= 0.0 AND map_y <= 1.0),
+ since_date TEXT NOT NULL,
+ till_date TEXT,
+ CHECK(till_date IS NULL OR till_date >= since_date)
+);
+CREATE INDEX IF NOT EXISTS desk_assignments_profile_dates ON desk_assignments(profile_id, since_date DESC);
+CREATE INDEX IF NOT EXISTS desk_assignments_location_dates ON desk_assignments(location_id, since_date DESC);
 "#;
 
 /// V98: profile communication metadata.
