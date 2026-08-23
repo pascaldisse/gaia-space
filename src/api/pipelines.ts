@@ -124,12 +124,31 @@ export function normalizeJob(job: unknown): ScriptJobDef | null {
   const trigger_type = typeof value.trigger_type === "string" ? value.trigger_type : "MANUAL";
   return { name: value.name, trigger_type, timeout_secs: typeof value.timeout_secs === "number" ? value.timeout_secs : null, steps, ...(explicitTriggers?.length ? { triggers: explicitTriggers } : {}) };
 }
-export function parseScriptSource(source: string): ScriptDef {
+export type ParsedScriptDef = ScriptDef & { warnings: string[] };
+/** Parses editor input without silently hiding malformed source. `warnings` names every
+ * unsupported member that the structured editor cannot round-trip; callers must surface it
+ * before saving, because saving serializes only the supported DSL. */
+export function parseScriptSource(source: string): ParsedScriptDef {
   try {
     const parsed = JSON.parse(source) as { jobs?: unknown };
-    if (parsed && Array.isArray(parsed.jobs)) return { jobs: parsed.jobs.map(normalizeJob).filter((job): job is ScriptJobDef => job !== null) };
-  } catch { /* fall through to empty */ }
-  return emptyScriptDef();
+    if (!parsed || !Array.isArray(parsed.jobs)) return { ...emptyScriptDef(), warnings: ["script has no jobs array; editor opened an empty script"] };
+    const warnings: string[] = [];
+    const jobs = parsed.jobs.flatMap((raw, index) => {
+      const job = normalizeJob(raw);
+      if (!job) {
+        warnings.push(`job ${index + 1} is malformed and was not loaded`);
+        return [];
+      }
+      const value = raw as Record<string, unknown>;
+      if (Array.isArray(value.steps) && job.steps.length < value.steps.length) warnings.push(`job '${job.name}' has ${value.steps.length - job.steps.length} unsupported or malformed step(s) not loaded`);
+      if (job.steps.some((step) => step.type === "Container")) warnings.push(`job '${job.name}' has container step(s): this build cannot execute them, and the shell-only editor will not preserve their container settings on save`);
+      if (Array.isArray(value.triggers) && (job.triggers?.length ?? 0) < value.triggers.length) warnings.push(`job '${job.name}' has ${value.triggers.length - (job.triggers?.length ?? 0)} unsupported or malformed trigger(s) not loaded`);
+      return [job];
+    });
+    return { jobs, warnings };
+  } catch {
+    return { ...emptyScriptDef(), warnings: ["invalid pipeline script JSON; editor opened an empty script"] };
+  }
 }
 
 /** Editor shape: steps are edited as one script per line. */
@@ -192,6 +211,18 @@ export function cronError(expr: string): string | null {
     if (!any) return `cron field '${fields[i]}' matches nothing`;
   }
   return null;
+}
+/** Every reason the server would reject this script, in the server's own wording where practical. */
+/** Non-blocking executor capability notices. Rust intentionally accepts these scripts to
+ * preserve existing source; the editor makes the eventual runtime failure explicit instead. */
+export function scriptDefWarnings(def: ScriptDef): string[] {
+const warnings: string[] = [];
+for (const job of def.jobs ?? []) {
+for (const step of job.steps ?? []) {
+if (step.type === "Container") warnings.push(`job '${job.name || "(unnamed)"}': container step '${step.image}' is saved but cannot run in this build`);
+}
+}
+return warnings;
 }
 /** Every reason the server would reject this script, in the server's own wording where practical. */
 export function scriptDefErrors(def: ScriptDef): string[] {

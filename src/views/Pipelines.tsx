@@ -9,6 +9,7 @@ import {
   allowedDeploymentTransitions,
   JOB_TRIGGER_TYPES,
   scriptDefErrors,
+  scriptDefWarnings,
   serializeJob,
   editableJob,
   MAX_JOBS_PER_SCRIPT,
@@ -33,6 +34,7 @@ const fromEditJob = serializeJob;
 
 export default function Pipelines() {
   const [error, setError] = createSignal<string | null>(null);
+  const [warning, setWarning] = createSignal<string | null>(null);
   const [tab, setTab] = createSignal<"automation" | "deployments">("automation");
   const [projects] = createResource(() => api.listProjects());
 
@@ -51,8 +53,12 @@ export default function Pipelines() {
         <div class="pipelines-error" onClick={() => setError(null)}>{error()}</div>
       </Show>
 
+      <Show when={warning()}>
+        <div class="pipelines-warning" role="alert" onClick={() => setWarning(null)}>{warning()}</div>
+      </Show>
+
       <Show when={tab() === "automation"}>
-        <Automation projects={projects} setError={setError} />
+        <Automation projects={projects} setError={setError} setWarning={setWarning} />
       </Show>
       <Show when={tab() === "deployments"}>
         <Deployments projects={projects} setError={setError} />
@@ -61,7 +67,7 @@ export default function Pipelines() {
   );
 }
 
-function Automation(props: { projects: () => { id: string; name: string }[] | undefined; setError: (e: string | null) => void }) {
+function Automation(props: { projects: () => { id: string; name: string }[] | undefined; setError: (e: string | null) => void; setWarning: (e: string | null) => void }) {
   const [scripts, { refetch: refetchScripts }] = createResource(() => pipelinesApi.listScripts());
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   createEffect(() => {
@@ -113,7 +119,9 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
     if (s) {
       setPath(s.path);
       setRepository(s.repository ?? "");
-      setJobs(parseScriptSource(s.source).jobs.map(toEditJob));
+      const parsed = parseScriptSource(s.source);
+      setJobs(parsed.jobs.map(toEditJob));
+      props.setWarning(parsed.warnings.length ? `Source preservation warning: ${parsed.warnings.join("; ")}. Saving will omit those parts.` : null);
     }
   });
   function addJob() {
@@ -139,6 +147,8 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
         props.setError(problems.join("; "));
         return;
       }
+      const warnings = scriptDefWarnings(def);
+      props.setWarning(warnings.length ? warnings.join("; ") : null);
       const source = JSON.stringify(def);
       await pipelinesApi.updateScript({ ...s, path: path().trim() || ".space.kts", repository: repository().trim() || null, source });
       await refetchScripts();

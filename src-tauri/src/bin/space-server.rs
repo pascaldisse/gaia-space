@@ -4229,6 +4229,45 @@ const DEFAULT_WEBHOOK_TICK_BATCH: i64 = 20;
 
 /// Spawns the retry-queue sweeper. Delivery is blocking (rusqlite + blocking HTTP), so
 /// each sweep runs on the blocking pool; a failing sweep is logged, never fatal.
+const DEFAULT_PIPELINE_SCHEDULE_TICK_SECS: u64 = 60;
+/// Schedule dispatch remains an opt-in server lifecycle task: an absent enable flag starts
+/// nothing, while its cadence defaults to sixty seconds and `0` disables it explicitly.
+fn pipeline_schedule_ticker_config(enabled: Option<&str>, secs: Option<&str>) -> Option<u64> {
+    let enabled = enabled
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if !enabled { return None; }
+    let secs = secs.and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS);
+    (secs > 0).then_some(secs)
+}
+/// Calls the existing poll-driven schedule entry point from the server's lifecycle only.
+/// It creates no separate daemon; deployment operators opt in with
+/// `SPACE_PIPELINE_SCHEDULE_TICK_ENABLED=1`, and may tune or disable the cadence via
+/// `SPACE_PIPELINE_SCHEDULE_TICK_SECS` (default 60; zero disables).
+fn spawn_pipeline_schedule_ticker() {
+    let Some(secs) = pipeline_schedule_ticker_config(
+        env::var("SPACE_PIPELINE_SCHEDULE_TICK_ENABLED").ok().as_deref(),
+        env::var("SPACE_PIPELINE_SCHEDULE_TICK_SECS").ok().as_deref(),
+    ) else { return; };
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(secs));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            match tokio::task::spawn_blocking(|| {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|error| error.to_string())?.as_secs() as i64;
+                pipelines::due_scheduled_runs(now)
+            }).await {
+                Ok(Ok(runs)) if !runs.is_empty() => eprintln!("pipeline schedule ticker: started {} run(s)", runs.len()),
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => eprintln!("pipeline schedule ticker: tick failed: {error}"),
+                Err(error) => eprintln!("pipeline schedule ticker: task panicked: {error}"),
+            }
+        }
+    });
+}
+
 fn spawn_webhook_ticker() {
     let Some((secs, batch)) = webhook_ticker_config(
         env::var("SPACE_WEBHOOK_TICK_SECS").ok().as_deref(),
@@ -4261,6 +4300,7 @@ async fn main() {
     db::set_db_path(PathBuf::from(p));
     bootstrap();
     spawn_webhook_ticker();
+    spawn_pipeline_schedule_ticker();
     let app = Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
@@ -4348,6 +4388,15 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipeline_schedule_ticker_is_opt_in_and_configurable() {
+        assert_eq!(pipeline_schedule_ticker_config(None, None), None);
+        assert_eq!(pipeline_schedule_ticker_config(Some("true"), None), Some(DEFAULT_PIPELINE_SCHEDULE_TICK_SECS));
+        assert_eq!(pipeline_schedule_ticker_config(Some("1"), Some("15")), Some(15));
+        assert_eq!(pipeline_schedule_ticker_config(Some("yes"), Some("0")), None);
+        assert_eq!(pipeline_schedule_ticker_config(Some("false"), Some("15")), None);
+    }
 
     #[test]
     fn webhook_ticker_config_defaults_and_optout() {
