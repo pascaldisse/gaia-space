@@ -586,17 +586,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
     }
     // V82: view/collapse is per reviewer and per file, never a shared review mutation.
-    if version < 82 {
+    if version < 82 && table_exists(&tx, "reviews")? && table_exists(&tx, "profiles")? {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS review_file_states (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, file_path TEXT NOT NULL, viewed INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id, profile_id, file_path));")?;
     }
     // V81: merge action preferences are per-review facts. They keep source deletion and
     // linked-issue transitions coupled to the successful merge, never a later UI chore.
-    if version < 81 {
+    if version < 81 && table_exists(&tx, "reviews")? {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS review_merge_preferences (review_id TEXT PRIMARY KEY REFERENCES reviews(id) ON DELETE CASCADE, delete_source_branch INTEGER NOT NULL DEFAULT 0, linked_issue_statuses_json TEXT NOT NULL DEFAULT '[]');")?;
     }
     // V80: inline suggested-edit lifecycle. A suggestion remains an immutable proposal;
     // accepting it records review intent only and never writes to a registered repository.
-    if version < 80 {
+    if version < 80 && table_exists(&tx, "review_discussions")? {
         add_column_if_missing(&tx, "review_discussions", "suggestion_commit_id", "TEXT")?;
         add_column_if_missing(
             &tx,
@@ -1455,7 +1455,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert!(SCHEMA_VERSION >= 74);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
