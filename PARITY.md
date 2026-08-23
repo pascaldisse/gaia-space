@@ -72,6 +72,7 @@ MANUAL-ONLY UNVERIFIED (owner): production ticker delivery to an external receiv
 Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21); ordered MR stacks create/list and retarget open children after parent merge landed (V22; `review::tests::merged_stack_parent_retargets_open_children_only`).
 Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
 Progress (Vishnu-V): review navigation now cycles unresolved discussions/changed files; the list has quick filters, sort, aggregate badges; source-branch CODEOWNERS drives My owned files diff filtering; webhook catalog covers review/participant/discussion/suggestion transitions.
+Progress (V121): MR diff renders unified and side-by-side hunk line mapping; protected-branch rules have create/edit/delete UI with full per-action principal round-trip; external checks persist/report in UI and block gates until success. Evidence: `src/Diff.tsx`, `src/diffModel.ts`, `src/views/Reviews.tsx`, `src-tauri/src/review.rs`.
 Worst gaps: CODEOWNERS team owners/full gitignore negation remain partial.
 
 ## 02 Planning / Issues / Boards (audited ✓ — rows: reports/parity/02-issues-boards.md @ bcaad14)
