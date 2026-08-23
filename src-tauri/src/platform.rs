@@ -176,6 +176,139 @@ pub fn remove_member_location(id: String) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Location {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub location_type: String,
+    pub timezone: Option<String>,
+    pub archived: bool,
+}
+#[derive(Debug, Deserialize)]
+pub struct LocationInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub location_type: String,
+    pub timezone: Option<String>,
+}
+fn location_type_rank(value: &str) -> Option<u8> {
+    match value {
+        "Region" => Some(0),
+        "Campus" => Some(1),
+        "Building" => Some(2),
+        "Floor" => Some(3),
+        "Room" | "ConferenceRoom" => Some(4),
+        _ => None,
+    }
+}
+fn valid_location_type(value: &str) -> bool {
+    location_type_rank(value).is_some()
+}
+fn location_cycle_on(c: &Connection, id: &str, parent_id: Option<&str>) -> Result<bool> {
+    let mut current = parent_id.map(str::to_owned);
+    while let Some(candidate) = current {
+        if candidate == id {
+            return Ok(true);
+        }
+        current = err(c
+            .query_row(
+                "SELECT parent_id FROM locations WHERE id=?1",
+                [&candidate],
+                |row| row.get(0),
+            )
+            .optional())?
+        .flatten();
+    }
+    Ok(false)
+}
+fn read_location(row: &rusqlite::Row<'_>) -> rusqlite::Result<Location> {
+    Ok(Location {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        parent_id: row.get(2)?,
+        location_type: row.get(3)?,
+        timezone: row.get(4)?,
+        archived: row.get(5)?,
+    })
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_locations() -> Result<Vec<Location>> {
+    let c = db::conn()?;
+    let mut statement = err(c.prepare(
+        "SELECT id,name,parent_id,location_type,timezone,archived FROM locations ORDER BY name",
+    ))?;
+    let rows = err(statement.query_map([], read_location))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_location(input: LocationInput) -> Result<Location> {
+    let name = input.name.trim().to_string();
+    if name.is_empty() {
+        return Err("A location name is required".into());
+    }
+    if !valid_location_type(&input.location_type) {
+        return Err("Invalid location type".into());
+    }
+    let parent_id = input
+        .parent_id
+        .and_then(|id| (!id.trim().is_empty()).then(|| id.trim().to_string()));
+    let timezone = input
+        .timezone
+        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
+    let id = input.id.unwrap_or_else(|| new_id("location"));
+    let c = db::conn()?;
+    if location_cycle_on(&c, &id, parent_id.as_deref())? {
+        return Err("A location cannot be its own ancestor".into());
+    }
+    if let Some(parent) = &parent_id {
+        let exists: bool = err(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM locations WHERE id=?1 AND archived=0)",
+            [parent],
+            |row| row.get(0),
+        ))?;
+        if !exists {
+            return Err("Parent location does not exist".into());
+        }
+        let parent_type: String = err(c.query_row(
+            "SELECT location_type FROM locations WHERE id=?1",
+            [parent],
+            |row| row.get(0),
+        ))?;
+        if location_type_rank(&parent_type) >= location_type_rank(&input.location_type) {
+            return Err("A parent must be a broader location type".into());
+        }
+    }
+    err(c.execute("INSERT INTO locations(id,name,parent_id,location_type,timezone) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,parent_id=excluded.parent_id,location_type=excluded.location_type,timezone=excluded.timezone", params![id, name, parent_id, input.location_type, timezone]))?;
+    Ok(err(c.query_row(
+        "SELECT id,name,parent_id,location_type,timezone,archived FROM locations WHERE id=?1",
+        [&id],
+        read_location,
+    ))?)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn archive_location(id: String, archived: bool) -> Result<()> {
+    let c = db::conn()?;
+    if archived {
+        let children: bool = err(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM locations WHERE parent_id=?1 AND archived=0)",
+            [&id],
+            |row| row.get(0),
+        ))?;
+        if children {
+            return Err("Archive child locations first".into());
+        }
+    }
+    err(c.execute(
+        "UPDATE locations SET archived=?2 WHERE id=?1",
+        params![id, archived],
+    ))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Teams + memberships
 // ---------------------------------------------------------------------------
@@ -2160,5 +2293,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, ("Project".to_string(), None));
+    }
+}
+
+#[cfg(test)]
+mod location_tests {
+    use super::*;
+
+    #[test]
+    fn locations_are_typed_hierarchies_and_reject_cycles() {
+        let _guard = db::test_serial();
+        let fixture = db::TempDb::new("platform-locations");
+        std::env::set_var("SPACE_DB", fixture.path());
+        db::migrate(&db::conn().unwrap()).unwrap();
+        let campus = save_location(LocationInput {
+            id: Some("campus".into()),
+            name: "HQ".into(),
+            parent_id: None,
+            location_type: "Campus".into(),
+            timezone: Some("Europe/Berlin".into()),
+        })
+        .unwrap();
+        let building = save_location(LocationInput {
+            id: Some("building".into()),
+            name: "A".into(),
+            parent_id: Some(campus.id.clone()),
+            location_type: "Building".into(),
+            timezone: None,
+        })
+        .unwrap();
+        assert_eq!(list_locations().unwrap().len(), 2);
+        assert_eq!(building.parent_id.as_deref(), Some("campus"));
+        assert!(save_location(LocationInput {
+            id: Some("campus".into()),
+            name: "HQ".into(),
+            parent_id: Some("building".into()),
+            location_type: "Campus".into(),
+            timezone: None
+        })
+        .unwrap_err()
+        .contains("ancestor"));
+        assert!(archive_location("campus".into(), true)
+            .unwrap_err()
+            .contains("child"));
+        std::env::remove_var("SPACE_DB");
     }
 }

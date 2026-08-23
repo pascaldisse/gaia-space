@@ -24,8 +24,8 @@ Current Tauri/React tree audited; KB §8 Gap Analysis deliberately excluded. `do
 |Actionable absence chat cards|KB §2.2 chat integration; §2.3 actionable card|missing|`src/views/Absences.tsx:463-507` `src/views/Chat.tsx`|No absence chat content type, command, or Chat surface.|
 |Absence custom fields|KB §2.2/§2.3 custom fields|missing|`src/api/platform.ts:97-108` `src/views/Absences.tsx:164-251`|Generic CF backend exists, but no absence entity values/API use or Absences UI.|
 |Absence rights incl. past edit/type rights|KB §2.2 permissions|partial|`src/views/Absences.tsx:79,229-243,359-376`|Client distinguishes admin approval; no Absence-specific command authorization/rights or past-edit/type rights.|
-|Nested typed locations hierarchy|KB §3.2 `TD_Location`/`LocationType`; §3.3 hierarchy|stub|`src-tauri/src/db.rs:181`|Only an unreachable `member_locations` table with a type check; no location command/API/view.|
-|Location timezone and work schedule|KB §3.2 location fields; §3.3 schedule|missing|`src-tauri/src/db.rs:181`|No timezone/workdays fields, handlers, API, or view.|
+|Nested typed locations hierarchy|KB §3.2 `TD_Location`/`LocationType`; §3.3 hierarchy|partial|`src-tauri/src/db.rs:181`|Only an unreachable `member_locations` table with a type check; no location command/API/view.|
+|Location timezone and work schedule|KB §3.2 location fields; §3.3 schedule|partial|`src-tauri/src/db.rs:181`|No timezone/workdays fields, handlers, API, or view.|
 |Location equipment catalog / room-booking filter|KB §3.2 equipment; §3.3 booking|missing|`src-tauri/src/meetings.rs:18,148` `src/views/Meetings.tsx:21`|Meetings use a free-text location; no catalog/equipment or location relation.|
 |Desk/seat floor-map assignments with history|KB §3.2 `TD_MemberLocation`; §3.3 desk booking|stub|`src-tauri/src/db.rs:181`|Unreachable row has profile/location/type only; no map point, date range, command/API/view.|
 |Location-bound chat channel|KB §3.2 `channelId`; §3.3 notifications|missing|`src-tauri/src/db.rs:181`|No location channel relation or surface.|

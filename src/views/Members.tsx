@@ -6,6 +6,7 @@ import {
   type Team,
   type TeamMembership,
   type MemberLocation,
+  type Location,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -31,6 +32,7 @@ export default function Members() {
   const [roles] = createResource(() => platformApi.roles());
   const [allMemberships] = createResource(() => platformApi.memberships());
   const [locations, { refetch: refetchLocations }] = createResource(() => platformApi.memberLocations());
+const [orgLocations, { refetch: refetchOrgLocations }] = createResource(() => platformApi.locations());
   const [profileDraft, setProfileDraft] = createSignal(newProfile());
   const [profileEditing, setProfileEditing] = createSignal<Profile | null>(
     null,
@@ -47,6 +49,10 @@ export default function Members() {
   const [locationProfileId, setLocationProfileId] = createSignal("");
   const [locationDraft, setLocationDraft] = createSignal("");
   const [locationType, setLocationType] = createSignal("Building");
+const [orgLocationName, setOrgLocationName] = createSignal("");
+const [orgLocationParent, setOrgLocationParent] = createSignal("");
+const [orgLocationType, setOrgLocationType] = createSignal("Campus");
+const [orgLocationTimezone, setOrgLocationTimezone] = createSignal("");
   const [memberships, { refetch: refetchMemberships }] = createResource(
     () => activeTeam()?.id,
     (id) =>
@@ -156,6 +162,15 @@ export default function Members() {
   };
   const removeLocation = async (location: MemberLocation) => {
     try { await platformApi.removeMemberLocation(location.id); setProblem(""); refetchLocations(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const saveOrgLocation = async () => {
+    if (!orgLocationName().trim()) return;
+    try { await platformApi.saveLocation({ name: orgLocationName().trim(), parent_id: orgLocationParent() || null, location_type: orgLocationType(), timezone: orgLocationTimezone().trim() || null }); setOrgLocationName(""); setOrgLocationTimezone(""); setProblem(""); refetchOrgLocations(); }
+    catch (error) { setProblem(String(error)); }
+  };
+  const archiveOrgLocation = async (location: Location) => {
+    try { await platformApi.archiveLocation(location.id, !location.archived); setProblem(""); refetchOrgLocations(); }
     catch (error) { setProblem(String(error)); }
   };
   const archiveProfile = async (profile: Profile) => {
@@ -315,6 +330,15 @@ export default function Members() {
             <button type="button" class="ghost" disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</button>
           </div>
           <Show when={(locations() ?? []).length > 0}><ul class="org-list"><For each={locations()}>{(location) => <li><div class="org-list-text"><strong>{location.location}</strong><span class="org-sub">{personName(location.profile_id)} · {location.location_type}</span></div><button class="ghost small" onClick={() => removeLocation(location)}>Remove</button></li>}</For></ul></Show>
+<div class="panel-title"><h3>Organization locations</h3></div>
+<div class="org-form">
+<input aria-label="Organization location name" placeholder="Location name" value={orgLocationName()} onInput={(event) => setOrgLocationName(event.currentTarget.value)} />
+<select aria-label="Organization location type" value={orgLocationType()} onChange={(event) => setOrgLocationType(event.currentTarget.value)}><For each={["Region", "Campus", "Building", "Floor", "Room", "ConferenceRoom"]}>{(type) => <option value={type}>{type}</option>}</For></select>
+<select aria-label="Organization location parent" value={orgLocationParent()} onChange={(event) => setOrgLocationParent(event.currentTarget.value)}><option value="">No parent</option><For each={(orgLocations() ?? []).filter((location) => !location.archived)}>{(location) => <option value={location.id}>{location.name} · {location.location_type}</option>}</For></select>
+<input aria-label="Organization location timezone" placeholder="Timezone (optional)" value={orgLocationTimezone()} onInput={(event) => setOrgLocationTimezone(event.currentTarget.value)} />
+<button type="button" class="ghost" disabled={!orgLocationName().trim()} onClick={saveOrgLocation}>Add organization location</button>
+</div>
+<Show when={(orgLocations() ?? []).length > 0}><ul class="org-list"><For each={orgLocations()}>{(location) => <li classList={{ archived: location.archived }}><div class="org-list-text"><strong>{location.name}</strong><span class="org-sub">{location.location_type}{location.parent_id ? ` · parent ${orgLocations()?.find((parent) => parent.id === location.parent_id)?.name ?? location.parent_id}` : ""}{location.timezone ? ` · ${location.timezone}` : ""}</span></div><button class="ghost small" onClick={() => archiveOrgLocation(location)}>{location.archived ? "Restore" : "Archive"}</button></li>}</For></ul></Show>
           <Show when={profiles.loading}>
             <p class="org-hint">Loading…</p>
           </Show>

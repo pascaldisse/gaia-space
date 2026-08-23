@@ -1736,7 +1736,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "archive_cf_definition" => CommandPolicy::Session,
         "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
         "archive_meeting" | "delete_meeting" => CommandPolicy::MeetingWrite,
-        "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
+        "archive_issue" | "archive_location" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
         "cf_get_values" | "cf_set_value" | "check_right" | "close_sprint"
@@ -1753,6 +1753,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "save_test_report"
         | "ingest_teamcity_test_messages" => CommandPolicy::Session,
         "create_profile"
+        | "save_location"
         | "create_quality_gate_rule"
         | "create_review_stack"
         | "create_review"
@@ -1869,7 +1870,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "parse_application_payload"
         | "application_payload_classes"
         | "list_redirect_uris" => CommandPolicy::AppAdmin,
-        "list_team_memberships"
+        "list_locations"
+        | "list_team_memberships"
         | "list_teams"
         | "list_thread_replies"
         | "list_time_tracking_entries"
@@ -4176,12 +4178,15 @@ async fn cmd(
     "issue_app_token" => applications::issue_app_token(client_id: String, client_secret: String, scope: Option<String>, ttl_seconds: Option<i64>),
     "verify_app_token" => applications::verify_app_token(token: String),
     "revoke_app_token" => applications::revoke_app_token(id: String),
+    "save_location" => platform::save_location(input: platform::LocationInput),
+    "archive_location" => platform::archive_location(id: String, archived: bool),
     "save_marketplace_app" => applications::save_marketplace_app(value: applications::MarketplaceApp),
     "install_marketplace_app" => applications::install_marketplace_app(value: applications::AppInstall),
     "uninstall_app" => applications::uninstall_app(id: String),
     "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
     "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
+    "list_locations" => platform::list_locations(),
     "list_team_memberships" => platform::list_team_memberships(team_id: Option<String>, profile_id: Option<String>),
     "list_teams" => platform::list_teams(),
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),

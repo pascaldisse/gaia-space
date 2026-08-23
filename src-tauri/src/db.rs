@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 68;
+pub const SCHEMA_VERSION: i64 = 72;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -574,6 +574,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 67 {
         tx.execute_batch(SCHEMA_V67)?;
     }
+    // V72: organization locations are durable typed hierarchy nodes. Member assignments
+    // remain historical presence records; they must not impersonate the organization tree.
+    if version < 72 {
+        tx.execute_batch(SCHEMA_V72)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -600,6 +605,21 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
 }
 
 /// V66: durable room inventory, equipment capabilities and a meeting reservation.
+/// V72: typed organization location hierarchy, distinct from member presence assignments.
+pub(crate) const SCHEMA_V72: &str = r#"
+CREATE TABLE IF NOT EXISTS locations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT REFERENCES locations(id),
+    location_type TEXT NOT NULL CHECK(location_type IN ('Region','Campus','Building','Floor','Room','ConferenceRoom')),
+    timezone TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(parent_id, name)
+);
+CREATE INDEX IF NOT EXISTS locations_parent ON locations(parent_id, name);
+"#;
+
 pub(crate) const SCHEMA_V66: &str = r#"
 CREATE TABLE IF NOT EXISTS meeting_rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, location TEXT, capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity > 0), archived INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS meeting_room_equipment (room_id TEXT NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE, equipment TEXT NOT NULL, PRIMARY KEY(room_id, equipment));
@@ -1375,7 +1395,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 68);
+        assert_eq!(SCHEMA_VERSION, 72);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

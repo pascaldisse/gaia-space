@@ -46,9 +46,9 @@ pub mod auth_security;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calendar_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod organization;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod oauth;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod organization;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod package_registry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -205,6 +205,9 @@ pub fn run() {
             platform::list_member_locations,
             platform::add_member_location,
             platform::remove_member_location,
+            platform::list_locations,
+            platform::save_location,
+            platform::archive_location,
             platform::list_teams,
             platform::create_team,
             platform::update_team,
