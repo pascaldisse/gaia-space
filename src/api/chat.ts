@@ -105,7 +105,24 @@ export type Message = {
 export type AttachmentUploadState = "loading" | "uploading" | "completed" | "failed";
 export type MessageAttachment = { id: string; message_id: string; file_name: string; mime_type: string; byte_length: number; data_url: string; upload_state: AttachmentUploadState; error: string | null };
 export type NewMessageAttachment = Omit<MessageAttachment, "message_id" | "upload_state" | "error"> & { upload_state?: AttachmentUploadState };
-export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; };
+// A link the backend extracted from the message text, plus whatever unfurling learned.
+// Text only — no image/thumbnail URL crosses this seam, so nothing external is ever
+// loaded by the client on behalf of a message.
+export type MessageLinkStatus = "pending" | "ok" | "refused" | "failed";
+export type MessageLink = {
+  url: string;
+  position: number;
+  status: MessageLinkStatus;
+  title: string | null;
+  description: string | null;
+  site_name: string | null;
+  error: string | null;
+  fetched_at: number | null;
+};
+export type MessageView = Message & { reply_count: number; reactions: Reaction[]; attachments: MessageAttachment[]; links?: MessageLink[]; };
+// One page of history, newest-first. `next_cursor` is opaque: it is a position handed
+// back verbatim, never parsed or built by the client.
+export type MessagePage = { messages: MessageView[]; next_cursor: string | null; has_more: boolean };
 export type MentionView = MessageView & { channel_name: string | null; notification_id: string; read: boolean };
 
 // Minimal profile shape — read-only call into the existing platform::list_profiles
@@ -150,7 +167,23 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   // messages
   listMessages: (channelId: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_messages", { channelId, actingProfileId: actingProfileId ?? null }),
-  listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
+  // Paged history: omit `cursor` for the newest page, then pass back `next_cursor`.
+// `limit` is clamped server-side, so asking for more than the ceiling is not an error.
+listMessagesPage: (
+input: { channelId: string; threadOf?: string | null; cursor?: string | null; limit?: number | null; actingProfileId?: string | null },
+) =>
+invoke<MessagePage>("list_messages_page", {
+channelId: input.channelId,
+threadOf: input.threadOf ?? null,
+cursor: input.cursor ?? null,
+limit: input.limit ?? null,
+actingProfileId: input.actingProfileId ?? null,
+}),
+// Explicit unfurl of a message's pending links. The server fetches, guarded; the client
+// never requests a third-party URL itself.
+unfurlMessageLinks: (messageId: string, actingProfileId?: string | null) =>
+invoke<MessageLink[]>("unfurl_message_links", { messageId, actingProfileId: actingProfileId ?? null }),
+listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
     invoke<MessageView[]>("list_pinned_messages", { channelId, actingProfileId: actingProfileId ?? null }),
   setMessagePinned: (id: string, pinned: boolean) =>
     invoke<MessageView>("set_message_pinned", { id, pinned }),

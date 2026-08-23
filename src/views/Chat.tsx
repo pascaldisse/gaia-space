@@ -18,6 +18,17 @@ import {
   type ScheduledMessage,
   type PollView,
 } from "../api/chat";
+// Rows per history page. One knob, used by both the live window and "load older";
+// the server clamps it anyway, so this is a preference, never a trusted limit.
+const PAGE_SIZE = 50;
+import {
+  applyPage,
+  beginLoad,
+  failLoad,
+  initialPaging,
+  resetPaging,
+  visibleMessages,
+} from "../messagePaging";
 import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
@@ -112,9 +123,58 @@ export default function Chat() {
     const ch = activeChannelId();
     return ch ? { ch, p: actingProfileId() } : null;
   };
-  const [messages, { refetch: refetchMessages }] = createResource(messageKey, (k) =>
-    chatApi.listMessages(k.ch, k.p),
+  // The live window is the newest page, not the whole channel: a long history must not
+  // be one unbounded query, and paging older is the same call with a cursor.
+  const [messagePage, { refetch: refetchMessages }] = createResource(messageKey, (k) =>
+    chatApi.listMessagesPage({ channelId: k.ch, limit: PAGE_SIZE, actingProfileId: k.p }),
   );
+  const messages = Object.assign(() => messagePage()?.messages, {
+    get loading() {
+      return messagePage.loading;
+    },
+  });
+  // History paging: `messages()` is the live newest window; older pages accumulate in
+  // `paging` and are merged for display (ordered, de-duplicated, race-guarded — see
+  // src/messagePaging.ts). Switching channel/profile resets it, which also invalidates
+  // any page still in flight for the channel we just left.
+  const [paging, setPaging] = createSignal(initialPaging());
+  createEffect(() => {
+    messageKey();
+    setPaging((state) => resetPaging(state));
+  });
+  const shownMessages = () => visibleMessages(paging(), messages());
+  // Before any older page is pulled, the continuation point is the live page's own
+  // cursor — one order, one cursor space, no second source of truth.
+  const olderCursor = () => paging().cursor ?? messagePage()?.next_cursor ?? null;
+  const canLoadOlder = () => paging().hasMore && olderCursor() !== null;
+  const loadOlder = async () => {
+    const key = messageKey();
+    if (!key) return;
+    const cursor = olderCursor();
+    if (!cursor) return;
+    const started = beginLoad(paging());
+    if (!started.started) return;
+    setPaging(started.state);
+    try {
+      const pageResult = await chatApi.listMessagesPage({
+        channelId: key.ch,
+        cursor,
+        limit: PAGE_SIZE,
+        actingProfileId: key.p,
+      });
+      setPaging((state) => applyPage(state, started.ticket, pageResult));
+    } catch (e) {
+      setPaging((state) => failLoad(state, started.ticket, e));
+    }
+  };
+  const unfurlLinks = async (messageId: string) => {
+    try {
+      await chatApi.unfurlMessageLinks(messageId, actingProfileId());
+      await refetchMessages();
+    } catch (e) {
+      fail(e);
+    }
+  };
   const [pinnedMessages, { refetch: refetchPinnedMessages }] = createResource(messageKey, (k) =>
     chatApi.listPinnedMessages(k.ch, k.p),
   );
@@ -127,7 +187,7 @@ export default function Chat() {
   const threadRoot = () => {
     const id = threadRootId();
     if (!id) return null;
-    return messages()?.find((m) => m.id === id) ?? null;
+    return shownMessages().find((m) => m.id === id) ?? null;
   };
   const threadKey = () => {
     const id = threadRootId();
@@ -799,6 +859,19 @@ export default function Chat() {
                 {(absence) => <div class="absence-chat-card"><strong>Time off {absence().action.replace("absence.", "")}</strong><span>{profileName(absence().profile_id)} · {absence().date_from} → {absence().date_to}</span><small>{absence().availability}</small><a {...linkProps({ view: "Absences" })}>Open time off</a></div>}
               </Show>
               </Show>
+              <Show when={(m.links ?? []).length}><div class="message-links"><For each={m.links ?? []}>{(link) => (
+                <div class={`link-card status-${link.status}`}>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer nofollow">{link.title ?? link.url}</a>
+                  <Show when={link.site_name}><span class="hint"> · {link.site_name}</span></Show>
+                  <Show when={link.description}><div class="link-description">{link.description}</div></Show>
+                  <Show when={link.status === "pending"}>
+                    <button type="button" class="ghost small" onClick={() => unfurlLinks(m.id)}>Show preview</button>
+                  </Show>
+                  <Show when={link.status !== "pending" && link.status !== "ok"}>
+                    <span class="hint">No preview ({link.error ?? link.status})</span>
+                  </Show>
+                </div>
+              )}</For></div></Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
                   <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
@@ -1028,8 +1101,23 @@ export default function Chat() {
 
         <div class="message-pane">
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
-            <Show when={messages()?.length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
-              <For each={messages()}>{(m) => renderMessage(m, false)}</For>
+            <Show when={shownMessages().length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
+              <Show when={canLoadOlder() || paging().error}>
+                <div class="history-pager">
+                  <Show when={paging().error}>
+                    <span class="hint" role="alert">Could not load older messages: {paging().error}</span>
+                  </Show>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    disabled={paging().loading}
+                    onClick={loadOlder}
+                  >
+                    {paging().loading ? "Loading…" : paging().error ? "Retry" : "Load older messages"}
+                  </button>
+                </div>
+              </Show>
+              <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
             </Show>
           </Show>
         </div>

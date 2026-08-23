@@ -407,3 +407,11 @@
 .poll-form-option { display: flex; gap: .3em; }
 .poll-form-option input { flex: 1; }
 .poll-form-actions { display: flex; align-items: center; gap: .5em; flex-wrap: wrap; }
+
+/* History paging + link unfurl (V118). Text-only previews: no remote image is ever
+   loaded on behalf of a message. */
+.history-pager { display: flex; align-items: center; gap: .5em; justify-content: center; padding: .3em 0; }
+.message-links { display: flex; flex-direction: column; gap: .3em; }
+.link-card { display: flex; flex-direction: column; gap: .2em; padding: .35em .55em; border: 1px solid var(--border, #333); border-left: 3px solid var(--accent-soft, #7a9bd6); border-radius: 6px; max-width: 480px; }
+.link-card .link-description { color: var(--muted, #9dac9f); font-size: .9em; }
+.link-card.status-refused, .link-card.status-failed { border-left-color: #a6613f; }
