@@ -1,6 +1,6 @@
-import { createResource, createSignal, createEffect, For, Show } from "solid-js";
+import { createResource, createSignal, createEffect, For, Match, Show, Switch } from "solid-js";
 import { api } from "../api";
-import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type RetentionCandidate } from "../api/pipelines";
+import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
 import "./Packages.css";
 
 export default function Packages() {
@@ -91,6 +91,7 @@ const [pubImmutable, setPubImmutable] = createSignal(false);
 const [overview, setOverview] = createSignal<{ cve_id: string; severity: string; affected_range: string }[] | null>(null);
   const [candidates, setCandidates] = createSignal<RetentionCandidate[] | null>(null);
   const [repoReport, setRepoReport] = createSignal<DependencyOverview[] | null>(null);
+  const [detail, setDetail] = createSignal<PackageDetail | null>(null);
 
   async function publish(e: SubmitEvent) {
     e.preventDefault();
@@ -136,6 +137,11 @@ setPubImmutable(false);
     const repo = selected();
     if (!repo) return;
     try { setRepoReport(await pipelinesApi.repositoryVulnerabilityReport(repo.id)); } catch (err) { setError(String(err)); }
+  }
+  async function showDetail(v: PackageVersion) {
+    const repo = selected();
+    if (!repo) return;
+    try { setDetail(await pipelinesApi.packageVersionDetail(repo.id, v.package_name, v.version)); } catch (err) { setError(String(err)); }
   }
   async function showOverview(v: PackageVersion) { try { setOverview((await pipelinesApi.dependencyOverview(v.id)).vulnerabilities); } catch (err) { setError(String(err)); } }
 async function togglePinned(v: PackageVersion) {
@@ -263,6 +269,7 @@ async function togglePinned(v: PackageVersion) {
                             <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
                             <td class="row-actions">
                               <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
+<button class="ghost small" onClick={() => showDetail(v)}>Detail</button>
 <button class="ghost small" onClick={() => showOverview(v)}>CVEs</button>
                               <button class="ghost small" onClick={() => togglePinned(v)}>{v.pinned ? "Unpin" : "Pin"}</button>
                               <button class="ghost small danger" onClick={() => deleteVersion(v.id)}>Delete</button>
@@ -274,6 +281,72 @@ async function togglePinned(v: PackageVersion) {
                   </table>
                 </Show>
                 <Show when={overview()}><div class="metadata-view"><header><strong>Dependency vulnerability overview</strong><button class="ghost small" onClick={() => setOverview(null)}>×</button></header><Show when={overview()!.length} fallback={<p class="hint pad">No local CVEs recorded (no-op scanner).</p>}><ul><For each={overview()!}>{(v) => <li><strong>{v.cve_id}</strong> · {v.severity} · {v.affected_range}</li>}</For></ul></Show></div></Show>
+<Show when={detail()}>
+                  {(d) => (
+                    <div class="metadata-view">
+                      <header>
+                        <strong>Typed detail · {d().format}</strong>
+                        <button class="ghost small" onClick={() => setDetail(null)}>×</button>
+                      </header>
+                      <Switch>
+                        <Match when={d().format === "nuget" ? (d() as Extract<PackageDetail, { format: "nuget" }>) : null}>
+                          {(n) => (
+                            <dl class="detail-list">
+                              <dt>Id</dt><dd><code>{n().id}</code> <code>{n().version}</code></dd>
+                              <dt>Authors</dt><dd>{n().authors ?? "—"}</dd>
+                              <dt>Description</dt><dd>{n().description ?? "—"}</dd>
+                              <dt>License</dt><dd>{n().license ?? "—"}</dd>
+                              <dt>Tags</dt><dd>{n().tags.length ? n().tags.join(", ") : "—"}</dd>
+                              <dt>Dependencies</dt><dd><Show when={n().dependencies.length} fallback="—"><ul><For each={n().dependencies}>{(x) => <li>{x.name} <code>{x.requirement}</code></li>}</For></ul></Show></dd>
+                            </dl>
+                          )}
+                        </Match>
+                        <Match when={d().format === "pypi" ? (d() as Extract<PackageDetail, { format: "pypi" }>) : null}>
+                          {(p) => (
+                            <dl class="detail-list">
+                              <dt>Name</dt><dd><code>{p().name}</code> <code>{p().version}</code></dd>
+                              <dt>Summary</dt><dd>{p().summary ?? "—"}</dd>
+                              <dt>Requires-Python</dt><dd>{p().requires_python ?? "—"}</dd>
+                              <dt>Requires-Dist</dt><dd><Show when={p().requires_dist.length} fallback="—"><ul><For each={p().requires_dist}>{(x) => <li>{x.name} <code>{x.requirement}</code></li>}</For></ul></Show></dd>
+                              <dt>Files</dt><dd><Show when={p().files.length} fallback="—"><ul><For each={p().files}>{(f) => <li><code>{f}</code></li>}</For></ul></Show></dd>
+                            </dl>
+                          )}
+                        </Match>
+                        <Match when={d().format === "composer" ? (d() as Extract<PackageDetail, { format: "composer" }>) : null}>
+                          {(c) => (
+                            <dl class="detail-list">
+                              <dt>Name</dt><dd><code>{c().name}</code> <code>{c().version}</code></dd>
+                              <dt>Description</dt><dd>{c().description ?? "—"}</dd>
+                              <dt>Type</dt><dd>{c().package_type ?? "—"}</dd>
+                              <dt>Licenses</dt><dd>{c().licenses.length ? c().licenses.join(", ") : "—"}</dd>
+                              <dt>Require</dt><dd><Show when={c().require.length} fallback="—"><ul><For each={c().require}>{(x) => <li>{x.name} <code>{x.requirement}</code></li>}</For></ul></Show></dd>
+                            </dl>
+                          )}
+                        </Match>
+                        <Match when={d().format === "container" ? (d() as Extract<PackageDetail, { format: "container" }>) : null}>
+                          {(o) => (
+                            <dl class="detail-list">
+                              <dt>Reference</dt><dd><code>{o().name}:{o().reference}</code></dd>
+                              <dt>Media type</dt><dd><code>{o().media_type ?? "—"}</code></dd>
+                              <dt>Config</dt><dd>{o().config ? <code>{o().config!.digest} · {o().config!.size} B</code> : "—"}</dd>
+                              <dt>Layers</dt><dd><Show when={o().layers.length} fallback="—"><ul><For each={o().layers}>{(l) => <li><code>{l.digest}</code> · {l.media_type} · {l.size} B</li>}</For></ul></Show></dd>
+                              <dt>Total size</dt><dd>{o().total_size} B</dd>
+                              <dt>Subject</dt><dd>{o().subject ? <code>{o().subject}</code> : "—"}</dd>
+                            </dl>
+                          )}
+                        </Match>
+                        <Match when={d().format === "generic" ? (d() as Extract<PackageDetail, { format: "generic" }>) : null}>
+                          {(g) => (
+                            <>
+                              <p class="hint pad">No protocol model for this format — the publisher's own projection, unchanged.</p>
+                              <pre>{JSON.stringify(g().fields, null, 2)}</pre>
+                            </>
+                          )}
+                        </Match>
+                      </Switch>
+                    </div>
+                  )}
+                </Show>
 <Show when={viewingMeta()}>
                   {(v) => (
                     <div class="metadata-view">

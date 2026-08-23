@@ -1832,6 +1832,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_package_version"
         | "add_package_vulnerability" => CommandPolicy::PackageRepositoryAdmin,
         "package_retention_candidates"
+        | "package_version_detail"
         | "repository_vulnerability_report"
         | "list_package_versions"
         | "list_package_repository_acl"
@@ -3291,7 +3292,7 @@ async fn registry_composer_get(
             let base = registry_base_url(&headers, &repository_id, "composer");
             (
                 StatusCode::OK,
-                Json(package_registry::composer_packages_json(&base)),
+                Json(package_registry::composer_packages_json(&base, &repository_id)),
             )
                 .into_response()
         }
@@ -3304,9 +3305,82 @@ async fn registry_composer_get(
         Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
     }
 }
-/// OCI distribution spec v2 (read side): tag list, tag-addressed manifest, referrers.
-/// Blob addressing needs a content-addressed store this registry does not have yet, so it is
-/// reported as unsupported rather than faked.
+/// `Docker-Content-Digest` — the header clients read to confirm what they just fetched or
+/// pushed is the content they addressed.
+const DOCKER_CONTENT_DIGEST: axum::http::HeaderName =
+    axum::http::HeaderName::from_static("docker-content-digest");
+const DOCKER_UPLOAD_UUID: axum::http::HeaderName =
+    axum::http::HeaderName::from_static("docker-upload-uuid");
+/// `POST /v2/{name}/blobs/uploads/` — monolithic upload when `?digest=` carries the digest and
+/// the body carries the blob, otherwise a session start whose `Location` the client PUTs to.
+async fn registry_oci_post(
+    headers: HeaderMap,
+    Path((repository_id, path)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    payload: Bytes,
+) -> axum::response::Response {
+    if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
+        return response;
+    }
+    let (package_name, target) = match package_registry::oci_coordinates(&path) {
+        Ok(value) => value,
+        Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+    };
+    if !matches!(target, package_registry::OciTarget::BlobUploadStart) {
+        return err(StatusCode::BAD_REQUEST, "POST is only for blobs/uploads/").into_response();
+    }
+    let uploads_base = format!("/api/registry/{repository_id}/v2/{package_name}/blobs/uploads");
+    match query.get("digest") {
+        // Monolithic POST: the whole blob arrives with its digest, so it is stored now.
+        Some(digest) if !payload.is_empty() => {
+            match package_registry::store_blob(
+                &pipelines::package_base_dir(),
+                &repository_id,
+                &payload,
+                Some(digest),
+            ) {
+                Ok(stored) => blob_created(&repository_id, &package_name, &stored),
+                Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+            }
+        }
+        // Session start. The session id is opaque and carries no state: the PUT that closes it
+        // supplies the bytes and the digest, and content addressing decides where they land.
+        _ => {
+            let session = new_upload_session();
+            (
+                StatusCode::ACCEPTED,
+                [
+                    (header::LOCATION, format!("{uploads_base}/{session}")),
+                    (DOCKER_UPLOAD_UUID, session.clone()),
+                    (header::RANGE, "0-0".to_string()),
+                ],
+            )
+                .into_response()
+        }
+    }
+}
+/// A random, opaque upload session id. It is not a key into anything — see `registry_oci_post`.
+fn new_upload_session() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+/// The 201 every accepted blob push answers with, per distribution-spec.
+fn blob_created(repository_id: &str, package_name: &str, digest: &str) -> axum::response::Response {
+    (
+        StatusCode::CREATED,
+        [
+            (
+                header::LOCATION,
+                format!("/api/registry/{repository_id}/v2/{package_name}/blobs/{digest}"),
+            ),
+            (DOCKER_CONTENT_DIGEST, digest.to_string()),
+        ],
+    )
+        .into_response()
+}
+/// OCI distribution spec v2 (read side): tag list, tag-addressed manifest, referrers and
+/// digest-addressed blobs out of the content-addressed store.
 async fn registry_oci_get(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
@@ -3350,17 +3424,41 @@ async fn registry_oci_get(
                 Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
             }
         }
-        package_registry::OciTarget::Blob { .. } => err(
-            StatusCode::NOT_IMPLEMENTED,
-            "blob addressing requires a content-addressed store (not implemented)",
+        package_registry::OciTarget::Blob { digest } => {
+            match package_registry::read_blob(
+                &pipelines::package_base_dir(),
+                &repository_id,
+                &digest,
+            ) {
+                Ok(bytes) => (
+                    StatusCode::OK,
+                    [
+                        (
+                            header::CONTENT_TYPE,
+                            "application/octet-stream".to_string(),
+                        ),
+                        (DOCKER_CONTENT_DIGEST, digest.clone()),
+                    ],
+                    bytes,
+                )
+                    .into_response(),
+                Err(error) => err(StatusCode::NOT_FOUND, &error).into_response(),
+            }
+        }
+        package_registry::OciTarget::BlobUploadStart
+        | package_registry::OciTarget::BlobUpload { .. } => err(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "blob uploads are POST/PUT, not GET",
         )
         .into_response(),
     }
 }
-/// `PUT /v2/{name}/manifests/{tag}` stores one tagged manifest as a package version.
+/// `PUT /v2/{name}/manifests/{tag}` stores one tagged manifest as a package version;
+/// `PUT /v2/{name}/blobs/uploads/{session}?digest=` closes a blob upload into the store.
 async fn registry_oci_put(
     headers: HeaderMap,
     Path((repository_id, path)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
     payload: Bytes,
 ) -> axum::response::Response {
     if let Err(response) = registry_repo_auth(&headers, &repository_id, true) {
@@ -3370,10 +3468,31 @@ async fn registry_oci_put(
         Ok(value) => value,
         Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
     };
+    if matches!(
+        target,
+        package_registry::OciTarget::BlobUpload { .. } | package_registry::OciTarget::BlobUploadStart
+    ) {
+        let Some(digest) = query.get("digest") else {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "blob upload must close with ?digest={algorithm}:{hex}",
+            )
+            .into_response();
+        };
+        return match package_registry::store_blob(
+            &pipelines::package_base_dir(),
+            &repository_id,
+            &payload,
+            Some(digest),
+        ) {
+            Ok(stored) => blob_created(&repository_id, &package_name, &stored),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
     let package_registry::OciTarget::Manifest { reference } = target else {
         return err(
             StatusCode::NOT_IMPLEMENTED,
-            "only tagged manifest upload is supported",
+            "only tagged manifest and blob upload are supported",
         )
         .into_response();
     };
@@ -3864,6 +3983,7 @@ async fn cmd(
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "package_retention_candidates" => pipelines::package_retention_candidates(repository_id: String),
+    "package_version_detail" => package_registry::package_version_detail(repository_id: String, package_name: String, version: String),
     "repository_vulnerability_report" => pipelines::repository_vulnerability_report(repository_id: String, min_severity: Option<String>),
     "publish_package_version" => pipelines::publish_package_version(repository_id: String, package_name: String, version: String, metadata_json: Option<String>, payload_filename: Option<String>, payload_content: Option<String>, immutable: Option<bool>),
     "add_package_vulnerability" => pipelines::add_package_vulnerability(vulnerability: pipelines::PackageVulnerability),
@@ -4127,7 +4247,9 @@ async fn main() {
         )
         .route(
             "/api/registry/{repository_id}/v2/{*path}",
-            put(registry_oci_put).get(registry_oci_get),
+            put(registry_oci_put)
+                .post(registry_oci_post)
+                .get(registry_oci_get),
         )
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
@@ -4745,6 +4867,7 @@ mod tests {
             registry_oci_put(
                 bearer("ta"),
                 Path(("repo-oci".into(), "Library/Nginx/manifests/1.25".into())),
+                Query(HashMap::new()),
                 Bytes::from(manifest.to_string()),
             )
             .await
@@ -4756,6 +4879,7 @@ mod tests {
             registry_oci_put(
                 bearer("ta"),
                 Path(("repo-oci".into(), "library/nginx/manifests/sig-1".into())),
+                Query(HashMap::new()),
                 Bytes::from(signature.to_string()),
             )
             .await
@@ -4793,7 +4917,89 @@ mod tests {
         .await;
         assert_eq!(stored_manifest.status(), StatusCode::OK);
 
-        // Blob addressing is honestly unimplemented rather than faked.
+        // Blob addressing: monolithic POST, session PUT, digest-addressed GET.
+        let layer = b"layer-content-bytes".to_vec();
+        let digest = package_registry::compute_digest(&layer);
+        let posted = registry_oci_post(
+            bearer("ta"),
+            Path(("repo-oci".into(), "library/nginx/blobs/uploads".into())),
+            Query(HashMap::from([("digest".to_string(), digest.clone())])),
+            Bytes::from(layer.clone()),
+        )
+        .await;
+        assert_eq!(posted.status(), StatusCode::CREATED);
+        assert_eq!(
+            posted.headers().get("docker-content-digest").unwrap(),
+            digest.as_str()
+        );
+        let fetched = registry_oci_get(
+            bearer("ta"),
+            Path(("repo-oci".into(), format!("library/nginx/blobs/{digest}"))),
+        )
+        .await;
+        assert_eq!(fetched.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(fetched.into_body(), 1 << 20).await.unwrap().to_vec(),
+            layer
+        );
+        // Session start hands out a Location the client PUTs the blob to.
+        let started = registry_oci_post(
+            bearer("ta"),
+            Path(("repo-oci".into(), "library/nginx/blobs/uploads".into())),
+            Query(HashMap::new()),
+            Bytes::new(),
+        )
+        .await;
+        assert_eq!(started.status(), StatusCode::ACCEPTED);
+        let location = started
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let session_path = location.split("/v2/").nth(1).unwrap().to_string();
+        let config = b"{\"config\":true}".to_vec();
+        let config_digest = package_registry::compute_digest(&config);
+        assert_eq!(
+            registry_oci_put(
+                bearer("ta"),
+                Path(("repo-oci".into(), session_path.clone())),
+                Query(HashMap::from([(
+                    "digest".to_string(),
+                    config_digest.clone()
+                )])),
+                Bytes::from(config.clone()),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        // A digest that does not describe the bytes is refused, not stored.
+        assert_eq!(
+            registry_oci_put(
+                bearer("ta"),
+                Path(("repo-oci".into(), session_path)),
+                Query(HashMap::from([("digest".to_string(), digest.clone())])),
+                Bytes::from(b"different".to_vec()),
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        // Unknown digest is a 404; a malformed one is a 400.
+        assert_eq!(
+            registry_oci_get(
+                bearer("ta"),
+                Path((
+                    "repo-oci".into(),
+                    format!("library/nginx/blobs/sha256:{}", "0".repeat(64))
+                )),
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
         assert_eq!(
             registry_oci_get(
                 bearer("ta"),
@@ -4801,7 +5007,7 @@ mod tests {
             )
             .await
             .status(),
-            StatusCode::NOT_IMPLEMENTED
+            StatusCode::NOT_FOUND
         );
         env::remove_var("SPACE_PACKAGE_DIR");
         let _ = std::fs::remove_dir_all(&package_dir);

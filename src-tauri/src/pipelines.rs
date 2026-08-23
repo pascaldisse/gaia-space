@@ -1392,7 +1392,7 @@ fn package_name_dir(package_name: &str) -> PathBuf {
     }
     dir
 }
-fn package_base_dir() -> PathBuf {
+pub fn package_base_dir() -> PathBuf {
     std::env::var_os("SPACE_PACKAGE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {

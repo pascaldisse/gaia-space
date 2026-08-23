@@ -88,6 +88,17 @@ export type DependencyOverview = { version: PackageVersion; vulnerabilities: Pac
 /** One version a retention policy would delete; `reason` names the limb that matched. */
 export type RetentionCandidate = { id: string; package_name: string; version: string; created_at: number; downloads: number; reason: "age" | "count" | "age+count" };
 
+/// Per-format typed detail of one stored version (Rust `package_registry::PackageDetail`).
+/// The `format` tag says which fields exist; formats without a protocol model stay generic.
+export type DetailDependency = { name: string; requirement: string };
+export type OciDescriptor = { digest: string; media_type: string; size: number };
+export type PackageDetail =
+  | { format: "nuget"; id: string; version: string; authors: string | null; description: string | null; license: string | null; tags: string[]; dependencies: DetailDependency[] }
+  | { format: "pypi"; name: string; version: string; summary: string | null; requires_python: string | null; requires_dist: DetailDependency[]; files: string[] }
+  | { format: "composer"; name: string; version: string; description: string | null; package_type: string | null; licenses: string[]; require: DetailDependency[] }
+  | { format: "container"; name: string; reference: string; media_type: string | null; config: OciDescriptor | null; layers: OciDescriptor[]; total_size: number; subject: string | null }
+  | { format: "generic"; name: string; version: string; fields: unknown };
+
 export const pipelinesApi = {
   // scripts
   listScripts: () => invoke<PipelineScript[]>("list_pipeline_scripts"),
@@ -132,6 +143,8 @@ export const pipelinesApi = {
   removePackageRepositoryAcl: (repositoryId: string, profileId: string) => invoke<void>("remove_package_repository_acl", { repositoryId, profileId }),
   applyPackageRetention: (repositoryId: string) => invoke<number>("apply_package_retention", { repositoryId }),
   packageRetentionCandidates: (repositoryId: string) => invoke<RetentionCandidate[]>("package_retention_candidates", { repositoryId }),
+  packageVersionDetail: (repositoryId: string, packageName: string, version: string) =>
+    invoke<PackageDetail>("package_version_detail", { repositoryId, packageName, version }),
   repositoryVulnerabilityReport: (repositoryId: string, minSeverity?: string) => invoke<DependencyOverview[]>("repository_vulnerability_report", { repositoryId, minSeverity: minSeverity ?? null }),
 
   // package versions

@@ -126,6 +126,10 @@ pub enum OciTarget {
     Manifest { reference: String },
     /// `/v2/{name}/blobs/{digest}`.
     Blob { digest: String },
+    /// `/v2/{name}/blobs/uploads/` — session start (POST), possibly monolithic with `?digest=`.
+    BlobUploadStart,
+    /// `/v2/{name}/blobs/uploads/{session}` — the PUT that closes a session.
+    BlobUpload { session: String },
     /// `/v2/{name}/tags/list`.
     TagList,
     /// `/v2/{name}/referrers/{digest}` — OCI artifact attachments (subject).
@@ -148,6 +152,10 @@ pub fn oci_coordinates(path: &str) -> Result<(String, OciTarget)> {
     let target = match rest {
         ["manifests", reference] => OciTarget::Manifest {
             reference: (*reference).to_string(),
+        },
+        ["blobs", "uploads"] => OciTarget::BlobUploadStart,
+        ["blobs", "uploads", session] => OciTarget::BlobUpload {
+            session: (*session).to_string(),
         },
         ["blobs", digest] => OciTarget::Blob {
             digest: (*digest).to_string(),
@@ -284,6 +292,17 @@ fn pypi_files(metadata: Option<&str>, package_name: &str, version: &str) -> Vec<
                 .or_else(|| file.get("name").and_then(Value::as_str).map(str::to_owned))
         })
         .collect();
+    // Assets uploaded through the generic route rewrite `metadata_json` into a `_files` map;
+    // those names are what storage actually holds, so they outrank the PEP 625 guess.
+    let names = if names.is_empty() {
+        metadata
+            .and_then(|m| serde_json::from_str::<Value>(m).ok())
+            .and_then(|value| value.get("_files").and_then(Value::as_object).cloned())
+            .map(|files| files.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    } else {
+        names
+    };
     if names.is_empty() {
         vec![format!(
             "{}-{version}.tar.gz",
@@ -295,13 +314,34 @@ fn pypi_files(metadata: Option<&str>, package_name: &str, version: &str) -> Vec<
 }
 
 /// Composer root service document: points clients at the `p2` metadata layout.
-pub fn composer_packages_json(registry_base: &str) -> Value {
+/// `available-packages` names what this repository actually holds; a client that reads an empty
+/// list concludes the repository is empty, so the list is built from storage, not left blank.
+pub fn composer_packages_json(registry_base: &str, repository_id: &str) -> Value {
     let base = registry_base.trim_end_matches('/');
+    let mut names: Vec<String> = composer_package_names(repository_id).unwrap_or_default();
+    names.sort();
+    names.dedup();
     json!({
         "metadata-url": format!("{base}/p2/%package%.json"),
         "providers-api": format!("{base}/p2/%package%.json"),
-        "available-packages": Value::Array(vec![]),
+        "available-packages": names,
     })
+}
+
+fn composer_package_names(repository_id: &str) -> Result<Vec<String>> {
+    let c = db::conn()?;
+    let mut statement = c
+        .prepare("SELECT DISTINCT package_name FROM package_versions WHERE repository_id=?1")
+        .map_err(|e| e.to_string())?;
+    let names = statement
+        .query_map(params![repository_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(names
+        .into_iter()
+        .map(|name| normalized_key("composer", &name))
+        .collect())
 }
 
 /// Composer `p2/{vendor}/{package}.json`: one entry per stored version, carrying the
@@ -372,6 +412,360 @@ pub fn oci_referrers(repository_id: &str, package_name: &str, digest: &str) -> R
         "mediaType": "application/vnd.oci.image.index.v1+json",
         "manifests": manifests,
     }))
+}
+
+// ---------- per-format typed detail models ----------
+//
+// The stored `metadata_json` is a free-form document: whatever the publisher (or the format's
+// own upload route) wrote. Reading it generically means every consumer re-guesses which key
+// holds an author, a dependency or a layer. These models do that reading once, per format,
+// and name the fields that format actually has — an unknown format keeps its raw projection
+// rather than being forced into a shape it does not own.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DetailDependency {
+    pub name: String,
+    /// The constraint as the publisher wrote it (`^1.2`, `>=3.8`, `[1.0,2.0)`) — never resolved.
+    pub requirement: String,
+}
+/// One layer/config descriptor of an OCI manifest.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OciDescriptor {
+    pub digest: String,
+    pub media_type: String,
+    pub size: i64,
+}
+/// What a version looks like once read through its own format's rules.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "format", rename_all = "lowercase")]
+pub enum PackageDetail {
+    Nuget {
+        id: String,
+        version: String,
+        authors: Option<String>,
+        description: Option<String>,
+        license: Option<String>,
+        tags: Vec<String>,
+        dependencies: Vec<DetailDependency>,
+    },
+    Pypi {
+        name: String,
+        version: String,
+        summary: Option<String>,
+        requires_python: Option<String>,
+        requires_dist: Vec<DetailDependency>,
+        files: Vec<String>,
+    },
+    Composer {
+        name: String,
+        version: String,
+        description: Option<String>,
+        package_type: Option<String>,
+        licenses: Vec<String>,
+        require: Vec<DetailDependency>,
+    },
+    Container {
+        name: String,
+        reference: String,
+        media_type: Option<String>,
+        config: Option<OciDescriptor>,
+        layers: Vec<OciDescriptor>,
+        total_size: i64,
+        subject: Option<String>,
+    },
+    /// Formats without a protocol model here (maven, npm, generic, …): the publisher's own
+    /// projection, unchanged. Inventing typed fields for them would be a guess, not a model.
+    Generic {
+        name: String,
+        version: String,
+        fields: Value,
+    },
+}
+fn text(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
+}
+/// `["a","b"]`, `"a b"` or `"a, b"` — all three spellings appear in real nuspec/composer files.
+fn string_list(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        Some(Value::String(text)) => text
+            .split([',', ' ', ';'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+/// `{"name":"req"}` or `["name >= 1.0", ...]` — object form is Composer/npm, list form is PyPI.
+fn dependencies(value: &Value, key: &str) -> Vec<DetailDependency> {
+    match value.get(key) {
+        Some(Value::Object(map)) => map
+            .iter()
+            .map(|(name, requirement)| DetailDependency {
+                name: name.clone(),
+                requirement: requirement
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| requirement.to_string()),
+            })
+            .collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| {
+                if let Some(text) = item.as_str() {
+                    // PEP 508: `flask >= 2.0` — the name is the leading identifier.
+                    let split = text
+                        .find(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')))
+                        .unwrap_or(text.len());
+                    let (name, requirement) = text.split_at(split);
+                    return Some(DetailDependency {
+                        name: name.trim().to_string(),
+                        requirement: requirement.trim().to_string(),
+                    });
+                }
+                Some(DetailDependency {
+                    name: text(item, "name")?,
+                    requirement: text(item, "version")
+                        .or_else(|| text(item, "requirement"))
+                        .unwrap_or_default(),
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+fn descriptor(value: &Value) -> Option<OciDescriptor> {
+    Some(OciDescriptor {
+        digest: text(value, "digest")?,
+        media_type: text(value, "mediaType").unwrap_or_default(),
+        size: value.get("size").and_then(Value::as_i64).unwrap_or_default(),
+    })
+}
+/// The publisher's typed projection: `formatMetadata` when present, else the document itself.
+fn format_projection(metadata_json: Option<&str>) -> Value {
+    let value: Value = metadata_json
+        .and_then(|m| serde_json::from_str(m).ok())
+        .unwrap_or_else(|| json!({}));
+    value
+        .get("formatMetadata")
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or(value)
+}
+/// Reads one stored version through its repository's format.
+pub fn package_detail(
+    format: &str,
+    package_name: &str,
+    version: &str,
+    metadata_json: Option<&str>,
+) -> PackageDetail {
+    let meta = format_projection(metadata_json);
+    match format {
+        "nuget" => PackageDetail::Nuget {
+            id: text(&meta, "id").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            authors: text(&meta, "authors"),
+            description: text(&meta, "description"),
+            license: text(&meta, "license").or_else(|| text(&meta, "licenseExpression")),
+            tags: string_list(&meta, "tags"),
+            dependencies: dependencies(&meta, "dependencies"),
+        },
+        "pypi" => PackageDetail::Pypi {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            summary: text(&meta, "summary").or_else(|| text(&meta, "description")),
+            requires_python: text(&meta, "requires_python")
+                .or_else(|| text(&meta, "requiresPython")),
+            requires_dist: dependencies(&meta, "requires_dist"),
+            files: pypi_files(metadata_json, package_name, version),
+        },
+        "composer" => PackageDetail::Composer {
+            name: text(&meta, "name").unwrap_or_else(|| package_name.to_string()),
+            version: text(&meta, "version").unwrap_or_else(|| version.to_string()),
+            description: text(&meta, "description"),
+            package_type: text(&meta, "type"),
+            licenses: string_list(&meta, "license"),
+            require: dependencies(&meta, "require"),
+        },
+        "container" => {
+            let manifest = meta.get("ociManifest").cloned().unwrap_or_else(|| json!({}));
+            let layers: Vec<OciDescriptor> = manifest
+                .get("layers")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(descriptor).collect())
+                .unwrap_or_default();
+            let config = manifest.get("config").and_then(descriptor);
+            // Accumulated while walking the layers, not re-derived afterwards.
+            let total_size = layers.iter().map(|layer| layer.size).sum::<i64>()
+                + config.as_ref().map(|c| c.size).unwrap_or_default();
+            PackageDetail::Container {
+                name: normalized_key("container", package_name),
+                reference: version.to_string(),
+                media_type: text(&manifest, "mediaType"),
+                config,
+                layers,
+                total_size,
+                subject: meta
+                    .get("subject")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        manifest
+                            .get("subject")
+                            .and_then(|s| s.get("digest"))
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    }),
+            }
+        }
+        _ => PackageDetail::Generic {
+            name: package_name.to_string(),
+            version: version.to_string(),
+            fields: meta,
+        },
+    }
+}
+/// Typed detail of one stored version, read through the repository's declared format.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn package_version_detail(
+    repository_id: String,
+    package_name: String,
+    version: String,
+) -> Result<PackageDetail> {
+    let c = db::conn()?;
+    let format: String = c
+        .query_row(
+            "SELECT format FROM package_repositories WHERE id=?1",
+            params![repository_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "package repository not found".to_string())?;
+    let metadata: Option<String> = c
+        .query_row(
+            "SELECT metadata_json FROM package_versions WHERE repository_id=?1 AND package_name=?2 AND version=?3",
+            params![repository_id, package_name, version],
+            |r| r.get(0),
+        )
+        .map_err(|_| "package version not found".to_string())?;
+    Ok(package_detail(
+        &format,
+        &package_name,
+        &version,
+        metadata.as_deref(),
+    ))
+}
+
+// ---------- OCI content-addressed blob store ----------
+//
+// Blobs are addressed by their own content digest, so the store is a pure function of the
+// bytes: `{package base dir}/_blobs/{repository}/{algo}/{aa}/{hex}`. Nothing is written under
+// a client-supplied name, and a digest that does not match the bytes is refused rather than
+// stored under a lie.
+use std::fs;
+use std::path::{Path, PathBuf};
+/// The one digest algorithm this store accepts. Adding another means adding a real
+/// implementation for it — an unknown algorithm is rejected, never silently treated as sha256.
+pub const BLOB_DIGEST_ALGORITHM: &str = "sha256";
+/// `sha256:{64 lower-case hex}` → `(algorithm, hex)`.
+pub fn parse_digest(digest: &str) -> Result<(String, String)> {
+    let (algorithm, hex) = digest
+        .split_once(':')
+        .ok_or_else(|| "digest must be {algorithm}:{hex}".to_string())?;
+    if algorithm != BLOB_DIGEST_ALGORITHM {
+        return Err(format!("unsupported digest algorithm '{algorithm}'"));
+    }
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        return Err("sha256 digest must be 64 lower-case hex characters".into());
+    }
+    Ok((algorithm.to_string(), hex.to_string()))
+}
+/// The digest of these bytes, in the wire form clients send back.
+pub fn compute_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{BLOB_DIGEST_ALGORITHM}:{}", hex::encode(Sha256::digest(bytes)))
+}
+fn safe_repository(repository_id: &str) -> Result<()> {
+    if repository_id.is_empty()
+        || !repository_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        || repository_id.starts_with('.')
+    {
+        return Err("invalid repository id for blob storage".into());
+    }
+    Ok(())
+}
+/// Where a digest lives. Path components come from the *validated* digest, never from a path
+/// the client wrote, so traversal has no surface here.
+pub fn blob_path(base_dir: &Path, repository_id: &str, digest: &str) -> Result<PathBuf> {
+    safe_repository(repository_id)?;
+    let (algorithm, hex) = parse_digest(digest)?;
+    Ok(base_dir
+        .join("_blobs")
+        .join(repository_id)
+        .join(algorithm)
+        .join(&hex[..2])
+        .join(hex))
+}
+/// Writes bytes under their own digest. `expected` (the client's `?digest=`) must match the
+/// bytes actually received; a mismatch is the spec's `DIGEST_INVALID`, not a stored blob.
+/// Re-uploading an identical blob is a no-op — content addressing makes it idempotent.
+pub fn store_blob(
+    base_dir: &Path,
+    repository_id: &str,
+    bytes: &[u8],
+    expected: Option<&str>,
+) -> Result<String> {
+    let digest = compute_digest(bytes);
+    if let Some(expected) = expected {
+        let (_, expected_hex) = parse_digest(expected)?;
+        if !digest.ends_with(&expected_hex) {
+            return Err(format!("digest mismatch: bytes hash to {digest}"));
+        }
+    }
+    let path = blob_path(base_dir, repository_id, &digest)?;
+    if path.exists() {
+        return Ok(digest);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "blob path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("cannot create blob directory: {e}"))?;
+    // Write-then-rename: a reader never sees a half-written blob under a digest that promises
+    // the whole content.
+    let staging = parent.join(format!(".{}.partial", &digest[digest.len() - 32..]));
+    fs::write(&staging, bytes).map_err(|e| format!("cannot write blob: {e}"))?;
+    fs::rename(&staging, &path).map_err(|e| format!("cannot commit blob: {e}"))?;
+    Ok(digest)
+}
+/// Reads a blob and re-verifies it against the digest it was asked for. The check is done on
+/// the bytes read from disk, not on the path that produced them — a corrupted or swapped file
+/// fails here instead of being served as if it were the requested content.
+pub fn read_blob(base_dir: &Path, repository_id: &str, digest: &str) -> Result<Vec<u8>> {
+    let path = blob_path(base_dir, repository_id, digest)?;
+    let bytes = fs::read(&path).map_err(|_| "blob not found".to_string())?;
+    if compute_digest(&bytes) != digest {
+        return Err("stored blob does not match its digest".into());
+    }
+    Ok(bytes)
+}
+/// Whether a digest is present (the `HEAD` / mount-check answer), without reading it.
+pub fn blob_exists(base_dir: &Path, repository_id: &str, digest: &str) -> bool {
+    blob_path(base_dir, repository_id, digest).is_ok_and(|path| path.is_file())
+}
+/// Size in bytes of a stored blob — what a `HEAD` response reports as `Content-Length`.
+pub fn blob_size(base_dir: &Path, repository_id: &str, digest: &str) -> Result<u64> {
+    let path = blob_path(base_dir, repository_id, digest)?;
+    fs::metadata(&path)
+        .map(|meta| meta.len())
+        .map_err(|_| "blob not found".to_string())
 }
 
 #[cfg(test)]
@@ -461,13 +855,229 @@ mod tests {
             index["resources"][0]["@id"],
             "https://space.example/api/registry/repo/nuget/"
         );
-        let composer = composer_packages_json("https://space.example/api/registry/repo/composer");
+        let composer = composer_packages_json("https://space.example/api/registry/repo/composer", "repo");
         assert_eq!(
             composer["metadata-url"],
             "https://space.example/api/registry/repo/composer/p2/%package%.json"
         );
     }
 
+    fn blob_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "gaia-space-blobstore-test-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    #[test]
+    fn each_format_reads_its_own_metadata_shape() {
+        let nuget = package_detail(
+            "nuget",
+            "Newtonsoft.Json",
+            "13.0.1",
+            Some(
+                r#"{"formatMetadata":{"id":"Newtonsoft.Json","version":"13.0.1","authors":"James Newton-King","tags":"json serializer","dependencies":{"System.Text.Json":"[6.0,)"}}}"#,
+            ),
+        );
+        let PackageDetail::Nuget {
+            authors,
+            tags,
+            dependencies,
+            ..
+        } = nuget
+        else {
+            panic!("nuget repository must yield a nuget detail");
+        };
+        assert_eq!(authors.as_deref(), Some("James Newton-King"));
+        assert_eq!(tags, vec!["json".to_string(), "serializer".to_string()]);
+        assert_eq!(
+            dependencies,
+            vec![DetailDependency {
+                name: "System.Text.Json".into(),
+                requirement: "[6.0,)".into()
+            }]
+        );
+        let pypi = package_detail(
+            "pypi",
+            "Flask-Login",
+            "0.6.3",
+            Some(r#"{"formatMetadata":{"summary":"session auth","requires_python":">=3.8","requires_dist":["flask >= 2.0","werkzeug"]}}"#),
+        );
+        let PackageDetail::Pypi {
+            summary,
+            requires_python,
+            requires_dist,
+            files,
+            ..
+        } = pypi
+        else {
+            panic!("pypi repository must yield a pypi detail");
+        };
+        assert_eq!(summary.as_deref(), Some("session auth"));
+        assert_eq!(requires_python.as_deref(), Some(">=3.8"));
+        assert_eq!(requires_dist[0].name, "flask");
+        assert_eq!(requires_dist[0].requirement, ">= 2.0");
+        assert_eq!(requires_dist[1].requirement, "");
+        assert_eq!(files, vec!["flask_login-0.6.3.tar.gz".to_string()]);
+        let composer = package_detail(
+            "composer",
+            "monolog/monolog",
+            "3.5.0",
+            Some(r#"{"formatMetadata":{"description":"logging","type":"library","license":["MIT"],"require":{"php":"^8.1"}}}"#),
+        );
+        let PackageDetail::Composer {
+            package_type,
+            licenses,
+            require,
+            ..
+        } = composer
+        else {
+            panic!("composer repository must yield a composer detail");
+        };
+        assert_eq!(package_type.as_deref(), Some("library"));
+        assert_eq!(licenses, vec!["MIT".to_string()]);
+        assert_eq!(require[0].requirement, "^8.1");
+        let container = package_detail(
+            "container",
+            "Library/Nginx",
+            "1.25",
+            Some(
+                r#"{"formatMetadata":{"ociManifest":{"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"digest":"sha256:cfg","mediaType":"application/vnd.oci.image.config.v1+json","size":7},"layers":[{"digest":"sha256:l1","mediaType":"application/vnd.oci.image.layer.v1.tar","size":100},{"digest":"sha256:l2","mediaType":"application/vnd.oci.image.layer.v1.tar","size":20}]},"subject":"sha256:deadbeef"}}"#,
+            ),
+        );
+        let PackageDetail::Container {
+            name,
+            layers,
+            total_size,
+            subject,
+            config,
+            ..
+        } = container
+        else {
+            panic!("container repository must yield a container detail");
+        };
+        assert_eq!(name, "library/nginx");
+        assert_eq!(layers.len(), 2);
+        assert_eq!(config.unwrap().digest, "sha256:cfg");
+        // Independent path: 7 + 100 + 20 written out, not re-summed by the same fold.
+        assert_eq!(total_size, 127);
+        assert_eq!(subject.as_deref(), Some("sha256:deadbeef"));
+    }
+    #[test]
+    fn a_format_without_a_model_keeps_its_raw_projection() {
+        let detail = package_detail("maven", "com.example:app", "1.0", Some(r#"{"anything":1}"#));
+        assert_eq!(
+            detail,
+            PackageDetail::Generic {
+                name: "com.example:app".into(),
+                version: "1.0".into(),
+                fields: json!({"anything": 1}),
+            }
+        );
+        // Absent/broken metadata must not panic and must not invent fields.
+        assert_eq!(
+            package_detail("nuget", "pkg", "1.0", Some("not json")),
+            PackageDetail::Nuget {
+                id: "pkg".into(),
+                version: "1.0".into(),
+                authors: None,
+                description: None,
+                license: None,
+                tags: vec![],
+                dependencies: vec![],
+            }
+        );
+    }
+    #[test]
+    fn digests_are_parsed_strictly() {
+        assert!(parse_digest(&format!("sha256:{}", "a".repeat(64))).is_ok());
+        assert!(parse_digest("sha256:abc").is_err());
+        assert!(parse_digest(&format!("sha512:{}", "a".repeat(64))).is_err());
+        assert!(parse_digest(&format!("sha256:{}", "A".repeat(64))).is_err());
+        assert!(parse_digest("nocolon").is_err());
+        assert_eq!(
+            compute_digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+    #[test]
+    fn blobs_round_trip_by_digest_and_reject_a_lying_digest() {
+        let dir = blob_test_dir("round-trip");
+        let digest = store_blob(&dir, "repo-1", b"layer-bytes", None).unwrap();
+        // Independent check: the digest the store returned must equal an outside sha256 of the
+        // same bytes, computed without going through store_blob.
+        {
+            use sha2::{Digest, Sha256};
+            assert_eq!(
+                digest,
+                format!("sha256:{}", hex::encode(Sha256::digest(b"layer-bytes")))
+            );
+        }
+        assert_eq!(read_blob(&dir, "repo-1", &digest).unwrap(), b"layer-bytes");
+        assert!(blob_exists(&dir, "repo-1", &digest));
+        assert_eq!(blob_size(&dir, "repo-1", &digest).unwrap(), 11);
+        // Same bytes again: idempotent, same digest, no error.
+        assert_eq!(
+            store_blob(&dir, "repo-1", b"layer-bytes", Some(&digest)).unwrap(),
+            digest
+        );
+        // A declared digest that does not describe the bytes is refused.
+        assert!(store_blob(&dir, "repo-1", b"other", Some(&digest))
+            .unwrap_err()
+            .contains("digest mismatch"));
+        // Blobs are per repository: another repository does not see it.
+        assert!(!blob_exists(&dir, "repo-2", &digest));
+        assert!(read_blob(&dir, "repo-2", &digest).is_err());
+        // No partial files survive a successful write.
+        let stored = blob_path(&dir, "repo-1", &digest).unwrap();
+        let leftovers: Vec<_> = fs::read_dir(stored.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staging files must not survive");
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn blob_paths_cannot_escape_the_store() {
+        let dir = blob_test_dir("escape");
+        assert!(blob_path(&dir, "../etc", &compute_digest(b"x")).is_err());
+        assert!(blob_path(&dir, "repo", "sha256:../../etc/passwd").is_err());
+        assert!(blob_path(&dir, "", &compute_digest(b"x")).is_err());
+        let ok = blob_path(&dir, "repo", &compute_digest(b"x")).unwrap();
+        assert!(ok.starts_with(dir.join("_blobs").join("repo").join("sha256")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn oci_upload_paths_parse() {
+        assert_eq!(
+            oci_coordinates("library/nginx/blobs/uploads").unwrap(),
+            ("library/nginx".into(), OciTarget::BlobUploadStart)
+        );
+        assert_eq!(
+            oci_coordinates("nginx/blobs/uploads/session-1").unwrap(),
+            (
+                "nginx".into(),
+                OciTarget::BlobUpload {
+                    session: "session-1".into()
+                }
+            )
+        );
+        assert_eq!(
+            oci_coordinates(&format!("nginx/blobs/sha256:{}", "a".repeat(64))).unwrap(),
+            (
+                "nginx".into(),
+                OciTarget::Blob {
+                    digest: format!("sha256:{}", "a".repeat(64))
+                }
+            )
+        );
+    }
     #[test]
     fn pypi_filenames_fall_back_to_pep625_sdist_name() {
         assert_eq!(
