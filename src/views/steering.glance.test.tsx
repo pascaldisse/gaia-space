@@ -78,8 +78,8 @@ describe("project at a glance inside Steering", () => {
           { id: "d2", container_type: "kb", container_id: null, folder_id: null, doc_type: "md", title: "Other", body: null, version: 1, archived: false },
         ];
         case "list_meetings": return [
-          { id: "m1", title: "Standup", description: null, starts_at: Date.now() / 1000 + 3600, ends_at: Date.now() / 1000 + 7200, rrule: null, location: null, organizer_id: null, channel_id: "c1", archived: false },
-          { id: "m2", title: "Past", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: null, channel_id: "c1", archived: false },
+          { id: "m1", title: "Standup", description: null, starts_at: Date.now() / 1000 + 3600, ends_at: Date.now() / 1000 + 7200, rrule: null, location: null, organizer_id: null, channel_id: "c1", video_status: "scheduled", archived: false },
+          { id: "m2", title: "Past", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: null, channel_id: "c1", video_status: "scheduled", archived: false },
         ];
         case "list_package_repositories": return [{ id: "pk1", project_id: "p1", name: "repo", format: "npm", mode: "HOSTING", description: null, archived: false }];
         default: return [];

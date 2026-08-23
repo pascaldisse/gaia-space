@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 85;
+pub const SCHEMA_VERSION: i64 = 86;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -583,6 +583,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 85 {
         tx.execute_batch(SCHEMA_V85)?;
     }
+    // V86: lifecycle is persisted independently from generic meeting archival.
+    if version < 86 && table_exists(&tx, "meetings")? {
+        tx.execute_batch(SCHEMA_V86)?;
+        add_column_if_missing(&tx, "meetings", "video_status", "TEXT NOT NULL DEFAULT 'scheduled' CHECK(video_status IN ('scheduled','live','ended','cancelled'))")?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -1026,6 +1031,13 @@ CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_right
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
 /// V85: durable transcription substrate; captions and summaries derive from these segments.
+
+/// V86: lifecycle state for the provider-backed video room. The selected provider
+/// itself arrives in V87; splitting the facts keeps existing meetings safely native.
+pub(crate) const SCHEMA_V86: &str = r#"
+-- column-only migration; see migrate() for table/column guards.
+"#;
+
 pub(crate) const SCHEMA_V85: &str = r#"
 CREATE TABLE IF NOT EXISTS call_transcript_segments (
     id TEXT PRIMARY KEY,
@@ -2200,5 +2212,25 @@ mod v39_webhook_migration_tests {
             )
             .expect("calendar owner");
         assert_eq!(profile, "default-org");
+    }
+}
+
+#[cfg(test)]
+mod v86_video_status_migration_tests {
+    use super::*;
+
+    #[test]
+    fn latest_schema_persists_only_the_documented_video_lifecycle_default() {
+        let c = open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        let columns: Vec<String> = c
+            .prepare("PRAGMA table_info(meetings)").unwrap()
+            .query_map([], |row| row.get(1)).unwrap()
+            .map(|row| row.unwrap()).collect();
+        assert!(columns.contains(&"video_status".to_string()));
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at) VALUES('video-status','Status',1,2)", []).unwrap();
+        let status: String = c.query_row("SELECT video_status FROM meetings WHERE id='video-status'", [], |row| row.get(0)).unwrap();
+        assert_eq!(status, "scheduled");
+        assert!(c.execute("UPDATE meetings SET video_status='paused' WHERE id='video-status'", []).is_err());
     }
 }

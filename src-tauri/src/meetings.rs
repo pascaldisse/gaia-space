@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, String>;
 const RSVP_STATUSES: [&str; 3] = ["invited", "accepted", "declined"];
+const VIDEO_STATUSES: [&str; 4] = ["scheduled", "live", "ended", "cancelled"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meeting {
@@ -18,6 +19,7 @@ pub struct Meeting {
     pub location: Option<String>,
     pub organizer_id: Option<String>,
     pub channel_id: Option<String>,
+    pub video_status: String,
     pub archived: bool,
 }
 
@@ -49,7 +51,8 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         location: r.get(6)?,
         organizer_id: r.get(7)?,
         channel_id: r.get(8)?,
-        archived: r.get(9)?,
+        video_status: r.get(9)?,
+        archived: r.get(10)?,
     })
 }
 
@@ -63,10 +66,13 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     if let Some(rule) = &meeting.rrule {
         parse_rule(rule)?;
     }
+    if !VIDEO_STATUSES.contains(&meeting.video_status.as_str()) {
+        return Err("Video status must be scheduled, live, ended, or cancelled".into());
+    }
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.archived";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.video_status,m.archived";
 /// Meeting read scope: organizer, explicitly invited participant, or a member of
 /// the project attached through the meeting's channel.
 const MEETING_READ_SCOPE: &str = "(m.organizer_id=?1 OR EXISTS(SELECT 1 FROM meeting_participants mp WHERE mp.meeting_id=m.id AND mp.profile_id=?1) OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id WHERE ch.id=m.channel_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))))";
@@ -147,7 +153,7 @@ pub fn get_meeting(id: String, profile_id: String) -> Result<Option<Meeting>> {
 pub fn create_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,video_status,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_status, meeting.archived]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -155,7 +161,7 @@ pub fn create_meeting(meeting: Meeting) -> Result<()> {
 pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,archived=?10 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.archived]).map_err(|e| e.to_string())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,video_status=?10,archived=?11 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.video_status, meeting.archived]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -431,6 +437,7 @@ mod tests {
             location: None,
             organizer_id: Some("default-org".into()),
             channel_id: None,
+            video_status: "scheduled".into(),
             archived: false,
         }
     }
@@ -525,6 +532,21 @@ mod tests {
         assert!(
             one.is_none(),
             "get_meeting cannot reach outside the scope either"
+        );
+    }
+
+    #[test]
+    fn validates_only_the_documented_video_lifecycle_states() {
+        for status in VIDEO_STATUSES {
+            let mut value = meeting(1_000, None);
+            value.video_status = status.into();
+            assert!(validate_meeting(&value).is_ok(), "{status} must be accepted");
+        }
+        let mut invalid = meeting(1_000, None);
+        invalid.video_status = "paused".into();
+        assert_eq!(
+            validate_meeting(&invalid).unwrap_err(),
+            "Video status must be scheduled, live, ended, or cancelled"
         );
     }
 
