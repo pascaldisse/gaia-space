@@ -761,6 +761,62 @@ textarea:focus {
   color: #c8c8c8;
 }
 
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  padding: 0.3em 0.9em;
+}
+
+.diff-modes {
+  display: flex;
+  gap: 0.3em;
+}
+
+.diff-modes button.active {
+  font-weight: 600;
+}
+
+.diff-side {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.diff-side-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.diff-side-cell {
+  display: flex;
+  gap: 0.6em;
+  padding: 0 0.9em;
+  white-space: pre;
+  overflow-x: auto;
+  color: #c8c8c8;
+}
+
+.diff-side-cell.add {
+  background: #10321f;
+  color: #9be8ac;
+}
+
+.diff-side-cell.del {
+  background: #3a1616;
+  color: #f5a3a3;
+}
+
+.diff-side-cell.empty {
+  background: #1a1a1a;
+}
+
+.diff-lno {
+  min-width: 3em;
+  text-align: right;
+  color: #7a7a7a;
+}
+
 .error {
   color: #e05252;
 }
