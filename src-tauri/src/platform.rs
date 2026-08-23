@@ -49,6 +49,22 @@ pub struct Profile {
     pub archived: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProfileEmailStatus { pub profile_id: String, pub status: String, pub verified_at: Option<i64> }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MessengerContact { pub id: Option<String>, pub profile_id: String, pub contact_type: String, pub login: String, pub deep_link: Option<String> }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Principal { pub id: String, pub kind: String, pub profile_id: Option<String>, pub label: String }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_profile_email_status(profile_id: String) -> Result<ProfileEmailStatus> { let c=db::conn()?; Ok(c.query_row("SELECT profile_id,status,verified_at FROM profile_email_statuses WHERE profile_id=?1", [&profile_id], |r| Ok(ProfileEmailStatus{profile_id:r.get(0)?,status:r.get(1)?,verified_at:r.get(2)?})).optional()?.unwrap_or(ProfileEmailStatus{profile_id,status:"unverified".into(),verified_at:None})) }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_profile_email_status(value: ProfileEmailStatus) -> Result<()> { if !["unverified","verified","bounced"].contains(&value.status.as_str()) { return Err("Invalid email status".into()) }; let c=db::conn()?; c.execute("INSERT INTO profile_email_statuses(profile_id,status,verified_at) VALUES(?1,?2,?3) ON CONFLICT(profile_id) DO UPDATE SET status=excluded.status,verified_at=excluded.verified_at",params![value.profile_id,value.status,value.verified_at]).map_err(|e|e.to_string())?; Ok(()) }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_messenger_contacts(profile_id: String) -> Result<Vec<MessengerContact>> { let c=db::conn()?; let mut q=c.prepare("SELECT id,profile_id,contact_type,login,deep_link FROM profile_messenger_contacts WHERE profile_id=?1 ORDER BY contact_type,login").map_err(|e|e.to_string())?; q.query_map([profile_id],|r| Ok(MessengerContact{id:Some(r.get(0)?),profile_id:r.get(1)?,contact_type:r.get(2)?,login:r.get(3)?,deep_link:r.get(4)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string()) }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn save_messenger_contact(mut value: MessengerContact) -> Result<MessengerContact> { if value.contact_type.trim().is_empty() || value.login.trim().is_empty() { return Err("Contact type and login are required".into()) }; let id=value.id.clone().unwrap_or_else(||new_id("contact")); let c=db::conn()?; c.execute("INSERT INTO profile_messenger_contacts(id,profile_id,contact_type,login,deep_link) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile_id,contact_type,login) DO UPDATE SET deep_link=excluded.deep_link",params![id,value.profile_id,value.contact_type.trim(),value.login.trim(),value.deep_link]).map_err(|e|e.to_string())?; value.id=Some(id); Ok(value) }
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_principals() -> Result<Vec<Principal>> { let c=db::conn()?; let mut q=c.prepare("SELECT id,kind,profile_id,label FROM principals ORDER BY label").map_err(|e|e.to_string())?; q.query_map([],|r| Ok(Principal{id:r.get(0)?,kind:r.get(1)?,profile_id:r.get(2)?,label:r.get(3)?})).map_err(|e|e.to_string())?.collect::<std::result::Result<_,_>>().map_err(|e|e.to_string()) }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_profiles() -> Result<Vec<Profile>> {
     let c = db::conn()?;

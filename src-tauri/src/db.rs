@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 99;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V98: profile email status and messenger contacts are independent facts.
+    if version < 98 { tx.execute_batch(SCHEMA_V98)?; }
+    // V99: principals unify people, applications, and external identities.
+    if version < 99 { tx.execute_batch(SCHEMA_V99)?; }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -607,6 +611,17 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
     seed(&conn)?;
     Ok(conn)
 }
+
+/// V98: profile communication metadata.
+pub(crate) const SCHEMA_V98: &str = r#"
+CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','verified','bounced')), verified_at INTEGER);
+CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
+"#;
+/// V99: durable principal identity abstraction.
+pub(crate) const SCHEMA_V99: &str = r#"
+CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
+INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
+"#;
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
@@ -1415,7 +1430,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 99);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
