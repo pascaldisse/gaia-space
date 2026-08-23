@@ -495,6 +495,15 @@ fn app_room_project_id(
     ).map_err(|_| err(StatusCode::NOT_FOUND, "room not found").into_response())
 }
 
+/// Lists must skip unscoped rooms rather than fail the entire authorized result set.
+fn app_room_project_id_if_scoped(c: &rusqlite::Connection, room_id: &str) -> Result<Option<String>, axum::response::Response> {
+    c.query_row(
+        "SELECT ch.project_id FROM meetings m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1 AND m.archived=0 AND ch.project_id IS NOT NULL",
+        [room_id],
+        |row| row.get(0),
+    ).optional().map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())
+}
+
 fn app_has_project_right(
     c: &rusqlite::Connection,
     application_id: &str,
@@ -524,7 +533,9 @@ async fn app_list_rooms(
     for room in meetings::list_meetings_scoped_for_application(&c)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "room lookup failed").into_response())?
     {
-        let project_id = app_room_project_id(&c, &room.id)?;
+        let Some(project_id) = app_room_project_id_if_scoped(&c, &room.id)? else {
+            continue;
+        };
         if app_has_project_right(&c, &application.id, &project_id, "Project.ViewMeetings")? {
             rooms.push(room);
         }
@@ -6048,6 +6059,7 @@ mod tests {
         platform::seed_rights().unwrap();
         let c = db::conn().unwrap();
         c.execute_batch("INSERT INTO applications(id,name,application_type,client_id,client_credentials_flow_enabled) VALUES('app-room','Room App','Application','client-room',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('room-project','Rooms','ROOM','pa',1); INSERT INTO channels(id,content_type,name,project_id) VALUES('room-channel','entity-bound','Rooms','room-project'); INSERT INTO meetings(id,title,starts_at,ends_at,channel_id,video_provider,video_status,access_level) VALUES('room-live','Live',1,2,'room-channel','native','scheduled','PUBLIC'),('room-ended','Ended',1,2,'room-channel','native','ended','PUBLIC'),('room-archived','Archived',1,2,'room-channel','native','scheduled','PUBLIC'); UPDATE meetings SET archived=1 WHERE id='room-archived';").unwrap();
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at,video_provider,video_status,access_level) VALUES('room-unscoped','Unscoped',1,2,'native','scheduled','PUBLIC')", []).unwrap();
         drop(c);
         let secret = applications::rotate_app_secret("app-room".into()).unwrap();
         let mint = |scope: &str| {
@@ -6121,7 +6133,8 @@ mod tests {
                 .iter()
                 .map(|room| room.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["room-live", "room-ended"]
+            vec!["room-live", "room-ended"],
+            "channel-less rooms are skipped; they cannot poison an authorized list"
         );
     }
 
