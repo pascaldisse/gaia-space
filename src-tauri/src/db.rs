@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 85;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -578,6 +578,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 74 {
         tx.execute_batch(SCHEMA_V74)?;
     }
+    // V85: transcript segments are durable, source-attributed call facts. The
+    // transcriber remains external; this boundary deliberately stores no audio.
+    if version < 85 {
+        tx.execute_batch(SCHEMA_V85)?;
+    }
     // V68: schedule dispatch claims a job+minute in SQLite, so concurrent pollers
     // cannot both turn the same cron fire into a run. NULL preserves manual/event runs.
     // Numbered last because this lane integrates after V64-V67 (PARITY.md ladder).
@@ -1020,6 +1025,23 @@ CREATE INDEX IF NOT EXISTS app_authorized_rights_context ON app_authorized_right
 
 /// V74: one target per project + IDE + instance type. The pool contains durable
 /// STANDBY rows; its target is configuration, not process-local scheduler state.
+/// V85: durable transcription substrate; captions and summaries derive from these segments.
+pub(crate) const SCHEMA_V85: &str = r#"
+CREATE TABLE IF NOT EXISTS call_transcript_segments (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker_id TEXT REFERENCES profiles(id),
+    text TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'external' CHECK(source IN ('external','manual')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK(length(trim(text)) > 0),
+    CHECK(ended_at >= started_at)
+);
+CREATE INDEX IF NOT EXISTS call_transcript_segments_meeting_time ON call_transcript_segments(meeting_id, started_at, id);
+"#;
+
 pub(crate) const SCHEMA_V74: &str = r#"
 CREATE TABLE IF NOT EXISTS dev_environment_pool_policies (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
