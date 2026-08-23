@@ -1816,6 +1816,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_jobs" | "list_jobs_for_script" | "list_messages" | "list_notifications" => {
             CommandPolicy::Session
         }
+        // Both are scoped to the caller by `bind_session_identity` rewriting `profile_id`,
+        // so one session can never read another profile's mentions inbox or badge.
+        "list_mentions_for_profile" | "count_unread_mentions" => CommandPolicy::Session,
         "list_meetings" => CommandPolicy::MeetingReadList,
         "list_package_repositories"
         | "list_pipeline_scripts"
@@ -4289,7 +4292,9 @@ async fn cmd(
     "update_issue" => issues::update_issue(issue: issues::Issue),
     "update_issue_status" => issues::update_issue_status(status: issues::IssueStatus),
     "update_meeting" => meetings::update_meeting(meeting: meetings::Meeting),
-    "update_message" => chat::update_message(id: String, text: String),
+    "update_message" => chat::update_message(id: String, text: String, mention_ids: Option<Vec<String>>),
+    "list_mentions_for_profile" => chat::list_mentions_for_profile(profile_id: String, unread_only: Option<bool>),
+    "count_unread_mentions" => chat::count_unread_mentions(profile_id: String),
     "update_package_repository" => pipelines::update_package_repository(repo: pipelines::PackageRepository),
     "update_pipeline_script" => pipelines::update_pipeline_script(script: pipelines::PipelineScript),
     "update_profile" => platform::update_profile(profile: platform::Profile),
@@ -4758,6 +4763,67 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
+    }
+
+    #[tokio::test]
+    async fn mention_edits_belong_to_the_author_and_the_inbox_to_its_owner() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('ch-men','public','Talk',0)", []).unwrap();
+        c.execute("INSERT INTO channel_members(channel_id,profile_id,administrator) VALUES('ch-men','pa',0),('ch-men','pb',0)", []).unwrap();
+        drop(c);
+
+        // alice posts and names bob
+        let (status, body) = call(
+            cookie("ta"),
+            "create_message",
+            json!({"message": {"id":"m-men","channel_id":"ch-men","author_id":"pa","text":"hi @bob","created_at":1,"edited_at":null,"thread_of":null,"archived":false,"mention_ids":["pb"]}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"]["mention_ids"], json!(["pb"]), "{body}");
+
+        // bob sees it in his inbox and in his badge
+        let (status, body) = call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["value"], json!(1), "{body}");
+        let (status, body) = call(cookie("tb"), "list_mentions_for_profile", json!({"profile_id":"pb","unread_only":true})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["value"].as_array().unwrap().len(), 1, "{body}");
+        assert_eq!(body["value"][0]["channel_name"], json!("Talk"));
+
+        // alice asking for bob's inbox gets her own: the session binds `profile_id`
+        let (status, body) = call(cookie("ta"), "list_mentions_for_profile", json!({"profile_id":"pb"})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["value"].as_array().unwrap().is_empty(), "{body}");
+
+        // bob cannot rewrite the mentions of alice's message
+        let (status, _) = call(
+            cookie("tb"),
+            "update_message",
+            json!({"id":"m-men","text":"hijacked","mention_ids":[]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await.1["value"],
+            json!(1)
+        );
+
+        // the author may, and dropping bob clears his unread alert
+        let (status, body) = call(
+            cookie("ta"),
+            "update_message",
+            json!({"id":"m-men","text":"never mind","mention_ids":[]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"]["mention_ids"], json!([]));
+        assert_eq!(
+            call(cookie("tb"), "count_unread_mentions", json!({"profile_id":"pb"})).await.1["value"],
+            json!(0)
+        );
     }
 
     #[tokio::test]

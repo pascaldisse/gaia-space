@@ -490,10 +490,27 @@ fn attachments_for_impl(c: &Connection, message_id: &str) -> Result<Vec<MessageA
     rows.collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())
 }
+/// Mentions are message content, so a view of a message carries them: the stored
+/// `message_mentions` rows are the fact, not the `@name` spelling inside the text
+/// (a display name can change without rewriting every message that named it).
+fn mentions_for_impl(c: &Connection, message_id: &str) -> Result<Vec<String>> {
+    let mut s = c
+        .prepare("SELECT profile_id FROM message_mentions WHERE message_id=?1 ORDER BY profile_id")
+        .map_err(|e| e.to_string())?;
+    let ids = s
+        .query_map([message_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(ids)
+}
+
 fn to_view(c: &Connection, m: Message, acting_profile_id: Option<&str>) -> Result<MessageView> {
     let reply_count = reply_count_impl(c, &m.id)?;
     let reactions = reactions_for_impl(c, &m.id, acting_profile_id)?;
     let attachments = attachments_for_impl(c, &m.id)?;
+    let mut m = m;
+    m.mention_ids = mentions_for_impl(c, &m.id)?;
     Ok(MessageView {
         message: m,
         reply_count,
@@ -571,36 +588,186 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived],
     )
     .map_err(|e| e.to_string())?;
-    for profile_id in &message.mention_ids {
-        if message.author_id.as_deref() == Some(profile_id.as_str()) {
-            continue;
-        }
-        let exists: bool = c
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1)",
-                [profile_id],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if !exists {
-            continue;
-        }
-        c.execute(
-            "INSERT OR IGNORE INTO message_mentions(message_id,profile_id) VALUES(?1,?2)",
-            rusqlite::params![message.id, profile_id],
+    sync_mentions_impl(
+        c,
+        &message.id,
+        &message.channel_id,
+        message.author_id.as_deref(),
+        &message.text,
+        &message.mention_ids,
+    )
+}
+
+/// A mention target must be a real profile that may actually read the channel, and it
+/// is never the author naming themselves. Filtering here rather than at the UI keeps a
+/// hand-written command from notifying someone about a private channel they cannot open.
+fn mention_target_allowed(
+    c: &Connection,
+    channel_id: &str,
+    author_id: Option<&str>,
+    profile_id: &str,
+) -> Result<bool> {
+    if author_id == Some(profile_id) {
+        return Ok(false);
+    }
+    let exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1)",
+            [profile_id],
+            |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-        c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{}:{}", message.id, profile_id), profile_id, message.text, message.id]).map_err(|e| e.to_string())?;
+    if !exists {
+        return Ok(false);
+    }
+    channel_allows_profile(c, channel_id, profile_id)
+}
+
+/// Set the mention rows of a message to exactly `mention_ids` (an edit is a diff, not an
+/// append): dropped targets lose both their row and their unread mention notification,
+/// added targets get both. A target that survives the edit keeps its existing
+/// notification, read or unread — re-notifying someone for a typo fix would be noise.
+fn sync_mentions_impl(
+    c: &Connection,
+    message_id: &str,
+    channel_id: &str,
+    author_id: Option<&str>,
+    text: &str,
+    mention_ids: &[String],
+) -> Result<()> {
+    let mut wanted: Vec<String> = Vec::new();
+    for profile_id in mention_ids {
+        if wanted.iter().any(|id| id == profile_id) {
+            continue;
+        }
+        if mention_target_allowed(c, channel_id, author_id, profile_id)? {
+            wanted.push(profile_id.clone());
+        }
+    }
+    let existing = mentions_for_impl(c, message_id)?;
+    for stale in existing.iter().filter(|id| !wanted.contains(id)) {
+        c.execute(
+            "DELETE FROM message_mentions WHERE message_id=?1 AND profile_id=?2",
+            rusqlite::params![message_id, stale],
+        )
+        .map_err(|e| e.to_string())?;
+        // The mention is gone, so its unread alert must go too; an already-read
+        // notification is history and stays.
+        c.execute(
+            "DELETE FROM notifications WHERE id=?1 AND read_at IS NULL",
+            [format!("mention:{message_id}:{stale}")],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for profile_id in wanted.iter().filter(|id| !existing.contains(id)) {
+        c.execute(
+            "INSERT OR IGNORE INTO message_mentions(message_id,profile_id) VALUES(?1,?2)",
+            rusqlite::params![message_id, profile_id],
+        )
+        .map_err(|e| e.to_string())?;
+        c.execute("INSERT OR IGNORE INTO notifications(id,recipient_id,event_type,title,body,entity_type,entity_id) VALUES(?1,?2,'chat.mention','You were mentioned',?3,'message',?4)", rusqlite::params![format!("mention:{message_id}:{profile_id}"), profile_id, text, message_id]).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
-fn update_message_impl(c: &Connection, id: &str, text: &str) -> Result<()> {
-    c.execute(
-        "UPDATE messages SET text=?2,edited_at=unixepoch() WHERE id=?1",
-        rusqlite::params![id, text],
-    )
-    .map_err(|e| e.to_string())?;
+
+fn update_message_impl(
+    c: &Connection,
+    id: &str,
+    text: &str,
+    mention_ids: Option<&[String]>,
+) -> Result<()> {
+    let changed = c
+        .execute(
+            "UPDATE messages SET text=?2,edited_at=unixepoch() WHERE id=?1",
+            rusqlite::params![id, text],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("message not found".to_string());
+    }
+    // Omitting `mention_ids` leaves the mentions untouched: an old client that only
+    // knows how to edit text must not silently strip everyone off the message.
+    if let Some(mention_ids) = mention_ids {
+        let message = get_message_impl(c, id)?.ok_or_else(|| "message not found".to_string())?;
+        sync_mentions_impl(
+            c,
+            id,
+            &message.channel_id,
+            message.author_id.as_deref(),
+            text,
+            mention_ids,
+        )?;
+    }
     Ok(())
+}
+
+/// One mention as its recipient sees it: the message, where it was said, and whether the
+/// alert is still unread (KB §04 `MentionsFolderVM` / `getTotalUnreadMentions`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MentionView {
+    #[serde(flatten)]
+    pub message: MessageView,
+    pub channel_name: Option<String>,
+    pub notification_id: String,
+    pub read: bool,
+}
+
+fn list_mentions_for_profile_impl(
+    c: &Connection,
+    profile_id: &str,
+    unread_only: bool,
+) -> Result<Vec<MentionView>> {
+    let mut s = c
+        .prepare(
+            "SELECT m.id,m.channel_id,m.author_id,m.text,m.created_at,m.edited_at,m.thread_of,m.archived \
+             FROM message_mentions mm JOIN messages m ON m.id=mm.message_id \
+             WHERE mm.profile_id=?1 AND m.archived=0 ORDER BY m.created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let msgs: Vec<Message> = s
+        .query_map([profile_id], message_row)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for m in msgs {
+        // Access is re-checked at read time: leaving a private channel must hide its
+        // mentions, even though the mention row survives for the message's own history.
+        if !channel_allows_profile(c, &m.channel_id, profile_id)? {
+            continue;
+        }
+        let notification_id = format!("mention:{}:{}", m.id, profile_id);
+        let read_at: Option<Option<i64>> = c
+            .query_row(
+                "SELECT read_at FROM notifications WHERE id=?1",
+                [&notification_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let read = matches!(read_at, Some(Some(_)));
+        if unread_only && read {
+            continue;
+        }
+        let channel_name: Option<String> = c
+            .query_row("SELECT name FROM channels WHERE id=?1", [&m.channel_id], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        out.push(MentionView {
+            message: to_view(c, m, Some(profile_id))?,
+            channel_name,
+            notification_id,
+            read,
+        });
+    }
+    Ok(out)
+}
+
+fn count_unread_mentions_impl(c: &Connection, profile_id: &str) -> Result<i64> {
+    Ok(list_mentions_for_profile_impl(c, profile_id, true)?.len() as i64)
 }
 /// Deletion is soft, and attachments are retained on purpose: the message can be
 /// restored with its files, and the record of what was posted survives the hiding of
@@ -904,12 +1071,31 @@ pub fn remove_message_attachment(message_id: String, id: String) -> Result<()> {
     remove_message_attachment_impl(&db::conn()?, &message_id, &id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_message(id: String, text: String) -> Result<MessageView> {
+pub fn update_message(
+    id: String,
+    text: String,
+    mention_ids: Option<Vec<String>>,
+) -> Result<MessageView> {
     let c = db::conn()?;
-    update_message_impl(&c, &id, &text)?;
+    update_message_impl(&c, &id, &text, mention_ids.as_deref())?;
     let m = get_message_impl(&c, &id)?.ok_or_else(|| "message not found".to_string())?;
     to_view(&c, m, None)
 }
+/// Mentions inbox of one profile (KB §04 `MentionsFolderVM`).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_mentions_for_profile(
+    profile_id: String,
+    unread_only: Option<bool>,
+) -> Result<Vec<MentionView>> {
+    list_mentions_for_profile_impl(&db::conn()?, &profile_id, unread_only.unwrap_or(false))
+}
+
+/// Badge count (KB §04 `getTotalUnreadMentions`).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn count_unread_mentions(profile_id: String) -> Result<i64> {
+    count_unread_mentions_impl(&db::conn()?, &profile_id)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_message(id: String) -> Result<()> {
     delete_message_impl(&db::conn()?, &id)
@@ -1186,6 +1372,143 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("conflict"), "{err}");
+        drop(c);
+        drop(path);
+    }
+
+    fn seed_profiles(c: &Connection, ids: &[&str]) {
+        for id in ids {
+            c.execute(
+                "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
+                rusqlite::params![id, format!("{id}-user")],
+            )
+            .unwrap();
+        }
+    }
+
+    fn post(c: &Connection, channel: &str, id: &str, author: &str, mentions: &[&str]) -> Result<()> {
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some(author.into()),
+                text: "hey".into(),
+                created_at: 1,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                mention_ids: mentions.iter().map(|s| s.to_string()).collect(),
+            },
+        )
+    }
+
+    #[test]
+    fn mentions_are_stored_and_read_back_on_the_view() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-m1");
+        seed_profiles(&c, &["alice", "bob"]);
+        post(&c, "chan-m1", "msg-m1", "alice", &["bob", "bob", "alice", "ghost"]).unwrap();
+        // duplicates collapse, the author naming themselves is dropped, an unknown id is ignored
+        assert_eq!(mentions_for_impl(&c, "msg-m1").unwrap(), vec!["bob".to_string()]);
+        let view = list_messages_impl(&c, "chan-m1", Some("alice")).unwrap();
+        assert_eq!(view[0].message.mention_ids, vec!["bob".to_string()]);
+        // the mention raised exactly one unread notification for bob
+        let unread: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE recipient_id='bob' AND event_type='chat.mention' AND read_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unread, 1);
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn a_mention_target_must_be_able_to_read_the_channel() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["alice", "bob"]);
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "chan-m2".into(),
+                content_type: "private".into(),
+                name: Some("Secret".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+            },
+            &["alice".to_string()],
+        )
+        .expect("channel");
+        add_channel_member_impl(&c, "chan-m2", "alice", true).unwrap();
+        post(&c, "chan-m2", "msg-m2", "alice", &["bob"]).unwrap();
+        // bob cannot open the channel, so naming him neither stores a row nor alerts him
+        assert!(mentions_for_impl(&c, "msg-m2").unwrap().is_empty());
+        assert!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn editing_a_message_diffs_its_mentions() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-m3");
+        seed_profiles(&c, &["alice", "bob", "carol"]);
+        post(&c, "chan-m3", "msg-m3", "alice", &["bob"]).unwrap();
+        c.execute(
+            "UPDATE notifications SET read_at=unixepoch() WHERE id='mention:msg-m3:bob'",
+            [],
+        )
+        .unwrap();
+        // text-only edit keeps the mentions untouched
+        update_message_impl(&c, "msg-m3", "typo fixed", None).unwrap();
+        assert_eq!(mentions_for_impl(&c, "msg-m3").unwrap(), vec!["bob".to_string()]);
+        // an explicit list is the whole truth: bob leaves, carol arrives
+        update_message_impl(&c, "msg-m3", "now carol", Some(&["carol".to_string()])).unwrap();
+        assert_eq!(mentions_for_impl(&c, "msg-m3").unwrap(), vec!["carol".to_string()]);
+        // bob's alert was already read, so it stays as history; carol gets a fresh one
+        let bob_kept: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE id='mention:msg-m3:bob'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bob_kept, 1);
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 1);
+        // a target dropped while still unread loses the alert too
+        update_message_impl(&c, "msg-m3", "nobody", Some(&[])).unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "carol").unwrap(), 0);
+        assert!(update_message_impl(&c, "msg-nope", "x", None).is_err());
+        drop(c);
+        drop(path);
+    }
+
+    #[test]
+    fn the_mentions_inbox_filters_by_read_state_and_archival() {
+        let (c, path) = conn();
+        seed_channel(&c, "chan-m4");
+        seed_profiles(&c, &["alice", "bob"]);
+        post(&c, "chan-m4", "msg-m4a", "alice", &["bob"]).unwrap();
+        post(&c, "chan-m4", "msg-m4b", "alice", &["bob"]).unwrap();
+        assert_eq!(list_mentions_for_profile_impl(&c, "bob", false).unwrap().len(), 2);
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 2);
+        c.execute(
+            "UPDATE notifications SET read_at=unixepoch() WHERE id='mention:msg-m4a:bob'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 1);
+        let unread = list_mentions_for_profile_impl(&c, "bob", true).unwrap();
+        assert_eq!(unread.len(), 1);
+        assert_eq!(unread[0].message.message.id, "msg-m4b");
+        assert_eq!(unread[0].channel_name.as_deref(), Some("General"));
+        // a deleted message drops out of the inbox
+        delete_message_impl(&c, "msg-m4b").unwrap();
+        assert_eq!(count_unread_mentions_impl(&c, "bob").unwrap(), 0);
         drop(c);
         drop(path);
     }

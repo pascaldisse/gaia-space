@@ -299,6 +299,8 @@ pub fn run() {
             chat::set_message_attachment_state,
             chat::remove_message_attachment,
             chat::update_message,
+            chat::list_mentions_for_profile,
+            chat::count_unread_mentions,
             chat::delete_message,
             chat::add_reaction,
             chat::remove_reaction,
