@@ -28,7 +28,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V57 → feat/w8-auth (predefined role policy; UNSTARTED — reservation only) ☀Kali-VIII
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 356 rows): done 52 · partial 178 · stub 4 · missing 122. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 356 rows): done 53 · partial 177 · stub 4 · missing 122. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Current committed ledger contains 356, not the claimed 371; 371 has no row source in this tree.
 
@@ -52,8 +52,8 @@ Worst gaps: per-format typed detail models (Dart still generic) · retention/imm
 Progress (feat/w8-pkg ☀Surya-VIII): registry protocols for the four remaining formats in `src-tauri/src/package_registry.rs` — NuGet V3 (lower-cased id coordinates, service index, flat-container version list), PyPI (PEP 503 normalization, simple project page, distribution resolve), Composer (`packages.json` + `p2/{vendor}/{package}.json`), OCI distribution v2 (verb-driven name split, tagged manifest PUT/GET, tag list, referrers by `subject.digest`). Routes `/api/registry/{repo}/{nuget|pypi|composer|v2}/*` reuse the existing `registry_auth` seam. Retention gained a preview seam: `package_retention_candidates` returns the exact rows cleanup would delete with an `age`/`count`/`age+count` reason grouped per package name (previously grouped by parsing the row id — a real mis-grouping, now fixed), and `apply_package_retention` deletes that set through `delete_package_version` so payload files go too. CVE ledger gained `repository_vulnerability_report(repository_id, min_severity)` — repository-wide, severity-ranked, local ledger only (no scanner, no network). UI: Preview retention / Repository CVEs actions in `src/views/Packages.tsx`. Tests: `package_registry::tests::*` (6), `pipelines::tests::{retention_candidates_group_per_package_and_carry_a_reason,vulnerability_report_filters_by_severity_and_repository}`, `space-server::tests::format_registry_protocols_are_reachable_over_http` (publish→resolve per format + 401 on unauthenticated). No migration needed — reserved V60 was NOT consumed and stays free. UNVERIFIED: no real `dotnet`/`pip`/`composer`/`docker` client was run against these endpoints; conformance is asserted only by the in-process HTTP tests. OCI blob (digest) addressing is deliberately 501, not faked.
 
 ## 04 Chat / Documents / Meetings / Calendar (audited ✓ — rows: reports/parity/04-collab.md @ 039cca2)
-59 rows — done 9 · partial 31 · missing 19.
-Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV+multi-calendar+Day/Schedule views.
+59 rows — done 10 · partial 30 · missing 19.
+Progress: chat attachment persistence/preview + selected-mention notifications landed (`af6fbbf`, `d095404`, `7fe7776`); document sharing+KB permissions/search remains UNVERIFIED. · doc import/publish/rich-types · meeting rooms/equipment/external attendees · CalDAV write-back+multi-calendar exposure (Day/Schedule views landed).
 
 ## 05 Platform / Auth / Permissions (audited ✓ — rows: reports/parity/05-auth-permissions.md @ 67f0243)
 32 rows — done 4 · partial 16 · missing 12.
