@@ -1466,6 +1466,18 @@ fn codeowner_matches_tx(conn: &Connection, review_id: &str) -> Result<Vec<CodeOw
     Ok(matches)
 }
 
+/// Changed files whose source-branch CODEOWNERS rule resolves to this profile.
+/// This is intentionally independent of quality-gate configuration: ownership-aware
+/// review stays useful even when the target branch has no CODEOWNERS gate.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_owned_review_files(review_id: String, profile_id: String) -> Result<Vec<String>> {
+    Ok(codeowner_matches_tx(&db::conn()?, &review_id)?
+        .into_iter()
+        .filter(|entry| entry.owner_ids.iter().any(|owner| owner == &profile_id))
+        .map(|entry| entry.path)
+        .collect())
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn record_external_check(check: ExternalCheck) -> Result<()> {
     if check.check_name.trim().is_empty() {

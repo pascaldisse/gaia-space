@@ -163,6 +163,8 @@ export const reviewApi = {
   update: (review: Review) => invoke<void>("update_review", { review }),
   aggregatedStatus: (reviewId: string, profileId: string) =>
     invoke<ReviewAggregatedStatus>("review_aggregated_status", { reviewId, profileId }),
+  listOwnedFiles: (reviewId: string, profileId: string) =>
+    invoke<string[]>("list_owned_review_files", { reviewId, profileId }),
   openMergeRequest: (req: NewMergeRequest) =>
     invoke<Review>("open_merge_request", { req }),
   diff: (repoPath: string, sourceBranch: string, targetBranch: string) =>

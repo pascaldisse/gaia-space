@@ -306,6 +306,7 @@ pub fn run() {
             review::update_review,
             review::list_review_participants,
             review::review_aggregated_status,
+            review::list_owned_review_files,
             review::list_review_file_states,
             review::save_review_file_state,
             review::add_review_participant,

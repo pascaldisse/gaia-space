@@ -96,3 +96,5 @@
 .quick-filters button { padding: 2px 6px; font-size: 10px; text-transform: capitalize; }
 .quick-filters button.active { background: var(--accent-soft); border-color: var(--accent); }
 .review-status-badge { color: var(--text-dim); font-size: 9px; letter-spacing: .03em; }
+
+.owned-files-filter { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }

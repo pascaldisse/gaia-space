@@ -183,6 +183,13 @@ export default function Reviews() {
       : null;
   };
   const [diff] = createResource(diffKey, (k) => reviewApi.diff(k.p, k.s, k.t));
+  const [ownedOnly, setOwnedOnly] = createSignal(false);
+  const [ownedFiles] = createResource(
+    () => ({ reviewId: selectedId(), profileId: actingProfileId() }),
+    ({ reviewId, profileId }) => reviewId && profileId
+      ? reviewApi.listOwnedFiles(reviewId, profileId)
+      : Promise.resolve([]),
+  );
   const [navigationFile, setNavigationFile] = createSignal<string | null>(null);
   const [navigationNotice, setNavigationNotice] = createSignal("");
   let unresolvedCursor = -1;
@@ -1043,11 +1050,13 @@ export default function Reviews() {
                   Diff ({review().source_branch} → {review().target_branch})
                 </h3>
                 <div class="review-navigation">
-<button class="ghost small" type="button" onClick={jumpToNextUnresolved}>Next unresolved</button>
-<button class="ghost small" type="button" onClick={jumpToNextFile}>Next file</button>
-<span class="hint" aria-live="polite">{navigationNotice()}</span>
-</div>
-<Diff text={diff() ?? ""} loading={diff.loading} focusFile={navigationFile()} />
+                  <button class="ghost small" type="button" onClick={jumpToNextUnresolved}>Next unresolved</button>
+                  <button class="ghost small" type="button" onClick={jumpToNextFile}>Next file</button>
+                  <label class="owned-files-filter"><input type="checkbox" checked={ownedOnly()} disabled={!ownedFiles()?.length} onChange={(event) => setOwnedOnly(event.currentTarget.checked)} /> My owned files ({ownedFiles()?.length ?? 0})</label>
+                  <span class="hint" aria-live="polite">{navigationNotice()}</span>
+                </div>
+                <Show when={ownedOnly() && !ownedFiles()?.length}><p class="hint">No changed files are assigned to you by source-branch CODEOWNERS.</p></Show>
+                <Diff text={diff() ?? ""} loading={diff.loading} focusFile={navigationFile()} ownedFiles={ownedFiles()} ownedOnly={ownedOnly()} />
               </section>
 
               <section class="discussions">
