@@ -1528,6 +1528,72 @@ mod tests {
         c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO project_members(project_id,profile_id) VALUES('project','q'),('project','r');").unwrap();
         c
     }
+    #[test]
+    fn calendar_options_default_then_persist_and_keep_dashboard_widgets() {
+        let c = conn();
+        assert_eq!(
+            calendar_options_on(&c, "p").unwrap(),
+            default_calendar_options("p"),
+            "an absent row reads as the documented default view"
+        );
+        save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "p".into(),
+                hidden_widgets: vec!["inbox".into()],
+                initialized: true,
+            },
+        )
+        .unwrap();
+        let saved = save_calendar_options_on(
+            &c,
+            CalendarOptions {
+                profile_id: "p".into(),
+                show_weekends: false,
+                show_todos: false,
+                working_hours_only: true,
+                working_hours_start: 8,
+                working_hours_end: 16,
+                show_declined: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.working_hours_start, 8);
+        assert!(!saved.show_weekends && saved.show_declined);
+        assert_eq!(calendar_options_on(&c, "p").unwrap(), saved, "read back");
+        assert_eq!(
+            dashboard_preferences_on(&c, "p").unwrap().hidden_widgets,
+            vec!["inbox".to_string()],
+            "the shared preference row keeps its dashboard column"
+        );
+        // A member with no preference row yet must still get an insert, which
+        // means seeding the NOT NULL dashboard column.
+        let fresh = save_calendar_options_on(&c, default_calendar_options("q")).unwrap();
+        assert_eq!(fresh, default_calendar_options("q"));
+    }
+
+    #[test]
+    fn calendar_options_reject_empty_or_inverted_working_hours() {
+        let c = conn();
+        let inverted = CalendarOptions {
+            working_hours_start: 18,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, inverted).is_err());
+        let out_of_day = CalendarOptions {
+            working_hours_end: 25,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, out_of_day).is_err());
+        let empty = CalendarOptions {
+            working_hours_start: 9,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, empty).is_err());
+    }
+
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
         let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();

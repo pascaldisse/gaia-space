@@ -2195,7 +2195,17 @@ mod v39_webhook_migration_tests {
     #[test]
     fn v103_adds_calendar_option_columns_and_keeps_existing_preferences() {
         let conn = open_in_memory().unwrap();
+        // A pre-V103 fixture: the preference row exists with its dashboard column only.
+        conn.execute_batch(
+            "CREATE TABLE profiles (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, created_at INTEGER);",
+        )
+        .unwrap();
         conn.execute_batch(SCHEMA_V46).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES('p','[\"inbox\"]')",
             [],
