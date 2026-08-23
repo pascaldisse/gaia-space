@@ -17,6 +17,8 @@ pub mod blogs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod channel_feeds;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chatbot;
@@ -301,6 +303,8 @@ pub fn run() {
             chat::add_reaction,
             chat::remove_reaction,
             chat::mark_channel_read,
+            channel_feeds::save_channel_subscription,
+            channel_feeds::list_channel_subscriptions,
             review::list_reviews,
             review::get_review,
             review::update_review,

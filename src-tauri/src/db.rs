@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 109;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -590,6 +590,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 71 {
         tx.execute_batch(SCHEMA_V71)?;
     }
+    // V108: opt-in per-channel Spacebox delivery. Kept separate from generic
+    // notification preferences: membership grants read access, subscription grants feed delivery.
+    if version < 108 {
+        tx.execute_batch(SCHEMA_V108)?;
+    }
+    // V109: a document/article owns one entity discussion and may bind one meeting.
+    if version < 109 {
+        tx.execute_batch(SCHEMA_V109)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -610,6 +619,25 @@ pub fn migrate_path(path: impl AsRef<Path>) -> Result<Connection> {
 
 /// V71: local/Confluence-folder importer audit ledger. Source paths are metadata only;
 /// imported document bodies and attachment payloads remain in their normal stores.
+pub(crate) const SCHEMA_V108: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_subscriptions (
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  PRIMARY KEY(channel_id, profile_id)
+);
+CREATE INDEX IF NOT EXISTS channel_subscriptions_profile ON channel_subscriptions(profile_id, enabled);
+"#;
+pub(crate) const SCHEMA_V109: &str = r#"
+CREATE TABLE IF NOT EXISTS document_discussions (
+  document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+  meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS document_discussions_meeting ON document_discussions(meeting_id);
+"#;
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
     id TEXT PRIMARY KEY,
@@ -1415,7 +1443,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 74);
+        assert_eq!(SCHEMA_VERSION, 109);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
