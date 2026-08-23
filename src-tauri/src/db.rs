@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 115;
+pub const SCHEMA_VERSION: i64 = 116;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -626,6 +626,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // state, not history; both are table-guarded so partial fixtures upgrade cleanly.
     if version < 115 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V115)?;
+    }
+    // V116: a postponed message is a pending intent, not history — it lives outside
+    // `messages` until its delivery run inserts the real row.
+    if version < 116 && table_exists(&tx, "channels")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V116)?;
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
@@ -1522,6 +1527,29 @@ CREATE TABLE IF NOT EXISTS channel_typing (
 CREATE INDEX IF NOT EXISTS channel_typing_channel_time ON channel_typing(channel_id, updated_at DESC);
 "#;
 
+/// V116: a scheduled ("postponed") message is an unsent intent with its own lifecycle:
+/// `pending` until a delivery run inserts the real `messages` row (`sent`, carrying
+/// `sent_message_id`), or `cancelled` by its author. Delivery is idempotent because the
+/// due query only ever selects `pending` rows and the state moves in one UPDATE.
+pub(crate) const SCHEMA_V116: &str = r#"
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    thread_of TEXT,
+    scheduled_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','cancelled')),
+    sent_message_id TEXT,
+    error TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS scheduled_messages_due ON scheduled_messages(scheduled_at, id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS scheduled_messages_channel ON scheduled_messages(channel_id, scheduled_at, id);
+CREATE INDEX IF NOT EXISTS scheduled_messages_author ON scheduled_messages(author_id, scheduled_at, id);
+"#;
+
 pub(crate) const SCHEMA_V90: &str = r#"
 UPDATE users SET global_role=CASE role WHEN 'admin' THEN 'GlobalAdmin' ELSE 'GlobalMember' END
 WHERE global_role='GlobalMember';
@@ -1932,7 +1960,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 115);
+        assert_eq!(SCHEMA_VERSION, 116);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
