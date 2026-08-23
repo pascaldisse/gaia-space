@@ -463,7 +463,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // in fact being honoured organization-wide — the stored value contradicted the
     // resolver. Descriptor columns are rewritten; `implied_rights_json` is not, because
     // an administrator may have edited the implication graph deliberately.
-    if version < 58 {
+    if version < 58 && table_exists(&tx, "rights")? {
         tx.execute(
             "UPDATE rights SET right_group='DevEnvironments' WHERE right_group='Dev Environments'",
             [],
