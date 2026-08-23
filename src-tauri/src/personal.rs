@@ -938,6 +938,127 @@ pub fn set_dashboard_preferences_http(
     save_dashboard_preferences_on(&db::conn()?, preferences)
 }
 
+/// Per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`): the
+/// hide/show weekends / working-hours / to-dos / declined toggles. Persisted on
+/// the member's preference row so every device sees the same calendar.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct CalendarOptions {
+    pub profile_id: String,
+    pub show_weekends: bool,
+    pub show_todos: bool,
+    pub working_hours_only: bool,
+    pub working_hours_start: i64,
+    pub working_hours_end: i64,
+    pub show_declined: bool,
+}
+fn default_calendar_options(profile_id: &str) -> CalendarOptions {
+    CalendarOptions {
+        profile_id: profile_id.to_string(),
+        show_weekends: true,
+        show_todos: true,
+        working_hours_only: false,
+        working_hours_start: 9,
+        working_hours_end: 18,
+        show_declined: false,
+    }
+}
+/// A window is a half-open hour range inside one day, so an empty or inverted
+/// range can never be stored and silently blank the grid.
+fn clean_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    if options.profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    if !(0..=24).contains(&options.working_hours_start)
+        || !(0..=24).contains(&options.working_hours_end)
+    {
+        return Err("Calendar working hours must be between 0 and 24".into());
+    }
+    if options.working_hours_end <= options.working_hours_start {
+        return Err("Calendar working hours must end after they start".into());
+    }
+    Ok(options)
+}
+pub(crate) fn calendar_options_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    if profile_id.trim().is_empty() {
+        return Err("Calendar profile is required".into());
+    }
+    let stored = err(c
+        .query_row(
+            "SELECT calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined FROM user_preferences WHERE profile_id=?1",
+            [profile_id],
+            |row| {
+                Ok(CalendarOptions {
+                    profile_id: profile_id.to_string(),
+                    show_weekends: row.get(0)?,
+                    show_todos: row.get(1)?,
+                    working_hours_only: row.get(2)?,
+                    working_hours_start: row.get(3)?,
+                    working_hours_end: row.get(4)?,
+                    show_declined: row.get(5)?,
+                })
+            },
+        )
+        .optional())?;
+    // An absent preference row is not an error: it is the documented default view.
+    Ok(stored.unwrap_or_else(|| default_calendar_options(profile_id)))
+}
+pub(crate) fn save_calendar_options_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let options = clean_calendar_options(options)?;
+    // The preference row is shared with the dashboard, so an insert must seed the
+    // dashboard column while an update must leave whatever it already holds.
+    err(c.execute(
+        "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets,calendar_show_weekends,calendar_show_todos,calendar_working_hours_only,calendar_working_hours_start,calendar_working_hours_end,calendar_show_declined) VALUES(?1,'[]',?2,?3,?4,?5,?6,?7) ON CONFLICT(profile_id) DO UPDATE SET calendar_show_weekends=excluded.calendar_show_weekends,calendar_show_todos=excluded.calendar_show_todos,calendar_working_hours_only=excluded.calendar_working_hours_only,calendar_working_hours_start=excluded.calendar_working_hours_start,calendar_working_hours_end=excluded.calendar_working_hours_end,calendar_show_declined=excluded.calendar_show_declined",
+        params![
+            options.profile_id,
+            options.show_weekends,
+            options.show_todos,
+            options.working_hours_only,
+            options.working_hours_start,
+            options.working_hours_end,
+            options.show_declined
+        ],
+    ))?;
+    calendar_options_on(c, &options.profile_id)
+}
+fn calendar_options_for_actor_on(c: &Connection, profile_id: &str) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    calendar_options_on(c, profile_id)
+}
+fn save_calendar_options_for_actor_on(
+    c: &Connection,
+    options: CalendarOptions,
+) -> Result<CalendarOptions> {
+    let (actor_id, _) = actor::resolve(c)?;
+    if options.profile_id != actor_id {
+        return Err("Calendar options belong to the active profile".into());
+    }
+    save_calendar_options_on(c, options)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn get_calendar_options(profile_id: String) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    calendar_options_for_actor_on(&c, &profile_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_calendar_options(options: CalendarOptions) -> Result<CalendarOptions> {
+    let c = db::conn()?;
+    save_calendar_options_for_actor_on(&c, options)
+}
+/// HTTP has already bound `profile_id` to the authenticated session at its policy gate.
+pub fn get_calendar_options_http(profile_id: String) -> Result<CalendarOptions> {
+    calendar_options_on(&db::conn()?, &profile_id)
+}
+/// HTTP has already replaced the payload owner at its policy gate.
+pub fn set_calendar_options_http(options: CalendarOptions) -> Result<CalendarOptions> {
+    save_calendar_options_on(&db::conn()?, options)
+}
+
 fn read_scope(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubscriptionScope> {
     Ok(SubscriptionScope {
         profile_id: row.get(0)?,
@@ -1172,16 +1293,39 @@ pub fn calendar_aggregate(
     range_end: i64,
     range_start_date: Option<String>,
     range_end_date: Option<String>,
+    target_profile_id: Option<String>,
+    target_location: Option<String>,
 ) -> Result<Vec<CalendarItem>> {
     let c = db::conn()?;
-    calendar_aggregate_on(
+    let target_profile_id = target_profile_id.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or(&profile_id);
+    let mut items = calendar_aggregate_on(
         &c,
-        &profile_id,
+        target_profile_id,
         range_start,
         range_end,
         range_start_date.as_deref(),
         range_end_date.as_deref(),
-    )
+    )?;
+    if let Some(location) = target_location.as_deref().filter(|value| !value.trim().is_empty()) {
+        let mut statement = err(c.prepare("SELECT id FROM meetings WHERE archived=0 AND location=?1"))?;
+        let meeting_ids = err(statement.query_map([location], |row| row.get::<_, String>(0)))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        items.retain(|item| item.kind == "meeting" && meeting_ids.contains(&item.source_id));
+    }
+    // A calendar owner sees their details. Other profiles receive availability only:
+    // the aggregate still uses each source's existing read scope before redaction.
+    if target_profile_id != profile_id {
+        for item in &mut items {
+            // IDs can be deep links; never return a target-owned identifier to a viewer.
+            item.id = format!("busy-{}", item.starts_at);
+            item.source_id.clear();
+            item.title = "Busy".into();
+            item.project_id = None;
+            item.calendar_id = None;
+        }
+    }
+    Ok(items)
 }
 /// Date-only calendar values (`todos.due_date`, `projects.deadline`) are calendar dates,
 /// not instants: they are compared as `YYYY-MM-DD` strings against the day window the
@@ -1425,6 +1569,72 @@ mod tests {
         c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO project_members(project_id,profile_id) VALUES('project','q'),('project','r');").unwrap();
         c
     }
+    #[test]
+    fn calendar_options_default_then_persist_and_keep_dashboard_widgets() {
+        let c = conn();
+        assert_eq!(
+            calendar_options_on(&c, "p").unwrap(),
+            default_calendar_options("p"),
+            "an absent row reads as the documented default view"
+        );
+        save_dashboard_preferences_on(
+            &c,
+            DashboardPreferences {
+                profile_id: "p".into(),
+                hidden_widgets: vec!["inbox".into()],
+                initialized: true,
+            },
+        )
+        .unwrap();
+        let saved = save_calendar_options_on(
+            &c,
+            CalendarOptions {
+                profile_id: "p".into(),
+                show_weekends: false,
+                show_todos: false,
+                working_hours_only: true,
+                working_hours_start: 8,
+                working_hours_end: 16,
+                show_declined: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.working_hours_start, 8);
+        assert!(!saved.show_weekends && saved.show_declined);
+        assert_eq!(calendar_options_on(&c, "p").unwrap(), saved, "read back");
+        assert_eq!(
+            dashboard_preferences_on(&c, "p").unwrap().hidden_widgets,
+            vec!["inbox".to_string()],
+            "the shared preference row keeps its dashboard column"
+        );
+        // A member with no preference row yet must still get an insert, which
+        // means seeding the NOT NULL dashboard column.
+        let fresh = save_calendar_options_on(&c, default_calendar_options("q")).unwrap();
+        assert_eq!(fresh, default_calendar_options("q"));
+    }
+
+    #[test]
+    fn calendar_options_reject_empty_or_inverted_working_hours() {
+        let c = conn();
+        let inverted = CalendarOptions {
+            working_hours_start: 18,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, inverted).is_err());
+        let out_of_day = CalendarOptions {
+            working_hours_end: 25,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, out_of_day).is_err());
+        let empty = CalendarOptions {
+            working_hours_start: 9,
+            working_hours_end: 9,
+            ..default_calendar_options("p")
+        };
+        assert!(save_calendar_options_on(&c, empty).is_err());
+    }
+
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
         let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();

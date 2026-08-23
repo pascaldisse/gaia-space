@@ -487,6 +487,8 @@ pub fn run() {
             personal::list_subscription_settings,
             personal::get_dashboard_preferences,
             personal::set_dashboard_preferences,
+            personal::get_calendar_options,
+            personal::set_calendar_options,
             personal::list_subscription_scopes,
             personal::save_subscription_scope,
             personal::delete_subscription_scope,

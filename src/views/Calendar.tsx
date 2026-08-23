@@ -32,26 +32,30 @@ const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
 const [calendarFilter,setCalendarFilter] = createSignal("all");
+const [targetProfile,setTargetProfile] = createSignal("");
+const [targetLocation,setTargetLocation] = createSignal("");
 const [notice,setNotice] = createSignal("");
 const [invitee,setInvitee] = createSignal("");
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
-const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
-  ([profile,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key) : Promise.resolve([]));
+const [items,{refetch}] = createResource(() => { const [start,end]=range(); return [profileId(), targetProfile(), targetLocation(), Math.floor(start.getTime()/1000), Math.floor(end.getTime()/1000), dateKey(start), dateKey(end)] as const; },
+  ([profile,target_profile,target_location,range_start,range_end,start_key,end_key]) => profile ? personalApi.calendar(profile,range_start,range_end,start_key,end_key,target_profile||undefined,target_location||undefined) : Promise.resolve([]));
 const [meetings,{refetch:reloadMeetings}] = createResource(() => profileId(), profile => profile ? meetingsApi.list(profile) : Promise.resolve([]));
 const [projects] = createResource(() => platformApi.projects());
 const [calendars] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
+const [options,{refetch:reloadOptions}] = createResource(() => profileId(), owner => owner ? personalApi.calendarOptions(owner) : Promise.resolve(undefined));
+const updateOptions = async (patch:Record<string,boolean|number>) => { const current=options(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); return selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); };
+const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const prefs=options(); return filtered.filter(item => (prefs?.show_todos !== false || item.kind!=="task") && (!prefs?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=prefs.working_hours_start&&hour<prefs.working_hours_end;})())); };
 // Each view steps by its own span: a month, a week, a day, or a schedule window.
 const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
-const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) result.push(new Date(day)); return result; };
+const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(options()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };
 const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
 const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
@@ -129,7 +133,7 @@ return <section class="calendar-view">
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
-<Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show>
+<div class="calendar-filters"><Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Display</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">

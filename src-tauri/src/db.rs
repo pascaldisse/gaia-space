@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 102;
+pub const SCHEMA_VERSION: i64 = 103;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -639,6 +639,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "video_status",
             "TEXT NOT NULL DEFAULT 'scheduled'",
         )?;
+    }
+    // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
+    // Additive columns on the existing preference row, table-guarded because
+    // fixtures pinned before V46 have no `user_preferences` table yet.
+    if version < 103 && table_exists(&tx, "user_preferences")? {
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_weekends", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_issues", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_todos", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_show_declined", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_only", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_start", "INTEGER NOT NULL DEFAULT 9")?;
+        add_column_if_missing(&tx, "user_preferences", "calendar_working_hours_end", "INTEGER NOT NULL DEFAULT 18")?;
     }
     // V71: importer runs are durable audit facts. The stored source is the operator-selected
     // path (never its contents); counts make partial imports visible after the toast is gone.
@@ -1620,7 +1632,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 102);
+        assert_eq!(SCHEMA_VERSION, 103);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2383,5 +2395,37 @@ mod v39_webhook_migration_tests {
             )
             .expect("calendar owner");
         assert_eq!(profile, "default-org");
+    }
+
+    #[test]
+    fn v103_adds_calendar_option_columns_and_keeps_existing_preferences() {
+        let conn = open_in_memory().unwrap();
+        // A pre-V103 fixture: the preference row exists with its dashboard column only.
+        conn.execute_batch(
+            "CREATE TABLE profiles (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, created_at INTEGER);",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA_V46).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO user_preferences(profile_id,dashboard_hidden_widgets) VALUES('p','[\"inbox\"]')",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 46).unwrap();
+        migrate(&conn).unwrap();
+        let (widgets, weekends, declined, start): (String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT dashboard_hidden_widgets,calendar_show_weekends,calendar_show_declined,calendar_working_hours_start FROM user_preferences WHERE profile_id='p'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(widgets, "[\"inbox\"]", "existing preference survives");
+        assert_eq!((weekends, declined, start), (1, 0, 9), "defaults backfill");
     }
 }
