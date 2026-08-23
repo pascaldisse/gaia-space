@@ -32,7 +32,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V61 → feat/w9-cicd (quality-gate application principals · workers · artifacts) ☀wave9
 - V62 → feat/w9-auth (SSO/OAuth remainder · 2FA · permanent tokens; supersedes stale V57 reservation) ☀wave9
 - V63 → feat/w9-workers (pipeline workers · artifacts · test reporting) ☀wave9
-- V64 → feat/w10-review (quality-gate bypass permissions · CODEOWNERS team owners · external checks) ☀wave10
+- V64 → feat/w10-review (quality-gate bypass permissions · CODEOWNERS team owners · external checks) ☀wave10 — UNSTARTED/unconsumed (no schema change required)
 - V65 → feat/w10-personal (blogs · subscriptions/feeds · org chart/locations) ☀wave10
 - V66 → feat/w10-collab (doc import/publish · meeting rooms/equipment · external attendees) ☀wave10
 - V67 → feat/w10-auth (org settings/multi-workspace · SSO/SAML modules · OAuth2 authz-code ledger correction) ☀wave10
