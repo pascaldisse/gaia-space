@@ -271,7 +271,8 @@ export default function Reviews() {
   async function setSuggestionStatus(d: ReviewDiscussion, status: "OPEN" | "ACCEPTED" | "REJECTED") {
     if (!actingProfileId()) return;
     try {
-      await reviewApi.setSuggestedEditStatus(d.id, status, actingProfileId());
+      if (status === "ACCEPTED") await reviewApi.applySuggestedEdit(d.id, actingProfileId());
+      else await reviewApi.setSuggestedEditStatus(d.id, status, actingProfileId());
       refetchDiscussions();
     } catch (err) {
       setError(String(err));

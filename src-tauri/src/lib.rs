@@ -393,6 +393,7 @@ pub fn run() {
             review::create_review_discussion,
             review::set_discussion_resolved,
             review::set_suggested_edit_status,
+            review::apply_suggested_edit,
             review::list_protected_branch_rules,
             review::save_merge_preferences,
             review::get_merge_policy,

@@ -2,14 +2,11 @@
 //! Code review persistence; discussions deliberately reuse chat channels.
 //!
 //! Merge safety (hard constraint, see docs/space-knowledge-base/01-git-code-review.md):
-//! nothing reachable from the UI ever checks out, writes a ref, or commits into a
-//! user-registered repository. `merge_preview` (used by both `dry_run_merge` and
-//! `attempt_merge`) only ever calls `Repository::merge_commits`, which builds an
-//! in-memory `git2::Index` and touches neither the working directory nor any ref.
-//! The one function that performs a *real* merge commit + ref update
-//! (`execute_real_merge_in_test`) is `#[cfg(test)]`-gated — it does not exist in the
-//! shipped binary at all — and is only ever invoked in this file's test module
-//! against disposable repos created under `target/test-repos/`.
+//! `merge_preview` (used by both `dry_run_merge` and `attempt_merge`) only calls
+//! `Repository::merge_commits`, which builds an in-memory `git2::Index` and touches
+//! neither the working directory nor any ref. Suggested-edit application is the narrow
+//! exception: it verifies an immutable base blob, creates one source-branch commit, and
+//! compare-and-swaps that ref without checking out or writing a working tree.
 use crate::db;
 use git2::{DiffOptions, Repository};
 use rusqlite::Connection;
@@ -75,6 +72,7 @@ pub struct ReviewDiscussion {
     pub suggestion_has_conflicts: Option<bool>,
     pub suggestion_identical_contents: Option<bool>,
     pub suggestion_resolved_by: Option<String>,
+    pub suggestion_applied_commit_id: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QualityGateRule {
@@ -642,7 +640,7 @@ pub fn review_diff(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents,suggestion_resolved_by FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents,suggestion_resolved_by,suggestion_applied_commit_id FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
             Ok(ReviewDiscussion {
@@ -660,6 +658,7 @@ pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion
                 suggestion_has_conflicts: r.get(11)?,
                 suggestion_identical_contents: r.get(12)?,
                 suggestion_resolved_by: r.get(13)?,
+                suggestion_applied_commit_id: r.get(14)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -710,13 +709,24 @@ fn create_review_discussion_tx(
         suggestion_has_conflicts: d.suggestion_has_conflicts,
         suggestion_identical_contents: d.suggestion_identical_contents,
         suggestion_resolved_by: None,
+        suggestion_applied_commit_id: None,
     })
 }
 /// Anchored inline discussion on the real diff; backing channel row is a direct insert
 /// (chat.rs untouched — chat's own commands remain available for reading/posting later).
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_review_discussion(discussion: NewDiscussion) -> Result<ReviewDiscussion> {
+pub fn create_review_discussion(mut discussion: NewDiscussion) -> Result<ReviewDiscussion> {
     let c = db::conn()?;
+    // A suggestion's base must be an immutable commit, never the mutable branch name
+    // supplied by the UI. Ordinary discussions retain their caller-provided revision.
+    if discussion.suggestion_content.is_some() {
+        let (source_branch, repo_path) = review_source_branch(&c, &discussion.review_id)?;
+        let source_oid = branch_commit(&open(&repo_path)?, &source_branch)?
+            .id()
+            .to_string();
+        discussion.revision = Some(source_oid.clone());
+        discussion.suggestion_commit_id = Some(source_oid);
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -750,14 +760,14 @@ fn valid_suggested_edit_transition(from: &str, to: &str) -> bool {
         ("OPEN", "ACCEPTED" | "REJECTED") | ("ACCEPTED" | "REJECTED", "OPEN")
     )
 }
-/// Changes only the proposed-edit lifecycle; it deliberately does not apply code to a repository.
+/// Changes only the proposed-edit lifecycle; rejection/reopening never writes a repository.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_suggested_edit_status(id: String, status: String, actor_id: String) -> Result<()> {
     let c = db::conn()?;
     let current: Option<String> = c.query_row(
-"SELECT suggestion_status FROM review_discussions WHERE id=?1 AND suggestion_content IS NOT NULL",
-rusqlite::params![&id], |r| r.get(0),
-).map_err(|_| "suggested edit not found".to_string())?;
+        "SELECT suggestion_status FROM review_discussions WHERE id=?1 AND suggestion_content IS NOT NULL",
+        rusqlite::params![&id], |r| r.get(0),
+    ).map_err(|_| "suggested edit not found".to_string())?;
     let current = current.ok_or_else(|| "suggested edit has no lifecycle state".to_string())?;
     if !valid_suggested_edit_transition(&current, &status) {
         return Err(format!(
@@ -765,8 +775,8 @@ rusqlite::params![&id], |r| r.get(0),
         ));
     }
     c.execute(
-"UPDATE review_discussions SET suggestion_status=?2, suggestion_resolved_by=CASE WHEN ?2='OPEN' THEN NULL ELSE ?3 END WHERE id=?1",
-rusqlite::params![id, status, actor_id],
+        "UPDATE review_discussions SET suggestion_status=?2, suggestion_resolved_by=CASE WHEN ?2='OPEN' THEN NULL ELSE ?3 END WHERE id=?1",
+        rusqlite::params![id, status, actor_id],
     ).map_err(|e| e.to_string())?;
     let review_id: String = c
         .query_row(
@@ -778,6 +788,137 @@ rusqlite::params![id, status, actor_id],
     review_event_by_id(crate::events::REVIEW_SUGGESTION_UPDATED, &review_id);
     Ok(())
 }
+
+#[derive(Debug, Serialize)]
+pub struct AppliedSuggestedEdit {
+    pub commit_id: String,
+}
+
+fn replace_suggestion_lines(base: &str, start: i64, end: i64, replacement: &str) -> Result<String> {
+    if start < 1 || end < start {
+        return Err("suggested edit has an invalid line range".into());
+    }
+    let trailing_newline = base.ends_with('\n');
+    let body = base.strip_suffix('\n').unwrap_or(base);
+    let mut lines: Vec<&str> = if body.is_empty() {
+        Vec::new()
+    } else {
+        body.split('\n').collect()
+    };
+    let start = (start - 1) as usize;
+    let end = end as usize;
+    if end > lines.len() {
+        return Err("suggested edit line range is outside its base blob".into());
+    }
+    let replacement = replacement.strip_suffix('\n').unwrap_or(replacement);
+    lines.splice(start..end, replacement.split('\n'));
+    let mut result = lines.join("\n");
+    if trailing_newline {
+        result.push('\n');
+    }
+    Ok(result)
+}
+
+type SuggestedEditTarget = (
+    String,
+    String,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn apply_suggested_edit_tx(
+    c: &Connection,
+    id: &str,
+    actor_id: &str,
+) -> Result<AppliedSuggestedEdit> {
+    let (review_id, file_path, line_start, line_end, base_oid, content, status): SuggestedEditTarget = c.query_row(
+        "SELECT review_id,file_path,line_start,line_end,revision,suggestion_content,suggestion_status FROM review_discussions WHERE id=?1",
+        rusqlite::params![id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+    ).map_err(|_| "suggested edit not found".to_string())?;
+    if status.as_deref() != Some("OPEN") || content.is_none() {
+        return Err("suggested edit is not open".into());
+    }
+    let start = line_start.ok_or_else(|| "suggested edit needs a line anchor".to_string())?;
+    let end = line_end.unwrap_or(start);
+    let base_oid = git2::Oid::from_str(
+        &base_oid.ok_or_else(|| "suggested edit has no immutable base revision".to_string())?,
+    )
+    .map_err(|_| "suggested edit base revision is not a commit id".to_string())?;
+    let (source_branch, repo_path) = review_source_branch(c, &review_id)?;
+    let project_id = review_project_tx(c, &review_id)?;
+    enforce_merge_permission_tx(c, &project_id, &source_branch, actor_id)?;
+    let repo = open(&repo_path)?;
+    let base = repo
+        .find_commit(base_oid)
+        .map_err(|_| "suggested edit base revision is unavailable".to_string())?;
+    let current = branch_commit(&repo, &source_branch)?;
+    let safe_path = std::path::Path::new(&file_path);
+    if safe_path.is_absolute()
+        || safe_path
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err("suggested edit file path is unsafe".into());
+    }
+    let base_entry = base
+        .tree()
+        .map_err(|e| e.to_string())?
+        .get_path(safe_path)
+        .map_err(|_| "suggested edit base blob is unavailable".to_string())?;
+    let current_tree = current.tree().map_err(|e| e.to_string())?;
+    let current_entry = current_tree
+        .get_path(safe_path)
+        .map_err(|_| "suggested edit target blob is unavailable".to_string())?;
+    if base_entry.id() != current_entry.id() {
+        c.execute("UPDATE review_discussions SET suggestion_has_conflicts=1 WHERE id=?1 AND suggestion_status='OPEN'", rusqlite::params![id]).map_err(|e| e.to_string())?;
+        return Err("suggested edit conflicts with the current target blob".into());
+    }
+    let base_blob = repo.find_blob(base_entry.id()).map_err(|e| e.to_string())?;
+    let base_text = std::str::from_utf8(base_blob.content())
+        .map_err(|_| "suggested edit base blob is not UTF-8".to_string())?;
+    let edited = replace_suggestion_lines(base_text, start, end, content.as_deref().unwrap())?;
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index.read_tree(&current_tree).map_err(|e| e.to_string())?;
+    let entry = index
+        .get_path(safe_path, 0)
+        .ok_or_else(|| "suggested edit target is not a regular file".to_string())?;
+    index
+        .add_frombuffer(&entry, edited.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let tree_oid = index.write_tree_to(&repo).map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+    let signature = committer_signature(&repo, None, None)?;
+    let commit_oid = repo
+        .commit(
+            None,
+            &signature,
+            &signature,
+            &format!("Apply suggested edit to {file_path}"),
+            &tree,
+            &[&current],
+        )
+        .map_err(|e| e.to_string())?;
+    advance_verified_ref(&repo, &source_branch, &current.id().to_string(), commit_oid)?;
+    let changed = c.execute("UPDATE review_discussions SET suggestion_status='ACCEPTED',suggestion_resolved_by=?2,suggestion_applied_commit_id=?3,suggestion_has_conflicts=0 WHERE id=?1 AND suggestion_status='OPEN'", rusqlite::params![id, actor_id, commit_oid.to_string()]).map_err(|e| e.to_string())?;
+    if changed != 1 {
+        return Err("suggested edit changed before it could be recorded".into());
+    }
+    review_event_by_id(crate::events::REVIEW_SUGGESTION_UPDATED, &review_id);
+    Ok(AppliedSuggestedEdit {
+        commit_id: commit_oid.to_string(),
+    })
+}
+
+/// Applies an open suggestion to the MR source branch using an immutable blob base check.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn apply_suggested_edit(id: String, actor_id: String) -> Result<AppliedSuggestedEdit> {
+    apply_suggested_edit_tx(&db::conn()?, &id, &actor_id)
+}
+
 // ---------- stacked merge requests ----------
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_review_stack(input: NewReviewStack) -> Result<ReviewStack> {
@@ -2882,6 +3023,75 @@ mod tests {
             "merged tree must keep main's file"
         );
 
+        sweep(&dir);
+    }
+    fn suggestion_fixture(name: &str) -> (db::TempDb, PathBuf, Repository, Connection, String) {
+        let (dir, repo) = clean_repo(name);
+        let path = dir.to_string_lossy().to_string();
+        let db_path = temp_db();
+        let conn = db::migrate_path(&db_path).expect("migrate");
+        conn.execute("INSERT INTO reviews(id,project_id,number,kind,state,source_branch,target_branch,title,repo_path) VALUES('suggestion','demo-project',1,'MR','Opened','feature','main','T',?1)", rusqlite::params![path]).unwrap();
+        let base = branch_commit(&repo, "feature").unwrap().id().to_string();
+        (db_path, dir, repo, conn, base)
+    }
+
+    fn insert_open_suggestion(conn: &Connection, base: &str) {
+        conn.execute("INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,suggestion_status,suggestion_content,suggestion_has_conflicts) VALUES('suggestion-disc','suggestion','extra.txt',1,1,?1,'OPEN','changed',0)", rusqlite::params![base]).unwrap();
+    }
+
+    #[test]
+    fn suggested_edit_apply_creates_a_source_branch_commit() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-apply");
+        insert_open_suggestion(&conn, &base);
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let applied =
+            apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").expect("apply");
+        let tip = branch_commit(&repo, "feature").unwrap();
+        assert_ne!(tip.id(), before);
+        assert_eq!(tip.id().to_string(), applied.commit_id);
+        let entry = tip
+            .tree()
+            .unwrap()
+            .get_path(Path::new("extra.txt"))
+            .unwrap();
+        assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"changed\n");
+        let recorded: (String, String) = conn.query_row("SELECT suggestion_status,suggestion_applied_commit_id FROM review_discussions WHERE id='suggestion-disc'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(recorded, ("ACCEPTED".into(), applied.commit_id));
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn suggested_edit_apply_refuses_a_changed_target_blob() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-conflict");
+        insert_open_suggestion(&conn, &base);
+        plumb_commit(
+            &repo,
+            "refs/heads/feature",
+            Some(branch_commit(&repo, "feature").unwrap().id()),
+            "extra.txt",
+            "someone else\n",
+        );
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let err = apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").unwrap_err();
+        assert!(err.contains("conflicts"));
+        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before);
+        let conflicted: bool = conn.query_row("SELECT suggestion_has_conflicts FROM review_discussions WHERE id='suggestion-disc'", [], |r| r.get(0)).unwrap();
+        assert!(conflicted);
+        drop(db_path);
+        sweep(&dir);
+    }
+
+    #[test]
+    fn suggested_edit_apply_refuses_an_unauthorized_actor() {
+        let (db_path, dir, repo, conn, base) = suggestion_fixture("suggestion-permission");
+        insert_open_suggestion(&conn, &base);
+        conn.execute("INSERT INTO protected_branch_rules(id,project_id,branch_pattern,allow_merge_json) VALUES('lock','demo-project','feature','[\"other\"]')", []).unwrap();
+        let before = branch_commit(&repo, "feature").unwrap().id();
+        let err = apply_suggested_edit_tx(&conn, "suggestion-disc", "default-org").unwrap_err();
+        assert!(err.contains("not allowed"));
+        assert_eq!(branch_commit(&repo, "feature").unwrap().id(), before);
+        drop(db_path);
         sweep(&dir);
     }
 }

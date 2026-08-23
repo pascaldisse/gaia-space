@@ -44,9 +44,19 @@ export type ReviewDiscussion = {
   suggestion_has_conflicts: boolean | null;
   suggestion_identical_contents: boolean | null;
   suggestion_resolved_by: string | null;
+  suggestion_applied_commit_id: string | null;
 };
+export type AppliedSuggestedEdit = { commit_id: string };
 export type SuggestedEditStatus = "OPEN" | "ACCEPTED" | "REJECTED";
-export type ReviewAggregatedStatus = "MERGED" | "CLOSED" | "ACCEPTED" | "NEEDS_MY_REVIEW" | "NEEDS_MY_ATTENTION" | "WAITING_FOR_REVIEW" | "WAITING_FOR_UPDATES" | "OPENED";
+export type ReviewAggregatedStatus =
+  | "MERGED"
+  | "CLOSED"
+  | "ACCEPTED"
+  | "NEEDS_MY_REVIEW"
+  | "NEEDS_MY_ATTENTION"
+  | "WAITING_FOR_REVIEW"
+  | "WAITING_FOR_UPDATES"
+  | "OPENED";
 
 export type ProtectedBranchRule = {
   id: string;
@@ -76,9 +86,13 @@ export type QualityGateRule = {
 };
 
 export type MergePolicy = {
-  project_id: string; allow_merge: boolean; allow_rebase: boolean; allow_squash: boolean;
+  project_id: string;
+  allow_merge: boolean;
+  allow_rebase: boolean;
+  allow_squash: boolean;
   merge_message_option: "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION";
-  squash_message_option: "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION" | "TITLE_AND_COMMITS";
+  squash_message_option:
+    "DEFAULT" | "TITLE" | "TITLE_AND_DESCRIPTION" | "TITLE_AND_COMMITS";
 };
 export type SafeMergeRun = {
   id: string;
@@ -102,7 +116,12 @@ export type QualityGateEvaluation = {
   required_checks: string[];
 };
 
-export type ExternalIssueLink = { id: string; review_id: string; external_url: string; title: string | null };
+export type ExternalIssueLink = {
+  id: string;
+  review_id: string;
+  external_url: string;
+  title: string | null;
+};
 export type ExternalCheckStatus = "PENDING" | "SUCCEEDED" | "FAILED";
 export type ExternalCheck = {
   review_id: string;
@@ -163,7 +182,10 @@ export const reviewApi = {
   get: (id: string) => invoke<Review | null>("get_review", { id }),
   update: (review: Review) => invoke<void>("update_review", { review }),
   aggregatedStatus: (reviewId: string, profileId: string) =>
-    invoke<ReviewAggregatedStatus>("review_aggregated_status", { reviewId, profileId }),
+    invoke<ReviewAggregatedStatus>("review_aggregated_status", {
+      reviewId,
+      profileId,
+    }),
   listOwnedFiles: (reviewId: string, profileId: string) =>
     invoke<string[]>("list_owned_review_files", { reviewId, profileId }),
   openMergeRequest: (req: NewMergeRequest) =>
@@ -187,11 +209,18 @@ export const reviewApi = {
     invoke<ReviewDiscussion>("create_review_discussion", { discussion }),
   setDiscussionResolved: (id: string, resolved: boolean) =>
     invoke<void>("set_discussion_resolved", { id, resolved }),
-  setSuggestedEditStatus: (id: string, status: SuggestedEditStatus, actorId: string) =>
-    invoke<void>("set_suggested_edit_status", { id, status, actorId }),
+  setSuggestedEditStatus: (
+    id: string,
+    status: SuggestedEditStatus,
+    actorId: string,
+  ) => invoke<void>("set_suggested_edit_status", { id, status, actorId }),
+  applySuggestedEdit: (id: string, actorId: string) =>
+    invoke<AppliedSuggestedEdit>("apply_suggested_edit", { id, actorId }),
 
-  getMergePolicy: (projectId: string) => invoke<MergePolicy>("get_merge_policy", { projectId }),
-  saveMergePolicy: (policy: MergePolicy) => invoke<void>("save_merge_policy", { policy }),
+  getMergePolicy: (projectId: string) =>
+    invoke<MergePolicy>("get_merge_policy", { projectId }),
+  saveMergePolicy: (policy: MergePolicy) =>
+    invoke<void>("save_merge_policy", { policy }),
   listProtectedBranchRules: (projectId: string) =>
     invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),
   saveProtectedBranchRule: (rule: ProtectedBranchRule) =>
