@@ -1,4 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+
+const realCore = await import("@tauri-apps/api/core");
 import { editableJob, normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
 
 describe("pipeline script normalization", () => {
@@ -107,6 +109,13 @@ describe("validation parity with parse_and_validate_script", () => {
  *  Rust *variant* name. Pinned on the Rust side by
  *  `pipelines::tests::serialized_dsl_tags_are_variant_names`. */
 describe("event trigger wire contract", () => {
+  // `mock.module` is process-global and permanent: without restoring the real
+  // module every later test file that binds `@tauri-apps/api/core` would get this
+  // swallowing stub instead of its own recorder (CI file order made that a real
+  // 3-test failure while the local order hid it).
+  afterEach(() => {
+    mock.module("@tauri-apps/api/core", () => realCore);
+  });
   async function captureCall(call: (api: typeof import("./pipelines").pipelinesApi) => Promise<unknown>) {
     const calls: Array<{ cmd: string; args: Record<string, unknown> }> = [];
     mock.module("@tauri-apps/api/core", () => ({

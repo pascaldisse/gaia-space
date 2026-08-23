@@ -10,7 +10,15 @@ let dispose: (() => void) | undefined;
 const realFetch = globalThis.fetch;
 const issue = { id: "i1", project_id: "p1", number: 7, title: "Plan the release", description: null, status_id: "s1", assignee_id: null, assignee_ids: [], created_by: null, due_date: "2026-08-30", priority: null, archived: false };
 let calls: { command: string; body: Record<string, unknown> }[] = [];
-const wait = () => new Promise(resolve => setTimeout(resolve, 30));
+// A fixed sleep is a wager on machine speed: CI lost it (the board link was still
+// the pre-load `/dashboard` href after 30ms). Wait for the condition, not the clock.
+async function until(check: () => boolean, timeoutMs = 4000) {
+  const started = Date.now();
+  while (!check()) {
+    if (Date.now() - started > timeoutMs) throw new Error("condition never held");
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
 
 function serve(table: Record<string, unknown>) {
   calls = [];
@@ -41,7 +49,11 @@ test("project tasks filters persisted issues and links to the matching board", a
   const host = document.createElement("div");
   document.body.append(host);
   dispose = render(() => <ProjectTasks />, host);
-  await wait();
+  await until(() =>
+    host.textContent?.includes("Plan the release") === true &&
+    ((host.querySelector("a.primary") as HTMLAnchorElement | null)
+      ?.getAttribute("href")
+      ?.includes("boards") ?? false));
 
   expect(host.textContent).toContain("Plan the release");
   expect(host.textContent).toContain("Open board");
@@ -53,6 +65,7 @@ test("project tasks filters persisted issues and links to the matching board", a
   const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement;
   tag.value = "t1";
   tag.dispatchEvent(new Event("change", { bubbles: true }));
-  await wait();
+  await until(() => calls.some(call =>
+    call.command === "list_issues" && (call.body as { tag_id?: string }).tag_id === "t1"));
   expect(calls.filter(call => call.command === "list_issues").slice(-1)[0]?.body).toMatchObject({ project_id: "p1", tag_id: "t1" });
 });
