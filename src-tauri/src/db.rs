@@ -584,7 +584,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     // V90: account-global roles are distinct from scoped platform roles. The legacy
     // `role` column remains readable for old servers; `global_role` is authoritative.
-    if version < 90 {
+    if version < 90 && table_exists(&tx, "users")? {
         add_column_if_missing(&tx, "users", "global_role", "TEXT NOT NULL DEFAULT 'GlobalMember' CHECK(global_role IN ('GlobalAdmin','GlobalMember','Guest','LightGuest'))")?;
         tx.execute_batch(SCHEMA_V90)?;
     }
