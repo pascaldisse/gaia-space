@@ -10,6 +10,8 @@ import "./IssueDetail.css";
  *  used by the board and by any other view that opens an issue. */
 export default function IssueDetail(props: { issueId: string; statuses?: Status[]; onChanged?: () => void; onClose?: () => void }) {
   const [error, setError] = createSignal("");
+const [transfer, setTransfer] = createSignal<"clone" | "move">();
+const [targetProjectId, setTargetProjectId] = createSignal("");
   // A sub-item IS an issue: opening one shows this same surface, with a way back.
   const [openId, setOpenId] = createSignal<string>();
   const [trail, setTrail] = createSignal<{ id: string; label: string }[]>([]);
@@ -73,6 +75,8 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
   const nameOf = (id: string | null) => { if (!id) return "Unassigned"; const p = profiles()?.find(x => x.id === id); return p ? (p.display_name || p.username) : id; };
   const patch = (change: Partial<Issue>) => { const current = issue(); if (current) setDraft({ ...current, ...change }); };
   const save = async () => { const current = issue(); if (!current) return; try { await planningApi.updateIssue(current); setDraft(undefined); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
+const openTransfer = (action: "clone" | "move") => { setTargetProjectId(issue()?.project_id ?? ""); setTransfer(action); };
+const transferIssue = async () => { const current = issue(), target = targetProjectId(); const action = transfer(); if (!current || !action || !target || target === current.project_id) return; try { const next = action === "clone" ? await planningApi.cloneIssue(current.id, target) : await planningApi.moveIssueToProject(current.id, target); setTransfer(undefined); props.onChanged?.(); linkEntity("issue", next.id, { projectId: next.project_id }, true); } catch (reason) { setError(humanError(reason)); } };
   const addChecklist = async () => { const title = checklistTitle().trim(); const id = currentId(); if (!id || !title) return; try { await planningApi.saveChecklist({ issue_id: id, title }); setChecklistTitle(""); await refetch(); } catch (reason) { setError(humanError(reason)); } };
   const currentTags = () => detail()?.tags ?? [];
   const setTags = async (next: PlanningTag[]) => { const item = issue(); if (!item) return; try { await planningApi.setTags(item.id, next.map(tag => tag.id)); await refetch(); await reloadTags(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
@@ -96,7 +100,9 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
           <Show when={trail().length}><button class="ghost idp-back" onClick={back}>← {trail()[trail().length - 1].label}</button></Show>
           <span class="idp-number">#{item().number}</span>
           <div class="idp-head-actions">
-            <button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
+            <button class="ghost" onClick={() => openTransfer("clone")}>Clone…</button>
+<button class="ghost" onClick={() => openTransfer("move")}>Move…</button>
+<button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
             <Show when={props.onClose}><button class="ghost" aria-label="Close issue" onClick={() => props.onClose?.()}>×</button></Show>
           </div>
         </header>
@@ -206,6 +212,7 @@ const removeAttachment = async (attachment: IssueAttachment) => { try { await pl
         </section>
 
         <p class="idp-owner">Assigned to {assignees().length ? assignees().map(nameOf).join(", ") : "nobody"}</p>
+<Show when={transfer()}>{action => <div class="issue-transfer-backdrop" role="presentation" onClick={() => setTransfer(undefined)}><section class="issue-transfer-dialog" role="dialog" aria-modal="true" aria-label={`${action()} issue`} onClick={event => event.stopPropagation()}><h3>{action() === "clone" ? "Clone issue" : "Move issue"}</h3><label>Destination project<select value={targetProjectId()} onChange={event => setTargetProjectId(event.currentTarget.value)}><For each={(projects() ?? []).filter(project => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></label><div class="planning-actions"><button type="button" class="ghost" onClick={() => setTransfer(undefined)}>Cancel</button><button type="button" class="primary" disabled={!targetProjectId() || targetProjectId() === item().project_id} onClick={() => void transferIssue()}>{action() === "clone" ? "Clone" : "Move"}</button></div></section></div>}</Show>
       </>
     }</Show>
   </aside>;

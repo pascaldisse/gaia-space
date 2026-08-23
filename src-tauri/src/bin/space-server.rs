@@ -1912,7 +1912,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
-        "create_board" | "create_issue" | "create_issue_status" => {
+        "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
         "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
@@ -4331,6 +4331,8 @@ async fn cmd(
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
     "create_issue" => issues::create_issue(input: issues::IssueInput),
+    "clone_issue" => issues::clone_issue(input: issues::IssueTransferInput),
+    "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),
     "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
     "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
