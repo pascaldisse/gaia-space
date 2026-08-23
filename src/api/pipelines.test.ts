@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
+import { editableJob, normalizeJob, parseScriptSource, scriptDefErrors, serializeJob, TRIGGER_EVENT_TYPES, type TriggerEvent } from "./pipelines";
 
 describe("pipeline script normalization", () => {
   test("upgrades legacy trigger_type and string steps without losing compatibility", () => {
@@ -145,5 +145,41 @@ describe("event trigger wire contract", () => {
   test("every selectable event type is a member of the TriggerEvent union", () => {
     const tags: Array<TriggerEvent["type"]> = [...TRIGGER_EVENT_TYPES];
     expect(tags).toEqual(["Manual", "Push", "BranchDeleted", "CodeReviewOpened", "CodeReviewClosed", "SafeMerge"]);
+  });
+});
+
+/** Adversarial review of 31546cc (container warnings). The warning is real, but it understates
+ *  what the editor does: a container step does not merely lose "container settings" on save —
+ *  `editableJob` -> `serializeJob` rewrites it into a `Shell` step, so the very command that was
+ *  meant to run isolated in an image is saved as a command that runs directly on the worker host.
+ *  Pinned here so the behaviour cannot change unnoticed in either direction. */
+describe("container step editor round-trip (defect pin)", () => {
+  const source = JSON.stringify({
+    jobs: [{ name: "boxed", trigger_type: "MANUAL", timeout_secs: null,
+             steps: [{ type: "Container", image: "alpine", script: "rm -rf /workspace" }] }],
+  });
+
+  test("round-tripping a container step downgrades it to a host shell step", () => {
+    const job = parseScriptSource(source).jobs[0];
+    const saved = serializeJob(editableJob(job));
+    // Current behaviour: the isolation is dropped, the command survives.
+    expect(saved.steps).toEqual([{ type: "Shell", script: "rm -rf /workspace" }]);
+    expect(JSON.stringify(saved)).not.toContain("alpine");
+  });
+
+  // DEFECT (for the pipelines.ts owner): downgrading to Shell changes *where* the command runs.
+  // Either the container step must survive the round-trip, or the editor must refuse to save a
+  // script it cannot represent — a warning is not enough for a change of execution context.
+  test.failing("a container step should survive the editor round-trip", () => {
+    const job = parseScriptSource(source).jobs[0];
+    expect(serializeJob(editableJob(job)).steps).toEqual([
+      { type: "Container", image: "alpine", script: "rm -rf /workspace" },
+    ]);
+  });
+
+  test("scriptDefErrors does not block saving such a script, so nothing stops the downgrade", () => {
+    const parsed = parseScriptSource(source);
+    expect(scriptDefErrors({ jobs: [serializeJob(editableJob(parsed.jobs[0]))] })).toEqual([]);
+    expect(parsed.warnings.length).toBeGreaterThan(0);
   });
 });
