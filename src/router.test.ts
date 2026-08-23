@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
   createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
@@ -294,3 +294,7 @@ describe("project workspace routes", () => {
     expect(parsePath("projects/p-1/settings")).toMatchObject({ view: "Project Settings", projectId: "p-1" });
   });
 });
+
+// Availability is module-global: leaving a narrowed set behind breaks whichever
+// file runs next (it did — project-tasks lost its board link on CI).
+afterAll(() => setAvailableViews(null));

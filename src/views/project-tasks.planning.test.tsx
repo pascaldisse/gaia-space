@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { render } from "solid-js/web";
 import ProjectTasks from "./ProjectTasks";
 import { planningApi } from "../api/issues";
-import { navigate, registerViews, route } from "../router";
+import { navigate, registerViews, route, setAvailableViews } from "../router";
 import { projectId } from "../session";
 
 let dispose: (() => void) | undefined;
@@ -54,6 +54,10 @@ test("project tasks filters persisted issues and links to the matching board", a
     list_planning_tags: [{ id: "t1", project_id: "p1", parent_id: null, name: "release", archived: false }],
   });
   registerViews(["Dashboard", "Project Tasks", "Boards"]);
+  // Router availability is module-global and outlives the file that narrowed it:
+  // router.test.ts leaves a restricted set, and on CI's file order that made this
+  // view's board link fall back to /dashboard. Declare the reachable set here.
+  setAvailableViews(null);
   navigate({ view: "Project Tasks", projectId: "p1" });
   const host = document.createElement("div");
   document.body.append(host);
