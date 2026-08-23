@@ -38,7 +38,14 @@ export type ReviewDiscussion = {
   revision: string | null;
   resolved: boolean;
   channel_id: string | null;
+  suggestion_commit_id: string | null;
+  suggestion_status: SuggestedEditStatus | null;
+  suggestion_content: string | null;
+  suggestion_has_conflicts: boolean | null;
+  suggestion_identical_contents: boolean | null;
+  suggestion_resolved_by: string | null;
 };
+export type SuggestedEditStatus = "OPEN" | "ACCEPTED" | "REJECTED";
 
 export type ProtectedBranchRule = {
   id: string;
@@ -138,6 +145,10 @@ export type NewDiscussion = {
   revision: string | null;
   author_id: string;
   message: string;
+  suggestion_commit_id?: string | null;
+  suggestion_content?: string | null;
+  suggestion_has_conflicts?: boolean | null;
+  suggestion_identical_contents?: boolean | null;
 };
 
 export const reviewApi = {
@@ -165,6 +176,8 @@ export const reviewApi = {
     invoke<ReviewDiscussion>("create_review_discussion", { discussion }),
   setDiscussionResolved: (id: string, resolved: boolean) =>
     invoke<void>("set_discussion_resolved", { id, resolved }),
+  setSuggestedEditStatus: (id: string, status: SuggestedEditStatus, actorId: string) =>
+    invoke<void>("set_suggested_edit_status", { id, status, actorId }),
 
   listProtectedBranchRules: (projectId: string) =>
     invoke<ProtectedBranchRule[]>("list_protected_branch_rules", { projectId }),

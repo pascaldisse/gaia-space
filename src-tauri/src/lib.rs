@@ -312,6 +312,7 @@ pub fn run() {
             review::list_review_discussions,
             review::create_review_discussion,
             review::set_discussion_resolved,
+            review::set_suggested_edit_status,
             review::list_protected_branch_rules,
             review::save_protected_branch_rule,
             review::delete_protected_branch_rule,

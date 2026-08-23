@@ -1757,6 +1757,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "create_review_stack"
         | "create_review"
         | "create_review_discussion"
+        | "set_suggested_edit_status"
         | "create_role"
         | "create_role_assignment" => CommandPolicy::Session,
         "create_sprint"
@@ -4164,6 +4165,7 @@ async fn cmd(
     "list_my_review_stacks" => review::list_my_review_stacks(profile_id: String),
     "remove_review_stack" => review::remove_review_stack(stack_id: String),
     "list_review_discussions" => review::list_review_discussions(review_id: String),
+    "set_suggested_edit_status" => review::set_suggested_edit_status(id: String, status: String, actor_id: String),
     "list_review_participants" => review::list_review_participants(review_id: String),
     "list_reviews" => review::list_reviews(),
     "list_rights" => platform::list_rights(),

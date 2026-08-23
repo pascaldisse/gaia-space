@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 74;
+pub const SCHEMA_VERSION: i64 = 80;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -584,6 +584,37 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 68 && table_exists(&tx, "job_runs")? {
         add_column_if_missing(&tx, "job_runs", "fired_minute", "INTEGER")?;
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS job_runs_scheduled_once ON job_runs(job_id, fired_minute) WHERE fired_minute IS NOT NULL;")?;
+    }
+    // V80: inline suggested-edit lifecycle. A suggestion remains an immutable proposal;
+    // accepting it records review intent only and never writes to a registered repository.
+    if version < 80 {
+        add_column_if_missing(&tx, "review_discussions", "suggestion_commit_id", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_status",
+            "TEXT CHECK(suggestion_status IN ('OPEN','ACCEPTED','REJECTED'))",
+        )?;
+        add_column_if_missing(&tx, "review_discussions", "suggestion_content", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_has_conflicts",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_identical_contents",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "review_discussions",
+            "suggestion_resolved_by",
+            "TEXT REFERENCES profiles(id)",
+        )?;
+        tx.execute_batch("CREATE INDEX IF NOT EXISTS review_discussions_suggestion_status ON review_discussions(review_id, suggestion_status);")?;
     }
     // V71: importer runs are durable audit facts. The stored source is the operator-selected
     // path (never its contents); counts make partial imports visible after the toast is gone.

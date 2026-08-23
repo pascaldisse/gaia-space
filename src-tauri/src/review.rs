@@ -48,6 +48,12 @@ pub struct ReviewDiscussion {
     pub revision: Option<String>,
     pub resolved: bool,
     pub channel_id: Option<String>,
+    pub suggestion_commit_id: Option<String>,
+    pub suggestion_status: Option<String>,
+    pub suggestion_content: Option<String>,
+    pub suggestion_has_conflicts: Option<bool>,
+    pub suggestion_identical_contents: Option<bool>,
+    pub suggestion_resolved_by: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QualityGateRule {
@@ -134,6 +140,14 @@ pub struct NewDiscussion {
     pub revision: Option<String>,
     pub author_id: String,
     pub message: String,
+    #[serde(default)]
+    pub suggestion_commit_id: Option<String>,
+    #[serde(default)]
+    pub suggestion_content: Option<String>,
+    #[serde(default)]
+    pub suggestion_has_conflicts: Option<bool>,
+    #[serde(default)]
+    pub suggestion_identical_contents: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -429,7 +443,7 @@ pub fn review_diff(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_review_discussions(review_id: String) -> Result<Vec<ReviewDiscussion>> {
     let c = db::conn()?;
-    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
+    let mut s = c.prepare("SELECT id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents,suggestion_resolved_by FROM review_discussions WHERE review_id=?1 ORDER BY file_path,line_start").map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![review_id], |r| {
             Ok(ReviewDiscussion {
@@ -459,8 +473,8 @@ fn create_review_discussion_tx(
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,resolved,channel_id) VALUES(?1,?2,?3,?4,?5,?6,0,?7)",
-        rusqlite::params![d.id, d.review_id, d.file_path, d.line_start, d.line_end, d.revision, d.channel_id],
+        "INSERT INTO review_discussions(id,review_id,file_path,line_start,line_end,revision,resolved,channel_id,suggestion_commit_id,suggestion_status,suggestion_content,suggestion_has_conflicts,suggestion_identical_contents) VALUES(?1,?2,?3,?4,?5,?6,0,?7,?8,CASE WHEN ?9 IS NULL THEN NULL ELSE 'OPEN' END,?9,?10,?11)",
+        rusqlite::params![d.id, d.review_id, d.file_path, d.line_start, d.line_end, d.revision, d.channel_id, d.suggestion_commit_id, d.suggestion_content, d.suggestion_has_conflicts, d.suggestion_identical_contents],
     )
     .map_err(|e| e.to_string())?;
     if !d.message.trim().is_empty() {
@@ -509,6 +523,32 @@ pub fn set_discussion_resolved(id: String, resolved: bool) -> Result<()> {
     Ok(())
 }
 
+fn valid_suggested_edit_transition(from: &str, to: &str) -> bool {
+    matches!(
+        (from, to),
+        ("OPEN", "ACCEPTED" | "REJECTED") | ("ACCEPTED" | "REJECTED", "OPEN")
+    )
+}
+/// Changes only the proposed-edit lifecycle; it deliberately does not apply code to a repository.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_suggested_edit_status(id: String, status: String, actor_id: String) -> Result<()> {
+    let c = db::conn()?;
+    let current: Option<String> = c.query_row(
+"SELECT suggestion_status FROM review_discussions WHERE id=?1 AND suggestion_content IS NOT NULL",
+rusqlite::params![&id], |r| r.get(0),
+).map_err(|_| "suggested edit not found".to_string())?;
+    let current = current.ok_or_else(|| "suggested edit has no lifecycle state".to_string())?;
+    if !valid_suggested_edit_transition(&current, &status) {
+        return Err(format!(
+            "invalid suggested edit transition {current} -> {status}"
+        ));
+    }
+    c.execute(
+"UPDATE review_discussions SET suggestion_status=?2, suggestion_resolved_by=CASE WHEN ?2='OPEN' THEN NULL ELSE ?3 END WHERE id=?1",
+rusqlite::params![id, status, actor_id],
+).map_err(|e| e.to_string())?;
+    Ok(())
+}
 // ---------- stacked merge requests ----------
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_review_stack(input: NewReviewStack) -> Result<ReviewStack> {
