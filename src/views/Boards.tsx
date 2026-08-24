@@ -27,6 +27,13 @@ export default function Boards() {
 const [swimlaneGroup, setSwimlaneGroup] = createSignal<"none" | "assignee" | "creator" | "due_date">("none");
   const [openIssue, setOpenIssue] = createSignal<string>();
   const [menu, setMenu] = createSignal<{ column: BoardColumn; x: number; y: number }>();
+  // Board chrome is a chip bar: every configuration control lives inside a popover
+  // anchored to the chip that owns it, so the board itself is never pushed off screen
+  // by a row of naked form fields. One popover may be open at a time.
+  const [panel, setPanel] = createSignal<"board" | "sprint" | "lane" | "fields">();
+  const [showBacklog, setShowBacklog] = createSignal(true);
+  const togglePanel = (name: "board" | "sprint" | "lane" | "fields") => setPanel(open => open === name ? undefined : name);
+  const dismiss = () => { setMenu(undefined); setPanel(undefined); };
   // Board-local selection deliberately survives column changes, so one bulk action
   // can span the full filtered board rather than only the visible column.
   const [selectedIssueIds, setSelectedIssueIds] = createSignal<string[]>([]);
@@ -59,7 +66,7 @@ const [swimlaneGroup, setSwimlaneGroup] = createSignal<"none" | "assignee" | "cr
     if (!project || !name) return;
     try {
       const created = await planningApi.createBoard({ project_id: project, name, backlog_type: "MANUAL", archived: false });
-      setNewBoard(""); setBoard(created);
+      setNewBoard(""); setPanel(undefined); setBoard(created);
       // A board with no columns cannot hold work: lay the chosen template down now.
       for (const columnName of TEMPLATES[template()].columns) {
         const statusId = await statusFor(columnName);
@@ -154,30 +161,98 @@ const clearSelection = () => setSelectedIssueIds([]);
 const bulkMove = async () => { const b = board(); const columnId = bulkColumnId(); if (!b || !columnId || !selected().length) return; try { await planningApi.bulkMove({ board_id: b.id, issue_ids: selected(), column_id: columnId, sprint_id: sprintId() ?? null, swimlane_id: activeSwimlane() ?? null }); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
 const bulkSprint = async () => { const b = board(); if (!b || !selected().length) return; try { await planningApi.bulkSprint(b.id, selected(), bulkSprintId() || null); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
 const bulkRemove = async () => { const b = board(); if (!b || !selected().length || !confirm(`Remove ${selected().length} selected issue(s) from this board?`)) return; try { await planningApi.bulkRemove(b.id, selected()); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
-return <section class="planning-view boards-view" onClick={() => setMenu(undefined)}>
+const addSwimlane = async () => {
+  const b = board(); const name = newSwimlane().trim(); if (!b || !name) return;
+  try { const lane = await planningApi.saveSwimlane({ board_id: b.id, sprint_id: sprintId() ?? null, name, is_default: !(swimlanes()?.length) }); setNewSwimlane(""); setPanel(undefined); await reloadSwimlanes(); if (lane?.id) setActiveSwimlane(lane.id); }
+  catch (reason) { setError(humanError(reason)); }
+};
+const addSprint = async () => {
+  const b = board(); const name = newSprint().trim(); if (!b || !name) return;
+  try { const s = await planningApi.createSprint({ board_id: b.id, name, starts_on: null, ends_on: null, description: null }); setNewSprint(""); setPanel(undefined); setSprintId(s.id); reloadSprints(); }
+  catch (reason) { setError(humanError(reason)); }
+};
+const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All issues";
+return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
     <header class="planning-head"><div><h1>Issue boards</h1><p>Columns map issue statuses. Drag a column header (or use ‹ ›) to reorder; right-click to rename or delete.</p></div><ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} /></header>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
-    <div class="board-toolbar">
-      <form onSubmit={createBoard} class="board-create">
-        <input placeholder="New board name" value={newBoard()} onInput={e => setNewBoard(e.currentTarget.value)} />
-        <select value={template()} onChange={e => setTemplate(e.currentTarget.value)} aria-label="Board template">
-          <For each={Object.entries(TEMPLATES)}>{([key, value]) => <option value={key}>{value.label}</option>}</For>
-        </select>
-        <button class="primary" disabled={!projectId() || !newBoard().trim()}>Create board</button>
-      </form>
-      <div class="board-tabs"><For each={boards()}>{b => <button classList={{ active: board()?.id === b.id }} onClick={() => { setBoard(b); setSprintId(undefined); setOpenIssue(undefined); }}>{b.name}</button>}</For></div>
-      <Show when={board()}>
-        <select value={sprintId() ?? ""} onChange={e => setSprintId(e.currentTarget.value || undefined)}>
-          <option value="">All board issues</option>
-          <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
-        </select>
-        <div class="inline-form"><input placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /><button onClick={async () => { const b = board(); const name = newSwimlane().trim(); if (!b || !name) return; try { await planningApi.saveSwimlane({ board_id: b.id, sprint_id: sprintId() ?? null, name, is_default: !(swimlanes()?.length), }); setNewSwimlane(""); reloadSwimlanes(); } catch (reason) { setError(humanError(reason)); } }}>Lane</button></div>
-        <select aria-label="Swimlane" value={activeSwimlane() ?? ""} onChange={e => setActiveSwimlane(e.currentTarget.value || undefined)}><option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For></select>
-        <label class="swimlane-group">Group cards by <select aria-label="Swimlane grouping" value={swimlaneGroup()} onChange={e => setSwimlaneGroup(e.currentTarget.value as "none" | "assignee" | "creator" | "due_date")}><option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option></select></label>
-<div class="inline-form"><input placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /><button onClick={async () => { const b = board(); if (!b || !newSprint().trim()) return; try { const s = await planningApi.createSprint({ board_id: b.id, name: newSprint().trim(), starts_on: null, ends_on: null, description: null }); setNewSprint(""); setSprintId(s.id); reloadSprints(); } catch (reason) { setError(humanError(reason)); } }}>Sprint</button></div>
-      </Show>
+    {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
+    <div class="board-bar">
+      <div class="board-tabs" role="tablist" aria-label="Boards">
+        <For each={boards()}>{b => <button role="tab" aria-selected={board()?.id === b.id} classList={{ active: board()?.id === b.id }} onClick={() => { setBoard(b); setSprintId(undefined); setOpenIssue(undefined); }}>{b.name}</button>}</For>
+        <Show when={!boards()?.length}><span class="bar-empty">No boards yet</span></Show>
+      </div>
+      <div class="chip-wrap" onClick={event => event.stopPropagation()}>
+        <button class="chip chip-primary" aria-expanded={panel() === "board"} aria-haspopup="dialog" disabled={!projectId()} onClick={() => togglePanel("board")}><span class="chip-plus">＋</span> New board</button>
+        <Show when={panel() === "board"}>
+          <form class="popover" role="dialog" aria-label="New board" onSubmit={createBoard}>
+            <label class="pop-field"><span>Name</span><input autofocus placeholder="New board name" value={newBoard()} onInput={e => setNewBoard(e.currentTarget.value)} /></label>
+            <label class="pop-field"><span>Template</span>
+              <select value={template()} onChange={e => setTemplate(e.currentTarget.value)} aria-label="Board template">
+                <For each={Object.entries(TEMPLATES)}>{([key, value]) => <option value={key}>{value.label}</option>}</For>
+              </select>
+            </label>
+            <div class="pop-actions"><button class="primary" disabled={!projectId() || !newBoard().trim()}>Create board</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+          </form>
+        </Show>
+      </div>
     </div>
+
+    {/* Tier 2 — how this board is read: filters and display, one chip each. */}
+    <Show when={board()}>
+      <div class="board-viewbar" role="toolbar" aria-label="Board view">
+        <div class="chip-group">
+          <label class="chip chip-select" title={sprintName()}><span>Sprint</span>
+            <select aria-label="Sprint" value={sprintId() ?? ""} onChange={e => setSprintId(e.currentTarget.value || undefined)}>
+              <option value="">All issues</option>
+              <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
+            </select>
+          </label>
+          <div class="chip-wrap" onClick={event => event.stopPropagation()}>
+            <button class="chip chip-icon" aria-label="New sprint" title="New sprint" aria-expanded={panel() === "sprint"} onClick={() => togglePanel("sprint")}>＋</button>
+            <Show when={panel() === "sprint"}>
+              <form class="popover" role="dialog" aria-label="New sprint" onSubmit={e => { e.preventDefault(); void addSprint(); }}>
+                <label class="pop-field"><span>Sprint name</span><input autofocus placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /></label>
+                <div class="pop-actions"><button class="primary" disabled={!newSprint().trim()}>Sprint</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+              </form>
+            </Show>
+          </div>
+        </div>
+
+        <div class="chip-group">
+          <label class="chip chip-select"><span>Lane</span>
+            <select aria-label="Swimlane" value={activeSwimlane() ?? ""} onChange={e => setActiveSwimlane(e.currentTarget.value || undefined)}><option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For></select>
+          </label>
+          <div class="chip-wrap" onClick={event => event.stopPropagation()}>
+            <button class="chip chip-icon" aria-label="New swimlane" title="New swimlane" aria-expanded={panel() === "lane"} onClick={() => togglePanel("lane")}>＋</button>
+            <Show when={panel() === "lane"}>
+              <form class="popover" role="dialog" aria-label="New swimlane" onSubmit={e => { e.preventDefault(); void addSwimlane(); }}>
+                <label class="pop-field"><span>Lane name</span><input autofocus placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /></label>
+                <div class="pop-actions"><button class="primary" disabled={!newSwimlane().trim()}>Lane</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+              </form>
+            </Show>
+          </div>
+        </div>
+
+        <label class="chip chip-select"><span>Group</span>
+          <select aria-label="Swimlane grouping" value={swimlaneGroup()} onChange={e => setSwimlaneGroup(e.currentTarget.value as "none" | "assignee" | "creator" | "due_date")}><option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option></select>
+        </label>
+
+        <div class="chip-wrap" onClick={event => event.stopPropagation()}>
+          <button class="chip" aria-expanded={panel() === "fields"} aria-haspopup="dialog" onClick={() => togglePanel("fields")}>Card fields <small>{cardSettings()?.fields?.length ?? 0}</small></button>
+          <Show when={panel() === "fields"}>
+            <div class="popover pop-list" role="dialog" aria-label="Card fields">
+              <p class="pop-hint">What every card shows.</p>
+              <For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field =>
+                <label class="pop-check"><input type="checkbox" checked={cardSettings()?.fields?.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>
+              }</For>
+            </div>
+          </Show>
+        </div>
+
+        <button class="chip chip-toggle" classList={{ active: showBacklog() }} aria-pressed={showBacklog()} onClick={() => setShowBacklog(value => !value)}>Backlog</button>
+      </div>
+    </Show>
 
     <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
       <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected issues"><strong>{selected().length} selected</strong>
@@ -185,8 +260,8 @@ return <section class="planning-view boards-view" onClick={() => setMenu(undefin
         <select aria-label="Assign selected issues to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
         <button class="danger" onClick={() => void bulkRemove()}>Remove from board</button><button class="ghost" onClick={clearSelection}>Clear</button>
       </div></Show>
-      <div class="board-card-settings"><strong>Card fields</strong><For each={["priority", "due_date", "assignees", "checklists", "subitems"]}>{field => <label><input type="checkbox" checked={cardSettings()?.fields?.includes(field)} onChange={async event => { const settings = cardSettings(); if (!settings) return; const fields = event.currentTarget.checked ? [...settings.fields, field] : settings.fields.filter(value => value !== field); try { await planningApi.saveCardSettings({ ...settings, fields }); reloadCardSettings(); } catch (reason) { setError(humanError(reason)); } }} />{field.replace("_", " ")}</label>}</For></div>
-      <div class="board-split">
+      <div class="board-split" classList={{ "with-rail": showBacklog() || !!openIssue() }}>
+        <div class="board-canvas">
         <Show when={laneGroups().length} fallback={<p class="hint pad">No issues in this board.</p>}>
 <For each={laneGroups()}>{lane => <section class="swimlane-row">
 <Show when={swimlaneGroup() !== "none"}><header><strong>{lane.name}</strong><small>{lane.laneIssues.length} issues</small></header></Show>
@@ -233,9 +308,20 @@ return <section class="planning-view boards-view" onClick={() => setMenu(undefin
         </div>
 </section>}</For>
 </Show>
-<Show when={openIssue()}>{id =>
-          <IssueDetail issueId={id()} statuses={statuses()} onChanged={() => { reloadIssues(); }} onClose={() => setOpenIssue(undefined)} />
-        }</Show>
+        <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
+        </div>
+
+        {/* One right rail: the open card owns it, otherwise the backlog does. */}
+        <Show when={openIssue() || showBacklog()}>
+          <aside class="board-rail" onClick={event => event.stopPropagation()}>
+            <Show when={openIssue()} fallback={<>
+              <header class="rail-head"><h2>Backlog</h2><button class="chip chip-icon" aria-label="Hide backlog" title="Hide backlog" onClick={() => setShowBacklog(false)}>×</button></header>
+              <div class="rail-body"><Backlog boardId={b().id} columns={columns() ?? []} sprintId={sprintId()} swimlaneId={activeSwimlane()} moved={reloadIssues} /></div>
+            </>}>{id =>
+              <IssueDetail issueId={id()} statuses={statuses()} onChanged={() => { reloadIssues(); }} onClose={() => setOpenIssue(undefined)} />
+            }</Show>
+          </aside>
+        </Show>
 
         <Show when={menu()}>{context =>
           <div class="column-menu" style={{ left: `${context().x}px`, top: `${context().y}px` }} onClick={event => event.stopPropagation()}>
@@ -251,10 +337,12 @@ return <section class="planning-view boards-view" onClick={() => setMenu(undefin
           </div>
         }</Show>
 
-        <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
-        <section class="backlog"><h2>Backlog</h2><Backlog boardId={b().id} columns={columns() ?? []} sprintId={sprintId()} swimlaneId={activeSwimlane()} moved={reloadIssues} /></section>
-<BoardMatrix issues={issues() ?? []} columns={columns() ?? []} statuses={statuses()} />
       </div>
+
+      <details class="board-report">
+        <summary>Matrix report</summary>
+        <BoardMatrix issues={issues() ?? []} columns={columns() ?? []} statuses={statuses()} />
+      </details>
     </>}</Show>
   </section>;
 }
@@ -308,8 +396,7 @@ const rowName = (issue: Issue) => axis() === "priority" ? (issue.priority ?? "No
 const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.localeCompare(b));
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
-<h2>Matrix report</h2>
-<label>Rows <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
+<label class="chip chip-select"><span>Rows</span> <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
 <Show when={props.issues.length} fallback={<p class="hint">No board issues for this matrix.</p>}>
 <table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
 </Show>
