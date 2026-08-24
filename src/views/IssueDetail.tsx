@@ -18,7 +18,9 @@ const [targetProjectId, setTargetProjectId] = createSignal("");
   const currentId = () => openId() ?? props.issueId;
   const [detail, { refetch }] = createResource(currentId, id => id ? planningApi.issue(id) : Promise.resolve(null));
   const [draft, setDraft] = createSignal<Issue>();
-  const issue = () => draft() ?? detail()?.issue;
+  // Reading an errored resource re-throws inside the render scope; the panel would
+  // then never reach its own fallback and would sit on "Loading…" forever.
+  const issue = () => draft() ?? (detail.error ? undefined : detail()?.issue);
   const [members] = createResource(() => issue()?.project_id, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   // The owner (or an admin) may bring somebody onto the project by assigning
@@ -94,7 +96,11 @@ const transferIssue = async () => { const current = issue(), target = targetProj
 
   return <aside class="issue-detail-panel">
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
-    <Show when={issue()} fallback={<p class="hint pad">Loading issue…</p>}>{item =>
+    {/* A read that fails must SAY so — a permanent "Loading…" is a lie the panel
+        told for as long as the command was missing. */}
+    <Show when={issue()} fallback={detail.error
+      ? <p class="planning-error" role="alert">This issue could not be loaded: {humanError(detail.error)}</p>
+      : <p class="hint pad">Loading issue…</p>}>{item =>
       <>
         <header class="idp-head">
           <Show when={trail().length}><button class="ghost idp-back" onClick={back}>← {trail()[trail().length - 1].label}</button></Show>
