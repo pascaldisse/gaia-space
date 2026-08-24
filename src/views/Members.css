@@ -13,16 +13,19 @@
 }
 .org-hint { color: var(--text-faint); font-size: 12px; margin: 6px 2px; }
 
-/* ── wide working panels ── people deserve room for a useful directory;
-   membership becomes a full-width second-row workspace rather than a narrow
-   third fragment. The existing people/team/member flows stay unchanged. */
-.org-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr); gap: 16px; align-items: start; }
+/* People stay left; selecting a team reveals its member controls directly
+   underneath it on the right, without a hidden third row to scroll to. */
+.org-layout {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  grid-template-areas: "people teams" "people membership"; gap: 16px; align-items: start;
+}
 .org-panel {
   background: var(--surface); border: 1px solid var(--surface-border); border-radius: 14px;
   padding: 18px; min-height: 220px;
 }
-.org-panel:first-child { min-height: 360px; }
-.org-panel:nth-child(3) { grid-column: 1 / -1; min-height: 250px; }
+.org-panel:first-child { grid-area: people; min-height: 360px; align-self: stretch; }
+.org-panel:nth-child(2) { grid-area: teams; }
+.org-panel:nth-child(3) { grid-area: membership; min-height: 250px; }
 .org-panel:nth-child(3) .org-list { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 5px 12px; }
 .org-profile-panel { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 14px; padding: 18px; margin: 0 0 16px; }
 .org-profile-panel .panel-title > div { flex: 1; min-width: 0; }
@@ -115,7 +118,7 @@
 
 @media (max-width: 1000px) {
   .org-layout, .org-directory-addons, .org-profile-edit { grid-template-columns: 1fr; }
-  .org-layout { grid-template-columns: 1fr; }
+  .org-layout { grid-template-columns: 1fr; grid-template-areas: "people" "teams" "membership"; }
   .hover-actions { opacity: 1; }
 }
 @media (max-width: 760px) {

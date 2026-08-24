@@ -56,4 +56,34 @@ describe("advanced directory", () => {
     ([...detail.querySelectorAll("button")].find((button) => button.textContent === "Contacts") as HTMLButtonElement).click(); await settle();
     expect(detail.textContent).toContain("Telegram");
   });
+
+  test("selecting a team exposes member controls and adds the chosen person", async () => {
+    const calls: { command: string; body: unknown }[] = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const command = url.split("api/cmd/")[1] ?? url;
+      calls.push({ command, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      return new Response(JSON.stringify(replies[command] ?? { ok: true, value: [] }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const host = document.createElement("div"); document.body.appendChild(host);
+    dispose = render(() => <Members /> as any, host);
+    await settle();
+
+    (host.querySelector(".org-team-list li") as HTMLLIElement).click();
+    await settle();
+    const membership = host.querySelector(".org-panel:nth-child(3)")!;
+    expect(membership.textContent).toContain("Platform");
+    expect(membership.textContent).toContain("Add to team");
+    const person = membership.querySelector("select") as HTMLSelectElement;
+    person.value = "ada";
+    person.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    ([...membership.querySelectorAll("button")].find((button) => button.textContent === "Add to team") as HTMLButtonElement).click();
+    await settle();
+    expect(calls).toContainEqual({
+      command: "add_team_membership",
+      body: { input: { profile_id: "ada", team_id: "platform", role_id: null } },
+    });
+  });
 });
