@@ -58,7 +58,12 @@ function ProjectRoles(props: { projectId: string }) {
       await bindingsResource.refetch();
     });
   };
-  return <section class="project-roles">
+  // Access is administration, not daily work: it stays folded away under the board
+  // and says in its own summary how much is configured, so nobody opens it to look.
+  return <details class="project-access">
+    <summary><span>Access</span><small>{liveRoles().length} roles · {(bindings() ?? []).length} team bindings</small></summary>
+    <div class="project-access-body">
+    <section class="project-roles">
     <h3>Roles</h3>
     <Show when={panelError()}><p class="error" role="alert">{panelError()}</p></Show>
     <form class="project-role-form" onSubmit={addRole}>
@@ -96,7 +101,9 @@ function ProjectRoles(props: { projectId: string }) {
         <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.removeProjectTeamRole(binding.project_id, binding.team_id, binding.project_role_id); await bindingsResource.refetch(); })}>Remove</button>
       </li>
     }</For></ul>
-  </section>;
+    </section>
+    </div>
+  </details>;
 }
 export default function Projects() {
   // One destination: the project list IS the entry point, and an opened project
@@ -254,8 +261,8 @@ export default function Projects() {
     <Show when={route().entityId && !openProject()}><p class="error" role="alert">This project does not exist or is unavailable.</p></Show><Show when={openProject()}>{project=>
       <section class="project-open">
         <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><a {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</a></header>
-        <ProjectRoles projectId={project().id}/>
         <Boards/>
+        <ProjectRoles projectId={project().id}/>
       </section>
     }</Show>
   </section>;
