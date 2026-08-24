@@ -3,11 +3,12 @@ import { render } from "solid-js/web";
 import ProjectTasks from "./ProjectTasks";
 import { planningApi } from "../api/issues";
 import { navigate, registerViews, route, setAvailableViews } from "../router";
-import { projectId } from "../session";
+import { projectId, setProfileId } from "../session";
 
 let dispose: (() => void) | undefined;
 const realFetch = globalThis.fetch;
 const issue = { id: "i1", project_id: "p1", number: 7, title: "Plan the release", description: null, status_id: "s1", assignee_id: null, assignee_ids: [], created_by: null, due_date: "2026-08-30", priority: null, archived: false };
+const sharedTask = { id: "t1", profile_id: "pb", content: "Review somebody else's work", notes: null, due_date: "2026-08-29", project_id: "p1", done: false, source_entity_type: null, source_entity_id: null, assignee_ids: ["pa"], content_kind: "text" };
 let calls: { command: string; body: Record<string, unknown> }[] = [];
 // A fixed sleep is a wager on machine speed: CI lost it (the board link was still
 // the pre-load `/dashboard` href after 30ms). Wait for the condition, not the clock.
@@ -46,9 +47,12 @@ afterEach(() => {
 });
 
 test("project tasks filters persisted issues and links to the matching board", async () => {
+  setProfileId("pa");
   serve({
     list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
-    list_profiles: [],
+    list_profiles: [{ id: "pa", username: "alice", display_name: "Alice", archived: false }, { id: "pb", username: "bob", display_name: "Bob", archived: false }],
+    list_project_member_ids: ["pa", "pb"],
+    list_project_todos: [sharedTask],
     list_issues: [issue],
     list_issue_statuses: [{ id: "s1", project_id: "p1", name: "In progress", resolved: false, color: "#00c2a8", ordering: 0 }],
     list_planning_tags: [{ id: "t1", project_id: "p1", parent_id: null, name: "release", archived: false }],
@@ -69,6 +73,10 @@ test("project tasks filters persisted issues and links to the matching board", a
       ?.includes("boards") ?? false));
 
   expect(host.textContent).toContain("Plan the release");
+  // Project tasks did not become issues. They remain visible across creators instead
+  // of disappearing when this view also renders the issue tracker.
+  expect(host.textContent).toContain("Review somebody else's work");
+  expect(calls.some(call => call.command === "list_project_todos" && call.body.projectId === "p1")).toBe(true);
   expect(host.textContent).toContain("Open board");
   const board = host.querySelector('a.primary') as HTMLAnchorElement;
   expect(board.getAttribute("href")).toContain("boards");
@@ -87,4 +95,29 @@ test("project tasks filters persisted issues and links to the matching board", a
   board.click();
   expect(projectId()).toBe("p1");
   expect(route().view).toBe("Boards");
+});
+
+test("project work can add a project task without pretending it is an issue", async () => {
+  setProfileId("pa");
+  serve({
+    list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
+    list_profiles: [{ id: "pa", username: "alice", display_name: "Alice", archived: false }],
+    list_project_member_ids: ["pa"], list_project_todos: [], list_issues: [], list_issue_statuses: [], list_planning_tags: [],
+    create_todo: { ...sharedTask, id: "new-task", profile_id: "pa", content: "Ship the fix", assignee_ids: [] },
+  });
+  registerViews(["Dashboard", "Project Tasks", "Boards"]); setAvailableViews(null);
+  navigate({ view: "Project Tasks", projectId: "p1" });
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <ProjectTasks />, host);
+  await until(() => host.textContent?.includes("Add task") === true);
+  ([...host.querySelectorAll("button")].find(button => button.textContent === "Add task") as HTMLButtonElement).click();
+  const title = host.querySelector('input[aria-label="Task title"]') as HTMLInputElement;
+  title.value = "Ship the fix";
+  title.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "Ship the fix" }));
+  (host.querySelector("form.project-work-form") as HTMLFormElement).dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+  await until(() => calls.some(call => call.command === "create_todo"));
+  const write = calls.find(call => call.command === "create_todo")!;
+  expect(write.body.input).toMatchObject({ profile_id: "pa", project_id: "p1", content: "Ship the fix", done: false });
+  await until(() => host.textContent?.includes("Ship the fix") === true);
+  expect(calls.some(call => call.command === "create_issue")).toBe(false);
 });
