@@ -16,6 +16,7 @@ import {
   type DocumentBodyFormat,
   type DocumentFilePreview,
   type DocumentDiscussion,
+  type FavoriteDocument,
 } from "../api/documents";
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
@@ -95,9 +96,44 @@ export default function Documents() {
   // the work you follow — without duplicating anything.
   const [favorites, { refetch: refetchFavorites }] = createResource(
     actingProfileId,
-    (id) => (id ? documentsApi.listFavorites(id) : Promise.resolve([] as Document[])),
+    (id) => (id ? documentsApi.listFavorites(id) : Promise.resolve([] as FavoriteDocument[])),
   );
+  // Shelves in read order: unfiled first, then named shelves alphabetically. The order
+  // comes from the backend; this only groups the rows it already sorted.
+  const favoriteShelves = () => {
+    const shelves: { name: string | null; items: FavoriteDocument[] }[] = [];
+    for (const item of favorites() ?? []) {
+      const name = item.group_name ?? null;
+      const last = shelves[shelves.length - 1];
+      if (last && last.name === name) last.items.push(item);
+      else shelves.push({ name, items: [item] });
+    }
+    return shelves;
+  };
+  const favoriteGroups = () =>
+    [...new Set((favorites() ?? []).map((f) => f.group_name).filter((n): n is string => !!n))].sort();
+  async function moveFavorite(item: FavoriteDocument, delta: number) {
+    const actor = actingProfileId();
+    if (!actor) return;
+    try {
+      await documentsApi.moveFavorite(actor, item.id, item.group_name, item.position + delta);
+      await refetchFavorites();
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function fileFavorite(item: FavoriteDocument, group: string | null) {
+    const actor = actingProfileId();
+    if (!actor) return;
+    try {
+      await documentsApi.moveFavorite(actor, item.id, group, 0);
+      await refetchFavorites();
+    } catch (e) {
+      fail(e);
+    }
+  }
   const favoriteIds = () => new Set((favorites() ?? []).map((d) => d.id));
+  const [newShelfFor, setNewShelfFor] = createSignal<string | null>(null);
   const isFavorite = (id: string | null) => !!id && favoriteIds().has(id);
   async function toggleFavorite(documentId: string) {
     const actor = actingProfileId();
@@ -468,24 +504,47 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   const [uploading, setUploading] = createSignal(false);
   // In a browser the operator has no filesystem we can name: the bytes must be sent.
   // The desktop keeps the path field (it can read the disk it is running on).
-  async function uploadBrowserFile(file: File) {
+  // Progress is per file and reported by the transport, never guessed from a timer.
+  const [uploadProgress, setUploadProgress] = createSignal<{ name: string; fraction: number } | null>(null);
+  const [dragOver, setDragOver] = createSignal(false);
+  async function uploadBrowserFiles(files: File[]) {
     const cid = containerId();
-    if (!cid) return;
+    if (!cid || files.length === 0) return;
     setUploading(true);
     try {
-      const uploaded = await documentsApi.uploadWebFile(file, {
-        container_type: activeContainer(),
-        container_id: cid,
-        folder_id: selectedFolderId() ?? rootParentId(),
-        title: file.name,
-      });
+      let last: string | null = null;
+      for (const file of files) {
+        setUploadProgress({ name: file.name, fraction: 0 });
+        const uploaded = await documentsApi.uploadWebFileWithProgress(
+          file,
+          {
+            container_type: activeContainer(),
+            container_id: cid,
+            folder_id: selectedFolderId() ?? rootParentId(),
+            title: file.name,
+          },
+          (fraction) => setUploadProgress({ name: file.name, fraction }),
+        );
+        last = uploaded.document_id;
+      }
       await refetchDocuments();
-      setSelectedDocumentId(uploaded.document_id);
+      if (last) setSelectedDocumentId(last);
     } catch (e) {
       fail(e);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
+  }
+  const uploadBrowserFile = (file: File) => uploadBrowserFiles([file]);
+  // Dropping onto the tree files the bytes exactly where a click would have: the
+  // selected folder of the container you are looking at.
+  function onTreeDrop(event: DragEvent) {
+    setDragOver(false);
+    const dropped = Array.from(event.dataTransfer?.files ?? []);
+    if (!isWeb() || dropped.length === 0) return;
+    event.preventDefault();
+    void uploadBrowserFiles(dropped);
   }
   async function uploadFile() {
     const path = uploadPath().trim();
@@ -520,6 +579,73 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   // in the browser and every other type downloadable, instead of "it is on some disk".
   const fileHref = (documentId: string) =>
     isWeb() ? `${import.meta.env.BASE_URL}api/documents/files/${documentId}` : "";
+  // Office documents are zip archives, so nothing but a real reader can show them.
+  // Both readers are pure-JS and loaded on demand: a person who never opens a .docx
+  // never downloads the converter.
+  const OFFICE_MIME: Record<string, "docx" | "xlsx"> = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.ms-excel": "xlsx",
+  };
+  const officeKind = (preview: DocumentFilePreview): "docx" | "xlsx" | null => {
+    const byMime = OFFICE_MIME[preview.mime];
+    if (byMime) return byMime;
+    const name = preview.filename.toLowerCase();
+    if (name.endsWith(".docx")) return "docx";
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "xlsx";
+    return null;
+  };
+  const base64ToBytes = (value: string) => {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  };
+  async function officeBytes(documentId: string, preview: DocumentFilePreview): Promise<ArrayBuffer> {
+    // Web has the whole file behind a URL; desktop has the preview payload, which the
+    // backend may have capped — a truncated archive is unreadable, and says so.
+    if (isWeb()) {
+      const response = await fetch(fileHref(documentId), { credentials: "include" });
+      if (!response.ok) throw new Error(`could not read the file (HTTP ${response.status})`);
+      return await response.arrayBuffer();
+    }
+    if (!preview.data_base64) throw new Error("no bytes available for this file");
+    if (preview.truncated) throw new Error("the stored preview is truncated, so the archive cannot be opened");
+    return base64ToBytes(preview.data_base64).buffer as ArrayBuffer;
+  }
+  function OfficePreview(props: { preview: DocumentFilePreview; kind: "docx" | "xlsx" }) {
+    const [rendered] = createResource(
+      () => ({ id: selectedDocumentId(), preview: props.preview, kind: props.kind }),
+      async ({ id, preview, kind }) => {
+        if (!id) return null;
+        const bytes = await officeBytes(id, preview);
+        if (kind === "docx") {
+          const mammoth = await import("mammoth");
+          const result = await mammoth.convertToHtml({ arrayBuffer: bytes });
+          return sanitizeRichHtml(result.value);
+        }
+        const XLSX = await import("xlsx");
+        const book = XLSX.read(bytes, { type: "array" });
+        // Every sheet, each under its own name: a workbook is not just its first tab.
+        return book.SheetNames.map((name) =>
+          `<h3>${name.replace(/[<>&]/g, "")}</h3>${sanitizeRichHtml(XLSX.utils.sheet_to_html(book.Sheets[name]))}`,
+        ).join("");
+      },
+    );
+    return (
+      <div class="office-preview">
+        <Show when={!rendered.loading} fallback={<p class="hint" role="status">Rendering {props.preview.filename}…</p>}>
+          <Show
+            when={!rendered.error}
+            fallback={<p class="error-bar" role="alert">{String(rendered.error)}</p>}
+          >
+            <div class="office-body" innerHTML={rendered() ?? ""} />
+          </Show>
+        </Show>
+      </div>
+    );
+  }
+
   function FilePreview(props: { preview: DocumentFilePreview }) {
     const p = () => props.preview;
     return (
@@ -553,7 +679,15 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             </a>
           </p>
         </Show>
-        <Show when={p().text === null && !p().mime.startsWith("image/") && !(isWeb() && p().mime === "application/pdf")}>
+        <Show when={officeKind(p())}>
+          {(kind) => <OfficePreview preview={p()} kind={kind()} />}
+        </Show>
+        <Show when={
+          p().text === null
+          && !p().mime.startsWith("image/")
+          && !officeKind(p())
+          && !(isWeb() && p().mime === "application/pdf")
+        }>
           <p class="hint">No inline preview for this type — the file is stored beside the database.</p>
         </Show>
       </div>
@@ -1094,7 +1228,32 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       </nav>
 
       <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
-        <aside class="documents-tree">
+        <aside
+          class="documents-tree"
+          classList={{ "drop-target": dragOver() }}
+          onDragOver={(event) => {
+            if (!isWeb() || !event.dataTransfer?.types.includes("Files")) return;
+            event.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onTreeDrop}
+        >
+          <Show when={dragOver()}>
+            <p class="drop-hint" role="status">Drop to upload into {selectedFolderId() ? "this folder" : "the root"}</p>
+          </Show>
+          <Show when={uploadProgress()}>
+            {(progress) => (
+              <div class="upload-progress">
+                <p class="hint">Uploading {progress().name}… {Math.round(progress().fraction * 100)}%</p>
+                <progress
+                  aria-label={`Upload progress for ${progress().name}`}
+                  max="1"
+                  value={progress().fraction}
+                />
+              </div>
+            )}
+          </Show>
           {/* Three states stay distinct: a fetch in flight is not emptiness, and a failed
               fetch is never rendered as an empty tree (H7). */}
           <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
@@ -1109,22 +1268,85 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
               <div class="favorites-section">
                 <p class="tree-heading">★ Favourites</p>
-                <ul class="favorite-list" role="list" aria-label="Favourite documents">
-                  <For each={favorites()}>
-                    {(d) => (
-                      <li>
-                        <a
-                          class="doc-row"
-                          classList={{ active: d.id === selectedDocumentId() }}
-                          {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
-                        >
-                          <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
-                          <span class="doc-title">{d.title}</span>
-                        </a>
-                      </li>
-                    )}
-                  </For>
-                </ul>
+                <For each={favoriteShelves()}>
+                  {(shelf) => (
+                    <div class="favorite-shelf">
+                      <p class="shelf-name">{shelf.name ?? "Unfiled"}</p>
+                      <ul
+                        class="favorite-list"
+                        role="list"
+                        aria-label={shelf.name ? `Favourites on ${shelf.name}` : "Favourite documents"}
+                      >
+                        <For each={shelf.items}>
+                          {(d, index) => (
+                            <li
+                              class="favorite-row"
+                              draggable={true}
+                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `favorite:${d.id}`)}
+                            >
+                              <a
+                                class="doc-row"
+                                classList={{ active: d.id === selectedDocumentId() }}
+                                {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
+                              >
+                                <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
+                                <span class="doc-title">{d.title}</span>
+                              </a>
+                              {/* Ordering is keyboard-operable, not drag-only: a list you
+                                  can only sort with a mouse is a list some people cannot
+                                  sort at all. */}
+                              <button
+                                class="ghost tiny"
+                                aria-label={`Move ${d.title} up`}
+                                disabled={index() === 0}
+                                onClick={() => void moveFavorite(d, -1)}
+                              >↑</button>
+                              <button
+                                class="ghost tiny"
+                                aria-label={`Move ${d.title} down`}
+                                disabled={index() === shelf.items.length - 1}
+                                onClick={() => void moveFavorite(d, 1)}
+                              >↓</button>
+                              <select
+                                class="shelf-picker"
+                                aria-label={`Shelf for ${d.title}`}
+                                value={d.group_name ?? ""}
+                                onChange={(event) => {
+                                  const value = event.currentTarget.value;
+                                  if (value === "__new") {
+                                    setNewShelfFor(d.id);
+                                    event.currentTarget.value = d.group_name ?? "";
+                                    return;
+                                  }
+                                  void fileFavorite(d, value || null);
+                                }}
+                              >
+                                <option value="">Unfiled</option>
+                                <For each={favoriteGroups()}>{(name) => <option value={name}>{name}</option>}</For>
+                                <option value="__new">New shelf…</option>
+                              </select>
+                              <Show when={newShelfFor() === d.id}>
+                                <input
+                                  class="shelf-new"
+                                  aria-label={`New shelf name for ${d.title}`}
+                                  placeholder="Shelf name…"
+                                  autofocus
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") setNewShelfFor(null);
+                                    if (event.key !== "Enter") return;
+                                    const name = event.currentTarget.value.trim();
+                                    setNewShelfFor(null);
+                                    if (name) void fileFavorite(d, name);
+                                  }}
+                                />
+                              </Show>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                  )}
+                </For>
               </div>
             </Show>
             <button

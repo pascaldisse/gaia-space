@@ -438,6 +438,7 @@ pub fn run() {
             documents::get_document,
             documents::list_favorite_documents,
             documents::set_document_favorite,
+            documents::move_favorite_document,
             documents::ensure_project_document_root,
             documents::create_document,
             documents::update_document,

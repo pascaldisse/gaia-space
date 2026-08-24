@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 130;
+pub const SCHEMA_VERSION: i64 = 131;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -851,6 +851,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 130 && table_exists(&tx, "documents")? && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V130)?;
     }
+    // V131: a favourite is ordered and may be filed. `position` is per (profile, group)
+    // so ordering inside one shelf never renumbers another, and `group_name` NULL is the
+    // unfiled shelf — a group is a label on the pointer, never a folder that owns a
+    // document (the document still lives in its project or book).
+    if version < 131 && table_exists(&tx, "document_favorites")? {
+        add_column_if_missing(
+            &tx,
+            "document_favorites",
+            "position",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&tx, "document_favorites", "group_name", "TEXT")?;
+    }
     // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
@@ -1106,6 +1119,8 @@ CREATE TABLE IF NOT EXISTS document_favorites (
   profile_id  TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  position    INTEGER NOT NULL DEFAULT 0,
+  group_name  TEXT,
   PRIMARY KEY (profile_id, document_id)
 );
 CREATE INDEX IF NOT EXISTS document_favorites_document ON document_favorites(document_id);
@@ -2302,7 +2317,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 130);
+        assert_eq!(SCHEMA_VERSION, 131);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

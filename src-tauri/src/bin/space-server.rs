@@ -2539,7 +2539,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
         // Favourites are caller-scoped: `bind_session_identity` forces `profile_id` to
         // the session, and the read scope inside the query does the rest.
-        "list_favorite_documents" | "set_document_favorite" => CommandPolicy::Session,
+        "list_favorite_documents" | "set_document_favorite" | "move_favorite_document" => {
+            CommandPolicy::Session
+        }
         "get_meeting" | "list_meeting_participants" => CommandPolicy::MeetingRead,
         "get_profile" | "get_review" | "get_role" | "get_team" => CommandPolicy::Session,
         "goto_search" | "full_text_search" => CommandPolicy::SearchRead,
@@ -5150,6 +5152,7 @@ async fn cmd(
     "list_documents" => documents::list_documents_scoped(profile_id: String),
     "list_favorite_documents" => documents::list_favorite_documents(profile_id: String),
     "set_document_favorite" => documents::set_document_favorite(profile_id: String, document_id: String, favorite: bool),
+    "move_favorite_document" => documents::move_favorite_document(profile_id: String, document_id: String, group_name: Option<String>, position: i64),
     "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
     "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
     "list_issue_attachments" => issues::list_issue_attachments(issue_id: String),

@@ -24,6 +24,12 @@ export type DocumentFolder = {
 };
 
 export type DocType = "text" | "file";
+
+/// A favourite is a document plus the two facts that belong to the pointer alone.
+export type FavoriteDocument = Document & {
+  group_name: string | null;
+  position: number;
+};
 export type DocumentBodyFormat = "text" | "rich-text" | "checklist" | "code";
 
 export type Document = {
@@ -160,11 +166,50 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   searchBookDocuments: (bookId: string, query: string) =>
     invoke<DocumentSearchResult[]>("search_book_documents", { bookId, query }),
 
-  // Favourites: a pointer from a person to a document that lives elsewhere.
+  // Favourites: a pointer from a person to a document that lives elsewhere, carrying
+  // the shelf it was filed on and where it sits on that shelf.
   listFavorites: (profileId: string) =>
-    invoke<Document[]>("list_favorite_documents", { profileId }),
+    invoke<FavoriteDocument[]>("list_favorite_documents", { profileId }),
   setFavorite: (profileId: string, documentId: string, favorite: boolean) =>
     invoke<void>("set_document_favorite", { profileId, documentId, favorite }),
+  moveFavorite: (profileId: string, documentId: string, groupName: string | null, position: number) =>
+    invoke<void>("move_favorite_document", { profileId, documentId, groupName, position }),
+
+  // Upload with progress: `fetch` cannot report how far a body has been sent, so the
+  // one place that needs a progress bar uses XHR. Same route, same reply shape.
+  uploadWebFileWithProgress: (
+    file: File,
+    request: WebDocumentUpload,
+    onProgress: (fraction: number) => void,
+  ): Promise<DocumentFile> =>
+    new Promise((resolve, reject) => {
+      const base = import.meta.env.BASE_URL;
+      const query = new URLSearchParams({
+        filename: file.name,
+        container_type: request.container_type,
+        ...(request.container_id ? { container_id: request.container_id } : {}),
+        ...(request.folder_id ? { folder_id: request.folder_id } : {}),
+        ...(request.title ? { title: request.title } : {}),
+      });
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${base}api/documents/upload?${query}`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+      };
+      xhr.onload = () => {
+        try {
+          const body = JSON.parse(xhr.responseText) as { ok: boolean; value?: DocumentFile; error?: string };
+          if (!body.ok || !body.value) reject(new Error(body.error ?? `upload failed (HTTP ${xhr.status})`));
+          else resolve(body.value);
+        } catch {
+          reject(new Error(`upload failed (HTTP ${xhr.status})`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("upload failed: network error"));
+      xhr.send(file);
+    }),
 
   uploadFile: (request: UploadDocumentFileRequest) =>
     invoke<DocumentFile>("upload_document_file", { request }),

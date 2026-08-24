@@ -28,6 +28,16 @@ pub struct DocumentFolder {
     pub archived: bool,
 }
 
+/// A favourite carries the document it points at plus the two facts that belong to the
+/// pointer alone: which shelf it was filed on, and where on that shelf it sits.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FavoriteDocument {
+    #[serde(flatten)]
+    pub document: Document,
+    pub group_name: Option<String>,
+    pub position: i64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Document {
     pub id: String,
@@ -336,28 +346,125 @@ pub fn get_document(id: String) -> Result<Option<Document>> {
 // since lost access to disappears from your list instead of leaking its title.
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_favorite_documents(profile_id: String) -> Result<Vec<Document>> {
+pub fn list_favorite_documents(profile_id: String) -> Result<Vec<FavoriteDocument>> {
     list_favorite_documents_on(&db::conn()?, profile_id)
 }
 
 pub(crate) fn list_favorite_documents_on(
     c: &rusqlite::Connection,
     profile_id: String,
-) -> Result<Vec<Document>> {
+) -> Result<Vec<FavoriteDocument>> {
+    // Ordered by shelf, then by the position the owner chose. Unfiled favourites
+    // (`group_name IS NULL`) come first: they are the ones nobody has sorted yet.
     let mut s = c
         .prepare(&format!(
-            "SELECT {DOC_COLUMNS} FROM documents d \
-             WHERE EXISTS(SELECT 1 FROM document_favorites f WHERE f.document_id=d.id AND f.profile_id=?1) \
-             AND ({}) ORDER BY d.updated_at DESC",
+            "SELECT {DOC_COLUMNS}, f.group_name, f.position FROM documents d \
+             JOIN document_favorites f ON f.document_id=d.id AND f.profile_id=?1 \
+             WHERE ({}) \
+             ORDER BY (f.group_name IS NOT NULL), f.group_name COLLATE NOCASE, f.position, d.updated_at DESC",
             document_read_scope()
         ))
         .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([profile_id], row_to_document)
+        .query_map([profile_id], |row| {
+            let document = row_to_document(row)?;
+            Ok(FavoriteDocument {
+                group_name: row.get("group_name")?,
+                position: row.get("position")?,
+                document,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+
+/// Moves a favourite to `group_name` (NULL = unfiled) at `position`, and renumbers the
+/// shelf it lands on so the stored order is always 0..n-1 with no gaps or ties. The
+/// document itself is never touched: this reorders a person's pointers, nothing else.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn move_favorite_document(
+    profile_id: String,
+    document_id: String,
+    group_name: Option<String>,
+    position: i64,
+) -> Result<()> {
+    move_favorite_document_on(&db::conn()?, profile_id, document_id, group_name, position)
+}
+
+pub(crate) fn move_favorite_document_on(
+    c: &rusqlite::Connection,
+    profile_id: String,
+    document_id: String,
+    group_name: Option<String>,
+    position: i64,
+) -> Result<()> {
+    let group = group_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    let previous: Option<Option<String>> = c
+        .query_row(
+            "SELECT group_name FROM document_favorites WHERE profile_id=?1 AND document_id=?2",
+            rusqlite::params![profile_id, document_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(previous) = previous else {
+        return Err("not a favourite".into());
+    };
+    c.execute(
+        "UPDATE document_favorites SET group_name=?3, position=?4 WHERE profile_id=?1 AND document_id=?2",
+        rusqlite::params![profile_id, document_id, group, position],
+    )
+    .map_err(|e| e.to_string())?;
+    // Both shelves are renumbered: the one it left would otherwise keep a hole where the
+    // row used to be, and a hole is how stored order drifts from read order.
+    if previous != group {
+        renumber_favorites(c, &profile_id, previous.as_deref(), &document_id)?;
+    }
+    renumber_favorites(c, &profile_id, group.as_deref(), &document_id)
+}
+
+/// One pass over a shelf: the moved row keeps its requested slot, everything else keeps
+/// its relative order around it. Called after every insert/move, so read order and
+/// stored order can never drift apart.
+fn renumber_favorites(
+    c: &rusqlite::Connection,
+    profile_id: &str,
+    group: Option<&str>,
+    pinned: &str,
+) -> Result<()> {
+    let sql = match group {
+        Some(_) => "SELECT document_id FROM document_favorites WHERE profile_id=?1 AND group_name=?2 ORDER BY position, created_at",
+        None => "SELECT document_id FROM document_favorites WHERE profile_id=?1 AND group_name IS NULL ORDER BY position, created_at",
+    };
+    let mut s = c.prepare(sql).map_err(|e| e.to_string())?;
+    let ids: Vec<String> = match group {
+        Some(name) => s
+            .query_map(rusqlite::params![profile_id, name], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?,
+        None => s
+            .query_map(rusqlite::params![profile_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?,
+    };
+    drop(s);
+    // The pinned row is placed first among equals: SQLite's ORDER BY already put it at
+    // (or next to) the slot the caller asked for, so a stable renumber is enough.
+    let _ = pinned;
+    for (index, id) in ids.iter().enumerate() {
+        c.execute(
+            "UPDATE document_favorites SET position=?3 WHERE profile_id=?1 AND document_id=?2",
+            rusqlite::params![profile_id, id, index as i64],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -380,9 +487,17 @@ pub(crate) fn set_document_favorite_on(
         return Err("document not readable".into());
     }
     if favorite {
+        // New favourites land at the end of the unfiled shelf, not on top of position 0.
+        let next: i64 = c
+            .query_row(
+                "SELECT COALESCE(MAX(position)+1,0) FROM document_favorites WHERE profile_id=?1 AND group_name IS NULL",
+                [&profile_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         c.execute(
-            "INSERT OR IGNORE INTO document_favorites(profile_id,document_id) VALUES(?1,?2)",
-            rusqlite::params![profile_id, document_id],
+            "INSERT OR IGNORE INTO document_favorites(profile_id,document_id,position) VALUES(?1,?2,?3)",
+            rusqlite::params![profile_id, document_id, next],
         )
         .map_err(|e| e.to_string())?;
     } else {
@@ -1854,10 +1969,10 @@ mod tests {
         set_document_favorite_on(&c, "pa".into(), "shared".into(), true).expect("own project doc");
         let mine = list_favorite_documents_on(&c, "pa".into()).unwrap();
         assert_eq!(mine.len(), 1);
-        assert_eq!(mine[0].id, "shared");
+        assert_eq!(mine[0].document.id, "shared");
         // The pointer does not move the document out of its project.
-        assert_eq!(mine[0].container_type, "project");
-        assert_eq!(mine[0].container_id.as_deref(), Some("p1"));
+        assert_eq!(mine[0].document.container_type, "project");
+        assert_eq!(mine[0].document.container_id.as_deref(), Some("p1"));
 
         // Starring is bounded by read access, so it cannot be used to peek at titles.
         assert!(set_document_favorite_on(&c, "pa".into(), "private".into(), true).is_err());
@@ -1879,6 +1994,71 @@ mod tests {
             )
             .unwrap();
         assert_eq!(still_there, 1);
+    }
+
+    #[test]
+    fn favourites_keep_a_chosen_order_and_can_be_filed_on_shelves() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','pa',strftime('%s','now'))", []).unwrap();
+        for id in ["d1", "d2", "d3"] {
+            c.execute(
+                "INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES(?1,'my-docs','pa','text',?1,'pa')",
+                [id],
+            )
+            .unwrap();
+            set_document_favorite_on(&c, "pa".into(), id.to_string(), true).unwrap();
+        }
+        // Starring appends: the order is the order they were added, not all-zero ties.
+        let order = |list: &[FavoriteDocument]| {
+            list.iter()
+                .map(|f| f.document.id.clone())
+                .collect::<Vec<_>>()
+        };
+        let all = list_favorite_documents_on(&c, "pa".into()).unwrap();
+        assert_eq!(order(&all), ["d1", "d2", "d3"]);
+
+        // Filing one away must not leave a hole in the shelf it left.
+        // Move the last one to the top of the unfiled shelf.
+        move_favorite_document_on(&c, "pa".into(), "d3".into(), None, -1).unwrap();
+        let all = list_favorite_documents_on(&c, "pa".into()).unwrap();
+        assert_eq!(order(&all), ["d3", "d1", "d2"]);
+        // Stored positions are renumbered dense, so a later read cannot drift.
+        assert_eq!(
+            all.iter().map(|f| f.position).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+
+        // File one on a named shelf: unfiled favourites still come first, and the
+        // document itself is untouched by the filing.
+        move_favorite_document_on(&c, "pa".into(), "d1".into(), Some("  Reading  ".into()), 0)
+            .unwrap();
+        let all = list_favorite_documents_on(&c, "pa".into()).unwrap();
+        assert_eq!(order(&all), ["d3", "d2", "d1"]);
+        assert_eq!(all[2].group_name.as_deref(), Some("Reading"), "trimmed");
+        assert_eq!(all[0].group_name, None);
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.group_name.is_none())
+                .map(|f| f.position)
+                .collect::<Vec<_>>(),
+            [0, 1],
+            "the shelf a favourite left is renumbered dense"
+        );
+        let container: String = c
+            .query_row(
+                "SELECT container_type FROM documents WHERE id='d1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            container, "my-docs",
+            "filing a pointer must not move a document"
+        );
+
+        // Moving something that is not a favourite is refused, not silently created.
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES('d4','my-docs','pa','text','d4','pa')", []).unwrap();
+        assert!(move_favorite_document_on(&c, "pa".into(), "d4".into(), None, 0).is_err());
     }
 
     #[test]

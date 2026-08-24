@@ -140,6 +140,23 @@ describe("document editing surfaces", () => {
       upload_document_file: () => { uploaded = true; return { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, uploaded_by: "me", uploaded_at: 1 } }; },
       read_document_file: { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, truncated: false, text: null, data_base64: "iVBORw==" } },
     });
+    // The upload transport is XHR, because only XHR can report how far a body has been
+    // sent; the reply shape is the same JSON the route returns.
+    const realXhr = globalThis.XMLHttpRequest;
+    const sent: string[] = [];
+    class RecordingXhr {
+      upload = { onprogress: null as ((event: { lengthComputable: boolean; loaded: number; total: number }) => void) | null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      status = 200;
+      responseText = JSON.stringify({ ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, uploaded_by: "me", uploaded_at: 1 } });
+      withCredentials = false;
+      private url = "";
+      open(_method: string, url: string) { this.url = url; }
+      setRequestHeader() {}
+      send() { uploaded = true; sent.push(this.url); setTimeout(() => this.onload?.(), 0); }
+    }
+    globalThis.XMLHttpRequest = RecordingXhr as unknown as typeof XMLHttpRequest;
     const host = await mount();
 
     // A browser has no filesystem for us to name: the bytes are POSTed. (The desktop
@@ -151,10 +168,11 @@ describe("document editing surfaces", () => {
     picker.dispatchEvent(new Event("change", { bubbles: true }));
     await settle();
 
-    const call = calls.find((c) => c.cmd === "upload_document_file");
-    expect(call).not.toBeUndefined();
-    expect(call!.url).toContain("filename=logo.png");
-    expect(call!.url).toContain("container_type=my-docs");
+    globalThis.XMLHttpRequest = realXhr;
+    expect(sent.length).toBe(1);
+    expect(sent[0]).toContain("api/documents/upload");
+    expect(sent[0]).toContain("filename=logo.png");
+    expect(sent[0]).toContain("container_type=my-docs");
     // The upload lands in the tree and opens as a preview, not as an empty editor.
     expect(host.textContent).toContain("logo.png");
     const img = host.querySelector(".file-preview img.file-image") as HTMLImageElement;

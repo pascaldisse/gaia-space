@@ -106,6 +106,45 @@ describe("documents navigation", () => {
     expect(href).toContain("p1");
   });
 
+  test("favourites are ordered and filed, and the controls work without a mouse drag", async () => {
+    setProfileId("me");
+    serve({
+      list_documents: [doc()],
+      list_favorite_documents: [
+        doc({ id: "a", title: "Alpha", group_name: null, position: 0 }),
+        doc({ id: "b", title: "Beta", group_name: null, position: 1 }),
+        doc({ id: "c", title: "Gamma", group_name: "Reading", position: 0 }),
+      ],
+    });
+    const host = await mount();
+
+    // Two shelves: the unfiled one and the named one, in the order the backend sent.
+    const shelves = Array.from(host.querySelectorAll(".shelf-name")).map((p) => p.textContent);
+    expect(shelves).toEqual(["Unfiled", "Reading"]);
+
+    // Reordering is buttons, not drag-only — and the ends are correctly disabled.
+    const up = host.querySelector('button[aria-label="Move Alpha up"]') as HTMLButtonElement;
+    const downAlpha = host.querySelector('button[aria-label="Move Alpha down"]') as HTMLButtonElement;
+    expect(up.disabled).toBe(true);
+    expect(downAlpha.disabled).toBe(false);
+
+    downAlpha.click();
+    await settle();
+    const move = calls.find((call) => call.command === "move_favorite_document");
+    expect(move).not.toBeUndefined();
+    expect(move!.body).toMatchObject({ documentId: "a", groupName: null, position: 1 });
+
+    // Filing sends the shelf name; the document's own container is never part of it.
+    const picker = host.querySelector('select[aria-label="Shelf for Beta"]') as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value))
+      .toEqual(["", "Reading", "__new"]);
+    picker.value = "Reading";
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    const filed = calls.filter((call) => call.command === "move_favorite_document").slice(-1)[0];
+    expect(filed.body).toMatchObject({ documentId: "b", groupName: "Reading" });
+  });
+
   test("in the browser an upload is a file picker, never a path on someone else's disk", async () => {
     setProfileId("me");
     serve({ list_documents: [], list_document_folders: [] });
