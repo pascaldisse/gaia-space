@@ -100,7 +100,7 @@ export default function ProjectTasks() {
   const visibleTasks = () => (tasks() ?? []).filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
-      && (!assigneeId() || task.assignee_ids.includes(assigneeId()) || task.profile_id === assigneeId());
+      && (!assigneeId() || task.assignee_ids.includes(assigneeId()));
   });
 
   return <section class="planning-view project-tasks-view">
@@ -123,18 +123,11 @@ export default function ProjectTasks() {
       <main class="issue-list-pane">
         <div class="filter-row" aria-label="Issue filters">
           <input aria-label="Search issues" placeholder="Search tasks and issues" value={text()} onInput={event => setText(event.currentTarget.value)} />
-          <select aria-label="Filter by status" value={statusId()} onChange={event => setStatusId(event.currentTarget.value)}>
-            <option value="">All statuses</option>
-            <For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For>
-          </select>
-          <select aria-label="Filter by tag" value={tagId()} onChange={event => setTagId(event.currentTarget.value)}>
-            <option value="">All tags</option>
-            <For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For>
-          </select>
           <ProfilePicker label="Assignee" value={assigneeId()} onChange={setAssigneeId} allowAll />
         </div>
         <section class="project-work-group" aria-labelledby="project-task-heading">
           <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
+          <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
           <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
           <Show when={!tasks.loading && !visibleTasks().length}><p class="empty-state">No project tasks match these filters.</p></Show>
           <ul class="issue-list project-task-list">
@@ -150,6 +143,10 @@ export default function ProjectTasks() {
         </section>
         <section class="project-work-group" aria-labelledby="project-issue-heading">
           <h2 id="project-issue-heading">Issues <small>{issues()?.length ?? 0}</small></h2>
+          <div class="filter-row project-issue-filters" aria-label="Issue-only filters">
+            <select aria-label="Filter by status" value={statusId()} onChange={event => setStatusId(event.currentTarget.value)}><option value="">All issue statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
+            <select aria-label="Filter by tag" value={tagId()} onChange={event => setTagId(event.currentTarget.value)}><option value="">All issue tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+          </div>
           <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
           <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
           <ul class="issue-list">

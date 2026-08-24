@@ -49,7 +49,7 @@ afterEach(() => {
 test("project tasks filters persisted issues and links to the matching board", async () => {
   setProfileId("pa");
   serve({
-    list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
+    list_projects: [{ id: "p0", name: "First response option", key: "FIRST", archived: false }, { id: "p1", name: "Orbital", key: "ORB", archived: false }],
     list_profiles: [{ id: "pa", username: "alice", display_name: "Alice", archived: false }, { id: "pb", username: "bob", display_name: "Bob", archived: false }],
     list_project_member_ids: ["pa", "pb"],
     list_project_todos: [sharedTask],
@@ -78,6 +78,7 @@ test("project tasks filters persisted issues and links to the matching board", a
   expect(host.textContent).toContain("Review somebody else's work");
   expect(calls.some(call => call.command === "list_project_todos" && call.body.projectId === "p1")).toBe(true);
   expect(host.textContent).toContain("Open board");
+  expect((host.querySelector('.planning-actions label.picker select') as HTMLSelectElement).value).toBe("p1");
   const board = host.querySelector('a.primary') as HTMLAnchorElement;
   expect(board.getAttribute("href")).toContain("boards");
   // The tag filter is present and populated from the same resource the view uses.
@@ -104,6 +105,7 @@ test("project work can add a project task without pretending it is an issue", as
     list_profiles: [{ id: "pa", username: "alice", display_name: "Alice", archived: false }],
     list_project_member_ids: ["pa"], list_project_todos: [], list_issues: [], list_issue_statuses: [], list_planning_tags: [],
     create_todo: { ...sharedTask, id: "new-task", profile_id: "pa", content: "Ship the fix", assignee_ids: [] },
+    create_issue: { ...issue, id: "new-issue", number: 8, title: "Track the fix", status_id: null, due_date: null },
   });
   registerViews(["Dashboard", "Project Tasks", "Boards"]); setAvailableViews(null);
   navigate({ view: "Project Tasks", projectId: "p1" });
@@ -120,4 +122,12 @@ test("project work can add a project task without pretending it is an issue", as
   expect(write.body.input).toMatchObject({ profile_id: "pa", project_id: "p1", content: "Ship the fix", done: false });
   await until(() => host.textContent?.includes("Ship the fix") === true);
   expect(calls.some(call => call.command === "create_issue")).toBe(false);
+
+  ([...host.querySelectorAll("button")].find(button => button.textContent === "Add issue") as HTMLButtonElement).click();
+  const issueTitle = host.querySelector('input[aria-label="Issue title"]') as HTMLInputElement;
+  issueTitle.value = "Track the fix";
+  issueTitle.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "Track the fix" }));
+  (host.querySelector("form.project-work-form") as HTMLFormElement).dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+  await until(() => calls.some(call => call.command === "create_issue"));
+  expect(calls.find(call => call.command === "create_issue")?.body.input).toMatchObject({ project_id: "p1", title: "Track the fix", archived: false });
 });
