@@ -3409,7 +3409,20 @@ fn authorize_command(
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
         }
-        CommandPolicy::TodoCreate => Ok(()),
+        CommandPolicy::TodoCreate => {
+            let project_id = body
+                .get("input")
+                .and_then(|input| input.get("project_id").or_else(|| input.get("projectId")))
+                .and_then(Value::as_str);
+            if let Some(project_id) = project_id.filter(|id| !id.trim().is_empty()) {
+                if !project_readable(user, project_id)
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                {
+                    return Err(err(StatusCode::FORBIDDEN, "project access denied"));
+                }
+            }
+            Ok(())
+        }
         CommandPolicy::DashboardPreferencesWrite => {
             body.as_object_mut()
                 .and_then(|body| body.get_mut("preferences"))
@@ -8401,6 +8414,19 @@ mod tests {
             shared["profile_id"],
             json!("pa"),
             "owner spoof must be bound to the session"
+        );
+        let (status, _) = call(cookie("td"), "create_todo", json!({"input":{"profile_id":"td","content":"Injected task","project_id":"group","done":false,"assignee_ids":[]}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let count: i64 = c
+            .query_row(
+                "SELECT count(*) FROM todos WHERE project_id='group'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "denied project task creation must not persist a row"
         );
 
         // Legacy personal assignments stay private; the next write will reject them.
