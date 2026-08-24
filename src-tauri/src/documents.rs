@@ -132,7 +132,14 @@ fn document_write_scope() -> String {
 }
 
 pub fn document_readable_by(id: &str, profile_id: &str) -> Result<bool> {
-    let c = db::conn()?;
+    document_readable_by_on(&db::conn()?, id, profile_id)
+}
+
+pub(crate) fn document_readable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    profile_id: &str,
+) -> Result<bool> {
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?2 AND {})",
@@ -321,6 +328,71 @@ pub fn list_documents() -> Result<Vec<Document>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_document(id: String) -> Result<Option<Document>> {
     Ok(list_documents()?.into_iter().find(|v| v.id == id))
+}
+
+// ---- favourites -------------------------------------------------------------
+// A favourite is a pointer, so "My Documents" can show a project's document without
+// that document leaving the project. Reads are scoped: a starred document you have
+// since lost access to disappears from your list instead of leaking its title.
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_favorite_documents(profile_id: String) -> Result<Vec<Document>> {
+    list_favorite_documents_on(&db::conn()?, profile_id)
+}
+
+pub(crate) fn list_favorite_documents_on(
+    c: &rusqlite::Connection,
+    profile_id: String,
+) -> Result<Vec<Document>> {
+    let mut s = c
+        .prepare(&format!(
+            "SELECT {DOC_COLUMNS} FROM documents d \
+             WHERE EXISTS(SELECT 1 FROM document_favorites f WHERE f.document_id=d.id AND f.profile_id=?1) \
+             AND ({}) ORDER BY d.updated_at DESC",
+            document_read_scope()
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([profile_id], row_to_document)
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_document_favorite(
+    profile_id: String,
+    document_id: String,
+    favorite: bool,
+) -> Result<()> {
+    set_document_favorite_on(&db::conn()?, profile_id, document_id, favorite)
+}
+
+pub(crate) fn set_document_favorite_on(
+    c: &rusqlite::Connection,
+    profile_id: String,
+    document_id: String,
+    favorite: bool,
+) -> Result<()> {
+    // Starring is a read-level act: you may bookmark what you may read, nothing more.
+    if favorite && !document_readable_by_on(c, &document_id, &profile_id)? {
+        return Err("document not readable".into());
+    }
+    if favorite {
+        c.execute(
+            "INSERT OR IGNORE INTO document_favorites(profile_id,document_id) VALUES(?1,?2)",
+            rusqlite::params![profile_id, document_id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        c.execute(
+            "DELETE FROM document_favorites WHERE profile_id=?1 AND document_id=?2",
+            rusqlite::params![profile_id, document_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// The one canonical root per project. It is deterministic, so concurrent first
@@ -1762,6 +1834,65 @@ mod tests {
             )
             .unwrap();
         assert_eq!(channels, 0, "a rejected binding must not create a channel");
+    }
+
+    #[test]
+    fn a_favourite_is_a_pointer_scoped_by_read_access() {
+        let c = test_conn();
+        for id in ["pa", "pb"] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,strftime('%s','now'))",
+                [id],
+            )
+            .unwrap();
+        }
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('p1','Orbital','ORB','pa',strftime('%s','now'))", []).unwrap();
+        // A project document (readable by its members) and somebody else's private one.
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES('shared','project','p1','text','Spec','pa')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES('private','my-docs','pb','text','Diary','pb')", []).unwrap();
+
+        set_document_favorite_on(&c, "pa".into(), "shared".into(), true).expect("own project doc");
+        let mine = list_favorite_documents_on(&c, "pa".into()).unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].id, "shared");
+        // The pointer does not move the document out of its project.
+        assert_eq!(mine[0].container_type, "project");
+        assert_eq!(mine[0].container_id.as_deref(), Some("p1"));
+
+        // Starring is bounded by read access, so it cannot be used to peek at titles.
+        assert!(set_document_favorite_on(&c, "pa".into(), "private".into(), true).is_err());
+        assert_eq!(
+            list_favorite_documents_on(&c, "pa".into()).unwrap().len(),
+            1
+        );
+
+        // Un-starring removes the pointer only: the document survives.
+        set_document_favorite_on(&c, "pa".into(), "shared".into(), false).unwrap();
+        assert!(list_favorite_documents_on(&c, "pa".into())
+            .unwrap()
+            .is_empty());
+        let still_there: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM documents WHERE id='shared'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1);
+    }
+
+    #[test]
+    fn a_favourite_disappears_when_its_document_does() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','pa','pa',strftime('%s','now'))", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,created_by) VALUES('d1','my-docs','pa','text','Note','pa')", []).unwrap();
+        set_document_favorite_on(&c, "pa".into(), "d1".into(), true).unwrap();
+        c.execute("DELETE FROM documents WHERE id='d1'", [])
+            .unwrap();
+        let rows: i64 = c
+            .query_row("SELECT COUNT(*) FROM document_favorites", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "the pointer must cascade with its target");
     }
 
     #[test]

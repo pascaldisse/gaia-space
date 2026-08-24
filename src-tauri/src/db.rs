@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 129;
+pub const SCHEMA_VERSION: i64 = 130;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -843,6 +843,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "TEXT REFERENCES profiles(id)",
         )?;
     }
+    // V130: a favourite is a per-person pointer at a document that lives somewhere
+    // else. It is deliberately NOT a copy and NOT a flag on the document: the same
+    // project document may be starred by many people, and un-starring must never
+    // touch the document or its container. This is what lets "My Documents" show
+    // work owned by projects without inventing a second home for it.
+    if version < 130 && table_exists(&tx, "documents")? && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V130)?;
+    }
     // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
@@ -1092,6 +1100,17 @@ CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY R
 CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
 "#;
 /// V99: durable principal identity abstraction.
+/// V130: per-profile document favourites (pointer rows, cascade with both sides).
+pub(crate) const SCHEMA_V130: &str = r#"
+CREATE TABLE IF NOT EXISTS document_favorites (
+  profile_id  TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (profile_id, document_id)
+);
+CREATE INDEX IF NOT EXISTS document_favorites_document ON document_favorites(document_id);
+"#;
+
 /// V128: per-application parameters plus the owner index for the column added above.
 pub(crate) const SCHEMA_V128: &str = r#"
 CREATE TABLE IF NOT EXISTS app_parameters (
@@ -2259,7 +2278,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .expect("version"),
-            129
+            SCHEMA_VERSION
         );
         migrate(&conn).expect("V129 re-run is idempotent");
     }
@@ -2283,7 +2302,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 129);
+        assert_eq!(SCHEMA_VERSION, 130);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

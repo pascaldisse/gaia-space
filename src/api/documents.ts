@@ -160,6 +160,12 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   searchBookDocuments: (bookId: string, query: string) =>
     invoke<DocumentSearchResult[]>("search_book_documents", { bookId, query }),
 
+  // Favourites: a pointer from a person to a document that lives elsewhere.
+  listFavorites: (profileId: string) =>
+    invoke<Document[]>("list_favorite_documents", { profileId }),
+  setFavorite: (profileId: string, documentId: string, favorite: boolean) =>
+    invoke<void>("set_document_favorite", { profileId, documentId, favorite }),
+
   uploadFile: (request: UploadDocumentFileRequest) =>
     invoke<DocumentFile>("upload_document_file", { request }),
   uploadWebFile: async (file: File, request: WebDocumentUpload): Promise<DocumentFile> => {

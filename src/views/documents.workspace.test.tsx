@@ -182,13 +182,15 @@ test("the folder tree is keyboard-operable and announces its expansion state", a
     expect(item.getAttribute("aria-selected")).toBe("true");
   });
 
-  test("all three containers are presented as canonical anchors", async () => {
+  // Two homes, not three: yours, and the ones a project owns (books included, chosen in
+  // the source picker). The kb container still exists in storage and in the URL.
+  test("both containers are presented as canonical anchors", async () => {
     setProfileId("me");
     serve({ list_document_folders: { ok: true, value: [] }, list_documents: { ok: true, value: [] } });
     const host = await mount();
 
     const tabs = [...host.querySelectorAll("a.container-tab")];
-    expect(tabs.map((a) => a.textContent)).toEqual(["My Documents", "Project Docs", "Knowledge Base"]);
+    expect(tabs.map((a) => a.textContent)).toEqual(["My Documents", "Project Docs"]);
     // Navigation is real hrefs, never clickable divs (SPEC H8).
     for (const a of tabs) expect(a.getAttribute("href")).toMatch(/\/documents\/(my-docs|project|kb)/);
   });

@@ -487,3 +487,19 @@
 .comment-row { padding:.45rem; border-radius:.4rem; background:var(--surface-raised, var(--surface)); }
 .comment-row p { margin:0 0 .3rem; white-space:pre-wrap; }
 .comment-row .active { border-color:var(--accent); }
+
+/* PDF and download: a stored file is viewable where the browser can view it, and
+   fetchable where it cannot. "It is on a disk somewhere" is not a viewer. */
+.file-pdf { width: 100%; min-height: 60vh; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.4em; background: var(--surface); }
+.file-download { font-size: 0.9em; }
+
+/* Favourites head the personal tree; the star lives with the document it marks. */
+.favorites-section { padding: 0.3em 0 0.5em; border-bottom: var(--dk-hairline) solid var(--dk-line); margin-bottom: 0.4em; }
+.tree-heading { margin: 0 0 0.3em; padding: 0 0.4em; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.favorite-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1em; }
+.favorite-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* A file picker that reads like a button, because in a browser that is the only way
+   to name a file at all. */
+.upload-picker { display: inline-flex; align-items: center; gap: 0.4em; cursor: pointer; padding: 0.25em 0.6em; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.35em; font-size: 0.85em; }
+.upload-picker input[type="file"] { max-width: 11em; font-size: 0.8em; }

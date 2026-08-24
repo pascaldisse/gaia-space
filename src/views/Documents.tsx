@@ -19,15 +19,21 @@ import {
 } from "../api/documents";
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
-import { profileId as sessionProfileId, profileLocked } from "../session";
+import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
 
+// Two places, not three. A document lives either with a person ("My Documents") or
+// with a project ("Project Docs"); the knowledge base is not a third home, it is a
+// choice of *source* inside Project Docs (books are org-wide project-shaped shelves).
+// The storage containers are unchanged — `kb` is still its own container_type — this
+// is purely the navigation the person sees.
 const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
   { key: "my-docs", label: "My Documents" },
   { key: "project", label: "Project Docs" },
-  { key: "kb", label: "Knowledge Base" },
 ];
+const tabFor = (container: ContainerType): ContainerType =>
+  container === "my-docs" ? "my-docs" : "project";
 
 function when(ts: number | null) {
   if (!ts) return "";
@@ -83,6 +89,26 @@ export default function Documents() {
     if (activeContainer() === "project") return projectRoot()?.id ?? null;
     return null;
   };
+
+  // Favourites are pointers, not copies: a project document starred here still lives in
+  // its project. This is what makes "My Documents" the first stop — your own work plus
+  // the work you follow — without duplicating anything.
+  const [favorites, { refetch: refetchFavorites }] = createResource(
+    actingProfileId,
+    (id) => (id ? documentsApi.listFavorites(id) : Promise.resolve([] as Document[])),
+  );
+  const favoriteIds = () => new Set((favorites() ?? []).map((d) => d.id));
+  const isFavorite = (id: string | null) => !!id && favoriteIds().has(id);
+  async function toggleFavorite(documentId: string) {
+    const actor = actingProfileId();
+    if (!actor) return;
+    try {
+      await documentsApi.setFavorite(actor, documentId, !isFavorite(documentId));
+      await refetchFavorites();
+    } catch (e) {
+      fail(e);
+    }
+  }
 
   const [allFolders, { refetch: refetchFolders }] = createResource(() => documentsApi.listDocumentFolders());
   const [allDocuments, { refetch: refetchDocuments }] = createResource(() => documentsApi.listDocuments());
@@ -440,6 +466,27 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   // and capped by the backend, so selecting a large upload never pulls the whole file.
   const [uploadPath, setUploadPath] = createSignal("");
   const [uploading, setUploading] = createSignal(false);
+  // In a browser the operator has no filesystem we can name: the bytes must be sent.
+  // The desktop keeps the path field (it can read the disk it is running on).
+  async function uploadBrowserFile(file: File) {
+    const cid = containerId();
+    if (!cid) return;
+    setUploading(true);
+    try {
+      const uploaded = await documentsApi.uploadWebFile(file, {
+        container_type: activeContainer(),
+        container_id: cid,
+        folder_id: selectedFolderId() ?? rootParentId(),
+        title: file.name,
+      });
+      await refetchDocuments();
+      setSelectedDocumentId(uploaded.document_id);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setUploading(false);
+    }
+  }
   async function uploadFile() {
     const path = uploadPath().trim();
     const cid = containerId();
@@ -469,6 +516,10 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   );
   const previewDataUrl = (p: DocumentFilePreview) =>
     p.data_base64 ? `data:${p.mime};base64,${p.data_base64}` : "";
+  // The stored bytes have a stable URL in web mode: that is what makes a PDF viewable
+  // in the browser and every other type downloadable, instead of "it is on some disk".
+  const fileHref = (documentId: string) =>
+    isWeb() ? `${import.meta.env.BASE_URL}api/documents/files/${documentId}` : "";
   function FilePreview(props: { preview: DocumentFilePreview }) {
     const p = () => props.preview;
     return (
@@ -485,8 +536,25 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         <Show when={p().text !== null}>
           <pre class="file-text">{p().text}</pre>
         </Show>
-        <Show when={p().text === null && !p().mime.startsWith("image/")}>
-          <p class="hint">No inline preview for this type — the file is stored and downloadable from disk.</p>
+        <Show when={isWeb() && p().mime === "application/pdf"}>
+          <object
+            class="file-pdf"
+            data={fileHref(selectedDocumentId() ?? "")}
+            type="application/pdf"
+            aria-label={`PDF preview of ${p().filename}`}
+          >
+            <a href={fileHref(selectedDocumentId() ?? "")}>Open {p().filename}</a>
+          </object>
+        </Show>
+        <Show when={isWeb()}>
+          <p>
+            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={p().filename}>
+              ↓ Download {p().filename}
+            </a>
+          </p>
+        </Show>
+        <Show when={p().text === null && !p().mime.startsWith("image/") && !(isWeb() && p().mime === "application/pdf")}>
+          <p class="hint">No inline preview for this type — the file is stored beside the database.</p>
         </Show>
       </div>
     );
@@ -919,7 +987,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       <header class="documents-head">
         <div>
           <h1>Documents</h1>
-          <p>My Documents, project docs, and the Knowledge Base share one folder/document/version model.</p>
+          <p>Yours first — what you wrote and what you starred. Project docs and knowledge-base books live under one picker.</p>
         </div>
         <Show when={!profileLocked()}>
         <label>
@@ -940,7 +1008,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           {(t) => (
             <a
               class="container-tab"
-              classList={{ active: activeContainer() === t.key }}
+              classList={{ active: tabFor(activeContainer()) === t.key }}
               {...linkProps(containerRoute(t.key))}
               onClick={(event) => {
                 linkProps(containerRoute(t.key)).onClick(event);
@@ -955,25 +1023,39 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           )}
         </For>
 
-        <Show when={activeContainer() === "project"}>
-          <select value={selectedProjectId() ?? ""} onChange={(e) => {
-            const id = e.currentTarget.value || null;
-            setSelectedProjectId(id);
-            linkContainer("project", id ?? undefined);
-          }}>
-            <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+        {/* One picker for the whole "somewhere other than mine" half: projects and
+            knowledge-base books in a single list, because to the reader they are the
+            same question — *whose docs am I looking at?* */}
+        <Show when={tabFor(activeContainer()) === "project"}>
+          <select
+            aria-label="Documents source"
+            value={`${activeContainer()}:${activeContainer() === "kb" ? selectedBookId() ?? "" : selectedProjectId() ?? ""}`}
+            onChange={(e) => {
+              const [kind, ...rest] = e.currentTarget.value.split(":");
+              const id = rest.join(":") || null;
+              if (kind === "kb") {
+                setActiveContainer("kb");
+                setSelectedBookId(id);
+                linkContainer("kb", id ?? undefined);
+              } else {
+                setActiveContainer("project");
+                setSelectedProjectId(id);
+                linkContainer("project", id ?? undefined);
+              }
+              setSelectedFolderId(null);
+              setSelectedDocumentId(null);
+            }}
+          >
+            <optgroup label="Projects">
+              <For each={projects()}>{(p) => <option value={`project:${p.id}`}>{p.name}</option>}</For>
+            </optgroup>
+            <optgroup label="Knowledge base">
+              <For each={books()}>{(b) => <option value={`kb:${b.id}`}>{b.name}</option>}</For>
+            </optgroup>
           </select>
         </Show>
 
         <Show when={activeContainer() === "kb"}>
-          <select value={selectedBookId() ?? ""} onChange={(e) => {
-            const id = e.currentTarget.value || null;
-            setSelectedBookId(id);
-            linkContainer("kb", id ?? undefined);
-          }}>
-            <option value="">select a book…</option>
-            <For each={books()}>{(b) => <option value={b.id}>{b.name}</option>}</For>
-          </select>
           <input placeholder="New book name" value={newBookName()} onInput={(e) => setNewBookName(e.currentTarget.value)} />
           <button class="ghost small" onClick={createBook} disabled={!newBookName().trim()}>
             + Book
@@ -1021,6 +1103,30 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             when={containerId()}
             fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
           >
+            {/* Favourites head the personal tree: the documents you follow, wherever they
+                live, above the documents you own. Each row links into its own container,
+                so opening one lands in the project or book that owns it. */}
+            <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
+              <div class="favorites-section">
+                <p class="tree-heading">★ Favourites</p>
+                <ul class="favorite-list" role="list" aria-label="Favourite documents">
+                  <For each={favorites()}>
+                    {(d) => (
+                      <li>
+                        <a
+                          class="doc-row"
+                          classList={{ active: d.id === selectedDocumentId() }}
+                          {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
+                        >
+                          <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
+                          <span class="doc-title">{d.title}</span>
+                        </a>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </div>
+            </Show>
             <button
               type="button"
               class="tree-root"
@@ -1077,15 +1183,36 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </button>
               </div>
               <div class="new-item-row">
-                <input
-                  placeholder="path to a file to upload"
-                  aria-label="File to upload"
-                  value={uploadPath()}
-                  onInput={(e) => setUploadPath(e.currentTarget.value)}
-                />
-                <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
-                  {uploading() ? "Uploading…" : "↑ Upload"}
-                </button>
+                <Show
+                  when={isWeb()}
+                  fallback={
+                    <>
+                      <input
+                        placeholder="path to a file to upload"
+                        aria-label="File to upload"
+                        value={uploadPath()}
+                        onInput={(e) => setUploadPath(e.currentTarget.value)}
+                      />
+                      <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
+                        {uploading() ? "Uploading…" : "↑ Upload"}
+                      </button>
+                    </>
+                  }
+                >
+                  <label class="upload-picker">
+                    {uploading() ? "Uploading…" : "↑ Upload a file"}
+                    <input
+                      type="file"
+                      aria-label="File to upload"
+                      disabled={uploading() || !projectReady()}
+                      onChange={(e) => {
+                        const picked = e.currentTarget.files?.[0];
+                        e.currentTarget.value = ""; // same file twice must still upload
+                        if (picked) void uploadBrowserFile(picked);
+                      }}
+                    />
+                  </label>
+                </Show>
               </div>
               <p class="hint">
                 Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
@@ -1105,6 +1232,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <div class="editor-toolbar">
                   <input class="editor-title" value={editTitle()} onInput={(e) => setEditTitle(e.currentTarget.value)} />
                   <span class="version-chip">v{doc().version}</span>
+                  <button
+                    class="ghost small favorite-toggle"
+                    aria-label={isFavorite(doc().id) ? "Remove from My Documents favourites" : "Add to My Documents favourites"}
+                    aria-pressed={isFavorite(doc().id)}
+                    onClick={() => void toggleFavorite(doc().id)}
+                  >
+                    {isFavorite(doc().id) ? "★ Favourite" : "☆ Favourite"}
+                  </button>
 <select aria-label="Document body type" value={doc().body_format} onChange={(e) => void changeBodyFormat(doc(), e.currentTarget.value as DocumentBodyFormat)}>
 <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
 </select>

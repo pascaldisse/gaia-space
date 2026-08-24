@@ -21,11 +21,19 @@ afterEach(() => {
 });
 
 type Reply = { ok: true; value: unknown };
-const calls: { cmd: string; body: any }[] = [];
+const calls: { cmd: string; url: string; body: any }[] = [];
 const serve = (table: Record<string, Reply | (() => Reply)>) => {
   globalThis.fetch = (async (url: any, init: any) => {
-    const cmd = String(url).split("api/cmd/")[1] ?? String(url);
-    calls.push({ cmd, body: init?.body ? JSON.parse(init.body) : null });
+    // The web upload is a REST route, not a command: normalize it to one table key so a
+    // test can answer it without guessing the base path or the query string.
+    const cmd = String(url).includes("api/documents/upload")
+      ? "upload_document_file"
+      : String(url).split("api/cmd/")[1] ?? String(url);
+    calls.push({
+      cmd,
+      url: String(url),
+      body: init?.body && typeof init.body === "string" ? JSON.parse(init.body) : null,
+    });
     const entry = table[cmd];
     const reply = (typeof entry === "function" ? entry() : entry) ?? ({ ok: true, value: [] } as Reply);
     return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
@@ -134,18 +142,19 @@ describe("document editing surfaces", () => {
     });
     const host = await mount();
 
-    const path = host.querySelector('input[aria-label="File to upload"]') as HTMLInputElement;
-    expect(path).not.toBeNull();
-    path.value = "/srv/uploads/logo.png";
-    path.dispatchEvent(new Event("input", { bubbles: true }));
-    await settle();
-    button(host, "↑ Upload")!.click();
+    // A browser has no filesystem for us to name: the bytes are POSTed. (The desktop
+    // path-upload command is exercised on the Rust side, where a path is real.)
+    const picker = host.querySelector('input[type="file"][aria-label="File to upload"]') as HTMLInputElement;
+    expect(picker).not.toBeNull();
+    const chosen = new File([new Uint8Array([1, 2, 3, 4])], "logo.png", { type: "image/png" });
+    Object.defineProperty(picker, "files", { value: [chosen], configurable: true });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
     await settle();
 
     const call = calls.find((c) => c.cmd === "upload_document_file");
     expect(call).not.toBeUndefined();
-    expect(call!.body.request.source_path).toBe("/srv/uploads/logo.png");
-    expect(call!.body.request.container_type).toBe("my-docs");
+    expect(call!.url).toContain("filename=logo.png");
+    expect(call!.url).toContain("container_type=my-docs");
     // The upload lands in the tree and opens as a preview, not as an empty editor.
     expect(host.textContent).toContain("logo.png");
     const img = host.querySelector(".file-preview img.file-image") as HTMLImageElement;
