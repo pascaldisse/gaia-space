@@ -338,16 +338,28 @@ pub fn list_project_todos(
     include_done: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
+    list_project_todos_on(&c, &project_id, &profile_id, include_done.unwrap_or(false))
+}
+/// Project todos are a SHARED surface: a member sees EVERY member's project todos, not
+/// only their own — the membership branch of the predicate does not mention the row's
+/// owner. A non-member still sees only rows they own or are assigned to. Nothing here
+/// consults `projects.lead_id`: the lead is informational and grants no extra reach.
+pub(crate) fn list_project_todos_on(
+    c: &Connection,
+    project_id: &str,
+    profile_id: &str,
+    include_done: bool,
+) -> Result<Vec<Todo>> {
     let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(
-        params![project_id, profile_id, include_done.unwrap_or(false)],
+        params![project_id, profile_id, include_done],
         read_todo,
     ))?
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos {
-        todo.assignee_ids = assignees_on(&c, &todo.id)?;
+        todo.assignee_ids = assignees_on(c, &todo.id)?;
     }
     Ok(todos)
 }
