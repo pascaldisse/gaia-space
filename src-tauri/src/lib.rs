@@ -542,6 +542,7 @@ pub fn run() {
             pipelines::delete_package_version,
             personal::list_todos,
             personal::list_project_todos,
+            personal::list_team_todos,
             personal::list_project_member_ids,
             personal::calendar_aggregate,
             personal::create_todo,

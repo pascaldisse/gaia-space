@@ -2425,7 +2425,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
         "save_calendar_feed" => CommandPolicy::CalendarFeedUpsert,
         "delete_calendar_feed" | "sync_calendar_feed" => CommandPolicy::CalendarFeedOwnerAction,
-        "list_project_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
+        "list_project_todos" | "list_team_todos" | "list_project_member_ids" => {
+            CommandPolicy::ProjectTodoRead
+        }
         "create_todo" => CommandPolicy::TodoCreate,
         "update_todo" | "delete_todo" | "postpone_todo" | "convert_todo_to_issue" => {
             CommandPolicy::TodoOwnerWrite
@@ -5289,6 +5291,7 @@ async fn cmd(
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
+    "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>, target_profile_id: Option<String>, target_location: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),

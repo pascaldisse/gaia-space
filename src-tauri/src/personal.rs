@@ -340,17 +340,32 @@ pub fn list_project_todos(
     let c = db::conn()?;
     list_project_todos_on(&c, &project_id, &profile_id, include_done.unwrap_or(false))
 }
-/// Project todos are a SHARED surface: a member sees EVERY member's project todos, not
-/// only their own — the membership branch of the predicate does not mention the row's
-/// owner. A non-member still sees only rows they own or are assigned to. Nothing here
-/// consults `projects.lead_id`: the lead is informational and grants no extra reach.
+/// The ONE project-todo visibility rule, written once. `{p}` is the placeholder for the
+/// bound parameter holding the reading profile, so per-project and cross-project reads
+/// share the identical predicate and can never drift apart.
+///
+/// A member (or the project owner) sees EVERY member's todos in that project — the
+/// membership branch does not mention the row's owner. Someone outside the project sees
+/// only rows they own or are assigned to. `projects.lead_id` appears nowhere: the lead is
+/// informational and grants no extra reach.
+const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id={p} OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by={p} OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id={p}))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id={p}))";
+const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind";
+const TODO_ORDER: &str = "ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at";
+fn project_todo_visibility(profile_param: &str) -> String {
+    PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+}
+/// Todos of ONE project, as seen by `profile_id`. See [`PROJECT_TODO_VISIBILITY`].
 pub(crate) fn list_project_todos_on(
     c: &Connection,
     project_id: &str,
     profile_id: &str,
     include_done: bool,
 ) -> Result<Vec<Todo>> {
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let sql = format!(
+        "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND {} {TODO_ORDER}",
+        project_todo_visibility("?2")
+    );
+    let mut statement = err(c.prepare(&sql))?;
     let mut todos = err(statement.query_map(
         params![project_id, profile_id, include_done],
         read_todo,
@@ -358,6 +373,34 @@ pub(crate) fn list_project_todos_on(
     .collect::<std::result::Result<Vec<_>, _>>()
     .map_err(|error| error.to_string())?;
     drop(statement);
+    for todo in &mut todos {
+        todo.assignee_ids = assignees_on(c, &todo.id)?;
+    }
+    Ok(todos)
+}
+/// Cross-project counterpart of `list_project_todos`: OTHER people's running work, in
+/// every project this profile can see, in one list. Project-less personal todos are
+/// excluded — this is the team surface, not "my tasks".
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_team_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+    let c = db::conn()?;
+    list_team_todos_on(&c, &profile_id, include_done.unwrap_or(false))
+}
+pub(crate) fn list_team_todos_on(
+    c: &Connection,
+    profile_id: &str,
+    include_done: bool,
+) -> Result<Vec<Todo>> {
+    let sql = format!(
+        "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (?2=1 OR t.done=0) AND {} {TODO_ORDER}",
+        project_todo_visibility("?1")
+    );
+    let mut statement = err(c.prepare(&sql))?;
+    let mut todos = err(statement.query_map(params![profile_id, include_done], read_todo))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(statement);
+    // Same per-row assignee fill as `list_project_todos`: consistency over cleverness.
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
     }
