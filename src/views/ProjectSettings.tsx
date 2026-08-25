@@ -102,6 +102,11 @@ function ProjectLead(props: { projectId: string; leadId: string | null; canManag
   const [busy, setBusy] = createSignal(false);
   const [members] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([] as string[]));
   const candidates = () => (profiles() ?? []).filter(profile => !profile.archived && (members() ?? []).includes(profile.id));
+  if (!profiles()) void reloadProfiles().catch(() => undefined);
+  // Options arrive after the select mounts (members + profiles are async). Re-apply the
+  // controlled value then, or the browser keeps showing "No lead" for a project that has one.
+  let picker!: HTMLSelectElement;
+  createEffect(() => { candidates(); const value = props.leadId ?? ""; if (picker && picker.value !== value) picker.value = value; });
   const save = async (value: string) => {
     if (!props.canManage || value === (props.leadId ?? "")) return;
     setError(""); setBusy(true);
@@ -114,7 +119,7 @@ function ProjectLead(props: { projectId: string; leadId: string | null; canManag
     <p class="ps-hint">The lead is the one main responsible person. It is informational only: every member keeps the same access to this project's work.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
     <label class="ps-field"><span>Lead <em>optional</em></span>
-      <select aria-label="Project lead" disabled={!props.canManage || busy()} value={props.leadId ?? ""} onChange={event => void save(event.currentTarget.value)}>
+      <select ref={picker} aria-label="Project lead" disabled={!props.canManage || busy()} value={props.leadId ?? ""} onChange={event => void save(event.currentTarget.value)}>
         <option value="">No lead</option>
         <For each={candidates()}>{profile => <option value={profile.id}>{profile.display_name || profile.username}</option>}</For>
       </select>
