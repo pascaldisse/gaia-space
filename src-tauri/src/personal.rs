@@ -151,6 +151,10 @@ fn normalized_project_id(project_id: Option<String>) -> Option<String> {
 fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2)))", params![project_id, profile_id], |row| row.get(0)))
 }
+/// One visibility definition for both a project's task list and Team Tasks. Project
+/// leads are informational only and deliberately do not appear in this predicate.
+const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id=:profile_id OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=:profile_id OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=:profile_id))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=:profile_id))";
+const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind";
 pub fn project_member_by(project_id: &str, profile_id: &str) -> Result<bool> {
     project_member_on(&db::conn()?, project_id, profile_id)
 }
@@ -331,6 +335,31 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
+fn visible_project_todos_on(
+    c: &Connection,
+    project_id: Option<&str>,
+    profile_id: &str,
+    include_done: bool,
+) -> Result<Vec<Todo>> {
+    let sql = format!("SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (:project_id IS NULL OR t.project_id=:project_id) AND (:include_done=1 OR t.done=0) AND {PROJECT_TODO_VISIBILITY} ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at");
+    let mut statement = err(c.prepare(&sql))?;
+    let mut todos = err(statement.query_map(
+        rusqlite::named_params! {
+            ":project_id": project_id,
+            ":profile_id": profile_id,
+            ":include_done": include_done,
+        },
+        read_todo,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
+    drop(statement);
+    for todo in &mut todos {
+        todo.assignee_ids = assignees_on(c, &todo.id)?;
+    }
+    Ok(todos)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_todos(
     project_id: String,
@@ -338,18 +367,15 @@ pub fn list_project_todos(
     include_done: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND (t.profile_id=?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?2)) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
-    let mut todos = err(statement.query_map(
-        params![project_id, profile_id, include_done.unwrap_or(false)],
-        read_todo,
-    ))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
-    drop(statement);
-    for todo in &mut todos {
-        todo.assignee_ids = assignees_on(&c, &todo.id)?;
-    }
-    Ok(todos)
+    visible_project_todos_on(&c, Some(&project_id), &profile_id, include_done.unwrap_or(false))
+}
+
+/// Every project todo visible to the caller, for the cross-project Team Tasks view.
+/// `PROJECT_TODO_VISIBILITY` is shared with `list_project_todos` so the reads cannot drift.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_team_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+    let c = db::conn()?;
+    visible_project_todos_on(&c, None, &profile_id, include_done.unwrap_or(false))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_todo(id: String) -> Result<()> {
@@ -1893,6 +1919,12 @@ mod tests {
         assert!(save_calendar_options_on(&c, empty).is_err());
     }
 
+    fn list_project_todos_on(c: &Connection, project_id: &str, profile_id: &str, include_done: bool) -> Vec<Todo> {
+        visible_project_todos_on(c, Some(project_id), profile_id, include_done).unwrap()
+    }
+    fn list_team_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
+        visible_project_todos_on(c, None, profile_id, include_done).unwrap()
+    }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
         let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
@@ -1922,6 +1954,24 @@ mod tests {
             content_kind: default_content_kind(),
         }
     }
+    #[test]
+    fn every_member_reads_all_project_todos_and_may_assign_others_regardless_of_lead() {
+        let mut c = conn();
+        c.execute("INSERT INTO todos(id,profile_id,content,project_id,done) VALUES('owner','p','Owner task','project',0),('member','r','Member task','project',0),('done','p','Done task','project',1)", []).unwrap();
+        let per_project = list_project_todos_on(&c, "project", "q", false);
+        let team = list_team_todos_on(&c, "q", false);
+        assert_eq!(per_project.iter().map(|todo| todo.id.as_str()).collect::<Vec<_>>(), team.iter().map(|todo| todo.id.as_str()).collect::<Vec<_>>(), "project and aggregate reads share one visibility rule");
+        let before = create_todo_on(&mut c, todo_input("before-lead", "q", &["r"])).unwrap();
+        assert_eq!(before.assignee_ids, vec!["r".to_string()]);
+        crate::platform::set_project_lead_on(&c, "project", Some("p")).unwrap();
+        let after = create_todo_on(&mut c, todo_input("after-lead", "q", &["r"])).unwrap();
+        assert_eq!(after.assignee_ids, vec!["r".to_string()]);
+        let visible = list_team_todos_on(&c, "q", false);
+        for id in ["owner", "member", "before-lead", "after-lead"] {
+            assert!(visible.iter().any(|todo| todo.id == id), "non-lead member retains full task visibility after lead assignment");
+        }
+    }
+
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {
         let mut c = conn();
