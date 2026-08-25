@@ -26,6 +26,9 @@ export const personalApi = {
   // Shared surface: returns EVERY member's project todos, not only the caller's. A
   // project lead is informational and gets no wider read than any other member.
   projectTodos:(project_id:string,profile_id:string,include_done=false)=>call<Todo[]>("list_project_todos",{projectId:project_id,profileId:profile_id,includeDone:include_done}),
+  // Cross-project team surface: other people's running project work, everywhere the
+  // caller is a member/owner. Project-less personal todos are excluded.
+  teamTodos:(profile_id:string,include_done=false)=>call<Todo[]>("list_team_todos",{profileId:profile_id,includeDone:include_done}),
   projectMemberIds:(project_id:string)=>call<string[]>("list_project_member_ids",{projectId:project_id}),
   // `memberId`, not `profileId`: the web transport rewrites any profile id in a
   // request to the caller's own, which would turn "add Charles" into "add me".
