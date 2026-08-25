@@ -1934,6 +1934,48 @@ mod tests {
             content_kind: default_content_kind(),
         }
     }
+    /// Project work is a SHARED surface, and naming a lead changes nothing about it.
+    /// A plain member who is not the lead still reads every member's project todos and
+    /// may create a todo assigned to somebody else. If this test ever fails, some gate
+    /// started reading `projects.lead_id` — that is the bug, not this assertion.
+    #[test]
+    fn every_member_reads_all_project_todos_and_may_assign_others_regardless_of_lead() {
+        let mut c = conn();
+        // 'p' owns the project; 'q' and 'r' are members. Make 'p' the lead.
+        crate::platform::set_project_lead_on(&c, "project", Some("p")).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+
+        create_todo_on(&mut c, todo_input("owner-task", "p", &["p"])).unwrap();
+        // A non-lead member creates work FOR SOMEBODY ELSE: allowed, no lead involved.
+        let delegated = create_todo_on(&mut c, todo_input("delegated", "q", &["r"])).unwrap();
+        assert_eq!(delegated.assignee_ids, vec!["r".to_string()]);
+
+        // Every member sees every member's project todos — lead, owner, or neither.
+        for member in ["p", "q", "r"] {
+            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            assert_eq!(
+                ids,
+                vec!["owner-task".to_string(), "delegated".to_string()],
+                "{member} must see all project work"
+            );
+        }
+        // Someone outside the project sees none of it.
+        assert!(list_project_todos_on(&c, "project", "outsider", false)
+            .unwrap()
+            .is_empty());
+
+        // Clearing the lead changes nobody's reach either.
+        crate::platform::set_project_lead_on(&c, "project", None).unwrap();
+        assert_eq!(
+            list_project_todos_on(&c, "project", "r", false).unwrap().len(),
+            2
+        );
+    }
+
     #[test]
     fn invalid_assignee_rolls_back_the_whole_todo_write() {
         let mut c = conn();

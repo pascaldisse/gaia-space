@@ -1729,12 +1729,21 @@ pub fn set_project_lead(
     actor_profile_id: Option<String>,
 ) -> Result<Project> {
     let c = db::conn()?;
-    // Desktop passes its local identity; web passes none because the HTTP command
-    // gate already authorized the session before dispatch.
-    if let Some(actor) = actor_profile_id.as_deref() {
-        authorize_project_deadline_on(&c, actor, &project_id)?;
+    set_project_lead_for_actor_on(&c, &project_id, lead_id.as_deref(), actor_profile_id.as_deref())
+}
+/// Gate + write in one place so the desktop command, the web dispatch and the tests
+/// exercise the identical path. Desktop passes its local identity; web passes none
+/// because the HTTP command gate already authorized the session before dispatch.
+pub fn set_project_lead_for_actor_on(
+    c: &Connection,
+    project_id: &str,
+    lead_id: Option<&str>,
+    actor_profile_id: Option<&str>,
+) -> Result<Project> {
+    if let Some(actor) = actor_profile_id {
+        authorize_project_deadline_on(c, actor, project_id)?;
     }
-    set_project_lead_on(&c, &project_id, lead_id.as_deref())
+    set_project_lead_on(c, project_id, lead_id)
 }
 
 pub fn set_project_lead_on(
@@ -2829,6 +2838,125 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// The lead round-trips through the wide create/update writes, and the narrow door
+    /// refuses anyone who is not on the project. Naming a lead is a *label*: it moves no
+    /// ownership and opens no gate (see `Project::lead_id`).
+    #[test]
+    fn project_lead_round_trips_and_only_accepts_members() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('gone','ghost','Ghost',1)", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='gone'", [])
+            .unwrap();
+        let project = |lead: Option<&str>| Project {
+            id: "pr".into(),
+            name: "Project".into(),
+            key: "PR".into(),
+            description: Some("Original".into()),
+            created_by: Some("p".into()),
+            archived: false,
+            deadline: None,
+            lead_id: lead.map(str::to_owned),
+        };
+        // Create persists the lead; the owner is a member by construction.
+        create_project_on(&c, project(Some("p"))).unwrap();
+        assert_eq!(
+            project_on(&c, "pr").unwrap().unwrap().lead_id.as_deref(),
+            Some("p")
+        );
+        // Update persists it too, and a blank string is "no lead", not an id.
+        update_project_on(&c, project(Some("   "))).unwrap();
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        assert_eq!(
+            list_projects_on(&c).unwrap()[0].lead_id,
+            None,
+            "the list read carries the column"
+        );
+
+        // q is not on the project yet: refused, and nothing is written.
+        let refused = set_project_lead_on(&c, "pr", Some("q")).unwrap_err();
+        assert!(refused.contains("must be a project member"), "{refused}");
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        // Unknown and archived people are refused the same way.
+        assert!(set_project_lead_on(&c, "pr", Some("nobody")).is_err());
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','gone')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            set_project_lead_on(&c, "pr", Some("gone")).is_err(),
+            "an archived profile cannot lead"
+        );
+
+        // Once q is a member the write lands, and only `lead_id` moves.
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','q')",
+            [],
+        )
+        .unwrap();
+        let led = set_project_lead_on(&c, "pr", Some("q")).unwrap();
+        assert_eq!(led.lead_id.as_deref(), Some("q"));
+        assert_eq!(
+            (
+                led.name.as_str(),
+                led.description.as_deref(),
+                led.created_by.as_deref()
+            ),
+            ("Project", Some("Original"), Some("p")),
+            "a lead write never touches ownership or any other column"
+        );
+        // Clearing is explicit and always allowed.
+        assert_eq!(set_project_lead_on(&c, "pr", None).unwrap().lead_id, None);
+        // A project that does not exist is refused with the non-oracle message.
+        assert_eq!(
+            set_project_lead_on(&c, "ghost", None).unwrap_err(),
+            "project access denied"
+        );
+    }
+
+    /// Same owner-or-admin door as the deadline: a member who is neither owner nor admin
+    /// cannot set the lead — and being (or naming) a lead grants that person nothing.
+    #[test]
+    fn setting_a_project_lead_runs_the_owner_or_admin_gate() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('boss','admin','Admin',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','admin','x','Admin','boss','admin',1,1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','p',0,1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','q')",
+            [],
+        )
+        .unwrap();
+
+        // A plain member is refused, even to name themselves.
+        let refused = set_project_lead_for_actor_on(&c, "pr", Some("q"), Some("q")).unwrap_err();
+        assert!(refused.contains("owner or an admin"), "{refused}");
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        // Owner and admin both pass; the web path (no actor) is already authorized upstream.
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", Some("q"), Some("p"))
+                .unwrap()
+                .lead_id
+                .as_deref(),
+            Some("q")
+        );
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", None, Some("boss"))
+                .unwrap()
+                .lead_id,
+            None
+        );
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", Some("q"), None)
+                .unwrap()
+                .lead_id
+                .as_deref(),
+            Some("q")
+        );
+        // The freshly named lead is still just a member: the gate does not know them.
+        assert!(set_project_lead_for_actor_on(&c, "pr", None, Some("q")).is_err());
     }
 
     #[test]
