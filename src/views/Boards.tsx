@@ -153,6 +153,9 @@ return "All work";
 };
 const groups = new Map<string, Issue[]>();
 for (const issue of issues() ?? []) { const name = label(issue); groups.set(name, [...(groups.get(name) ?? []), issue]); }
+// An empty board still has columns to show and cards to add to them — a board
+// with zero issues must not hide the whole kanban, only report each column empty.
+if (!groups.size) groups.set(swimlaneGroup() === "none" ? "All work" : "No issues yet", []);
 return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, laneIssues]) => ({ name, laneIssues }));
 };
 const selected = selectedIssueIds;

@@ -2551,7 +2551,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "issue_time_total" | "join_channel" | "launch_sprint" | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
         "invite_meeting_participant" => CommandPolicy::MeetingWrite,
-        "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
+        "list_backlog_issues" | "list_board_columns" | "list_board_issues" | "get_board_card_settings" => {
             CommandPolicy::BoardRead
         }
         "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
@@ -2692,7 +2692,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "remove_team_membership"
         | "request_membership_edit"
         | "decide_membership_edit"
-        | "save_board_column" => CommandPolicy::Session,
+        | "save_board_column"
+        | "save_board_card_settings" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
         | "save_messenger_contact"
@@ -5148,6 +5149,7 @@ async fn cmd(
     "list_backlog_issues" => issues::list_backlog_issues(board_id: String),
     "list_board_columns" => issues::list_board_columns(board_id: String),
     "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
+    "get_board_card_settings" => issues::get_board_card_settings(board_id: String),
     "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
     "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
@@ -5322,6 +5324,7 @@ async fn cmd(
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
     "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
     "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
+    "save_board_card_settings" => issues::save_board_card_settings(settings: issues::BoardCardSettings),
     "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "ingest_teamcity_test_messages" => pipelines::ingest_teamcity_test_messages(input: pipelines::TeamCityTestReportInput),
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
