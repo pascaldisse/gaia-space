@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 131;
+pub const SCHEMA_VERSION: i64 = 132;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -863,6 +863,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         add_column_if_missing(&tx, "document_favorites", "group_name", "TEXT")?;
+    }
+    // V132: one main responsible person per project. Additive, nullable column — a
+    // project without a lead is normal, not broken. The lead is PURELY INFORMATIONAL:
+    // it is never read by any authorization gate, and every project member keeps
+    // identical access with or without it (see `platform::Project::lead_id`).
+    if version < 132 && table_exists(&tx, "projects")? {
+        add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
     // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
@@ -2317,7 +2324,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 131);
+        assert_eq!(SCHEMA_VERSION, 132);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2595,6 +2602,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(exists, 1);
+    }
+
+    /// V132 is additive: a database stamped at V131 gains a nullable `projects.lead_id`
+    /// and loses nothing — existing rows keep their name, owner, and deadline.
+    #[test]
+    fn v131_database_gains_project_lead_column_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO projects(id,name,key,created_by,archived,deadline,created_at) VALUES('legacy','Legacy','LGY','default-org',0,'2030-01-01',1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 131)
+            .expect("V131 stamp");
+        migrate(&conn).expect("V132 migration");
+        let (owner, deadline, lead): (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT created_by,deadline,lead_id FROM projects WHERE id='legacy'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(owner.as_deref(), Some("default-org"), "ownership untouched");
+        assert_eq!(deadline.as_deref(), Some("2030-01-01"));
+        assert_eq!(lead, None, "a project without a lead is normal");
+        migrate(&conn).expect("V132 re-run is idempotent");
     }
 
     #[test]
