@@ -97,7 +97,7 @@ function ProjectLead(props: { projectId: string; leadId: string | null | undefin
 const [error, setError] = createSignal("");
 const [saving, setSaving] = createSignal(false);
 const [members] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([] as string[]));
-if (!profiles()) void reloadProfiles().catch(() => undefined);
+onMount(() => { void reloadProfiles().catch(() => undefined); });
 const candidates = () => (profiles() ?? []).filter(profile => !profile.archived && (members() ?? []).includes(profile.id));
 let select!: HTMLSelectElement;
 // The profile/member resources resolve after this element mounts. Re-applying its controlled
