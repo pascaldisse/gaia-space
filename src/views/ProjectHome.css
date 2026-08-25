@@ -42,3 +42,7 @@
 .ph-deadline.soon em { color: var(--attn-amber-text); }
 .ph-deadline.ok { border-left-color: #4fae6a; }
 .ph-deadline.ok .ph-deadline-dot { background: #4fae6a; }
+/* Informational only: the lead line is never an access-control affordance. */
+.ph-lead { margin: 0 0 16px; color: var(--text-muted); font-size: 13px; }
+.ph-lead strong { color: var(--text-strong); margin-left: 6px; }
+.ph-task-link { display: flex; align-items: baseline; gap: 8px; width: 100%; color: inherit; text-decoration: none; }

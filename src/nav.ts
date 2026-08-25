@@ -9,7 +9,8 @@ export type NavGroup = { id: string; label: string; icon: IconName; views: strin
 
 export const NAV_GROUPS: NavGroup[] = [
   { id: "overview", label: "Overview", icon: "home", views: ["Dashboard"] },
-  { id: "tasks", label: "My tasks", icon: "check", views: ["To-Do", "Project Tasks"] },
+  // Shared work belongs here too: Team Tasks is everybody's project work, not "My" tasks.
+{ id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },

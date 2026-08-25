@@ -1,0 +1,11 @@
+.team-tasks-view .tt-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
+.tt-group { margin: 0 0 18px; }
+.tt-group-head { margin: 0 0 6px; font-size: 14px; display: flex; align-items: baseline; gap: 8px; }
+.tt-group-head a { color: var(--text-strong); text-decoration: none; }
+.tt-group-head a:hover { color: var(--accent-text, var(--accent)); }
+.tt-group-head small { color: var(--text-dim); font-size: 11px; font-weight: 500; }
+.tt-row { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; }
+.tt-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-assignees { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.tt-row.overdue time { color: var(--status-danger-ink); font-weight: 600; }
+.tt-row.overdue { border-left: 3px solid var(--status-risk-overdue); }
