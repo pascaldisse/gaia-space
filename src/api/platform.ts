@@ -29,7 +29,10 @@ export type Right = {
 export type RightGroup = { code: string; title: string; priority: number };
 export type ScopeType = "global" | "project" | "team" | "profile" | "channel" | "document" | "documentFolder";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null }; 
+/** `lead_id` is the one main responsible person. PURELY INFORMATIONAL: it is never an
+ *  authorization input — every project member keeps identical access (all tasks, knowledge,
+ *  calendar) and any member may create tasks for themselves and for others. */
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; lead_id: string | null }; 
 export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
@@ -41,7 +44,9 @@ const call = <T>(command: string, args: Record<string, unknown> = {}) => invoke<
 
 // A new project carries no owner: the server mints `created_by` from the
 // session identity, so the client can never name someone else as owner.
-export type NewProject = Omit<Project, "created_by">;
+// `lead_id` is optional at create time: a project without a lead is normal, and the
+// server column is nullable (serde default), so an omitted lead means "none yet".
+export type NewProject = Omit<Project, "created_by" | "lead_id"> & { lead_id?: string | null };
 const submitProject = (operation: "create" | "update", value: Project | NewProject) =>
   call<void>(`${operation}_project`, { project: value });
 
@@ -155,6 +160,11 @@ decideMembershipEdit: (id: string, approver_id: string, approve: boolean) => cal
    *  instead of being overwritten. Clearing is `deadline: null`. */
   updateProjectDeadline: (project_id: string, expected: string | null, deadline: string | null, actor?: string | null) =>
     call<Project>("update_project_deadline", { projectId: project_id, expectedDeadline: expected, deadline, actorProfileId: actor ?? null }),
+  /** Narrow lead write: only `projects.lead_id` moves. `lead_id: null` clears it; a named
+   *  lead must be a live profile that is already a project member. Same owner-or-admin door
+   *  as the deadline — being lead grants nothing. `actor` is desktop-only (see above). */
+  setProjectLead: (project_id: string, lead_id: string | null, actor?: string | null) =>
+    call<Project>("set_project_lead", { projectId: project_id, leadId: lead_id, actorProfileId: actor ?? null }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

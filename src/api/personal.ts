@@ -23,6 +23,8 @@ export type CalendarOptions = { profile_id:string; show_weekends:boolean; show_t
 const call = <T>(command:string, args:Record<string,unknown>={}) => invoke<T>(command,args);
 export const personalApi = {
   todos:(profile_id:string,include_done=false)=>call<Todo[]>("list_todos",{profileId:profile_id,includeDone:include_done}),
+  // Shared surface: returns EVERY member's project todos, not only the caller's. A
+  // project lead is informational and gets no wider read than any other member.
   projectTodos:(project_id:string,profile_id:string,include_done=false)=>call<Todo[]>("list_project_todos",{projectId:project_id,profileId:profile_id,includeDone:include_done}),
   projectMemberIds:(project_id:string)=>call<string[]>("list_project_member_ids",{projectId:project_id}),
   // `memberId`, not `profileId`: the web transport rewrites any profile id in a
