@@ -29,7 +29,7 @@ export type Right = {
 export type RightGroup = { code: string; title: string; priority: number };
 export type ScopeType = "global" | "project" | "team" | "profile" | "channel" | "document" | "documentFolder";
 export type RoleAssignment = { id: string; role_id: string; profile_id: string | null; team_id: string | null; scope_type: ScopeType; scope_id: string | null };
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null }; 
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; /** Informational only; never changes authorization. */ lead_id?: string | null };
 export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
@@ -155,6 +155,10 @@ decideMembershipEdit: (id: string, approver_id: string, approve: boolean) => cal
    *  instead of being overwritten. Clearing is `deadline: null`. */
   updateProjectDeadline: (project_id: string, expected: string | null, deadline: string | null, actor?: string | null) =>
     call<Project>("update_project_deadline", { projectId: project_id, expectedDeadline: expected, deadline, actorProfileId: actor ?? null }),
+  /** Informational only: owner-or-admin may set this narrow field; the selected
+   * lead never changes access. */
+  setProjectLead: (project_id: string, lead_id: string | null, actor?: string | null) =>
+    call<Project>("set_project_lead", { projectId: project_id, leadId: lead_id, actorProfileId: actor ?? null }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),

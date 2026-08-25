@@ -24,6 +24,7 @@ const call = <T>(command:string, args:Record<string,unknown>={}) => invoke<T>(co
 export const personalApi = {
   todos:(profile_id:string,include_done=false)=>call<Todo[]>("list_todos",{profileId:profile_id,includeDone:include_done}),
   projectTodos:(project_id:string,profile_id:string,include_done=false)=>call<Todo[]>("list_project_todos",{projectId:project_id,profileId:profile_id,includeDone:include_done}),
+teamTodos:(profile_id:string,include_done=false)=>call<Todo[]>("list_team_todos",{profileId:profile_id,includeDone:include_done}),
   projectMemberIds:(project_id:string)=>call<string[]>("list_project_member_ids",{projectId:project_id}),
   // `memberId`, not `profileId`: the web transport rewrites any profile id in a
   // request to the caller's own, which would turn "add Charles" into "add me".

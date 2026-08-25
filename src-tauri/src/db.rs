@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 131;
+pub const SCHEMA_VERSION: i64 = 132;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -966,6 +966,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // V109: a document/article owns one entity discussion and may bind one meeting.
     if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
         tx.execute_batch(SCHEMA_V109)?;
+    }
+    // V132: a project lead is informational only. Access control never reads this column.
+    if version < 132 && table_exists(&tx, "projects")? {
+        add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -2317,7 +2321,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 131);
+        assert_eq!(SCHEMA_VERSION, 132);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2335,6 +2339,21 @@ mod tests {
         );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
+    fn v132_adds_nullable_informational_project_lead_without_rewriting_rows() {
+        let temp = TempDb::new("gaia-space-v132-lead");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("UPDATE projects SET lead_id='default-org' WHERE id='demo-project'", []).expect("set lead");
+        conn.pragma_update(None, "user_version", 131).expect("rewind version");
+        migrate(&conn).expect("V132 migration");
+        let lead: Option<String> = conn.query_row("SELECT lead_id FROM projects WHERE id='demo-project'", [], |row| row.get(0)).expect("lead");
+        assert_eq!(lead.as_deref(), Some("default-org"));
+        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).expect("version"), SCHEMA_VERSION);
+        migrate(&conn).expect("V132 is idempotent");
     }
 
     #[test]

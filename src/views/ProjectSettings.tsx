@@ -91,6 +91,27 @@ function ProjectMembers(props: { projectId: string; owner: string | null; canMan
   </section>;
 }
 
+/** Informational only: lead selection does not change a member's project access or
+ * assignment capability. The owner-or-admin setting permission is the sole restriction. */
+function ProjectLead(props: { projectId: string; leadId: string | null | undefined; canManage: boolean; actor: string }) {
+const [error, setError] = createSignal("");
+const [saving, setSaving] = createSignal(false);
+const [members] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([] as string[]));
+onMount(() => { void reloadProfiles().catch(() => undefined); });
+const candidates = () => (profiles() ?? []).filter(profile => !profile.archived && (members() ?? []).includes(profile.id));
+let select!: HTMLSelectElement;
+// The profile/member resources resolve after this element mounts. Re-applying its controlled
+// value prevents a saved lead from being displayed as the initial "No lead" option.
+createEffect(() => { candidates(); const selected = props.leadId ?? ""; if (select && select.value !== selected) select.value = selected; });
+const save = async (next: string) => {
+if (!props.canManage || next === (props.leadId ?? "")) return;
+setError(""); setSaving(true);
+try { await platformApi.setProjectLead(props.projectId, next || null, props.actor || null); await reloadProjects(); }
+catch (reason) { setError(humanError(reason)); }
+finally { setSaving(false); }
+};
+return <section class="ps-panel"><div class="ps-panel-head"><h2>Project lead</h2></div><p class="ps-hint">A lead names the main responsible person. It is informational only: every project member keeps the same access to work.</p><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><label class="ps-field"><span>Lead <em>optional</em></span><select ref={select} aria-label="Project lead" value={props.leadId ?? ""} disabled={!props.canManage || saving()} onChange={event => void save(event.currentTarget.value)}><option value="">No lead</option><For each={candidates()}>{person => <option value={person.id}>{person.display_name || person.username}</option>}</For></select></label><Show when={props.leadId && !candidates().some(person => person.id === props.leadId)}><p class="ps-hint ps-hint-quiet">Current lead: {nameOf(props.leadId!)}</p></Show></section>;
+}
 function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
   const entityType = () => `issue:${props.projectId}`;
   const [definitions, { refetch }] = createResource(entityType, type => platformApi.cfDefinitions(type));
@@ -161,7 +182,7 @@ export default function ProjectSettings() {
     <header class="ps-head"><div class="ps-identity"><span class="ps-mark" aria-hidden="true">{project()?.key?.slice(0, 2) || "P"}</span><div><h1>Project settings</h1><p>{project()?.name ?? "Project unavailable"}<Show when={project()?.key}><code class="ps-keychip">{project()!.key}</code></Show></p></div></div></header>
     <Show when={!project()}><p class="ps-empty" role="alert">This project does not exist or is unavailable.</p></Show>
     <Show when={project()}><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><Show when={!canManage()}><p class="ps-notice" role="status">Only the project owner or an administrator can change these settings.</p></Show>
-      <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>General</h2></div><form onSubmit={save}><label class="ps-field"><span>Project name</span><input disabled={!canManage()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!canManage()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label><label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!canManage()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label><Show when={canManage()}><div class="ps-actions"><button class="primary" disabled={busy()}>Save changes</button></div></Show></form></section><section class="ps-panel"><div class="ps-panel-head"><h2>Project identity</h2></div><p class="ps-hint">The key is permanent and identifies this project in issue links and integrations.</p><div class="ps-refrow"><div><span class="ps-reflabel">Project key</span><code class="ps-refid">{project()!.key}</code></div></div><div class="ps-refrow"><div><span class="ps-reflabel">Project ID</span><code class="ps-refid">{project()!.id}</code></div></div></section><ProjectMembers projectId={id()} owner={project()!.created_by} canManage={canManage()} /><ProjectCustomFields projectId={id()} canManage={canManage()} /></div>
+      <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>General</h2></div><form onSubmit={save}><label class="ps-field"><span>Project name</span><input disabled={!canManage()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!canManage()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label><label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!canManage()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label><Show when={canManage()}><div class="ps-actions"><button class="primary" disabled={busy()}>Save changes</button></div></Show></form></section><section class="ps-panel"><div class="ps-panel-head"><h2>Project identity</h2></div><p class="ps-hint">The key is permanent and identifies this project in issue links and integrations.</p><div class="ps-refrow"><div><span class="ps-reflabel">Project key</span><code class="ps-refid">{project()!.key}</code></div></div><div class="ps-refrow"><div><span class="ps-reflabel">Project ID</span><code class="ps-refid">{project()!.id}</code></div></div></section><ProjectLead projectId={id()} leadId={project()!.lead_id} canManage={canManage()} actor={actor()} /><ProjectMembers projectId={id()} owner={project()!.created_by} canManage={canManage()} /><ProjectCustomFields projectId={id()} canManage={canManage()} /></div>
       <Show when={canManage()}><section class="ps-danger"><div class="ps-danger-head"><h2>Archive project</h2></div><div class="ps-danger-row"><p><strong>Archive {project()!.name}</strong>It disappears from active project lists. Project data remains available for restoration.</p><Show when={confirmArchive()} fallback={<button type="button" class="danger-outline" onClick={() => setConfirmArchive(true)}>Archive project</button>}><div class="ps-confirm"><span>Archive this project?</span><button type="button" class="danger" disabled={busy()} onClick={() => void archive()}>Confirm archive</button><button type="button" disabled={busy()} onClick={() => setConfirmArchive(false)}>Cancel</button></div></Show></div></section></Show>
     </Show>
   </section>;

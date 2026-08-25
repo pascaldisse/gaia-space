@@ -1419,12 +1419,15 @@ pub struct Project {
     pub created_by: Option<String>,
     pub archived: bool,
     pub deadline: Option<String>,
+    /// Informational only: no authorization path reads `lead_id`.
+    #[serde(default)]
+    pub lead_id: Option<String>,
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_projects() -> Result<Vec<Project>> {
     let c = db::conn()?;
     let mut s = c
-        .prepare("SELECT id,name,key,description,created_by,archived,deadline FROM projects ORDER BY archived,name")
+        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects ORDER BY archived,name")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], |r| {
@@ -1436,6 +1439,7 @@ pub fn list_projects() -> Result<Vec<Project>> {
                 created_by: r.get(4)?,
                 archived: r.get(5)?,
                 deadline: r.get(6)?,
+                lead_id: r.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1687,9 +1691,47 @@ pub fn update_project_deadline_on(
     project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
 }
 
+/// Project lead is informational only: it names a responsible member but grants no access.
+/// This is intentionally a narrow, single-column write. Its sole authorization gate is
+/// `authorize_project_deadline_on`; `lead_id` must never appear in authorization logic.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_project_lead(
+    project_id: String,
+    lead_id: Option<String>,
+    actor_profile_id: Option<String>,
+) -> Result<Project> {
+    let c = db::conn()?;
+    if let Some(actor) = actor_profile_id.as_deref() {
+        authorize_project_deadline_on(&c, actor, &project_id)?;
+    }
+    set_project_lead_on(&c, &project_id, lead_id.as_deref())
+}
+
+pub fn set_project_lead_on(
+    c: &Connection,
+    project_id: &str,
+    lead_id: Option<&str>,
+) -> Result<Project> {
+    if project_id.trim().is_empty() {
+        return Err("A project is required".into());
+    }
+    let lead_id = lead_id.map(str::trim).filter(|id| !id.is_empty());
+    let changed = c.execute(
+        "UPDATE projects SET lead_id=?2 WHERE id=?1 AND (?2 IS NULL OR (EXISTS(SELECT 1 FROM profiles WHERE id=?2 AND archived=0) AND (created_by=?2 OR EXISTS(SELECT 1 FROM project_members WHERE project_id=projects.id AND profile_id=?2))))",
+        params![project_id, lead_id],
+    ).map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return match project_on(c, project_id)? {
+            None => Err("project access denied".into()),
+            Some(_) => Err("Project lead must be an active project member".into()),
+        };
+    }
+    project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
+}
+
 pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
-        "SELECT id,name,key,description,created_by,archived,deadline FROM projects WHERE id=?1",
+        "SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects WHERE id=?1",
         [project_id],
         |r| {
             Ok(Project {
@@ -1700,6 +1742,7 @@ pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
                 created_by: r.get(4)?,
                 archived: r.get(5)?,
                 deadline: r.get(6)?,
+                lead_id: r.get(7)?,
             })
         },
     )
@@ -2764,6 +2807,7 @@ mod tests {
             created_by: owner.map(str::to_owned),
             archived: false,
             deadline: None,
+            lead_id: None,
         };
         // Desktop used to send no owner at all: the row landed with NULL `created_by`
         // and no owner-or-admin gate could ever pass for it again.
@@ -3046,6 +3090,23 @@ mod tests {
             .unwrap();
         assert_eq!(stored, ("Project".to_string(), None));
     }
+    #[test]
+    fn project_lead_write_is_narrow_and_requires_an_active_project_member() {
+        let c = conn();
+        for id in ["owner", "member", "outside", "archived"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,archived,created_at) VALUES(?1,?1,?1,?2,1)", params![id, id == "archived"]).unwrap();
+        }
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at) VALUES('pr','Project','PR','Original','owner',0,'2030-03-10',1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','member'),('pr','archived')", []).unwrap();
+        let chosen = set_project_lead_on(&c, "pr", Some("member")).unwrap();
+        assert_eq!(chosen.lead_id.as_deref(), Some("member"));
+        let untouched: (String, Option<String>, Option<String>) = c.query_row("SELECT name,description,deadline FROM projects WHERE id='pr'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(untouched, ("Project".into(), Some("Original".into()), Some("2030-03-10".into())));
+        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("active project member"));
+        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("active project member"));
+        assert_eq!(set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id, None);
+    }
+
     #[test]
     fn project_role_inherits_its_template_and_bindings_stay_inside_the_project() {
         let c = conn();

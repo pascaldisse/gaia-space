@@ -4,7 +4,7 @@ import {
   createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Projects", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
+const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -103,6 +103,8 @@ describe("grammar", () => {
   });
 
   test("project task and calendar routes retain their project context", () => {
+    expect(buildPath({ view: "Project Overview", projectId: "p-1" })).toBe("projects/p-1/overview");
+    expect(parsePath("projects/p-1/overview")).toMatchObject({ view: "Project Overview", projectId: "p-1" });
     expect(buildPath({ view: "Project Tasks", projectId: "p-1" })).toBe("projects/p-1/tasks");
     expect(parsePath("projects/p-1/tasks")).toMatchObject({ view: "Project Tasks", projectId: "p-1" });
     expect(buildPath({ view: "Calendar", projectId: "p-1" })).toBe("projects/p-1/calendar");
