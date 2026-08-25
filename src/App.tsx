@@ -17,6 +17,7 @@ import Blogs from "./views/Blogs";
 import Calendar from "./views/Calendar";
 import Meetings from "./views/Meetings";
 import ProjectTasks from "./views/ProjectTasks";
+import TeamTasks from "./views/TeamTasks";
 import Steering from "./views/Steering";
 import ProjectSettings from "./views/ProjectSettings";
 import { ProjectContext } from "./components/ProjectContext";
@@ -45,6 +46,9 @@ const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
+// Cross-project, project-id-free: routed by its own slug (`team-tasks`), unlike the
+// project-scoped views below which live under /projects/<id>/…
+const teamTasksView:View={name:"Team Tasks",icon:"check",component:TeamTasks};
 const projectSteeringView:View={name:"Project Steering",icon:"target",component:Steering};
 const projectSettingsView:View={name:"Project Settings",icon:"settings",component:ProjectSettings};
 
@@ -60,11 +64,11 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),projectTasksView,projectSteeringView,projectSettingsView,settingsView];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectSteeringView,projectSettingsView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
-    registerViews([...personalViews,...workspaceViews,usersView,projectTasksView,projectSteeringView,projectSettingsView,settingsView]);
+    registerViews([...personalViews,...workspaceViews,usersView,teamTasksView,projectTasksView,projectSteeringView,projectSettingsView,settingsView]);
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
@@ -75,7 +79,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   });
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews(),projectTasksView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
