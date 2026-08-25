@@ -9,7 +9,10 @@ export type NavGroup = { id: string; label: string; icon: IconName; views: strin
 
 export const NAV_GROUPS: NavGroup[] = [
   { id: "overview", label: "Overview", icon: "home", views: ["Dashboard"] },
-  { id: "tasks", label: "My tasks", icon: "check", views: ["To-Do", "Project Tasks"] },
+  // "Tasks", not "My tasks": this group holds the SHARED work surfaces (Team Tasks =
+  // everybody's running project work, Project Tasks = one project's), so a possessive
+  // label made people skip the only cross-team view there is.
+  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
