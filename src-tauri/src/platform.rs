@@ -1419,29 +1419,47 @@ pub struct Project {
     pub created_by: Option<String>,
     pub archived: bool,
     pub deadline: Option<String>,
+    /// The one person mainly responsible for the project.
+    ///
+    /// LAW: `lead_id` is PURELY INFORMATIONAL. It is never an authorization input —
+    /// no gate anywhere may read it, and there is no rule of the form "only the lead
+    /// may ...". Every project member keeps identical access with or without a lead:
+    /// all tasks, knowledge and calendar entries stay readable, and any member may
+    /// create tasks for themselves and for others. Authorization stays where it
+    /// already lives: `created_by` (owner) plus the admin role.
+    ///
+    /// `serde(default)` keeps every pre-V132 payload (and every old client) deserializable.
+    #[serde(default)]
+    pub lead_id: Option<String>,
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_projects() -> Result<Vec<Project>> {
     let c = db::conn()?;
+    list_projects_on(&c)
+}
+pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
     let mut s = c
-        .prepare("SELECT id,name,key,description,created_by,archived,deadline FROM projects ORDER BY archived,name")
+        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects ORDER BY archived,name")
         .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                key: r.get(2)?,
-                description: r.get(3)?,
-                created_by: r.get(4)?,
-                archived: r.get(5)?,
-                deadline: r.get(6)?,
-            })
-        })
+        .query_map([], read_project)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id.
+fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        key: r.get(2)?,
+        description: r.get(3)?,
+        created_by: r.get(4)?,
+        archived: r.get(5)?,
+        deadline: r.get(6)?,
+        lead_id: r.get(7)?,
+    })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_project(id: String) -> Result<Option<Project>> {
@@ -1469,14 +1487,17 @@ pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
         created_by: Some(owner),
         ..project
     };
-    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty())]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id)]).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_project(project: Project) -> Result<()> {
     let c = db::conn()?;
+    update_project_on(&c, project)
+}
+pub fn update_project_on(c: &Connection, project: Project) -> Result<()> {
     c.execute(
-        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7 WHERE id=?1",
+        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7,lead_id=?8 WHERE id=?1",
         rusqlite::params![
             project.id,
             project.name,
@@ -1484,11 +1505,18 @@ pub fn update_project(project: Project) -> Result<()> {
             project.description,
             project.created_by,
             project.archived,
-            project.deadline.filter(|date| !date.trim().is_empty())
+            project.deadline.filter(|date| !date.trim().is_empty()),
+            normalized_lead(project.lead_id)
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+/// A blank string is "no lead", not a profile id: the column stays NULL or holds a real id.
+fn normalized_lead(lead_id: Option<String>) -> Option<String> {
+    lead_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
 }
 
 /// Narrow deadline write: the only column it can change is `projects.deadline`, so a
@@ -1689,19 +1717,9 @@ pub fn update_project_deadline_on(
 
 pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
-        "SELECT id,name,key,description,created_by,archived,deadline FROM projects WHERE id=?1",
+        "SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects WHERE id=?1",
         [project_id],
-        |r| {
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                key: r.get(2)?,
-                description: r.get(3)?,
-                created_by: r.get(4)?,
-                archived: r.get(5)?,
-                deadline: r.get(6)?,
-            })
-        },
+        read_project,
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -2764,6 +2782,7 @@ mod tests {
             created_by: owner.map(str::to_owned),
             archived: false,
             deadline: None,
+            lead_id: None,
         };
         // Desktop used to send no owner at all: the row landed with NULL `created_by`
         // and no owner-or-admin gate could ever pass for it again.
