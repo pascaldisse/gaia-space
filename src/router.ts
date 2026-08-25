@@ -105,6 +105,7 @@ export function parsePath(path: string): Route {
     const projectId = rest[0];
     if (rest[1] === "issues" && rest[2])
       return norm({ view: "Issues", entityType: "issue", entityId: rest.slice(2).join("/"), projectId });
+    if (rest.length === 2 && rest[1] === "overview") return norm({ view: "Project Overview", projectId });
     if (rest.length === 2 && rest[1] === "steering") return norm({ view: "Project Steering", projectId });
 if (rest.length === 2 && rest[1] === "settings") return norm({ view: "Project Settings", projectId });
 if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks", projectId });
@@ -139,6 +140,7 @@ export function buildPath(r: Route): string {
   const slug = viewToSlug[view] ?? toSlug(view);
   const desc = r.entityType ? entityRoutes[r.entityType] : undefined;
 
+  if (r.view === "Project Overview" && r.projectId) return `projects/${enc(r.projectId)}/overview`;
   if (r.view === "Project Steering" && r.projectId) return `projects/${enc(r.projectId)}/steering`;
 if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
 if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
