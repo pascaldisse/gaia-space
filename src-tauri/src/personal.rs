@@ -1981,6 +1981,71 @@ mod tests {
     /// A plain member who is not the lead still reads every member's project todos and
     /// may create a todo assigned to somebody else. If this test ever fails, some gate
     /// started reading `projects.lead_id` — that is the bug, not this assertion.
+    /// The cross-project team surface. It answers "what is everyone running?" over every
+    /// project the reader belongs to — and stops exactly at the projects they do not.
+    #[test]
+    fn team_todos_span_projects_the_reader_belongs_to_and_no_others() {
+        let mut c = conn();
+        // Second project: 'p' is NOT on it, 'q' owns it.
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('other','Other','OTH','q',1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('other','r')",
+            [],
+        )
+        .unwrap();
+
+        // 'r' owns one todo in each project; 'q' owns a done one; 'p' keeps a personal todo.
+        create_todo_on(&mut c, todo_input("shared", "r", &[])).unwrap();
+        let mut in_other = todo_input("elsewhere", "r", &[]);
+        in_other.project_id = Some("other".into());
+        create_todo_on(&mut c, in_other).unwrap();
+        let mut finished = todo_input("finished", "q", &[]);
+        finished.done = true;
+        create_todo_on(&mut c, finished).unwrap();
+        let mut personal = todo_input("personal", "p", &[]);
+        personal.project_id = None;
+        create_todo_on(&mut c, personal).unwrap();
+
+        let ids = |profile: &str, include_done: bool| -> Vec<String> {
+            list_team_todos_on(&c, profile, include_done)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        };
+        // 'p' is a member of `project` only: it sees another member's todo there, never
+        // the other project's work, and never its own project-less personal todo.
+        assert_eq!(ids("p", false), vec!["shared".to_string()]);
+        // 'r' belongs to both projects and sees both.
+        assert_eq!(
+            ids("r", false),
+            vec!["shared".to_string(), "elsewhere".to_string()]
+        );
+        // include_done is off by default and shows completed work when asked.
+        assert!(!ids("p", false).contains(&"finished".to_string()));
+        assert!(ids("p", true).contains(&"finished".to_string()));
+        // Someone in no project at all sees nothing.
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        assert!(ids("outsider", true).is_empty());
+
+        // Refactor safety: both reads run the SAME predicate, so for a single project
+        // they must agree exactly — the day they diverge, this fails.
+        for profile in ["p", "q", "r", "outsider"] {
+            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            let team: Vec<String> = list_team_todos_on(&c, profile, true)
+                .unwrap()
+                .into_iter()
+                .filter(|t| t.project_id.as_deref() == Some("project"))
+                .map(|t| t.id)
+                .collect();
+            assert_eq!(per_project, team, "predicates drifted for {profile}");
+        }
+    }
+
     #[test]
     fn every_member_reads_all_project_todos_and_may_assign_others_regardless_of_lead() {
         let mut c = conn();
