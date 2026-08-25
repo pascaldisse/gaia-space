@@ -148,7 +148,7 @@ fn assignee_is_active(c: &Connection, profile_id: &str) -> Result<bool> {
 fn normalized_project_id(project_id: Option<String>) -> Option<String> {
     project_id.and_then(|id| (!id.trim().is_empty()).then(|| id.trim().to_string()))
 }
-fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2)))", params![project_id, profile_id], |row| row.get(0)))
 }
 pub fn project_member_by(project_id: &str, profile_id: &str) -> Result<bool> {

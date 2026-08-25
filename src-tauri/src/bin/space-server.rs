@@ -2410,7 +2410,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
             CommandPolicy::ProjectMemberWrite
         }
         "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
-        "set_project_deadline" | "update_project_deadline" => CommandPolicy::ProjectDeadlineWrite,
+        // The lead is informational, but *editing* the project field is the same
+        // owner-or-admin door as the deadline. It grants the lead nothing.
+        "set_project_deadline" | "update_project_deadline" | "set_project_lead" => {
+            CommandPolicy::ProjectDeadlineWrite
+        }
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
         "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
@@ -5380,6 +5384,7 @@ async fn cmd(
     "update_project" => platform::update_project(project: platform::Project),
     "set_project_deadline" => platform::set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>),
     "update_project_deadline" => platform::update_project_deadline(project_id: String, expected_deadline: Option<String>, deadline: Option<String>, actor_profile_id: Option<String>),
+    "set_project_lead" => platform::set_project_lead(project_id: String, lead_id: Option<String>, actor_profile_id: Option<String>),
     "update_quality_gate_rule" => review::update_quality_gate_rule(rule: review::QualityGateRule),
     "update_review" => review::update_review(review: review::Review),
     "update_role" => platform::update_role(role: platform::Role),

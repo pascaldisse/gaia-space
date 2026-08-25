@@ -1715,6 +1715,67 @@ pub fn update_project_deadline_on(
     project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
 }
 
+/// Narrow lead write: the only column it can change is `projects.lead_id`, so a stale
+/// whole-project payload can never overwrite name/description/ownership (H6).
+///
+/// LAW (repeated here because this is the door that writes it): the lead is purely
+/// informational. Naming a lead grants nothing and removes nothing — every project
+/// member keeps identical read and write access to the project's work. The gate below
+/// is the *existing* owner-or-admin rule for editing the project, not a lead privilege.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn set_project_lead(
+    project_id: String,
+    lead_id: Option<String>,
+    actor_profile_id: Option<String>,
+) -> Result<Project> {
+    let c = db::conn()?;
+    // Desktop passes its local identity; web passes none because the HTTP command
+    // gate already authorized the session before dispatch.
+    if let Some(actor) = actor_profile_id.as_deref() {
+        authorize_project_deadline_on(&c, actor, &project_id)?;
+    }
+    set_project_lead_on(&c, &project_id, lead_id.as_deref())
+}
+
+pub fn set_project_lead_on(
+    c: &Connection,
+    project_id: &str,
+    lead_id: Option<&str>,
+) -> Result<Project> {
+    if project_id.trim().is_empty() {
+        return Err("A project is required".into());
+    }
+    // A missing project and one you may not touch are indistinguishable here for the
+    // same reason as the deadline path: the error text must not become an existence oracle.
+    if project_on(c, project_id)?.is_none() {
+        return Err("project access denied".into());
+    }
+    let lead = lead_id.map(str::trim).filter(|id| !id.is_empty());
+    if let Some(lead) = lead {
+        // A lead must be a real, live person who is already on the project. This is a
+        // data-integrity check on the value being stored — not an access rule.
+        let known: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1 AND archived=0)",
+                [lead],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !known {
+            return Err("that person does not exist".into());
+        }
+        if !crate::personal::project_member_on(c, project_id, lead)? {
+            return Err("the project lead must be a project member".into());
+        }
+    }
+    c.execute(
+        "UPDATE projects SET lead_id=?2 WHERE id=?1",
+        rusqlite::params![project_id, lead],
+    )
+    .map_err(|e| e.to_string())?;
+    project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
+}
+
 pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
         "SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects WHERE id=?1",

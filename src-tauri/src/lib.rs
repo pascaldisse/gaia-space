@@ -242,6 +242,7 @@ pub fn run() {
             platform::list_projects,
             platform::set_project_deadline,
             platform::update_project_deadline,
+            platform::set_project_lead,
             platform::list_roles,
             platform::create_role,
             platform::update_role,
