@@ -55,6 +55,8 @@ restore() {
   echo "!! FAILED at: ${STEP:-unknown} — restoring $BACKUP"
   systemctl stop gaia-space || true
   install -o gaia-space -g gaia-space -m 0755 "$BACKUP/space-server" "$BIN"
+  install -o root -g root -m 0644 "$BACKUP/gaia-space.service" /etc/systemd/system/gaia-space.service
+  systemctl daemon-reload
   rm -rf "${STATIC:?}/"* && tar -C "$STATIC" -xzf "$BACKUP/static.tar.gz"
   if [ "$DB_SUSPECT" = "1" ]; then
     echo "   migration was the failure — restoring the database too"
@@ -74,6 +76,8 @@ trap restore ERR
 STEP="install"
 echo "== install"
 systemctl stop gaia-space
+install -o root -g root -m 0644 "$RELEASE_DIR/gaia-space.service" /etc/systemd/system/gaia-space.service
+systemctl daemon-reload
 install -o gaia-space -g gaia-space -m 0755 "$RELEASE_DIR/space-server" "$BIN"
 rsync -a --delete "$RELEASE_DIR/static/" "$STATIC/"
 # SELinux: fresh files carry the wrong type and Caddy answers 403 without this.

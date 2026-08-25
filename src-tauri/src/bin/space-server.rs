@@ -10,7 +10,7 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db,
-    devenv, documents, events, issues, meetings, oauth, organization, package_registry,
+    devenv, documents, events, issues, leads, meetings, oauth, organization, package_registry,
     payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
@@ -2393,6 +2393,8 @@ enum CommandPolicy {
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
     CalendarOptionsWrite,
+    /// Contact leads contain private contact data; GlobalAdmin only.
+    LeadRead,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -2418,6 +2420,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
         "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
+        "list_leads" => CommandPolicy::LeadRead,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
@@ -3295,6 +3298,14 @@ fn authorize_command(
                 )?;
             }
             Ok(())
+        }
+        // Contact leads are private PII, not a workspace-wide member feed.
+        CommandPolicy::LeadRead => {
+            if user.role == "GlobalAdmin" {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "only an administrator can view leads"))
+            }
         }
         // App credentials are workspace-wide secrets with no per-app owner to fall
         // back on: an ordinary member must not rotate another app's secret, mint a
@@ -5195,6 +5206,7 @@ async fn cmd(
     "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
+    "list_leads" => leads::list_leads(),
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
     "list_desk_assignments" => platform::list_desk_assignments(profile_id: Option<String>, location_id: Option<String>),
@@ -6027,6 +6039,24 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
+    }
+
+    #[tokio::test]
+    async fn leads_are_an_admin_only_read_over_the_real_command_route() {
+        let _serial = test_lock();
+        setup();
+        let path = env::temp_dir().join(format!("gaia-space-leads-http-{}.json", std::process::id()));
+        std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
+        env::set_var("SPACE_LEADS_PATH", &path);
+
+        let (status, _) = call(cookie("ta"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not receive lead PII");
+        let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"][0]["email"], "ada@example.test");
+
+        env::remove_var("SPACE_LEADS_PATH");
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]
