@@ -52,3 +52,6 @@
 .project-role-list strong { color: var(--text-strong); }
 .project-role-list code { color: var(--text-faint); font-size: 11px; }
 .project-role-list button { margin-left: auto; }
+
+/* Lead chip on a project card: informational, read-only. Editing lives in Project settings. */
+.project-lead-chip { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--surface-hover, rgba(255,255,255,0.06)); border: 1px solid var(--surface-border); color: var(--text-faint); font-size: 11px; white-space: nowrap; }

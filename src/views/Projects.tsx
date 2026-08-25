@@ -1,7 +1,7 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
-import { currentUser, humanError, isWeb, profileId, projectId as sessionProject, setProjectId } from "../session";
+import { currentUser, humanError, isWeb, profileId, profiles, projectId as sessionProject, reloadProfiles, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
 import "./Projects.css";
@@ -111,6 +111,8 @@ export default function Projects() {
   const [form, setForm] = createSignal(empty()); const [error, setError] = createSignal("");
   const [keyTouched, setKeyTouched] = createSignal(false);
   const [items, { refetch }] = createResource(platformApi.projects);
+  if (!profiles()) void reloadProfiles().catch(() => undefined);
+  const leadName = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
   // Open-issue counts for EVERY card come from one issue read plus one status read,
   // grouped client-side. A per-card fetch would be N round trips for N projects.
   // The refusal is carried as a value, not as a thrown resource: a denied read has to
@@ -223,7 +225,9 @@ export default function Projects() {
             role="button" tabindex="0" aria-pressed={openId()===project.id}
             onClick={open}
             onKeyDown={event=>{ if(event.key==="Enter"||event.key===" "){ event.preventDefault(); open(event as unknown as MouseEvent); } }}>
-        <div class="project-card-head"><strong>{project.name}</strong><code>{project.key}</code></div>
+        {/* LAW: lead is PURELY INFORMATIONAL — a name on a card, read-only here, and it
+            gates nothing. Editing it lives in Project settings (owner-or-admin). */}
+        <div class="project-card-head"><strong>{project.name}</strong><code>{project.key}</code><Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Project lead (informational)">Lead: {leadName(lead())}</span>}</Show></div>
         <Show when={project.description}><p>{project.description}</p></Show>
         <Show when={!counts.loading && !countsFailed()}>
           <p class="pf-open"><b>{openCount(project.id)}</b> open issues</p>
