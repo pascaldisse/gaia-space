@@ -1864,6 +1864,53 @@ async fn logout(h: HeaderMap) -> impl IntoResponse {
     );
     r
 }
+#[derive(Deserialize)]
+struct CreatePermanentToken {
+    name: String,
+    expires_at: Option<i64>,
+}
+
+async fn permanent_tokens(h: HeaderMap) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::list_permanent_tokens(&user.id) {
+        Ok(tokens) => Json(tokens).into_response(),
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error).into_response(),
+    }
+}
+
+async fn create_permanent_token(
+    h: HeaderMap,
+    Json(input): Json<CreatePermanentToken>,
+) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::create_permanent_token(
+        &user.id,
+        &input.name,
+        input.expires_at,
+    ) {
+        Ok((record, token)) => Json(json!({"token": token, "record": record})).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+
+async fn revoke_permanent_token(h: HeaderMap, Path(token_id): Path<String>) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::revoke_permanent_token(&user.id, &token_id) {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "token not found").into_response(),
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error).into_response(),
+    }
+}
+
 async fn change_password(h: HeaderMap, Json(x): Json<Password>) -> impl IntoResponse {
     let u = match user_by_token(&h) {
         Ok(u) => u,
@@ -5705,6 +5752,14 @@ async fn main() {
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
+        .route(
+            "/api/auth/tokens",
+            get(permanent_tokens).post(create_permanent_token),
+        )
+        .route(
+            "/api/auth/tokens/{token_id}",
+            axum::routing::delete(revoke_permanent_token),
+        )
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
@@ -5942,8 +5997,9 @@ mod tests {
             Some((30, 100))
         );
     }
-    use axum::body::to_bytes;
+    use axum::{body::{to_bytes, Body}, http::Request};
     use std::sync::{Mutex, OnceLock};
+    use tower::ServiceExt;
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     fn test_lock() -> std::sync::MutexGuard<'static, ()> {
         TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
@@ -5973,6 +6029,61 @@ mod tests {
         )
         .await
     }
+    #[tokio::test]
+    async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
+        let _serial = test_lock();
+        setup();
+        let app = Router::new()
+            .route(
+                "/api/auth/tokens",
+                get(permanent_tokens).post(create_permanent_token),
+            )
+            .route(
+                "/api/auth/tokens/{token_id}",
+                axum::routing::delete(revoke_permanent_token),
+            );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/tokens")
+            .header(header::COOKIE, "space_session=ta")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"deploy"}"#))
+            .unwrap();
+        let (status, minted) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        let raw = minted["token"].as_str().unwrap();
+        assert!(raw.starts_with("spat_"), "opaque token returned once");
+        let id = minted["record"]["id"].as_str().unwrap().to_string();
+        assert_eq!(minted["record"]["name"], json!("deploy"));
+
+        let request = Request::builder()
+            .uri("/api/auth/tokens")
+            .header(header::COOKIE, "space_session=ta")
+            .body(Body::empty())
+            .unwrap();
+        let (status, listed) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(listed[0]["id"], json!(id));
+        assert!(listed[0].get("token").is_none(), "plaintext is never listed");
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/auth/tokens/{id}"))
+            .header(header::COOKIE, "space_session=tb")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "another user cannot revoke it");
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/auth/tokens/{id}"))
+            .header(header::COOKIE, "space_session=ta")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
+    }
+
     async fn login_call(
         app: App,
         source_ip: &str,
