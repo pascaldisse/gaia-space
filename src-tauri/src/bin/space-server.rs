@@ -933,16 +933,38 @@ async fn app_join_room(
         .map_err(|_| err(StatusCode::FORBIDDEN, "room_join_denied").into_response())
 }
 
+/// Resolves either the browser session cookie or a script credential. Permanent
+/// tokens carry the caller's existing account identity and consequently take the
+/// same authorization path as an interactive session.
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
-    let t = headers
+    if let Some(session) = headers
         .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            s.split(';')
-                .find_map(|x| x.trim().strip_prefix("space_session="))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies
+                .split(';')
+                .find_map(|cookie| cookie.trim().strip_prefix("space_session="))
         })
+    {
+        if let Ok(user) = user_by_session_token(session) {
+            return Ok(user);
+        }
+    }
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
-    user_by_session_token(t)
+    let user_id = gaia_space_lib::auth_security::permanent_token_user(bearer)
+        .map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    user_by_id(&user_id)
 }
 /// Package clients (npm/bun/Maven) cannot send browser cookies: npm sends
 /// `Authorization: Bearer <token>`, Maven sends HTTP Basic. Registry routes accept those two
@@ -1518,15 +1540,39 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
     Ok(user)
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
-    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,CASE WHEN u.role='admin' THEN 'GlobalAdmin' ELSE u.global_role END FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
-    // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
-    // (platform::is_admin_on): the account role or the Global.Superadmin right, one
-    // meaning on both transports. The raw column alone would leave a rights-model
-    // admin powerless over HTTP.
+    let c = db::conn().map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?;
+    let user_id: String = c
+        .query_row(
+            "SELECT user_id FROM sessions WHERE token=?1 AND expires_at>unixepoch()",
+            [t],
+            |row| row.get(0),
+        )
+        .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    user_by_id(&user_id)
+}
+
+fn user_by_id(user_id: &str) -> Result<User, (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?;
+    let mut user = c
+        .query_row(
+            "SELECT id,username,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE id=?1 AND active=1",
+            [user_id],
+            |row| {
+                let role: String = row.get(4)?;
+                Ok(User {
+                    id: row.get(0)?,
+                    username: row.get(1)?,
+                    display_name: row.get(2)?,
+                    profile_id: row.get(3)?,
+                    account_admin: role == "GlobalAdmin",
+                    role,
+                })
+            },
+        )
+        .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
-            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            .map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?
     {
         user.role = "GlobalAdmin".into();
     }
@@ -6082,6 +6128,28 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn permanent_bearer_token_authenticates_command_api_as_its_owner() {
+        let _serial = test_lock();
+        setup();
+        let (record, raw) = gaia_space_lib::auth_security::create_permanent_token(
+            "ua",
+            "script",
+            None,
+        )
+        .unwrap();
+
+        let (status, body) = call(bearer(&raw), "list_projects", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["ok"], json!(true));
+        assert_eq!(
+            gaia_space_lib::auth_security::revoke_permanent_token("ua", &record.id),
+            Ok(true)
+        );
+        let (status, _) = call(bearer(&raw), "list_projects", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "a revoked script token is unusable");
     }
 
     async fn login_call(
