@@ -1,7 +1,10 @@
 import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switch, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import "./App.css";
+import "./spaceTheme.css";
 import Dashboard from "./views/Dashboard";
+import Home from "./views/Home";
+import Development from "./views/Development";
 import Todo from "./views/Todo";
 import Absences from "./views/Absences";
 import Projects from "./views/Projects";
@@ -34,6 +37,7 @@ import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import ServerConnect from "./components/ServerConnect";
+import SpaceShell from "./components/SpaceShell";
 import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { isMobileSetup } from "./mobile";
@@ -41,7 +45,11 @@ import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntit
 import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
-const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
+// Chat-first destinations. They are ordinary registered views: reachable from every nav
+// layout, deep-linkable, and normalized by the same router policy as the rest.
+const homeView:View={name:"Home",icon:"home",component:Home};
+const developmentView:View={name:"Development",icon:"target",component:Development};
+const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
@@ -66,11 +74,11 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
-    registerViews([...personalViews,...workspaceViews,usersView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
+    registerViews([...personalViews,...workspaceViews,usersView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
@@ -81,7 +89,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   });
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
   const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
@@ -93,6 +101,12 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     <Match when={isMobileSetup()}><ServerConnect/></Match>
     <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>
     <Match when={isWeb()&&!currentUser()}><Login/></Match>
+    <Match when={navLayout()==="chat-first"}>
+      <SpaceShell views={views().map(v=>({name:v.name,icon:v.icon}))} active={active()} onOpenSearch={()=>setGotoOpen(true)}>
+        <Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show>
+        <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
+      </SpaceShell>
+    </Match>
     <Match when={true}>
       <div class="space-shell">
         <header class="topbar">

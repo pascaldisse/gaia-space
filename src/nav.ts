@@ -3,19 +3,22 @@ import type { IconName } from "./components/Icon";
 
 /** Navigation is user-configurable (JetBrains-Space style).
  *  `grouped` = the shipped default: 8 destinations, detail views nested as sub-tabs.
- *  `flat`    = every view as its own top-level entry (the pre-redesign behaviour). */
-export type NavLayout = "grouped" | "flat";
+ *  `flat`    = every view as its own top-level entry (the pre-redesign behaviour).
+ *  `chat-first` = the communication-first shell (rail + channel sidebar), default on this
+ *                 branch. Nothing is removed by it: every registered view stays reachable
+ *                 through the rail's "Mehr" panel, and switching back is lossless. */
+export type NavLayout = "grouped" | "flat" | "chat-first";
 export type NavGroup = { id: string; label: string; icon: IconName; views: string[] };
 
 export const NAV_GROUPS: NavGroup[] = [
-  { id: "overview", label: "Overview", icon: "home", views: ["Dashboard"] },
+  { id: "overview", label: "Overview", icon: "home", views: ["Home", "Dashboard"] },
   // "Tasks", not "My tasks": this group holds the SHARED work surfaces (Team Tasks =
   // everybody's running project work, Project Tasks = one project's), so a possessive
   // label made people skip the only cross-team view there is.
   { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
-  { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
+  { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
   { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Inbox", "Chat"] },
@@ -27,12 +30,20 @@ const LAYOUT_KEY = "space.nav.layout";
 const HIDDEN_KEY = "space.nav.hidden";
 const DEFAULT_VIEW_KEY = "space.nav.defaultView";
 
-const readLayout = (): NavLayout => (localStorage.getItem(LAYOUT_KEY) === "flat" ? "flat" : "grouped");
+const LAYOUTS: NavLayout[] = ["grouped", "flat", "chat-first"];
+const readLayout = (): NavLayout => {
+  const stored = localStorage.getItem(LAYOUT_KEY);
+  return LAYOUTS.includes(stored as NavLayout) ? (stored as NavLayout) : "chat-first";
+};
 const readHidden = (): string[] => { try { const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]"); return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []; } catch { return []; } };
 
 const [navLayout, setLayoutSignal] = createSignal<NavLayout>(readLayout());
 const [hiddenGroups, setHiddenSignal] = createSignal<string[]>(readHidden());
-const [defaultView, setDefaultSignal] = createSignal<string>(localStorage.getItem(DEFAULT_VIEW_KEY) ?? "Dashboard");
+// Chat-first opens on Home (the calendar start view of the briefing); the older layouts
+// keep their Dashboard landing. An explicit user choice always wins.
+const [defaultView, setDefaultSignal] = createSignal<string>(
+  localStorage.getItem(DEFAULT_VIEW_KEY) ?? (readLayout() === "chat-first" ? "Home" : "Dashboard"),
+);
 
 export { navLayout, hiddenGroups, defaultView };
 export function setNavLayout(next: NavLayout) { localStorage.setItem(LAYOUT_KEY, next); setLayoutSignal(next); }

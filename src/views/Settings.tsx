@@ -106,8 +106,12 @@ export default function Settings() {
     <div class="settings-card">
       <h2>Navigation layout</h2>
       <label class="settings-option">
+        <input type="radio" name="nav-layout" checked={navLayout() === "chat-first"} onChange={() => setNavLayout("chat-first")} />
+        <span><strong>Chat-first</strong> — rail + channel sidebar, communication-first shell (default)</span>
+      </label>
+      <label class="settings-option">
         <input type="radio" name="nav-layout" checked={navLayout() === "grouped"} onChange={() => setNavLayout("grouped")} />
-        <span><strong>Grouped</strong> — eight destinations, detail views as sub-tabs (default)</span>
+        <span><strong>Grouped</strong> — eight destinations, detail views as sub-tabs</span>
       </label>
       <label class="settings-option">
         <input type="radio" name="nav-layout" checked={navLayout() === "flat"} onChange={() => setNavLayout("flat")} />

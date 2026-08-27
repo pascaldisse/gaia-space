@@ -1,0 +1,334 @@
+/* Communication-first shell — geometry and type scale ported from
+   FINAL_GAIA_SPACE_PROTOTYP.html (.app / .rail / .sidebar / .commandbar).
+   Every rule is nested under .space-chat-shell so the existing layouts are
+   untouched. */
+
+.space-chat-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: 68px 304px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--wash);
+  color: var(--ink);
+}
+
+/* ── rail ─────────────────────────────────────────────────────────────── */
+.space-chat-shell .rail {
+  background: var(--rail-gradient);
+  color: var(--nav-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 10px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.space-chat-shell .rail::-webkit-scrollbar { display: none; }
+.space-chat-shell .mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #bdf4e9, var(--teal));
+  color: #071815;
+  font-size: 15px;
+  font-weight: 760;
+  letter-spacing: -.03em;
+  margin-bottom: 8px;
+  flex: none;
+}
+.space-chat-shell .rail-item {
+  width: 48px;
+  min-height: 48px;
+  flex: none;
+  border: 0;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  background: transparent;
+  color: var(--nav-muted);
+  text-decoration: none;
+  position: relative;
+}
+.space-chat-shell .rail-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.space-chat-shell .rail-item.active { background: rgba(255, 255, 255, .13); color: #fff; }
+.space-chat-shell .rail-icon { display: grid; place-items: center; line-height: 1; }
+.space-chat-shell .rail-label { font-size: 9.5px; font-weight: 650; }
+.space-chat-shell .rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--teal);
+  color: #021f1b;
+  font-size: 11px;
+  font-weight: 760;
+  border: 2px solid var(--purple-0);
+}
+.space-chat-shell .rail-spacer { flex: 1; }
+.space-chat-shell .round-action {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .1);
+  color: #fff;
+}
+.space-chat-shell .profile {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border: 0;
+  border-radius: 12px;
+  background: #e9e1ea;
+  color: var(--purple-0);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 760;
+  position: relative;
+}
+.space-chat-shell .profile:after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  border: 2px solid var(--purple-0);
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+}
+
+/* ── "Mehr" panel: every registered view that is not on the rail ──────── */
+.space-chat-shell .more-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(25, 16, 30, .28); }
+.space-chat-shell .more-panel {
+  position: fixed;
+  z-index: 31;
+  left: 76px;
+  bottom: 18px;
+  width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+.space-chat-shell .more-panel h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.space-chat-shell .more-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 9px;
+  border-radius: 9px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+}
+.space-chat-shell .more-item:hover { background: var(--wash-2); }
+.space-chat-shell .more-item.active { background: var(--teal-soft); color: #006b5e; font-weight: 700; }
+
+/* ── sidebar ──────────────────────────────────────────────────────────── */
+.space-chat-shell .space-sidebar {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
+    linear-gradient(180deg, var(--purple-2), var(--purple-1) 48%, #3b1242 100%);
+  color: var(--nav-text);
+  border-right: 1px solid rgba(0, 0, 0, .2);
+  padding: 18px 16px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.space-chat-shell .workspace-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 2px 16px;
+}
+.space-chat-shell .workspace-name strong { font-size: 21px; font-weight: 730; letter-spacing: -.035em; }
+.space-chat-shell .tiny-actions { display: flex; gap: 8px; }
+.space-chat-shell .tiny-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .08);
+  color: var(--nav-text);
+}
+.space-chat-shell .side-search {
+  height: 40px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .1);
+  color: var(--nav-muted);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 9px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.space-chat-shell .side-search::placeholder { color: var(--nav-muted); }
+.space-chat-shell .side-search:focus { outline: none; border-color: var(--teal); }
+.space-chat-shell .side-link,
+.space-chat-shell .channel {
+  width: 100%;
+  border: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border-radius: 9px;
+  color: var(--nav-muted);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+.space-chat-shell .side-link:hover,
+.space-chat-shell .channel:hover { background: rgba(255, 255, 255, .09); }
+.space-chat-shell .side-link strong,
+.space-chat-shell .channel.unread { color: #fff; font-weight: 680; }
+.space-chat-shell .side-link.active,
+.space-chat-shell .channel.active { background: #f3d7ff; color: #1b0e1f; font-weight: 700; }
+.space-chat-shell .side-link.active strong,
+.space-chat-shell .channel.active strong,
+.space-chat-shell .channel.active .hash { color: #1b0e1f; }
+.space-chat-shell .side-link .count,
+.space-chat-shell .channel .count {
+  margin-left: auto;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--teal);
+  color: #031f1b;
+  font-size: 11px;
+  font-weight: 760;
+}
+.space-chat-shell .side-icon { display: grid; place-items: center; width: 16px; color: inherit; }
+.space-chat-shell .section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+.space-chat-shell .section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 9px 7px;
+  color: #cab3cf;
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+.space-chat-shell .channel .hash { color: #bda7c2; font-weight: 680; }
+.space-chat-shell .side-empty { padding: 0 9px; color: var(--nav-muted); font-size: 13px; opacity: .8; }
+
+/* ── main column ──────────────────────────────────────────────────────── */
+.space-chat-shell .space-main {
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  min-width: 0;
+  background: var(--wash);
+}
+.space-chat-shell .commandbar {
+  height: 58px;
+  display: grid;
+  grid-template-columns: minmax(320px, 720px) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 24px;
+  background: linear-gradient(90deg, var(--purple-1), #3d073d);
+  border-bottom: 1px solid rgba(0, 0, 0, .2);
+}
+.space-chat-shell .command-search {
+  height: 38px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .18);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  color: rgba(255, 255, 255, .9);
+  font-size: 14px;
+  text-align: left;
+  font-family: inherit;
+}
+.space-chat-shell .command-search:hover { border-color: var(--teal); }
+.space-chat-shell .top-actions { justify-self: end; display: flex; gap: 10px; }
+.space-chat-shell .top-actions .btn {
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.space-chat-shell .top-actions .btn.primary { border-color: transparent; background: var(--teal); color: #021f1b; }
+
+/* The view itself. Existing views bring their own (dark) surfaces; new
+   chat-first views inherit --wash from here. */
+.space-chat-shell .space-content { min-height: 0; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+.space-chat-shell .space-content > * { flex: 1 1 auto; min-height: 0; }
+
+/* Narrow windows: the sidebar folds away, the rail stays. */
+@media (max-width: 900px) {
+  .space-chat-shell { grid-template-columns: 68px minmax(0, 1fr); }
+  .space-chat-shell .space-sidebar { display: none; }
+}
+
+/* ── placeholder views (Home / Development) ───────────────────────────── */
+.space-placeholder { padding: 28px; color: var(--ink); background: var(--wash); }
+.space-placeholder .surface {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  max-width: 720px;
+}
+.space-placeholder h1 { margin: 0 0 6px; font-size: 27px; line-height: 1.12; letter-spacing: -.045em; font-weight: 720; }
+.space-placeholder .kicker {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.space-placeholder p { color: var(--muted); line-height: 1.52; margin: 0; font-size: 14px; }
