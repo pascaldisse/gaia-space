@@ -272,6 +272,12 @@ pub fn run() {
             platform::cf_set_value,
             platform::cf_get_values,
             issues::list_issues,
+            // Desktop lost the issue detail pane: the command carries its
+            // #[tauri::command] attribute and the web transport dispatches it,
+            // but it was never registered here, so every desktop open failed with
+            // "Command get_issue_detail not found".
+            issues::get_issue,
+            issues::get_issue_detail,
             issues::create_issue,
             issues::clone_issue,
             issues::move_issue_to_project,
