@@ -1,4 +1,5 @@
 import { createMemo, createResource, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { personalApi, type Todo } from "../api/personal";
 import type { Project } from "../api/platform";
 import { profileId, profiles, projects } from "../session";
@@ -22,7 +23,7 @@ export default function ProjectHome(props: { project?: Project }) {
   const openTasks = () => navigate({ view: "Project Tasks", projectId: projectIdOf() });
 
   return <section class="ph-view project-home" aria-label={`${project()?.name ?? "Project"} dashboard`}>
-    <header class="ph-head"><div class="ph-title"><h1>Project overview</h1><p>{project()?.name ?? "Project unavailable"}</p></div><button class="ghost small" onClick={() => void refetch()}>Refresh</button></header>
+    <PageHeader kicker={project()?.name ?? "Project unavailable"} title="Project overview" actions={<button class="ghost small" onClick={() => void refetch()}>Refresh</button>} />
     <Show when={project()} fallback={<p class="ph-empty" role="alert">This project does not exist or is unavailable.</p>}>{value => <>
       <Show when={dashboard()} fallback={<p class="hint">Loading project dashboard…</p>}>{data => <div class="ph-stats">
         <div class="ph-stat"><span class="ph-stat-num">{data()!.open_issues}</span><span class="ph-stat-label">Open issues</span></div>

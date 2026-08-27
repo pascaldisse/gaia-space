@@ -12,7 +12,7 @@ import {
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { linkProps, useDeepLink } from "../router";
 import { profileId as sessionProfileId } from "../session";
 import "./Members.css";
@@ -296,9 +296,9 @@ export default function Members() {
 
   return (
     <section class="org-view">
-      <WorkspaceHeader
-        icon="org"
+      <PageHeader
         title="Organization"
+        subline="People, teams and roles"
         actions={
           <Show when={hasArchived()}>
             <label class="org-archived-toggle">
@@ -313,11 +313,7 @@ export default function Members() {
             </label>
           </Show>
         }
-      >
-        Your people and structure in one place — manage{" "}
-        <strong>profiles</strong>, shape the <strong>team org-chart</strong>,
-        and assign per-team roles.
-      </WorkspaceHeader>
+      />
       <Show when={problem()}>
         <p class="org-error" onClick={() => setProblem("")}>
           {problem()}

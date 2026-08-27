@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { createStore, produce } from "solid-js/store";
 import { api } from "../api";
 import { currentUser } from "../session";
@@ -42,9 +43,8 @@ export default function Pipelines() {
 
   return (
     <section class="pipelines-view">
+      <PageHeader title="Pipelines" subline="Config-as-code automation, triggered manually" />
       <header class="pipelines-head">
-        <h1>Pipelines</h1>
-        <p>Automation is config-as-code: jobs in a script always run in parallel (no dependency graph), max {MAX_JOBS_PER_SCRIPT} jobs/script, {MAX_STEPS_PER_JOB} steps/job. No daemon here, so triggers are manual-only.</p>
         <nav class="tab-switch">
           <button classList={{ active: tab() === "automation" }} onClick={() => setTab("automation")}>Automation</button>
           <button classList={{ active: tab() === "deployments" }} onClick={() => setTab("deployments")}>Deployments</button>

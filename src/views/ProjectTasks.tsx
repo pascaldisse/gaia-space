@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { planningApi, type Issue } from "../api/issues";
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
@@ -106,18 +107,14 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   });
 
   return <section class="planning-view project-tasks-view">
-    <header class="planning-head">
-      <div>
-        <h1>{project()?.name ?? "Project"} work</h1>
-        <p>Shared project tasks and tracked issues in one place. Boards visualize the issues.</p>
-      </div>
+    <PageHeader kicker={project()?.name} title="Work" subline="Shared tasks and tracked issues" actions={
       <div class="planning-actions">
         <ProjectPicker value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
         <button type="button" class="primary" onClick={() => { setPane({ kind: "new-task" }); setError(""); }}>Add task</button>
         <button type="button" class="ghost" onClick={() => { setPane({ kind: "new-issue" }); setError(""); }}>Add issue</button>
         <a class="primary" {...linkProps(board())} onClick={openBoard}>Open board</a>
       </div>
-    </header>
+    } />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     <Show when={issues.error}><p class="planning-error" role="alert">Could not load issues: {String(issues.error)}</p></Show>
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>

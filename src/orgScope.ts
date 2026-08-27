@@ -1,5 +1,6 @@
 import { createResource } from "solid-js";
 import { platformApi } from "./api/platform";
+import { projects } from "./session";
 
 /** The KICKER of every page header is the SCOPE the page lives in: the
  *  organisation for global views, the project for project-scoped ones.
@@ -12,3 +13,9 @@ const [organization] = createResource(() => platformApi.organization().catch(() 
 
 export const orgName = (): string => organization()?.name?.trim() ?? "";
 export { organization };
+
+/** Kicker for a PROJECT-SCOPED view. Returns undefined when the project is not
+ *  known (or none is selected) so PageHeader falls back to the organisation —
+ *  the scope line must never go blank or, worse, show a raw id. */
+export const projectName = (id?: string): string | undefined =>
+  (id ? (projects() ?? []).find((project) => project.id === id)?.name : undefined) || undefined;

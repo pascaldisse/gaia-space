@@ -7,6 +7,8 @@ import { meetingsApi } from "../api/meetings";
 import { pipelinesApi } from "../api/pipelines";
 import { linkProps, route, type Route } from "../router";
 import { humanError, profileId, projects, setProjectId } from "../session";
+import PageHeader from "../components/PageHeader";
+import { projectName } from "../orgScope";
 import "./Steering.css";
 import "./ProjectHome.css";
 type Work={id:string;title:string;kind:"Issue"|"Task";due:string|null;unassigned?:boolean;number?:number};
@@ -70,7 +72,7 @@ export default function Steering(){
  };
  const rows=(items:Work[])=><ul><For each={items.slice(0,6)}>{item=><li><b>{item.kind}</b> <Show when={item.number}>{n=><span>#{n()} </span>}</Show><a {...linkProps(item.kind==="Issue"?{view:"Issues",entityType:"issue",entityId:item.id,projectId:project()}:{view:"Project Tasks",projectId:project()})}>{item.title}</a><Show when={item.due}>{d=><time> {d()}</time>}</Show></li>}</For></ul>;
  const work=()=>data()??[]; const bucket=(label:string,items:Work[])=><section class="steering-bucket"><h2>{label} <small>{items.length}</small></h2><Show when={items.length} fallback={<p>All clear.</p>}>{rows(items)}</Show></section>;
- return <section class="resource-view"><header><h1>Steering</h1><p>Project work requiring attention.</p></header>
+ return <section class="resource-view"><PageHeader kicker={projectName(project())} title="Steering" subline="Work requiring attention" />
   <Show when={deadline()}>{info=>
    <a class="st-deadline" classList={{[info().tone]:true}} {...linkProps({view:"Calendar",projectId:project()})}>
     <span class="st-deadline-dot"/><span class="st-deadline-label">Project deadline</span><time>{info().date}</time><em>{info().note}</em>

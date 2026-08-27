@@ -1,4 +1,5 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import PageHeader, { Chip } from "../components/PageHeader";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, profiles, projectId as sessionProject, reloadProfiles, setProjectId } from "../session";
@@ -199,7 +200,7 @@ export default function Projects() {
   };
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
-  return <section class="resource-view projects-view"><header><h1>Projects</h1><p>Owned workspaces with deadlines and an archive you can reverse.</p></header><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
+  return <section class="resource-view projects-view"><PageHeader title="Projects" subline="Owned workspaces and their deadlines" chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>} /><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
     <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-issue counts are unavailable: {reason()}</p>}</Show>
     <Show when={live().length}>
       <div class="pf-summary">

@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { marked } from "marked";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
@@ -1126,11 +1127,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         </div>
       </Show>
 
-      <header class="documents-head">
-        <div>
-          <h1>Documents</h1>
-          <p>Yours first — what you wrote and what you starred. Project docs and knowledge-base books live under one picker.</p>
-        </div>
+      <PageHeader title="Documents" subline="Yours first — what you wrote and starred" actions={<>
         <Show when={!profileLocked()}>
         <label>
           Acting as
@@ -1143,7 +1140,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </select>
         </label>
         </Show>
-      </header>
+      </>} />
 
       <nav class="container-tabs">
         <For each={CONTAINER_TABS}>

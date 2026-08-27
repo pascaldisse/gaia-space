@@ -3,7 +3,7 @@ import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "../components/paper.css";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
@@ -144,7 +144,7 @@ export default function Todo() {
     {editRow(todo)}
   </Show>;
   return <section class="personal-view todo-view">
-    <WorkspaceHeader icon="check" title="My tasks" actions={<ProfilePicker locked/>}>Personal tasks and project work, scoped to the people attached to each project.</WorkspaceHeader>
+    <PageHeader title="My tasks" actions={<ProfilePicker locked/>}/>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
     <div class="view-cols todo-cols">
       <div class="view-main">

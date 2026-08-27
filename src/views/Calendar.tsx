@@ -6,7 +6,7 @@ import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meeti
 import CallPanel from "./CallPanel";
 import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
 import SourceLink from "../components/SourceLink";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, type QuickKind } from "../calendar";
@@ -36,6 +36,9 @@ export default function Calendar(props: { projectId?: string } = {}) {
 // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Kalender"
 // tab) > URL. Everything below reads this one accessor, never route().projectId directly.
 const scopeProjectId = () => props.projectId || route().projectId;
+// The kicker names the SCOPE: the project when the calendar is project-scoped,
+// otherwise the organisation (PageHeader's default when kicker is undefined).
+const scopeName = () => { const id=scopeProjectId(); if (!id) return undefined; return (projects() ?? []).find(project=>project.id===id)?.name ?? undefined; };
 const [cursor,setCursor] = createSignal(startOfDay(new Date()));
 const [view,setView] = createSignal<"month"|"week"|"day"|"schedule">("month");
 const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
@@ -135,7 +138,7 @@ const invite = async () => { const item=draft(); if (!item || !invitee().trim())
 const rsvp = async (participant:MeetingParticipant, status:MeetingParticipant["status"]) => { try { await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status); reloadParticipants(); } catch (reason) { setError(humanError(reason)); } };
 const itemHref = (item:CalendarItem) => item.kind==="meeting" ? linkProps({view:"Calendar",entityType:"meeting",entityId:meetingIdOf(item)}) : item.kind==="deadline" && item.project_id ? linkProps({view:"Projects",projectId:item.project_id}) : linkProps({view:"Todo"});
 return <section class="calendar-view">
-<WorkspaceHeader icon="calendar-nav" title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
+<PageHeader kicker={scopeName()} title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
 <button aria-label="Previous range" onClick={()=>shift(-1)}>←</button>
 <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
 <button aria-label="Next range" onClick={()=>shift(1)}>→</button>
@@ -147,7 +150,7 @@ return <section class="calendar-view">
 <button classList={{active:view()==="schedule"}} aria-pressed={view()==="schedule"} onClick={()=>setView("schedule")}>Schedule</button>
 </div>
 <button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
-</div>}>Meetings, assigned task dates, and project deadlines visible to your session. Pick a day to see its agenda or add to it.</WorkspaceHeader>
+</div>}/>
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>

@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { platformApi, type CfDefinition, type CfType, type RoleAssignment } from "../api/platform";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
@@ -195,7 +196,9 @@ export default function ProjectSettings() {
     finally { setBusy(false); }
   };
   return <section class="ps-view">
-    <header class="ps-head"><div class="ps-identity"><span class="ps-mark" aria-hidden="true">{project()?.key?.slice(0, 2) || "P"}</span><div><h1>Project settings</h1><p>{project()?.name ?? "Project unavailable"}<Show when={project()?.key}><code class="ps-keychip">{project()!.key}</code></Show></p></div></div></header>
+    {/* The .ps-mark tile stays: it IDENTIFIES this project (its key), it is not
+        page decoration like the old per-view icon lozenges were. */}
+    <header class="ps-head"><span class="ps-mark" aria-hidden="true">{project()?.key?.slice(0, 2) || "P"}</span><PageHeader kicker={project()?.name ?? "Project unavailable"} title="Project settings" chips={<Show when={project()?.key}><code class="ps-keychip">{project()!.key}</code></Show>} /></header>
     <Show when={!project()}><p class="ps-empty" role="alert">This project does not exist or is unavailable.</p></Show>
     <Show when={project()}><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><Show when={!canManage()}><p class="ps-notice" role="status">Only the project owner or an administrator can change these settings.</p></Show>
       <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>General</h2></div><form onSubmit={save}><label class="ps-field"><span>Project name</span><input disabled={!canManage()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!canManage()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label><label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!canManage()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label><Show when={canManage()}><div class="ps-actions"><button class="primary" disabled={busy()}>Save changes</button></div></Show></form></section><section class="ps-panel"><div class="ps-panel-head"><h2>Project identity</h2></div><p class="ps-hint">The key is permanent and identifies this project in issue links and integrations.</p><div class="ps-refrow"><div><span class="ps-reflabel">Project key</span><code class="ps-refid">{project()!.key}</code></div></div><div class="ps-refrow"><div><span class="ps-reflabel">Project ID</span><code class="ps-refid">{project()!.id}</code></div></div></section><ProjectLead projectId={id()} leadId={project()!.lead_id} canManage={canManage()} actor={actor()} /><ProjectMembers projectId={id()} owner={project()!.created_by} canManage={canManage()} /><ProjectCustomFields projectId={id()} canManage={canManage()} /></div>

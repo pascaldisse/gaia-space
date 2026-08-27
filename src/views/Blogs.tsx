@@ -3,7 +3,7 @@ import { blogsApi, type BlogPost } from "../api/blogs";
 import { documentsApi, newId, type Document } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { humanError, profileId } from "../session";
 import { linkEntity, linkProps, useDeepLink } from "../router";
 import "./Blogs.css";
@@ -29,7 +29,7 @@ export default function Blogs() {
   };
   const result=()=>posts()??[];
   return <section class="blogs-view">
-    <WorkspaceHeader icon="book" title="Blogs">Publish organization articles from private drafts. Articles remain distinct from Documents and retain redirect-safe aliases.</WorkspaceHeader>
+    <PageHeader title="Blogs" subline="Organization articles, published from drafts" />
     <Show when={error()}><p class="blogs-error" role="alert">{error()}</p></Show>
     <div class="blogs-layout">
       <aside class="blogs-compose"><h2>Write &amp; publish</h2><ProfilePicker identity/><input value={title()} onInput={e=>setTitle(e.currentTarget.value)} placeholder="Article title" aria-label="Article title"/><textarea value={body()} onInput={e=>setBody(e.currentTarget.value)} placeholder="Write the article…" aria-label="Article body"/>

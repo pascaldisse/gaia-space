@@ -3,6 +3,8 @@ import { planningApi, type Board, type BoardColumn, type BoardCardSettings, type
 import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
+import PageHeader from "../components/PageHeader";
+import { projectName } from "../orgScope";
 import { projectId as sessionProject, setProjectId as setSessionProject, humanError, profiles, reloadProfiles } from "../session";
 
 /** Board templates — a new board is usable immediately, Trello-shaped. */
@@ -173,7 +175,7 @@ const addSprint = async () => {
 };
 const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All issues";
 return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
-    <header class="planning-head"><div><h1>Issue boards</h1><p>Columns map issue statuses. Drag a column header (or use ‹ ›) to reorder; right-click to rename or delete.</p></div><ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} /></header>
+    <PageHeader kicker={projectName(projectId())} title="Issue boards" subline="Columns map issue statuses" actions={<ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
     {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
@@ -268,7 +270,9 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
 <div class="kanban">
           <For each={columns()}>{column =>
             <section classList={{ "board-column": true, "column-dragging": dragColumn() === column.id }} onContextMenu={event => { event.preventDefault(); setMenu({ column, x: event.clientX, y: event.clientY }); }}>
-              <header class="column-head" draggable={true}
+              {/* The old header paragraph explained column handling. It now lives on
+                  the thing it explains, where it is actually needed. */}
+              <header class="column-head" draggable={true} title="Drag to reorder · right-click to rename or delete"
                 onDragStart={event => { setDragColumn(column.id); event.dataTransfer?.setData("text/column-id", column.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}
                 onDragEnd={() => setDragColumn(undefined)}
                 onDragOver={event => { if (dragColumn() && dragColumn() !== column.id) event.preventDefault(); }}

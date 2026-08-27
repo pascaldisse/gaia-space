@@ -6,6 +6,7 @@ import {
   For,
   Show,
 } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import {
   reviewApi,
@@ -529,14 +530,8 @@ async function removeExternalIssueLink(id: string) {
 
   return (
     <section class="reviews-view">
+      <PageHeader title="Code Reviews" subline="Merge requests on real repository branches" />
       <header class="reviews-head">
-        <div>
-          <h1>Code Reviews</h1>
-          <p>
-            Merge requests on registered repos' real branches — quality gates,
-            turn-based review, dry-run safe merge.
-          </p>
-        </div>
         <label>
           Acting as
           <select

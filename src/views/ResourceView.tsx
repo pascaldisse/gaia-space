@@ -1,4 +1,5 @@
 import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { entityView, linkProps, useDeepLink } from "../router";
 import "./ResourceView.css";
 
@@ -46,7 +47,7 @@ export function ResourceView(props: Props) {
   const detail = (item: Item) => props.details ? props.details(item) : <DefaultDetails item={item} />;
 
   return <section class="resource-view resource-browser">
-    <header><div><h1>{props.title}</h1><p>{props.description}</p></div><button type="button" class="ghost" disabled={items.loading} onClick={() => void refetch()}>Refresh</button></header>
+    <PageHeader title={props.title} subline={props.description} actions={<button type="button" class="ghost" disabled={items.loading} onClick={() => void refetch()}>Refresh</button>} />
     <Show when={items.error}><p class="error" role="alert">Could not load {props.title.toLowerCase()}: {String(items.error)}</p></Show>
     <Show when={items.loading}><p class="hint" role="status">Loading persisted data…</p></Show>
     <Show when={!items.loading && !(items()?.length)}><p class="empty-state">{props.empty ?? "No records yet."}</p></Show>

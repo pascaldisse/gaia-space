@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
@@ -59,8 +60,8 @@ const [poolTarget, setPoolTarget] = createSignal(0);
 
   return (
     <div class="view dev-environments">
+      <PageHeader title="Dev environments" />
       <header class="view-header">
-        <h2>Dev environments</h2>
         <select value={projectId()} onChange={(e) => setProjectId(e.currentTarget.value)}>
           <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
         </select>

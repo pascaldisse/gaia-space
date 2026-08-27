@@ -7,7 +7,7 @@ import {
 import { platformApi, type CfDefinition } from "../api/platform";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import {
   currentUser,
   humanError,
@@ -150,8 +150,7 @@ export default function Absences() {
 
   return (
     <section class="timeoff-view">
-      <WorkspaceHeader
-        icon="clock-nav"
+      <PageHeader
         title="Time off"
         actions={
           <>
@@ -166,11 +165,7 @@ export default function Absences() {
             </button>
           </>
         }
-      >
-        Plan and track leave across your organization — who’s{" "}
-        <strong>away now</strong>, what’s <strong>coming up</strong>, and which
-        requests still need approval.
-      </WorkspaceHeader>
+      />
 
       <Show when={message()}>
         <p class="timeoff-error" onClick={() => setMessage("")}>

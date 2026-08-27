@@ -3,6 +3,7 @@ import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
 import { linkProps } from "../router";
+import PageHeader from "../components/PageHeader";
 import "../components/paper.css";
 import "./Issues.css";
 import "./TeamTasks.css";
@@ -56,12 +57,7 @@ export default function TeamTasks() {
   };
 
   return <section class="planning-view team-tasks-view">
-    <header class="planning-head">
-      <div>
-        <h1>Team tasks</h1>
-        <p>Running project work across every project you belong to — everybody's, not just yours.</p>
-      </div>
-    </header>
+    <PageHeader title="Team tasks" subline="Everybody's running work, not just yours" />
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load team tasks: {String(tasks.error)}</p></Show>
     <div class="filter-row" aria-label="Team task filters">
       <input aria-label="Search team tasks" placeholder="Search tasks" value={text()} onInput={event => setText(event.currentTarget.value)} />

@@ -7,6 +7,7 @@ import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { platformApi } from "../api/platform";
 import { humanError, profileId } from "../session";
+import PageHeader from "../components/PageHeader";
 import "./Settings.css";
 
 const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString() : "never";
@@ -99,9 +100,7 @@ return <Show when={organization() && settings()}><section class="settings-card">
 export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
   return <section class="personal-view settings-view">
-    <header>
-      <div><h1>Settings</h1><p>Navigation and layout preferences for your account.</p></div>
-    </header>
+    <PageHeader title="Settings" subline="Preferences for your account" />
 
     <div class="settings-card">
       <h2>Navigation layout</h2>

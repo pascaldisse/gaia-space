@@ -4,7 +4,7 @@ import { platformApi } from "../api/platform";
 import { calendarEntries, dateKey } from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { DASHBOARD_WIDGETS, hiddenWidgets, loadDashboardPrefs, toggleWidget, widgetVisible } from "../dashboardPrefs";
 import { navigate } from "../router";
 import { humanError, profileId } from "../session";
@@ -87,9 +87,7 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
 
   return (
     <section class="dashboard-view">
-      <WorkspaceHeader icon="home" title="Overview" actions={<ProfilePicker locked />}>
-        Your work, calendar, notification feed, and organization availability.
-      </WorkspaceHeader>
+      <PageHeader title="Overview" actions={<ProfilePicker locked />} />
       <Show when={actionError()}>
         <p class="dashboard-error" role="alert">{actionError()}</p>
       </Show>

@@ -98,25 +98,46 @@
 .theme-space-light .paper-pill.red { background: var(--red-soft); color: var(--red-ink); border-color: transparent; }
 
 /* ── filter bar ───────────────────────────────────────────────────────────── */
-/* One pattern for all four list views: a row of labelled controls that wraps,
-   sitting on the wash rather than in a box of its own. The control shapes come
-   from the global `--ctl-*` tokens — this only sets the rhythm between them. */
-.theme-space-light .paper-filters {
+/* One pattern for every list view (stage 6a). Prototype law: nothing floats
+   naked on the wash — a filter row is a PAPER CARD like every other block on
+   the page, with one field rhythm and labels in the kicker voice. The control
+   shapes come from the global `--ctl-*` tokens; this sets the card and the
+   rhythm between the fields. */
+.theme-space-light .paper-filters,
+.theme-space-light .filter-row {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
-  gap: 10px 12px;
+  gap: 12px 16px;
   margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--ctl-radius);
+  background: var(--paper);
 }
 .theme-space-light .paper-filters > label,
 .theme-space-light .paper-filters .picker,
-.theme-space-light .paper-filters .calendar-filter {
+.theme-space-light .paper-filters fieldset,
+.theme-space-light .paper-filters .calendar-filter,
+.theme-space-light .filter-row > label,
+.theme-space-light .filter-row .picker {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 620;
+  font-family: var(--font-head);
+  font-size: var(--type-kicker);
+  font-weight: var(--type-kicker-weight);
+  letter-spacing: var(--type-kicker-ls);
+  text-transform: uppercase;
+}
+/* The control inside a field is not a label — give it back body voice. */
+.theme-space-light .paper-filters :is(input, select, button),
+.theme-space-light .filter-row :is(input, select, button) {
+  font-size: var(--ctl-font-size);
+  font-weight: var(--ctl-font-weight);
+  letter-spacing: normal;
+  text-transform: none;
 }
 .theme-space-light .paper-filters .search { flex: 1 1 220px; min-width: 0; }
 .theme-space-light .paper-filters .search input { width: 100%; }

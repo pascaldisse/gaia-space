@@ -7,7 +7,7 @@ import {
 } from "../api/personal";
 import { Icon, type IconName } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader, { Chip } from "../components/PageHeader";
 import { entityView, linkProps } from "../router";
 import { humanError, profileId } from "../session";
 import "./Inbox.css";
@@ -294,9 +294,9 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
 
   return (
     <section class="inbox-view">
-      <WorkspaceHeader
-        icon="inbox"
+      <PageHeader
         title="Inbox"
+        chips={<Show when={unreadAll().length}><Chip value={unreadAll().length} label="unread" /></Show>}
         actions={
           <>
             <ProfilePicker identity />
@@ -307,9 +307,7 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
             </Show>
           </>
         }
-      >
-        Everything addressed to you — mentions, assignments, reviews, and updates across your work.
-      </WorkspaceHeader>
+      />
 
       <Show when={error()}>
         <p class="inbox-error" role="alert">

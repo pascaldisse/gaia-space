@@ -88,29 +88,6 @@
   .header-metrics, .ph-actions { justify-content: flex-start; }
 }
 
-/* ── filter bars ────────────────────────────────────────────────────────────
-   Prototype law: nothing floats naked on the wash. A view's filter row is a
-   paper card with consistent field spacing and kicker-styled labels. */
-.filter-bar {
-  display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 14px 18px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--ctl-border, var(--surface-line));
-  border-radius: var(--ctl-radius, 11px);
-  background: var(--ctl-bg-raised, transparent);
-}
-.filter-bar > * { min-width: 0; }
-.filter-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.filter-field > label,
-.filter-bar .filter-label {
-  color: var(--text-muted);
-  font-family: var(--font-head);
-  font-size: var(--type-kicker, 12px);
-  font-weight: var(--type-kicker-weight, 680);
-  letter-spacing: var(--type-kicker-ls, .08em);
-  text-transform: uppercase;
-}
-.filter-bar .filter-spacer { flex: 1 1 auto; }
+/* Filter bars are NOT here: the paper-card filter idiom lives with the rest of
+   the paper surfaces, in components/paper.css (`.paper-filters` / `.filter-row`),
+   scoped to .theme-space-light. One idiom, one home. */

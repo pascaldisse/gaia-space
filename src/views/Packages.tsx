@@ -1,4 +1,5 @@
 import { createResource, createSignal, createEffect, For, Match, Show, Switch } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
 import "./Packages.css";
@@ -159,10 +160,7 @@ async function togglePinned(v: PackageVersion) {
 
   return (
     <section class="packages-view">
-      <header class="packages-head">
-        <h1>Packages</h1>
-        <p>Package repositories across Space-supported formats — publish and browse versions, no upstream proxying.</p>
-      </header>
+      <PageHeader title="Packages" subline="Publish and browse package versions" />
 
       <Show when={error()}>
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>

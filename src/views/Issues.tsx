@@ -5,6 +5,8 @@ import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, route, useDeepLink } from "../router";
+import PageHeader, { Chip } from "../components/PageHeader";
+import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
 
@@ -110,14 +112,16 @@ const createStatus = async () => {
   };
 
   return <section class="planning-view">
-    <header class="planning-head">
-      <div><h1>Issues</h1><p>Track work independently from the boards that visualize it.</p></div>
-      <div class="planning-actions">
+    <PageHeader
+      kicker={projectName(projectId())}
+      title="Issues"
+      chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="issues" /></Show>}
+      actions={<>
         <ProjectPicker />
         <button type="button" class="ghost" disabled={!issues()?.length} onClick={exportCsv}>Export CSV</button>
-<a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
-      </div>
-    </header>
+        <a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+      </>}
+    />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     <div class="issue-layout">
       <aside class="issue-sidebar">

@@ -2,7 +2,7 @@ import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import { localInput, meetingDraftError } from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { humanError, isWeb, profileId } from "../session";
 import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
@@ -190,9 +190,7 @@ export default function Meetings() {
   }, () => setSelected(undefined));
 
   return <section class="meetings-view">
-    <WorkspaceHeader icon="calendar-nav" title="Meetings" actions={<a class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</a>}>
-      Schedule single or recurring meetings, manage attendance, and use Calendar for the shared schedule.
-    </WorkspaceHeader>
+    <PageHeader title="Meetings" actions={<a class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</a>} />
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="meeting-notice" role="status">{notice()}</p></Show>
 
