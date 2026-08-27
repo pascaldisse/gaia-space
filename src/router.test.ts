@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, channelTabs, type RouterAdapter,
 } from "./router";
 
 const VIEWS = ["Dashboard", "To-Do", "Projects", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
@@ -168,6 +168,15 @@ describe("grammar", () => {
     expect(parsePath("channel/c-1/nonsense")).toMatchObject({ view: "Dashboard" });
     // The tab-free channel link keeps its existing canonical form.
     expect(buildPath({ view: "Chat", entityType: "channel", entityId: "c-1" })).toBe("channels/c-1");
+  });
+
+  test("every workspace tab round-trips through the one channelTabs grammar", () => {
+    expect([...channelTabs]).toEqual(["messages", "overview", "tasks", "calendar", "files", "notes"]);
+    for (const tab of channelTabs) {
+      const path = `channel/c-1/${tab}`;
+      expect(parsePath(path)).toMatchObject({ view: "Chat", entityType: "channel", entityId: "c-1", tab });
+      expect(buildPath(parsePath(path))).toBe(path);
+    }
   });
 
   test("ids with unusual characters survive a round trip", () => {

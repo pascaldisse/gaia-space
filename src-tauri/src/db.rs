@@ -2653,7 +2653,7 @@ mod tests {
         let conn = open_in_memory().expect("db");
         migrate(&conn).expect("latest schema");
         seed(&conn).expect("seed");
-        conn.execute("INSERT INTO projects(id,name,key,created_by,archived) VALUES('p-anchor','Anchor','ANC','default-org',0)", []).unwrap();
+        conn.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('p-anchor','Anchor','ANC','default-org',0,1)", []).unwrap();
         conn.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('legacy-issue','p-anchor',1,'Legacy issue',0)", []).unwrap();
         conn.execute("INSERT INTO meetings(id,title,starts_at,ends_at,archived) VALUES('legacy-meeting','Legacy meeting',10,20,0)", []).unwrap();
         conn.pragma_update(None, "user_version", 132)
