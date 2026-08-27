@@ -19,7 +19,15 @@ import { join } from "node:path";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 // Files that are already light (prototype surfaces) or already scoped.
-const SKIP = new Set(["spaceTheme.css", "spaceLightOverrides.css", "HomeCalendar.css", "ChatSpaceLight.css", "WorkItemDrawer.css"]);
+const SKIP = new Set(["spaceTheme.css", "spaceLightOverrides.css", "spaceLightType.css", "HomeCalendar.css", "ChatSpaceLight.css", "WorkItemDrawer.css"]);
+
+/* Stage 5a note — why this generator still only converts COLOUR.
+   Radius, padding, font-size and weight are NOT mechanically convertible the
+   way a hue is: there is no "light equivalent" of 9px. A blanket literal
+   rewrite (e.g. every `border-radius: 9px` -> 11px) would hit inner elements
+   whose radius must stay smaller than their parent's, and would fight the view
+   worker's hand edits. Shape converges through the --ctl- and --radius- tokens
+   in spaceTheme.css instead, which every view already reads. */
 
 const files = [];
 (function walk(dir) {
