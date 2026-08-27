@@ -138,6 +138,9 @@ export type ProfileLite = {
   username: string;
   display_name: string; archived?: boolean };
 
+// Enough of an anchor's target to render a back-link into the conversation that
+// produced a task/ticket/meeting. `excerpt` is a one-line preview, never the body.
+export type SourceRef = { entity_type: string; entity_id: string; channel_id: string; channel_name: string | null; author_name: string | null; created_at: number; excerpt: string };
 export const chatApi = {
   // profiles (acting-user picker for local, auth-less app)
   listProfiles: () => invoke<ProfileLite[]>("list_profiles"),
@@ -169,6 +172,11 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<Channel>("create_entity_channel", { entityType, entityId, name: name ?? null }),
   getChannelByEntity: (entityType: string, entityId: string) =>
     invoke<Channel | null>("get_channel_by_entity", { entityType, entityId }),
+  // Turns a work item's `(source_entity_type, source_entity_id)` anchor back into a
+  // clickable origin. Rejects (never returns null) when the source is gone or the
+  // kind is unknown, so a dead link is visible instead of an empty source card.
+  resolveSourceRef: (entityType: string, entityId: string) =>
+    invoke<SourceRef>("resolve_source_ref", { entityType, entityId }),
   // Idempotent: opening a root creates its backing channel once, guarded by the parent ACL.
   ensureThreadChannel: (rootMessageId: string, title?: string | null, actingProfileId?: string | null) =>
     invoke<ThreadChannel>("ensure_thread_channel", { rootMessageId, title: title ?? null, actingProfileId: actingProfileId ?? null }),

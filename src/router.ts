@@ -47,7 +47,13 @@ export const entityView = (entityType: string) => entityRoutes[entityType]?.view
 export const toSlug = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
-export const FALLBACK_VIEW = "Dashboard";
+// The empty path lands on the layout's own home. Chat-first opens the calendar
+// Home of the redesign; the older layouts keep their Dashboard landing. Read from
+// storage, not from nav.ts, so the router keeps its zero-import independence.
+export const FALLBACK_VIEW = (() => {
+  try { return localStorage.getItem("space.nav.layout") === "grouped" || localStorage.getItem("space.nav.layout") === "flat" ? "Dashboard" : "Home"; }
+  catch { return "Home"; }
+})();
 const NO_CONTAINER = "-"; // placeholder for a document container with a null container_id
 export const documentContainers = ["my-docs", "project", "kb"] as const;
 const isDocumentContainer = (value: string): value is typeof documentContainers[number] =>

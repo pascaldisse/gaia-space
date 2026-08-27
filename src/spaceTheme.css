@@ -47,3 +47,19 @@
   /* Prototype rail gradient, kept as a token so rail + badge borders agree. */
   --rail-gradient: linear-gradient(180deg, #3b0640 0%, #4b0646 56%, #330631 100%);
 }
+
+/* Ink for text that the dark theme paints near-white.
+   The global stylesheet colours headings #e9f6f4 for the navy surfaces; on the
+   light content area that is invisible. Restated here rather than edited there,
+   so grouped/flat stay byte-identical. */
+.theme-space-light .space-content h1,
+.theme-space-light .space-content h2,
+.theme-space-light .space-content h3,
+.theme-space-light .space-content h4,
+.theme-space-light .space-content strong,
+.theme-space-light .space-content label,
+.theme-space-light .space-content dt { color: var(--ink); -webkit-text-fill-color: var(--ink); }
+.theme-space-light .space-content { color: var(--ink); }
+.theme-space-light .space-content p,
+.theme-space-light .space-content small,
+.theme-space-light .space-content time { color: var(--muted); }
