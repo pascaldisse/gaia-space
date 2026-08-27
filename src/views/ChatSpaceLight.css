@@ -128,3 +128,15 @@
 .theme-space-light .composer .attachment-button,
 .theme-space-light .composer .schedule-button,
 .theme-space-light .composer .poll-button { color: var(--muted); }
+
+/* ── stage 6b: controls that left Chat's legacy sidebar ───────────────────── */
+/* The refresh cadence is chrome, not content: quiet, right-aligned, hairline. */
+.theme-space-light .chat-pane-tools { padding: 12px 24px 0; gap: 6px; }
+.theme-space-light .chat-pane-tools .chat-tool-btn {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 999px;
+  color: var(--ink-muted); font-size: 12px; padding: 3px 10px; cursor: pointer;
+}
+.theme-space-light .chat-pane-tools .chat-tool-btn.active { color: var(--teal-ink, #0d6e63); border-color: var(--teal, #00c2a8); }
+
+.theme-space-light .chat-empty-state h2 { color: var(--ink); }
+.theme-space-light .chat-empty-state p { color: var(--ink-muted); }

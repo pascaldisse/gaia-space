@@ -50,6 +50,24 @@
 .chat-empty-card p strong { color: var(--text-emphasis); font-weight: 600; }
 .chat-empty-cta { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; }
 
+/* Refresh cadence, when the legacy sidebar (which used to hold it) is not rendered. */
+.chat-pane-tools {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 12px 0; justify-content: flex-end;
+}
+.chat-tool-btn {
+  background: rgba(255,255,255,.04); border: 1px solid #243050; border-radius: 999px;
+  color: var(--text-muted); font-size: 12px; padding: 2px 9px; cursor: pointer;
+}
+.chat-tool-btn.active { color: #5fe6d4; border-color: rgba(0,194,168,.45); }
+
+/* Nothing selected: say so, instead of pretending an empty channel. */
+.chat-empty-state {
+  margin: auto; padding: 32px; text-align: center; max-width: 420px;
+}
+.chat-empty-state h2 { margin: 0 0 6px; font-size: 16px; font-weight: 650; color: #e6e8ee; }
+.chat-empty-state p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+
 .chat-shell {
   display: flex;
   flex: 1;

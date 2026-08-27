@@ -1,6 +1,8 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
+import { navLayout } from "../nav";
+import { actingProfileId, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
 import "../App.css";
 import "./Chat.css";
@@ -67,7 +69,15 @@ function when(ts: number | null) {
   });
 }
 
-export default function Chat() {
+/**
+ * `embedded` — the caller already draws a channel list and a channel title, so Chat must
+ * NOT draw its own. It is a real conditional, not CSS: a hidden-but-mounted sidebar still
+ * fetches, still tab-traps, and still shows a second "new conversation" form. The chat-first
+ * layout is embedded by definition (SpaceShell owns the sidebar), which is why the default
+ * also consults `navLayout()` — the plain grouped/flat layouts keep the legacy sidebar.
+ */
+export default function Chat(props: { embedded?: boolean } = {}) {
+  const showLegacySidebar = () => !props.embedded && navLayout() !== "chat-first";
   const [error, setError] = createSignal<string | null>(null);
   const fail = (e: unknown) => setError(String(e));
 
@@ -79,7 +89,8 @@ export default function Chat() {
     : (profiles() ?? [])
   ).filter((profile) => !profile.archived && profile.id !== actingProfileId());
   const recipientsLoading = () => isWeb() ? directory.loading : profiles.loading;
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
+  // The acting profile lives in src/chatIdentity.ts: in the chat-first layout the picker
+  // is in the shell, so shell and view must read one cell. The seeding rule is unchanged.
   createEffect(() => {
     const authenticated = currentUser()?.profile_id;
     if (isWeb() && authenticated) { setActingProfileId(authenticated); return; }
@@ -1014,6 +1025,7 @@ export default function Chat() {
         </div>
       </Show>
 
+      <Show when={showLegacySidebar()}>
       <aside class="chat-sidebar">
         <div class="chat-profile-picker">
           <span class="section-label" style="padding:0">
@@ -1111,6 +1123,7 @@ export default function Chat() {
           </For>
         </div>
       </aside>
+      </Show>
 
       <section class="chat-center">
         <header class="chat-topbar">
@@ -1156,7 +1169,28 @@ export default function Chat() {
           </div>
         </Show>
 
+        {/* Without the legacy sidebar the refresh cadence would be unreachable, so it
+            rides here as a compact control next to the channel's messages. Polling still
+            runs by itself; this only says how often, plus one immediate refresh. */}
+        <Show when={!showLegacySidebar()}>
+          <div class="chat-pane-tools" aria-label="Message refresh">
+            <button class="chat-tool-btn" type="button" title="Refresh now" aria-label="Refresh now" onClick={() => { void refetchMessages(); void refetchChannels(); }}>⟳</button>
+            <For each={POLL_OPTIONS}>
+              {(opt) => (
+                <button class="chat-tool-btn" type="button" classList={{ active: pollMs() === opt.ms }} onClick={() => setPollMs(opt.ms)}>{opt.label}</button>
+              )}
+            </For>
+          </div>
+        </Show>
+
         <div class="message-pane">
+          {/* Honest empty state: with no channel selected there is nothing to say hello in. */}
+          <Show when={activeChannelId() || showLegacySidebar()} fallback={
+            <div class="chat-empty-state" role="status">
+              <h2>No conversation selected</h2>
+              <p>Choose a channel on the left, or create one with the + next to a project.</p>
+            </div>
+          }>
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
             <Show when={shownMessages().length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
               <Show when={canLoadOlder() || paging().error}>
@@ -1176,6 +1210,7 @@ export default function Chat() {
               </Show>
               <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
             </Show>
+          </Show>
           </Show>
         </div>
 

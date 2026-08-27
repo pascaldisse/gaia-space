@@ -351,3 +351,24 @@
   overflow-wrap: anywhere;
   hyphens: auto;
 }
+
+/* The section `+` is a real button now: it opens the "new conversation" drawer that
+   used to be a permanent form in Chat's own sidebar. */
+.space-chat-shell .section-add {
+  background: none; border: 0; padding: 0 2px; cursor: pointer;
+  color: #cab3cf; font-size: 14px; font-weight: 700; line-height: 1; opacity: .85;
+}
+.space-chat-shell .section-add:hover { opacity: 1; color: #fff; }
+
+/* "Acting as" — desktop-only chat identity, moved here from Chat's sidebar. */
+.space-chat-shell .side-acting {
+  margin: 10px 9px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.space-chat-shell .side-acting > span {
+  color: #cab3cf; font-size: 10px; font-weight: 720;
+  text-transform: uppercase; letter-spacing: .09em;
+}
+.space-chat-shell .side-acting select {
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+  border-radius: 9px; color: #f4ecf6; font-size: 13px; padding: 5px 8px;
+}

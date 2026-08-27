@@ -4,10 +4,12 @@ import "./SpaceShell.css";
 // loading it here (not lazily from the workspace) keeps the rules deterministic.
 import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
+import NewChannelDialog from "./NewChannelDialog";
+import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
-import { currentUser, profileId, projects, reloadProjects, workspaceId, workspaces } from "../session";
-import { linkProps, route } from "../router";
+import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
+import { linkEntity, linkProps, route } from "../router";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -55,9 +57,16 @@ export default function SpaceShell(props: {
 }): JSX.Element {
   const [moreOpen, setMoreOpen] = createSignal(false);
   const [filter, setFilter] = createSignal("");
+  /** `undefined` = closed; a string (possibly "") = open, bound to that project. */
+  const [newChannelFor, setNewChannelFor] = createSignal<string | undefined>();
 
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
+  // Chat's "Acting as" picker moved here when Chat's own sidebar stopped rendering.
+  // Desktop only: on web the chat identity is the signed-in account and is not a choice.
+  void reloadProfiles().catch(() => undefined);
+  const actingPeople = () => (profiles() ?? []).filter((person) => !person.archived);
+  const chatActing = () => chatActingProfileId() ?? actingProfileId() ?? "";
 
   const [channels] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
@@ -185,9 +194,9 @@ export default function SpaceShell(props: {
             <button class="tiny-btn" aria-label="Suchen" title="Suchen" onClick={props.onOpenSearch}>
               <Icon name="search" size={14} />
             </button>
-            <a class="tiny-btn" aria-label="Neuer Channel" title="Neuer Channel" {...linkProps({ view: "Chat" })}>
+            <button class="tiny-btn" aria-label="Neuer Channel" title="Neuer Channel" onClick={() => setNewChannelFor("")}>
               <Icon name="edit" size={14} />
-            </a>
+            </button>
           </div>
         </div>
         <input
@@ -203,7 +212,11 @@ export default function SpaceShell(props: {
         <For each={groups()}>
           {(group) => (
             <div class="section">
-              <div class="section-head"><span>{group.label}</span><span aria-hidden="true">+</span></div>
+              <div class="section-head">
+                <span>{group.label}</span>
+                {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
+                <button class="section-add" aria-label={`Neuer Channel in ${group.label}`} title="Neuer Channel" onClick={() => setNewChannelFor(group.id)}>+</button>
+              </div>
               <For each={group.channels}>
                 {(channel) => (
                   <a
@@ -223,7 +236,29 @@ export default function SpaceShell(props: {
         <Show when={!groups().length}>
           <div class="section"><div class="side-empty">Noch keine Channels.</div></div>
         </Show>
+
+        <Show when={!isWeb() && actingPeople().length > 1}>
+          <label class="side-acting">
+            <span>Acting as</span>
+            <select
+              aria-label="Acting as"
+              value={chatActing()}
+              onChange={(event) => setActingProfileId(event.currentTarget.value || null)}
+            >
+              <For each={actingPeople()}>{(person) => <option value={person.id}>{person.display_name || person.username}</option>}</For>
+            </select>
+          </label>
+        </Show>
       </aside>
+
+      <Show when={newChannelFor() !== undefined}>
+        <NewChannelDialog
+          projectId={newChannelFor() || undefined}
+          projectLabel={groups().find((group) => group.id === newChannelFor())?.label}
+          onClose={() => setNewChannelFor(undefined)}
+          onCreated={(id) => linkEntity("channel", id)}
+        />
+      </Show>
 
       <main class="space-main">
         <header class="commandbar">

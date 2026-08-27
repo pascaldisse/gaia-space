@@ -91,10 +91,10 @@
 .cw-panel.cw-chat { overflow: hidden; }
 
 /* The wrapped Chat view keeps its own logic; the workspace already draws the channel
-   list (shell sidebar) and the channel title (header), so those two duplicates are
-   hidden here — hidden in this wrapper only, never removed from Chat.tsx. */
+   title, so that duplicate header is hidden here. The channel LIST is no longer hidden
+   by CSS — Chat renders no sidebar at all when embedded (see Chat.tsx `embedded`),
+   because a hidden-but-mounted sidebar still fetches and still traps focus. */
 .cw-chat .chat-view { height: 100%; }
-.cw-chat .chat-sidebar,
 .cw-chat .chat-project-head,
 .cw-chat .chat-topbar { display: none; }
 .cw-chat .chat-center { border-right: 0; }

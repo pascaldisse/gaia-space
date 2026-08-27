@@ -141,8 +141,10 @@ export default function ChannelWorkspace(): JSX.Element {
       <div class="cw-body" classList={{ "with-rail": visibleTab() === "messages" && !!project() }}>
         <section class="cw-panel" classList={{ "cw-chat": visibleTab() === "messages" }}>
           <Show when={visibleTab() === "messages"}>
-            {/* The existing chat view, untouched: it reads the channel off the same route. */}
-            <Chat />
+            {/* The existing chat view: it reads the channel off the same route. `embedded`
+                means "this wrapper already draws the channel list and title" — Chat then
+                renders neither, instead of rendering them hidden. */}
+            <Chat embedded />
           </Show>
           <Show when={visibleTab() === "overview"}><ProjectHome project={project()} /></Show>
           <Show when={visibleTab() === "tasks"}><ProjectTasks projectId={projectIdOf()} /></Show>
