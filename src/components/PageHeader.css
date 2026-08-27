@@ -12,6 +12,17 @@
   margin-bottom: var(--view-head-gap, 22px);
 }
 
+/* Some view roots deliberately carry no padding — they scroll their own body and
+   each block pads itself. Their old bespoke header carried that inset; the shared
+   one has to carry it too, or the kicker sits flush against the command bar. */
+.documents-view > .page-header,
+.packages-view > .page-header,
+.pipelines-view > .page-header,
+.reviews-view > .page-header,
+.dev-environments > .page-header {
+  padding: var(--view-pad-y) var(--view-pad-x) 0;
+}
+
 .pgh-row {
   display: flex;
   justify-content: space-between;
