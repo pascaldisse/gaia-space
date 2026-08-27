@@ -44,9 +44,143 @@
 
   --shadow: 0 18px 44px rgba(31, 35, 40, .08);
 
+  /* readable inks on the three soft status fills */
+  --teal-ink: #006b5e;
+  --amber-ink: #7b5207;
+  --red-ink: #8a2323;
+
   /* Prototype rail gradient, kept as a token so rail + badge borders agree. */
   --rail-gradient: linear-gradient(180deg, #3b0640 0%, #4b0646 56%, #330631 100%);
+
+  /* ── TOKEN REMAP ─────────────────────────────────────────────────────────
+     Every colour custom property App.css `:root` defines for the dark theme is
+     re-pointed here at the light palette above. ~1300 colour decisions across
+     27 views already read these tokens, so the views convert without being
+     touched. Scoped to `.theme-space-light`: grouped/flat stay byte-identical.
+
+     Order follows App.css `:root` so the two lists can be diffed. */
+
+  /* brand system — navy is only ever used as INK ON TEAL inside views
+     (button.primary, avatars, project marks); the page background comes from
+     :root, which this scope does not reach. So it becomes a deep teal ink. */
+  --brand-navy: #08302b;
+  --brand-teal: var(--teal);
+  --brand-teal-bright: var(--teal-dark);
+  --brand-ice: var(--ink);
+  --brand-slate: var(--ink);
+  --brand-cool-gray: var(--ink);
+
+  --accent: var(--teal);
+  --accent-hover: var(--teal-dark);
+  --accent-soft: var(--teal-soft);
+  --accent-text: var(--teal-dark);
+  --text: var(--ink);
+  --text-strong: var(--ink);
+  --text-muted: var(--muted);
+  --text-faint: var(--quiet);
+  --text-dim: var(--quiet);
+  --text-emphasis: var(--ink);
+
+  /* identity avatars */
+  --avatar-person-bg: var(--wash-2);
+  --avatar-person-ink: var(--ink);
+  --avatar-person-ring: rgba(31, 35, 40, .10);
+
+  /* central status tokens — colour law: teal = action/open, amber = due soon
+     / waiting, red = critical/blocked. Success keeps the separate green so it
+     does not steal teal; neutral is plain paper grey. */
+  --status-success-ink: #1c6b44;
+  --status-success-bg: var(--green-soft);
+  --status-info-ink: var(--teal-ink);
+  --status-info-bg: var(--teal-soft);
+  --status-warning-ink: var(--amber-ink);
+  --status-warning-bg: var(--amber-soft);
+  --status-danger-ink: var(--red-ink);
+  --status-danger-bg: var(--red-soft);
+  --status-neutral-ink: var(--muted);
+  --status-neutral-bg: var(--wash-2);
+  --attn-amber: var(--amber);
+  --attn-amber-text: var(--amber-ink);
+  --deadline-blue: var(--blue);
+  --status-risk-overdue: var(--red);
+  --status-risk-high: var(--amber);
+  --status-risk-medium: #caa64a;
+  --status-risk-low: var(--teal);
+
+  /* controls — filled paper fields on a wash canvas, real hairlines */
+  --ctl-bg: var(--paper);
+  --ctl-bg-hover: #f6f2ec;
+  --ctl-bg-raised: var(--paper);
+  --ctl-bg-raised-hover: #f6f2ec;
+  --ctl-border: var(--line-strong);
+  --ctl-border-hover: var(--quiet);
+  --ctl-placeholder: var(--quiet);
+  --ctl-focus-ring: 0 0 0 3px rgba(0, 191, 166, .22);
+
+  /* surface / elevation ladder — cards are paper, the canvas behind is wash */
+  --surface: var(--paper);
+  --surface-hover: #f6f2ec;
+  --surface-raised: var(--paper);
+  --surface-border: var(--line);
+  --surface-border-hover: var(--line-strong);
+  --surface-sunken: var(--wash);
+  --surface-line: var(--line);
+  --surface-line-dashed: var(--line-strong);
+  --surface-2: var(--wash); /* only ever read as a fallback var(--surface-2, …) */
+
+  /* calendar typed items */
+  --cal-task: var(--amber);
+  --cal-task-bg: rgba(217, 155, 36, .12);
+  --cal-task-chip-bg: rgba(217, 155, 36, .18);
+  --cal-deadline: var(--red);
+  --cal-deadline-bg: rgba(189, 63, 63, .10);
+  --cal-deadline-chip-bg: rgba(189, 63, 63, .16);
+  --cal-deadline-ink: var(--red-ink);
+  --cal-external: var(--blue);
+  --cal-external-bg: rgba(75, 95, 199, .10);
+  --cal-external-chip-bg: rgba(75, 95, 199, .16);
+  --cal-external-ink: #3a49a0;
+
+  /* calendar grid surfaces */
+  --cal-grid-bg: var(--paper);
+  --cal-weekday-bg: var(--wash);
+  --cal-cell-line: var(--line);
+  --cal-cell-muted-bg: var(--wash);
+  --cal-cell-muted-ink: var(--quiet);
+  --cal-detail-bg: var(--wash);
+  --cal-cell-hover-bg: var(--wash-2);
+  --cal-side-rule: var(--line);
+  --cal-side-count-ink: var(--teal-ink);
+  --cal-side-count-bg: var(--teal-soft);
+  --cal-agenda-border: var(--line);
+  --cal-agenda-bg: var(--paper);
+  --cal-agenda-hover-bg: var(--wash);
+
+  /* documents / knowledge workspace */
+  --dk-line: var(--line);
+  --dk-row-hover-bg: var(--wash);
+  --dk-row-active-ink: var(--ink);
+  --dk-field-bg: var(--paper);
+  --dk-field-border: var(--line-strong);
+  --dk-meta-ink: var(--quiet);
+  --dk-title-ink: var(--ink);
+  --dk-caption-ink: var(--muted);
+  --dk-tab-ink: var(--muted);
+  --dk-snippet-ink: var(--muted);
+  --dk-danger-ink: var(--red-ink);
+  --dk-editor-bg: var(--paper);
+  --dk-version-current-bg: var(--wash-2);
+  --dk-mark-grad-end: var(--teal-dark);
+  --dk-mark-shadow: 0 2px 10px rgba(0, 191, 166, .28);
+  --dk-icon-bg: rgba(0, 191, 166, .10);
+  --dk-icon-border: rgba(0, 191, 166, .30);
 }
+
+/* Native widget chrome: App.css pins `color-scheme: dark` on every field. */
+.theme-space-light input,
+.theme-space-light select,
+.theme-space-light textarea { color-scheme: light; }
+.theme-space-light select option { background: var(--paper); color: var(--ink); }
 
 /* Ink for text that the dark theme paints near-white.
    The global stylesheet colours headings #e9f6f4 for the navy surfaces; on the
