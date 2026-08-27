@@ -1,21 +1,29 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
 import { platformApi } from "../api/platform";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
+import IssueCreateDrawer from "../components/IssueCreateDrawer";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
-import { linkEntity, linkProps, route, useDeepLink } from "../router";
+import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
 
-const blank = () => ({ title: "", description: "", status_id: "", assignee_id: "", due_date: "" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 /** Workspace issue tracker: filters query the persisted planning domain; the
- * detail panel owns issue fields, tags, checklists, time entries, and children. */
-export default function Issues() {
+ * detail panel owns issue fields, tags, checklists, time entries, and children.
+ *
+ * Layout (stage 6b): the list is the surface. Creation lives in a drawer, the status
+ * editor in a panel, and the detail pane only exists once a row is selected — no
+ * permanent form column, no permanent empty column.
+ *
+ * `filterTagName` pins the view to one planning tag (Entwicklung's "Bugs" section). If
+ * the project has no such tag, the view says so rather than showing every issue. */
+export default function Issues(props: { filterTagName?: string } = {}) {
   const projectId = sessionProject;
   const [query, setQuery] = createSignal("");
   const [statusFilter, setStatusFilter] = createSignal("");
@@ -24,8 +32,9 @@ export default function Issues() {
   const [customFieldFilter, setCustomFieldFilter] = createSignal("");
   const [customValueFilter, setCustomValueFilter] = createSignal("");
   const [selected, setSelected] = createSignal<Issue>();
-  const [form, setForm] = createSignal(blank());
   const [error, setError] = createSignal("");
+  const [drawerOpen, setDrawerOpen] = createSignal(false);
+  const [statusEditorOpen, setStatusEditorOpen] = createSignal(false);
   const [issues, { refetch: reloadIssues }] = createResource(
     () => [projectId(), query(), statusFilter(), tagFilter(), assigneeFilter(), customFieldFilter(), customValueFilter()] as const,
     ([project_id, text, status_id, tag_id, assignee_id, custom_field_id, custom_value]) => planningApi.issues({
@@ -40,6 +49,13 @@ export default function Issues() {
   );
   const [statuses, { refetch: reloadStatuses }] = createResource(projectId, id => id ? planningApi.statuses(id) : Promise.resolve([]));
   const [tags, { refetch: reloadTags }] = createResource(projectId, id => id ? planningApi.tags(id) : Promise.resolve([]));
+  // A pinned tag ("Bugs") is a FILTER, not a second data path: it resolves to the same
+  // tag_id the filter select would have sent. Absent tag -> honest empty state, no list.
+  const pinnedTag = () => props.filterTagName
+    ? (tags() ?? []).find(tag => tag.name.toLowerCase() === props.filterTagName!.toLowerCase())
+    : undefined;
+  const pinnedTagMissing = () => !!props.filterTagName && !tags.loading && !!tags() && !pinnedTag();
+  createEffect(() => { if (props.filterTagName) setTagFilter(pinnedTag()?.id ?? ""); });
   const [customFields] = createResource(projectId, id => id ? platformApi.cfDefinitions(`issue:${id}`) : Promise.resolve([]));
   let deepLinkSequence = 0;
   const issueRoute = (issue: Issue) => ({ view: "Issues", entityType: "issue", entityId: issue.id, projectId: issue.project_id || projectId() || undefined });
@@ -71,21 +87,27 @@ export default function Issues() {
       if (sequence === deepLinkSequence) setError(humanError(reason));
     }
   }, () => { deepLinkSequence++; setSelected(undefined); });
+  // The deep link can fire BEFORE the list exists: opening an issue puts the project in
+  // the URL, which remounts this view with an empty list, and `get_issue_detail` is not
+  // available in every build. So when the list does arrive, honour the URL from it —
+  // otherwise the detail pane stays shut on a URL that names an issue.
+  createEffect(() => {
+    const id = route().entityType === "issue" ? route().entityId : undefined;
+    if (!id || selected()?.id === id) return;
+    const fromList = issues()?.find(issue => issue.id === id);
+    if (fromList) setSelected(fromList);
+  });
 
-  const createIssue = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const values = form();
-    if (!projectId() || !values.title.trim()) { setError("Pick a project and enter an issue title."); return; }
-    try {
-      const issue = await planningApi.createIssue({
-        project_id: projectId(), title: values.title.trim(), description: values.description.trim() || null,
-        status_id: values.status_id || null, assignee_id: values.assignee_id || null, created_by: null,
-        due_date: values.due_date || null, priority: null, archived: false,
-      });
-      setForm(blank());
-      await reloadIssues();
-      openInUrl(issue);
-    } catch (reason) { setError(humanError(reason)); }
+  const afterCreate = async (issue: Issue) => { await reloadIssues(); openInUrl(issue); };
+  // Colour law, one pill per row: red = overdue or urgent, amber = due within three days
+  // or high priority, teal = open work, neutral = a status the project calls resolved.
+  const pillTone = (issue: Issue) => {
+    const status = statuses()?.find(entry => entry.id === issue.status_id);
+    if (status?.resolved) return "done";
+    const priority = (issue.priority ?? "").toUpperCase();
+    if (priority === "URGENT" || (issue.due_date && issue.due_date < todayISO())) return "red";
+    if (priority === "HIGH" || (issue.due_date && issue.due_date <= inDays(3))) return "amber";
+    return "teal";
   };
   const csvCell = (value: string | number | null | undefined) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 const exportCsv = () => {
@@ -118,26 +140,20 @@ const createStatus = async () => {
       chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="issues" /></Show>}
       actions={<>
         <ProjectPicker />
+        {/* Header region is the PageHeader lane's; these two entries are only ADDED to
+            its actions slot, because the creation column and the status editor column
+            were removed from the body and their acts must stay reachable. */}
+        <button type="button" class="ghost" onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</button>
         <button type="button" class="ghost" disabled={!issues()?.length} onClick={exportCsv}>Export CSV</button>
-        <a class="primary" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+        <a class="ghost" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+        <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New issue</button>
       </>}
     />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
-    <div class="issue-layout">
-      <aside class="issue-sidebar">
-        <form class="new-issue" onSubmit={createIssue}>
-          <h2>New issue</h2>
-          <input aria-label="Issue title" placeholder="Title" value={form().title} onInput={event => setForm({ ...form(), title: event.currentTarget.value })} />
-          <textarea aria-label="Issue description" placeholder="Description" value={form().description} onInput={event => setForm({ ...form(), description: event.currentTarget.value })} />
-          <select aria-label="Issue status" value={form().status_id} onChange={event => setForm({ ...form(), status_id: event.currentTarget.value })}>
-            <option value="">No status</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For>
-          </select>
-          <ProfilePicker label="Assignee" value={form().assignee_id} onChange={id => setForm({ ...form(), assignee_id: id })} allowAll />
-          <input aria-label="Due date" type="date" value={form().due_date} onInput={event => setForm({ ...form(), due_date: event.currentTarget.value })} />
-          <button class="primary" disabled={!projectId() || !form().title.trim()}>Create issue</button>
-        </form>
-        <section class="status-editor">
-          <div class="section-title"><h2>Statuses</h2><button type="button" aria-label="Create status" onClick={() => void createStatus()}>+</button></div>
+    {/* Statuses used to be a permanent column; it is the same editor, on demand. */}
+    <Show when={statusEditorOpen()}>
+      <section class="status-editor issue-status-panel">
+        <div class="section-title"><h2>Statuses</h2><button type="button" aria-label="Create status" onClick={() => void createStatus()}>+</button></div>
           <For each={statuses()}>{status => <div class="status-row">
             <input aria-label={`${status.name} color`} type="color" value={status.color} onChange={event => void saveStatus(status, { color: event.currentTarget.value })} />
             <input aria-label={`${status.name} name`} value={status.name} onBlur={event => void saveStatus(status, { name: event.currentTarget.value.trim() || status.name })} />
@@ -147,20 +163,29 @@ const createStatus = async () => {
               catch (reason) { setError(humanError(reason)); }
             }}>×</button>
           </div>}</For>
-        </section>
-      </aside>
+      </section>
+    </Show>
+    <div class="issue-layout" classList={{ "with-detail": !!selected() }}>
       <main class="issue-list-pane">
         <div class="filter-row" aria-label="Issue filters">
           <input aria-label="Search issues" placeholder="Search title or description" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
           <select aria-label="Filter by status" value={statusFilter()} onChange={event => setStatusFilter(event.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
-          <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+          <Show when={!props.filterTagName}>
+            <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+          </Show>
           <ProfilePicker label="Assignee" value={assigneeFilter()} onChange={setAssigneeFilter} allowAll />
           <select aria-label="Filter by custom field" value={customFieldFilter()} disabled={!projectId()} onChange={event => { setCustomFieldFilter(event.currentTarget.value); setCustomValueFilter(""); }}><option value="">All custom fields</option><For each={customFields()}>{field => <option value={field.id}>{field.name}</option>}</For></select>
           <Show when={customFieldFilter()}><input aria-label="Filter custom field value" placeholder="Exact custom value" value={customValueFilter()} onInput={event => setCustomValueFilter(event.currentTarget.value)} /></Show>
         </div>
+        <Show when={pinnedTagMissing()}>
+          {/* Honest: no such tag in this project, so there is no list to show — not
+              "every issue" pretending to be the bug list. */}
+          <p class="empty-state">This project has no “{props.filterTagName}” tag yet. Tag an issue to build this list.</p>
+        </Show>
+        <Show when={!pinnedTagMissing()}>
         <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
         <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
-        <ul class="issue-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
+        <ul class="issue-list paper-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
           {/* Title line, then a muted meta line, then at most one status pill —
               the same three-part shape every list surface uses now. */}
           <a class="issue-row" {...linkProps(issueRoute(issue))} onClick={event => followIssue(event, issue)}>
@@ -171,20 +196,25 @@ const createStatus = async () => {
                 <Show when={issue.due_date}>{date => <time classList={{ overdue: date() < todayISO() }}>{date()}</time>}</Show>
               </span>
             </span>
-            <Show when={issue.status_id}>{id => {
-              const status = () => statuses()?.find(entry => entry.id === id());
-              // Colour law: an unresolved status is open work (teal); a resolved
-              // one is finished and must not keep asking for attention.
-              return <span class="status-name" classList={{ teal: status() ? !status()!.resolved : true }}>{status()?.name ?? "Status"}</span>;
-            }}</Show>
+            {/* Exactly one pill per row, coloured by the law: see `pillTone`. */}
+            <span class="status-name" classList={{ [pillTone(issue)]: true }}>
+              {statuses()?.find(entry => entry.id === issue.status_id)?.name ?? "No status"}
+            </span>
           </a>
         </li>}</For></ul>
-      </main>
-      <aside class="issue-detail">
-        <Show when={selected()} fallback={<p class="hint pad">Select an issue to manage its tags, checklist, time, and sub-items.</p>}>
-          {issue => <IssueDetail issueId={issue().id} statuses={statuses()} onChanged={() => { void reloadIssues(); void reloadTags(); }} />}
         </Show>
-      </aside>
+      </main>
+      {/* The detail pane EXISTS only once a row is chosen; until then the list is the
+          whole width, instead of an empty column asking to be filled. */}
+      <Show when={selected()}>
+        {issue => <aside class="issue-detail">
+          <button type="button" class="ghost issue-detail-close" aria-label="Close issue detail" onClick={() => { setSelected(undefined); navigate({ view: route().view, projectId: route().projectId }, undefined, undefined, true); }}>×</button>
+          <IssueDetail issueId={issue().id} statuses={statuses()} onChanged={() => { void reloadIssues(); void reloadTags(); }} />
+        </aside>}
+      </Show>
     </div>
+    <Show when={drawerOpen() && projectId()}>
+      <IssueCreateDrawer projectId={projectId()} statuses={statuses() ?? []} onClose={() => setDrawerOpen(false)} onCreated={issue => void afterCreate(issue)} />
+    </Show>
   </section>;
 }

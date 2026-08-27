@@ -1,0 +1,37 @@
+/* Entwicklung: Tickets · Bugs · Pull Requests · Releases (stage 6b).
+   The sections are a switch, not four pages: each mounts an existing surface. */
+.dev-view { height: 100%; overflow: auto; }
+.dev-tabs { display: flex; gap: 6px; padding: 18px 30px 0; flex-wrap: wrap; }
+.dev-tab {
+  background: transparent; border: 1px solid var(--surface-border); border-radius: 999px;
+  color: var(--text-muted); font-size: 13px; padding: 5px 13px; cursor: pointer;
+}
+.dev-tab.active { color: var(--text); border-color: var(--surface-border-hover); }
+.dev-section { padding: 18px 30px 30px; }
+.dev-empty { max-width: 520px; }
+.dev-empty h2 { margin: 0 0 6px; font-size: 17px; }
+.dev-empty p { margin: 0 0 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* The tickets/bugs sections mount the whole Issues view, which brings its own
+   page header — so the tab row must not add a second block of padding above it. */
+.dev-view .planning-view { height: auto; }
+
+.theme-space-light .dev-view { background: var(--wash); color: var(--ink); }
+.theme-space-light .dev-tabs { padding: 22px 30px 0; gap: 8px; }
+.theme-space-light .dev-tab {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 999px;
+  color: var(--muted); font-size: 13px; font-weight: 650; padding: 6px 14px;
+}
+/* Both states are declared explicitly: only the chosen section may carry the teal. */
+.theme-space-light .dev-tab:not(.active) { background: var(--paper); color: var(--muted); border-color: var(--line); }
+.theme-space-light .dev-tab.active { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
+.theme-space-light .dev-empty {
+  border: 1px solid var(--line); border-radius: 20px; background: var(--paper);
+  padding: 22px 24px; box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .dev-empty h2 { color: var(--ink); font-weight: 700; letter-spacing: -.02em; }
+.theme-space-light .dev-empty p { color: var(--muted); }
+.theme-space-light .dev-section .issue-list {
+  border: 1px solid var(--line); border-radius: 20px; background: var(--paper);
+  padding: 6px 18px; box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}

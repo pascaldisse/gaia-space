@@ -148,3 +148,44 @@
 /* In the narrow list pane the search owns its own line, so the selects below it
    line up in one even rank instead of hanging off the end of the search field. */
 .theme-space-light .issue-list-pane .filter-row > input { flex: 1 1 100%; }
+
+/* ══ stage 6b: the list is the surface ═════════════════════════════════════
+   The creation column and the permanent empty detail column are gone (creation is a
+   drawer, the status editor a panel). So the layout is ONE column until a row is
+   selected — nothing reserves space for something that is not there yet.
+   `.project-issue-layout` (ProjectTasks) keeps its own two-column grammar. */
+.issue-layout:not(.project-issue-layout) { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.issue-layout.with-detail:not(.project-issue-layout) {
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.05fr);
+}
+.issue-list-pane { border-right: 0; }
+/* Rows are title + meta + ONE pill now (they used to be four flat cells), so the base
+   grid must match that shape. `.project-task-row` keeps its own four-column grammar. */
+.issue-row:not(.project-task-row) { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+.row-main { min-width: 0; display: block; }
+.row-main strong { display: block; }
+.row-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-top: 3px; }
+.issue-layout.with-detail .issue-list-pane { border-right: 1px solid var(--surface-border); }
+.issue-status-panel { margin: 0 0 14px; padding: 13px; border: 1px solid var(--surface-border); border-radius: 7px; background: var(--surface); }
+.issue-detail-close { float: right; font-size: 15px; line-height: 1; }
+@media (max-width: 760px) {
+  .issue-layout.with-detail:not(.project-issue-layout) { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── space-light ──────────────────────────────────────────────────────────── */
+.theme-space-light .issue-layout.with-detail .issue-list-pane { border-right: 1px solid var(--line); }
+.theme-space-light .issue-status-panel {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 16px 20px;
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .issue-detail-close {
+  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+  color: var(--muted); width: 26px; height: 26px; cursor: pointer;
+}
+/* The three meaningful fills, plus a quiet one for work that is finished. */
+.theme-space-light .status-name.amber { background: var(--amber-soft); color: var(--amber-ink); border-color: transparent; }
+.theme-space-light .status-name.red { background: var(--red-soft); color: var(--red-ink); border-color: transparent; }
+.theme-space-light .status-name.done { background: var(--wash); color: var(--muted); }
