@@ -3044,6 +3044,51 @@ mod tests {
         .unwrap();
     }
 
+    /// `resolve_source_ref` is the whole back-link contract: work created out of a
+    /// message stores only `("message", <id>)`, so this reader must hand back the
+    /// channel, the author and a readable excerpt — and must fail loudly when the
+    /// anchor points at nothing, rather than rendering an empty source card.
+    #[test]
+    fn resolve_source_ref_returns_the_channel_behind_a_message_anchor() {
+        let (c, _temp) = conn();
+        seed_channel(&c, "c-source");
+        c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('p-author','author','Ada Lovelace',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO messages(id,channel_id,author_id,text,created_at) VALUES('m-1','c-source','p-author','Can  someone\nship the release notes?',4242)",
+            [],
+        )
+        .unwrap();
+        let resolved = resolve_source_ref_impl(&c, "message", "m-1").expect("anchor resolves");
+        assert_eq!(resolved.entity_type, "message");
+        assert_eq!(resolved.entity_id, "m-1");
+        assert_eq!(resolved.channel_id, "c-source");
+        assert_eq!(resolved.channel_name.as_deref(), Some("General"));
+        assert_eq!(resolved.author_name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(resolved.created_at, 4242);
+        assert_eq!(
+            resolved.excerpt, "Can someone ship the release notes?",
+            "the excerpt is one flat line, never the raw body"
+        );
+        let missing = resolve_source_ref_impl(&c, "message", "m-gone").unwrap_err();
+        assert!(
+            missing.contains("m-gone"),
+            "a dangling anchor names itself: {missing}"
+        );
+        let unknown = resolve_source_ref_impl(&c, "asteroid", "m-1").unwrap_err();
+        assert!(unknown.contains("asteroid"), "unknown kinds fail loudly: {unknown}");
+    }
+
+    /// An excerpt is a preview, not a payload: long bodies are cut on a char boundary
+    /// (never a byte boundary — multi-byte text must not panic here).
+    #[test]
+    fn source_excerpt_is_one_short_line() {
+        assert_eq!(source_excerpt("  a   b \n c "), "a b c");
+        let long = "\u{00e4}".repeat(400);
+        let cut = source_excerpt(&long);
+        assert_eq!(cut.chars().count(), SOURCE_EXCERPT_CHARS + 1);
+        assert!(cut.ends_with('\u{2026}'));
+    }
+
     fn seed_scheduler(c: &Connection, channel: &str) {
         seed_channel(c, channel);
         c.execute(

@@ -1,7 +1,11 @@
 import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import "./SpaceShell.css";
+// Light chat surface. Scoped under `.theme-space-light`, which only this shell sets:
+// loading it here (not lazily from the workspace) keeps the rules deterministic.
+import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
 import { chatApi, type ChannelSummary } from "../api/chat";
+import { platformApi } from "../api/platform";
 import { currentUser, profileId, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { linkProps, route } from "../router";
 
@@ -22,7 +26,10 @@ const RAIL: { label: string; view: string; icon: IconName; badge?: "chat" | "men
   { label: "Home", view: "Home", icon: "home" },
   { label: "Chats", view: "Chat", icon: "chat", badge: "chat" },
   { label: "Aktivität", view: "Inbox", icon: "inbox", badge: "mentions" },
-  { label: "Aufgaben", view: "To-Do", icon: "check" },
+  // "Aufgaben" is the SHARED work surface — everybody's running project work (Team Tasks),
+  // not the private To-Do list. To-Do stays reachable through the rail's "Mehr" panel,
+  // which is built from the live view registry.
+  { label: "Aufgaben", view: "Team Tasks", icon: "check" },
   { label: "Kalender", view: "Calendar", icon: "calendar" },
   { label: "Entwicklung", view: "Development", icon: "target" },
 ];
@@ -65,8 +72,14 @@ export default function SpaceShell(props: {
   const badgeOf = (kind?: "chat" | "mentions") =>
     kind === "chat" ? unreadTotal() : kind === "mentions" ? (mentionCount() ?? 0) : 0;
 
+  // The header names the real organization. Order of truth: the organization record,
+  // then the connected workspace, and only then the product name as a last resort — a
+  // failing/absent org read must not rename somebody's workspace.
+  const [organization] = createResource(() => platformApi.organization().catch(() => undefined));
   const workspaceName = () =>
-    workspaces().find((workspace) => workspace.id === workspaceId())?.name ?? "GAIA Space";
+    organization()?.name?.trim() ||
+    workspaces().find((workspace) => workspace.id === workspaceId())?.name ||
+    "GAIA Space";
   const meLabel = () => currentUser()?.display_name ?? currentUser()?.username ?? "?";
 
   const activeChannelId = () => (route().entityType === "channel" ? route().entityId : undefined);

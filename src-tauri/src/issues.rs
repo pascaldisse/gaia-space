@@ -1956,6 +1956,33 @@ mod tests {
         c.execute_batch("CREATE TABLE issues(id TEXT PRIMARY KEY,project_id TEXT,number INT,title TEXT,description TEXT,status_id TEXT,assignee_id TEXT,created_by TEXT,due_date TEXT,archived INT);CREATE TABLE issue_statuses(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,resolved INT,color TEXT,ordering INT,archived INT DEFAULT 0);CREATE TABLE boards(id TEXT PRIMARY KEY,project_id TEXT,name TEXT,backlog_type TEXT,archived INT);CREATE TABLE board_columns(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,ordering INT);CREATE TABLE column_statuses(column_id TEXT,status_id TEXT);CREATE TABLE sprints(id TEXT PRIMARY KEY,board_id TEXT,name TEXT,state TEXT,starts_on TEXT,ends_on TEXT,description TEXT,archived INT);CREATE TABLE issue_board_positions(issue_id TEXT,board_id TEXT,sprint_id TEXT,swimlane_id TEXT,position INT,PRIMARY KEY(issue_id,board_id));CREATE TABLE issue_links(id TEXT,issue_id TEXT,linked_issue_id TEXT,link_type TEXT);").unwrap();
         c
     }
+    /// A ticket raised out of a channel must still know where it came from after a
+    /// round-trip through storage — that is the entire point of V133's two columns.
+    #[test]
+    fn source_anchor_round_trips_on_an_issue() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,archived,created_at) VALUES('p','P','P',0,unixepoch())", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,archived,source_entity_type,source_entity_id) VALUES('i','p',1,'Ship notes',0,'message','m-1')", []).unwrap();
+        let issue = c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1", ["i"], read_issue).unwrap();
+        assert_eq!(issue.source_entity_type.as_deref(), Some("message"));
+        assert_eq!(issue.source_entity_id.as_deref(), Some("m-1"));
+        assert_eq!(
+            issue.title, "Ship notes",
+            "the anchor adds to the row, it does not replace it"
+        );
+    }
+
+    /// Half an anchor is a pointer nothing can follow, so it is refused on the way in
+    /// rather than stored and rendered as a dead link later.
+    #[test]
+    fn an_issue_anchor_is_both_halves_or_neither() {
+        assert!(valid_anchor(&None, &None).is_ok());
+        assert!(valid_anchor(&Some("message".into()), &Some("m-1".into())).is_ok());
+        assert!(valid_anchor(&Some("message".into()), &None).is_err());
+        assert!(valid_anchor(&None, &Some("m-1".into())).is_err());
+    }
+
     #[test]
     fn bulk_selection_requires_unique_nonempty_issue_ids() {
         assert!(nonempty_unique_ids(&[]).is_err());

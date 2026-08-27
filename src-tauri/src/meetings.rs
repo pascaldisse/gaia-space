@@ -756,6 +756,36 @@ mod tests {
             vec![start, start + 86_400, start + 172_800]
         );
     }
+    /// A date arranged in a channel must still know which message arranged it after a
+    /// round-trip through storage, and a half-written anchor never reaches the table.
+    #[test]
+    fn source_anchor_round_trips_on_a_meeting_and_halves_are_refused() {
+        let c = scope_conn();
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at,archived,source_entity_type,source_entity_id) VALUES('m-anchored','Release sync',10,20,0,'message','msg-7')", []).unwrap();
+        let stored = c
+            .query_row(
+                &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id='m-anchored'"),
+                [],
+                row_to_meeting,
+            )
+            .unwrap();
+        assert_eq!(stored.title, "Release sync");
+        assert_eq!(stored.source_entity_type.as_deref(), Some("message"));
+        assert_eq!(stored.source_entity_id.as_deref(), Some("msg-7"));
+
+        let mut half = meeting(1000, None);
+        half.source_entity_type = Some("message".into());
+        assert!(
+            validate_meeting(&half).is_err(),
+            "an anchor without its id is refused"
+        );
+        half.source_entity_type = None;
+        half.source_entity_id = Some("msg-7".into());
+        assert!(validate_meeting(&half).is_err());
+        half.source_entity_type = Some("message".into());
+        assert!(validate_meeting(&half).is_ok(), "both halves are accepted");
+    }
+
     fn scope_conn() -> rusqlite::Connection {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
