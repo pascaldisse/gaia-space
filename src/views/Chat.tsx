@@ -1281,7 +1281,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           <div class="composer composer-wrap">
             {/* Real affordances only: this line states what the composer actually does.
                 Hidden by default; the light shell shows it as the prototype's hint row. */}
-            <div class="composer-hint" aria-hidden="true">Enter senden · Shift+Enter neue Zeile · 📎 Datei · 🕒 später · 📊 Umfrage</div>
+            <div class="composer-hint" aria-hidden="true">Enter to send · Shift+Enter for a new line · 📎 file · 🕒 later · 📊 poll</div>
             <textarea
               placeholder="Message…"
               value={draft()}

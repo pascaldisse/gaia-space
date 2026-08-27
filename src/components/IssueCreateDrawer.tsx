@@ -9,7 +9,7 @@ import "./WorkItemDrawer.css";
  *
  * WHY NOT WorkItemDrawer: that drawer turns a MESSAGE into work. It requires a source
  * anchor (`entity_type`/`entity_id`), resolves it over `resolve_source_ref`, shows a
- * "Quelle" card, and writes the anchor onto the created issue. Creating an issue from
+ * "Source" card, and writes the anchor onto the created issue. Creating an issue from
  * the Issues page has no source message, so reusing it would mean inventing an anchor
  * and showing a permanently unresolvable source card. Its copy is German, too, and this
  * surface stays English until the translation lane runs. So: a thin drawer of the same

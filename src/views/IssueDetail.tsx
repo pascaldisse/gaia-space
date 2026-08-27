@@ -116,7 +116,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
 
         {/* A ticket raised in a channel leads back to the message that raised it. */}
         <Show when={item().source_entity_type === "message" && item().source_entity_id}>{id =>
-          <p class="idp-source">Aus Nachricht: <SourceLink entityType="message" entityId={id() as string} /></p>
+          <p class="idp-source">From message: <SourceLink entityType="message" entityId={id() as string} /></p>
         }</Show>
         <input class="idp-title" value={item().title} onInput={e => patch({ title: e.currentTarget.value })} onBlur={save} />
         <textarea class="idp-description" placeholder="Add a description…" value={item().description ?? ""} onInput={e => patch({ description: e.currentTarget.value || null })} onBlur={save} />

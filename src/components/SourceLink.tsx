@@ -13,11 +13,11 @@ export default function SourceLink(props: { entityType: string; entityId: string
     ([entity_type, entity_id]) => chatApi.resolveSourceRef(entity_type, entity_id).catch(() => null),
   );
   return <span class="source-link">
-    <Show when={source.loading}><span class="source-link-quiet">{props.label ?? "Quelle"}…</span></Show>
+    <Show when={source.loading}><span class="source-link-quiet">{props.label ?? "Source"}…</span></Show>
     <Show when={!source.loading && !source()}>
       {/* An anchor with no target is a fact worth showing: the work still knows it
           came from somewhere, and the person is not left wondering why. */}
-      <span class="source-link-dead" title={`${props.entityType}: ${props.entityId}`}>Quelle nicht mehr verfügbar</span>
+      <span class="source-link-dead" title={`${props.entityType}: ${props.entityId}`}>Source no longer available</span>
     </Show>
     <Show when={source()}>{ref =>
       <a class="source-link-anchor" {...linkProps({ view: "Chat", entityType: "channel", entityId: ref().channel_id, tab: "messages" })} title={ref().excerpt}>

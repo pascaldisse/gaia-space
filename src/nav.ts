@@ -6,7 +6,7 @@ import type { IconName } from "./components/Icon";
  *  `flat`    = every view as its own top-level entry (the pre-redesign behaviour).
  *  `chat-first` = the communication-first shell (rail + channel sidebar), default on this
  *                 branch. Nothing is removed by it: every registered view stays reachable
- *                 through the rail's "Mehr" panel, and switching back is lossless. */
+ *                 through the rail's "More" panel, and switching back is lossless. */
 export type NavLayout = "grouped" | "flat" | "chat-first";
 export type NavGroup = { id: string; label: string; icon: IconName; views: string[] };
 

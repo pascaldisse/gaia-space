@@ -14,9 +14,9 @@ import "./HomeCalendar.css";
 
 type Tone = "" | "teal" | "amber" | "red";
 
-const LOCALE = "de-DE";
-const WEEKDAYS = ["S", "M", "D", "M", "D", "F", "S"] as const;
-const WEEKDAY_NAMES = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"] as const;
+const LOCALE = "en-US";
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"] as const;
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
 /** The visible month window, taken from the same 42 cells the grid renders, so the
  *  fetched range and the drawn range can never disagree. */
@@ -29,7 +29,7 @@ const monthWindow = (cursor: Date) => {
 };
 
 const timeLabel = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
-const dayHeadline = (day: Date) => `${WEEKDAY_NAMES[day.getDay()]}, ${day.getDate()}. ${day.toLocaleDateString(LOCALE, { month: "long" })}`;
+const dayHeadline = (day: Date) => `${WEEKDAY_NAMES[day.getDay()]}, ${day.toLocaleDateString(LOCALE, { month: "long" })} ${day.getDate()}`;
 const monthTitle = (day: Date) => day.toLocaleDateString(LOCALE, { month: "long", year: "numeric" });
 
 /** Days between two local calendar days — the sign is what the pill reads. */
@@ -40,22 +40,22 @@ const daysUntil = (dueKey: string, today: Date) => {
 
 /** A todo's state, in the only three colours this app is allowed to mean anything with. */
 const todoState = (todo: Todo, today: Date): { label: string; tone: Tone } => {
-  if (!todo.due_date) return { label: "Offen", tone: "" };
+  if (!todo.due_date) return { label: "Open", tone: "" };
   const delta = daysUntil(todo.due_date, today);
-  if (delta < 0) return { label: "Überfällig", tone: "red" };
-  if (delta === 0) return { label: "Offen", tone: "teal" };
-  if (delta <= 2) return { label: "Bald fällig", tone: "amber" };
-  return { label: "Geplant", tone: "" };
+  if (delta < 0) return { label: "Overdue", tone: "red" };
+  if (delta === 0) return { label: "Open", tone: "teal" };
+  if (delta <= 2) return { label: "Due soon", tone: "amber" };
+  return { label: "Planned", tone: "" };
 };
 
 const itemState = (item: CalendarItem, today: Date): { label: string; tone: Tone } => {
   if (item.kind === "meeting") return { label: "Meeting", tone: "teal" };
   if (item.kind === "deadline") {
     const key = item.date ?? dateKey(new Date(item.starts_at * 1000));
-    return daysUntil(key, today) < 0 ? { label: "Überfällig", tone: "red" } : { label: "Deadline", tone: "amber" };
+    return daysUntil(key, today) < 0 ? { label: "Overdue", tone: "red" } : { label: "Deadline", tone: "amber" };
   }
-  if (item.kind === "task") return { label: "Aufgabe", tone: "" };
-  return { label: item.kind === "blog" ? "Blog" : "Termin", tone: "" };
+  if (item.kind === "task") return { label: "Task", tone: "" };
+  return { label: item.kind === "blog" ? "Blog" : "Date", tone: "" };
 };
 
 function Row(props: { time?: string; title: string; sub?: string; label: string; tone?: Tone; to: Route }): JSX.Element {
@@ -103,7 +103,7 @@ export default function HomeCalendar() {
   };
   const channelLabel = (id: string) => {
     const found = channels()?.find(channel => channel.id === id);
-    return found?.name ? `#${found.name}` : "Direktnachricht";
+    return found?.name ? `#${found.name}` : "Direct message";
   };
 
   const cells = createMemo(() => monthCells(cursor()));
@@ -134,8 +134,8 @@ export default function HomeCalendar() {
 
   const summaryLine = () => [
     `${dayMeetings().length} ${dayMeetings().length === 1 ? "Meeting" : "Meetings"}`,
-    `${dayTodos().length} ${dayTodos().length === 1 ? "Aufgabe" : "Aufgaben"}`,
-    `${openMessagesOnDay()} offene ${openMessagesOnDay() === 1 ? "Nachricht" : "Nachrichten"}`,
+    `${dayTodos().length} ${dayTodos().length === 1 ? "task" : "tasks"}`,
+    `${openMessagesOnDay()} open ${openMessagesOnDay() === 1 ? "message" : "messages"}`,
   ].join(" · ");
 
   const itemRoute = (item: CalendarItem): Route => {
@@ -151,33 +151,33 @@ export default function HomeCalendar() {
       <div class="title-row">
         <div>
           <div class="kicker">{organization()?.name ?? "\u00a0"}</div>
-          <h1>Kalender</h1>
-          <p class="subtitle">Dein Tag, deine Aufgaben und offene Nachrichten</p>
+          <h1>Calendar</h1>
+          <p class="subtitle">Your day, your tasks and open messages</p>
         </div>
         <div class="header-metrics">
-          <span class="metric-pill"><strong>{selectedDay().getDate()}</strong> ausgewählt</span>
+          <span class="metric-pill"><strong>{selectedDay().getDate()}</strong> selected</span>
           <Show when={!dashboard.loading && !items.error}>
             <span class="metric-pill"><strong>{meetingsToday().length}</strong> {meetingsToday().length === 1 ? "Meeting" : "Meetings"}</span>
           </Show>
           <Show when={!dashboard.loading && !dashboard.error}>
-            <span class="metric-pill"><strong>{todosToday().length}</strong> Aufgaben heute</span>
+            <span class="metric-pill"><strong>{todosToday().length}</strong> tasks today</span>
           </Show>
         </div>
       </div>
     </header>
 
-    <Show when={items.error}><p class="planning-error" role="alert">Termine konnten nicht geladen werden: {String(items.error)}</p></Show>
-    <Show when={dashboard.error}><p class="planning-error" role="alert">Aufgaben konnten nicht geladen werden: {String(dashboard.error)}</p></Show>
-    <Show when={channels.error || mentions.error}><p class="planning-error" role="alert">Offene Nachrichten konnten nicht geladen werden.</p></Show>
-    <Show when={!profileId()}><p class="hint">Dein Profil wird noch geladen; der Kalender erscheint, sobald es bereit ist.</p></Show>
+    <Show when={items.error}><p class="planning-error" role="alert">Dates could not be loaded: {String(items.error)}</p></Show>
+    <Show when={dashboard.error}><p class="planning-error" role="alert">Tasks could not be loaded: {String(dashboard.error)}</p></Show>
+    <Show when={channels.error || mentions.error}><p class="planning-error" role="alert">Open messages could not be loaded.</p></Show>
+    <Show when={!profileId()}><p class="hint">Your profile is still loading; the calendar appears as soon as it is ready.</p></Show>
 
     <div class="premium-home">
-      <section class="premium-month" aria-label="Monatsübersicht">
+      <section class="premium-month" aria-label="Month overview">
         <div class="month-head">
           <div class="month-title">{monthTitle(cursor())}</div>
           <div class="month-arrows">
-            <button class="month-arrow" type="button" aria-label="Vorheriger Monat" onClick={() => shiftMonth(-1)}>‹</button>
-            <button class="month-arrow" type="button" aria-label="Nächster Monat" onClick={() => shiftMonth(1)}>›</button>
+            <button class="month-arrow" type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>‹</button>
+            <button class="month-arrow" type="button" aria-label="Next month" onClick={() => shiftMonth(1)}>›</button>
           </div>
         </div>
         <div class="month-grid">
@@ -196,11 +196,11 @@ export default function HomeCalendar() {
             >{day.getDate()}</button>;
           }}</For>
         </div>
-        <Show when={items.loading}><p class="hint">Termine werden geladen…</p></Show>
+        <Show when={items.loading}><p class="hint">Loading dates…</p></Show>
       </section>
 
       <div class="premium-agenda">
-        <section class="agenda-card main" aria-label="Ausgewählter Tag">
+        <section class="agenda-card main" aria-label="Selected day">
           <div class="agenda-head">
             <div>
               <div class="agenda-title">{dayHeadline(selectedDay())}</div>
@@ -208,13 +208,13 @@ export default function HomeCalendar() {
             </div>
           </div>
           <div class="agenda-section">
-            <div class="section-title">Kalender</div>
-            <Show when={loading() && !dayItems().length}><p class="hint">Wird geladen…</p></Show>
-            <Show when={!loading() && !dayItems().length}><p class="empty-state">Keine Termine an diesem Tag.</p></Show>
+            <div class="section-title">Calendar</div>
+            <Show when={loading() && !dayItems().length}><p class="hint">Loading…</p></Show>
+            <Show when={!loading() && !dayItems().length}><p class="empty-state">Nothing scheduled on this day.</p></Show>
             <For each={dayItems()}>{item => {
               const state = itemState(item, today);
               return <Row
-                time={item.date && item.ends_at === null ? "Ganztägig" : timeLabel(item.starts_at)}
+                time={item.date && item.ends_at === null ? "All day" : timeLabel(item.starts_at)}
                 title={item.title}
                 sub={projectLabel(item.project_id)}
                 label={state.label}
@@ -224,50 +224,50 @@ export default function HomeCalendar() {
             }}</For>
           </div>
           <div class="agenda-section">
-            <div class="section-title">Heute fällig</div>
-            <Show when={!loading() && !dayTodos().length}><p class="empty-state">Nichts fällig an diesem Tag.</p></Show>
+            <div class="section-title">Due today</div>
+            <Show when={!loading() && !dayTodos().length}><p class="empty-state">Nothing due on this day.</p></Show>
             <For each={dayTodos()}>{todo => {
               const state = todoState(todo, today);
-              return <Row time={dateKey(selectedDay()) === dateKey(today) ? "Heute" : ""} title={todo.content} sub={projectLabel(todo.project_id)} label={state.label} tone={state.tone} to={todoRoute(todo)} />;
+              return <Row time={dateKey(selectedDay()) === dateKey(today) ? "Today" : ""} title={todo.content} sub={projectLabel(todo.project_id)} label={state.label} tone={state.tone} to={todoRoute(todo)} />;
             }}</For>
           </div>
         </section>
 
-        <section class="agenda-card" aria-label="Meine Aufgaben">
+        <section class="agenda-card" aria-label="My tasks">
           <div class="agenda-head">
             <div>
-              <div class="agenda-title">Meine Aufgaben</div>
-              <div class="agenda-sub">Kleine Übersicht, kein zweites Dashboard</div>
+              <div class="agenda-title">My tasks</div>
+              <div class="agenda-sub">A small overview, not a second dashboard</div>
             </div>
           </div>
           <div class="compact-stats">
-            <div class="compact-stat"><strong>{todos().length}</strong><span>gesamt</span></div>
-            <div class="compact-stat"><strong>{todosToday().length}</strong><span>heute</span></div>
-            <div class="compact-stat" classList={{ critical: todosCritical().length > 0 }}><strong>{todosCritical().length}</strong><span>kritisch</span></div>
+            <div class="compact-stat"><strong>{todos().length}</strong><span>total</span></div>
+            <div class="compact-stat"><strong>{todosToday().length}</strong><span>today</span></div>
+            <div class="compact-stat" classList={{ critical: todosCritical().length > 0 }}><strong>{todosCritical().length}</strong><span>critical</span></div>
           </div>
-          <Show when={dashboard.loading}><p class="hint">Aufgaben werden geladen…</p></Show>
-          <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">Keine offenen Aufgaben mit Datum.</p></Show>
+          <Show when={dashboard.loading}><p class="hint">Loading tasks…</p></Show>
+          <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">No open tasks with a date.</p></Show>
           <For each={highlighted()}>{todo => {
             const state = todoState(todo, today);
             return <Row title={todo.content} sub={projectLabel(todo.project_id)} label={state.label} tone={state.tone} to={todoRoute(todo)} />;
           }}</For>
         </section>
 
-        <section class="agenda-card" aria-label="Offene Nachrichten">
+        <section class="agenda-card" aria-label="Open messages">
           <div class="agenda-head">
             <div>
-              <div class="agenda-title">Offene Nachrichten</div>
-              <div class="agenda-sub">Nur Dinge, die Antwort brauchen</div>
+              <div class="agenda-title">Open messages</div>
+              <div class="agenda-sub">Only things that need an answer</div>
             </div>
             <Show when={openMessages() > 0}><span class="tag teal">{openMessages()}</span></Show>
           </div>
-          <Show when={mentions.loading || channels.loading}><p class="hint">Nachrichten werden geladen…</p></Show>
-          <Show when={!mentions.loading && !channels.loading && !openMessages()}><p class="empty-state">Nichts wartet auf dich.</p></Show>
+          <Show when={mentions.loading || channels.loading}><p class="hint">Loading messages…</p></Show>
+          <Show when={!mentions.loading && !channels.loading && !openMessages()}><p class="empty-state">Nothing is waiting for you.</p></Show>
           <For each={waitingMentions().slice(0, 4)}>{mention =>
-            <Row title={mention.text.trim().slice(0, 80) || "Erwähnung"} sub={mention.channel_name ? `#${mention.channel_name}` : channelLabel(mention.channel_id)} label="Antwort" tone="teal" to={{ view: "Chat", entityType: "channel", entityId: mention.channel_id }} />
+            <Row title={mention.text.trim().slice(0, 80) || "Mention"} sub={mention.channel_name ? `#${mention.channel_name}` : channelLabel(mention.channel_id)} label="Reply" tone="teal" to={{ view: "Chat", entityType: "channel", entityId: mention.channel_id }} />
           }</For>
           <For each={waitingDms().slice(0, 4)}>{channel =>
-            <Row title={channel.name ?? "Direktnachricht"} sub={`${channel.unread_count} ungelesen`} label="Wartet" tone="amber" to={{ view: "Chat", entityType: "channel", entityId: channel.id }} />
+            <Row title={channel.name ?? "Direct message"} sub={`${channel.unread_count} unread`} label="Waiting" tone="amber" to={{ view: "Chat", entityType: "channel", entityId: channel.id }} />
           }</For>
         </section>
       </div>

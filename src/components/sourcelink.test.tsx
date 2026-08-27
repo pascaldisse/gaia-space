@@ -5,8 +5,8 @@ import { render } from "solid-js/web";
 import SourceLink from "./SourceLink";
 import { createMemoryAdapter, initRouter, registerViews, setAvailableViews } from "../router";
 
-// The acceptance criterion this guards: "Globale Aufgaben und globaler Kalender zeigen
-// Quellen zurück in den Channel." A stored anchor must become a real, clickable route
+// The acceptance criterion this guards: "global tasks and the global calendar show
+// sources back into the channel". A stored anchor must become a real, clickable route
 // into the originating channel — and a dead anchor must SAY it is dead, not vanish.
 
 const calls: { cmd: string; args: Record<string, unknown> }[] = [];

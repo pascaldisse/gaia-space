@@ -33,7 +33,7 @@ const quickKinds:QuickKind[] = ["meeting","task","deadline"];
 *  was the LOOK, and that is shared — in Calendar.css's space-light section and
 *  components/paper.css, both written against HomeCalendar.css. */
 export default function Calendar(props: { projectId?: string } = {}) {
-// Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Kalender"
+// Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Calendar"
 // tab) > URL. Everything below reads this one accessor, never route().projectId directly.
 const scopeProjectId = () => props.projectId || route().projectId;
 // The kicker names the SCOPE: the project when the calendar is project-scoped,
@@ -266,7 +266,7 @@ return <section class="calendar-view">
 <label>Call status<select aria-label="Call status" value={item().video_status} disabled={item().video_status !== "scheduled"} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="cancelled">Cancelled</option></select></label>
 <Show when={item().video_room_id}>{room=><p class="hint" data-meeting-room>Call room: {room()} · {item().join_url}</p>}</Show>
 {/* A date arranged in a channel leads back to the message that arranged it. */}
-<Show when={item().source_entity_type==="message"&&item().source_entity_id}>{id=><p class="meeting-source">Aus Nachricht: <SourceLink entityType="message" entityId={id() as string}/></p>}</Show>
+<Show when={item().source_entity_type==="message"&&item().source_entity_id}>{id=><p class="meeting-source">From message: <SourceLink entityType="message" entityId={id() as string}/></p>}</Show>
 <a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a><Show when={item().channel_id} fallback={<button onClick={async()=>{ try { const channel_id=await meetingsApi.attachChannel(item().id); setDraft({...item(),channel_id}); reloadMeetings(); } catch(reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({view:"Chat",entityType:"channel",entityId:item().channel_id!})}>Open discussion</a></Show>
 <section class="rsvp">
 <h3>Participants</h3>

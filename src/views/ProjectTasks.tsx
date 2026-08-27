@@ -15,7 +15,7 @@ type Pane = { kind: "issue"; item: Issue } | { kind: "task"; item: Todo } | { ki
 /** One project work surface. Issues remain board-backed tracked work; project
  * tasks remain shared to-dos. Neither store is allowed to make the other vanish. */
 export default function ProjectTasks(props: { projectId?: string } = {}) {
-  // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Aufgaben"
+  // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Tasks"
   // tab, where the project comes from the channel) > URL > session project.
   const selectedProject = () => props.projectId || route().projectId || sessionProject();
   const [text, setText] = createSignal("");

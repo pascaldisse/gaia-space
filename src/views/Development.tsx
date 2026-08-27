@@ -8,8 +8,8 @@ import "./Issues.css";
 import "./Development.css";
 
 /**
- * Entwicklung (`/development`) — the briefing's dev surface: Tickets, Bugs,
- * Pull Requests, Releases (JANIS_BRIEFING.md §Entwicklung).
+ * Development (`/development`) — the briefing's dev surface: Tickets, Bugs,
+ * Pull Requests, Releases (JANIS_BRIEFING.md, dev section).
  *
  * Four sections over the EXISTING data, no fork and no second data path:
  *  - Tickets       -> the Issues view, whole (filters, CSV, board, drawer, detail).
@@ -43,7 +43,7 @@ export default function Development(): JSX.Element {
   return (
     <section class="dev-view">
       {/* Section switch only — the page header itself belongs to the header lane. */}
-      <nav class="dev-tabs" aria-label="Entwicklung sections">
+      <nav class="dev-tabs" aria-label="Development sections">
         <For each={SECTIONS}>
           {(entry) => (
             <button

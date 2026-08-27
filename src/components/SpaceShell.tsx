@@ -17,38 +17,38 @@ import { linkEntity, linkProps, route } from "../router";
  * Three columns, exactly the prototype's grid: 68px rail · 304px sidebar · 1fr content.
  * It REPLACES the topbar chrome only while `navLayout() === "chat-first"`; the grouped
  * and flat layouts keep the existing shell in App.tsx untouched, and every registered
- * view stays reachable — the rail's "Mehr" panel is built from the live view registry,
+ * view stays reachable — the rail's "More" panel is built from the live view registry,
  * not from a hand-written list, so a new view can never become unreachable here.
  */
 
 export type ShellView = { name: string; icon: IconName };
 
-/** view name -> rail entry. German labels per the briefing; views are the app's own names. */
+/** view name -> rail entry. Labels are the product's own words; views are the app's own names. */
 const RAIL: { label: string; view: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
   { label: "Home", view: "Home", icon: "home" },
   { label: "Chats", view: "Chat", icon: "chat", badge: "chat" },
-  { label: "Aktivität", view: "Inbox", icon: "inbox", badge: "mentions" },
-  // "Aufgaben" is the SHARED work surface — everybody's running project work (Team Tasks),
-  // not the private To-Do list. To-Do stays reachable through the rail's "Mehr" panel,
+  { label: "Activity", view: "Inbox", icon: "inbox", badge: "mentions" },
+  // "Tasks" is the SHARED work surface — everybody's running project work (Team Tasks),
+  // not the private To-Do list. To-Do stays reachable through the rail's "More" panel,
   // which is built from the live view registry.
-  { label: "Aufgaben", view: "Team Tasks", icon: "check" },
-  { label: "Kalender", view: "Calendar", icon: "calendar" },
-  { label: "Entwicklung", view: "Development", icon: "target" },
+  { label: "Tasks", view: "Team Tasks", icon: "check" },
+  { label: "Calendar", view: "Calendar", icon: "calendar" },
+  { label: "Development", view: "Development", icon: "target" },
 ];
 
 const SIDE_LINKS: { label: string; view: string; icon: IconName; strong?: boolean; badge?: "chat" | "mentions" }[] = [
-  { label: "Heute", view: "Home", icon: "home", strong: true },
+  { label: "Today", view: "Home", icon: "home", strong: true },
   { label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" },
-  { label: "Erwähnungen", view: "Inbox", icon: "inbox", badge: "mentions" },
-  { label: "Kalender", view: "Calendar", icon: "calendar" },
-  { label: "Entwicklung", view: "Development", icon: "target" },
+  { label: "Mentions", view: "Inbox", icon: "inbox", badge: "mentions" },
+  { label: "Calendar", view: "Calendar", icon: "calendar" },
+  { label: "Development", view: "Development", icon: "target" },
 ];
 
 const initials = (label: string) =>
   label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
 
 export default function SpaceShell(props: {
-  /** Every view registered in App.tsx, in registration order. Drives the "Mehr" panel. */
+  /** Every view registered in App.tsx, in registration order. Drives the "More" panel. */
   views: ShellView[];
   active: string;
   /** Opens the EXISTING Goto / full-text search overlay. */
@@ -113,7 +113,7 @@ export default function SpaceShell(props: {
     const sections = [...byProject.entries()]
       .map(([id, list]) => ({ id, label: nameOf(id), channels: list }))
       .sort((a, b) => a.label.localeCompare(b.label));
-    if (loose.length) sections.push({ id: "", label: "Weitere Channels", channels: loose });
+    if (loose.length) sections.push({ id: "", label: "Other channels", channels: loose });
     return sections;
   });
 
@@ -144,22 +144,22 @@ export default function SpaceShell(props: {
 
   return (
     <div class="space-chat-shell theme-space-light">
-      <aside class="rail" aria-label="Hauptnavigation">
+      <aside class="rail" aria-label="Main navigation">
         <div class="mark" aria-hidden="true">G</div>
         <For each={RAIL}>{railItem}</For>
         <button
           class="rail-item"
-          title="Mehr"
-          aria-label="Mehr"
+          title="More"
+          aria-label="More"
           aria-expanded={moreOpen()}
           classList={{ active: moreOpen() }}
           onClick={() => setMoreOpen((open) => !open)}
         >
           <span class="rail-icon" aria-hidden="true"><Icon name="menu" size={18} /></span>
-          <span class="rail-label">Mehr</span>
+          <span class="rail-label">More</span>
         </button>
         <div class="rail-spacer" />
-        <button class="round-action" aria-label="Neu erstellen" title="Neu erstellen" onClick={props.onOpenSearch}>
+        <button class="round-action" aria-label="Create new" title="Create new" onClick={props.onOpenSearch}>
           <Icon name="plus" size={20} />
         </button>
         <a class="profile" title={meLabel()} aria-label={meLabel()} {...linkProps({ view: "Settings" })}>
@@ -169,8 +169,8 @@ export default function SpaceShell(props: {
 
       <Show when={moreOpen()}>
         <div class="more-backdrop" onClick={() => setMoreOpen(false)} />
-        <nav class="more-panel" aria-label="Alle Ansichten">
-          <h2>Alle Ansichten</h2>
+        <nav class="more-panel" aria-label="All views">
+          <h2>All views</h2>
           <For each={moreViews()}>
             {(view) => (
               <a
@@ -191,10 +191,10 @@ export default function SpaceShell(props: {
         <div class="workspace-name">
           <strong>{workspaceName()}</strong>
           <div class="tiny-actions">
-            <button class="tiny-btn" aria-label="Suchen" title="Suchen" onClick={props.onOpenSearch}>
+            <button class="tiny-btn" aria-label="Search" title="Search" onClick={props.onOpenSearch}>
               <Icon name="search" size={14} />
             </button>
-            <button class="tiny-btn" aria-label="Neuer Channel" title="Neuer Channel" onClick={() => setNewChannelFor("")}>
+            <button class="tiny-btn" aria-label="New channel" title="New channel" onClick={() => setNewChannelFor("")}>
               <Icon name="edit" size={14} />
             </button>
           </div>
@@ -202,8 +202,8 @@ export default function SpaceShell(props: {
         <input
           class="side-search"
           type="search"
-          placeholder="Unterhaltung suchen"
-          aria-label="Unterhaltung suchen"
+          placeholder="Search conversations"
+          aria-label="Search conversations"
           value={filter()}
           onInput={(event) => setFilter(event.currentTarget.value)}
         />
@@ -215,7 +215,7 @@ export default function SpaceShell(props: {
               <div class="section-head">
                 <span>{group.label}</span>
                 {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
-                <button class="section-add" aria-label={`Neuer Channel in ${group.label}`} title="Neuer Channel" onClick={() => setNewChannelFor(group.id)}>+</button>
+                <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
               </div>
               <For each={group.channels}>
                 {(channel) => (
@@ -234,7 +234,7 @@ export default function SpaceShell(props: {
           )}
         </For>
         <Show when={!groups().length}>
-          <div class="section"><div class="side-empty">Noch keine Channels.</div></div>
+          <div class="section"><div class="side-empty">No channels yet.</div></div>
         </Show>
 
         <Show when={!isWeb() && actingPeople().length > 1}>
@@ -264,11 +264,11 @@ export default function SpaceShell(props: {
         <header class="commandbar">
           <button class="command-search" onClick={props.onOpenSearch}>
             <Icon name="search" size={16} />
-            Suche in Nachrichten, Aufgaben, Terminen und Tickets
+            Search messages, tasks, dates and tickets
           </button>
           <div class="top-actions">
-            <a class="btn" {...linkProps({ view: "Meetings" })}>Meeting planen</a>
-            <a class="btn primary" {...linkProps({ view: "Chat" })}>Neue Nachricht</a>
+            <a class="btn" {...linkProps({ view: "Meetings" })}>Schedule meeting</a>
+            <a class="btn primary" {...linkProps({ view: "Chat" })}>New message</a>
           </div>
         </header>
         <section class="space-content">{props.children}</section>

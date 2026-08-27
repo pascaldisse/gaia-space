@@ -9,7 +9,7 @@ import { setProfileId, setProjectId } from "../session";
 // The channel workspace is chrome around the existing Chat view. Two laws are tested
 // because both are product decisions, not implementation details:
 //  1. a channel WITHOUT a project has no work surfaces -> no tab row at all;
-//  2. the "Kanalstand" numbers are PROJECT numbers and say so in their own title.
+//  2. the "Channel status" numbers are PROJECT numbers and say so in their own title.
 
 let dispose: (() => void) | undefined;
 
@@ -66,22 +66,22 @@ describe("channel workspace", () => {
     const host = await mount("c-project");
     expect(host.querySelector(".cw-kicker")?.textContent).toBe("Atlas");
     const tabs = Array.from(host.querySelectorAll(".cw-tab")).map(node => node.textContent);
-    expect(tabs).toEqual(["Nachrichten", "Projektübersicht", "Aufgaben", "Kalender", "Dateien und Links", "Notizen & Entscheidungen"]);
-    expect(host.querySelector(".cw-tab.active")?.textContent).toBe("Nachrichten");
+    expect(tabs).toEqual(["Messages", "Overview", "Tasks", "Calendar", "Files & Links", "Notes & Decisions"]);
+    expect(host.querySelector(".cw-tab.active")?.textContent).toBe("Messages");
   });
 
-  test("Kanalstand shows PROJECT numbers under the project's own name", async () => {
+  test("Channel status shows PROJECT numbers under the project's own name", async () => {
     const host = await mount("c-project");
     const card = host.querySelector(".cw-rail .cw-card") as HTMLElement;
     // The label carries the project, so no figure can claim to be about this channel alone.
-    expect(card.querySelector("h2")?.textContent).toBe("Atlas · Projektstand");
+    expect(card.querySelector("h2")?.textContent).toBe("Atlas · Project status");
     const stats = Array.from(card.querySelectorAll(".cw-stat")).map(row => row.textContent);
-    expect(stats[0]).toContain("Offene Aufgaben");
+    expect(stats[0]).toContain("Open tasks");
     expect(stats[0]).toContain("5");
     expect(stats[1]).toContain("Tickets");
     expect(stats[1]).toContain("2");
     // Project members, with the informational lead role, come from the project — not the channel.
-    expect(host.textContent).toContain("Other Person · Mitglied");
+    expect(host.textContent).toContain("Other Person · Member");
     expect(host.textContent).toContain("Me · Lead");
   });
 });

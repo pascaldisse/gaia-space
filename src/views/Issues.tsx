@@ -21,7 +21,7 @@ const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOS
  * editor in a panel, and the detail pane only exists once a row is selected — no
  * permanent form column, no permanent empty column.
  *
- * `filterTagName` pins the view to one planning tag (Entwicklung's "Bugs" section). If
+ * `filterTagName` pins the view to one planning tag (Development's "Bugs" section). If
  * the project has no such tag, the view says so rather than showing every issue. */
 export default function Issues(props: { filterTagName?: string } = {}) {
   const projectId = sessionProject;

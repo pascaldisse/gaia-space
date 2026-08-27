@@ -16,12 +16,12 @@ export type WorkItemKind = "task" | "ticket" | "event";
 export type WorkItemSource = { entity_type: string; entity_id: string; channel_id?: string; excerpt?: string };
 
 const COPY: Record<WorkItemKind, { heading: string; intro: string; submit: string; busy: string }> = {
-  task: { heading: "Aufgabe erstellen", intro: "Diese Aufgabe bleibt mit der Nachricht und dem Channel verbunden.", submit: "Aufgabe erstellen", busy: "Wird erstellt…" },
-  ticket: { heading: "Ticket erstellen", intro: "Für Bugs, Features oder Verbesserungen im Bereich Entwicklung.", submit: "Ticket erstellen", busy: "Wird erstellt…" },
-  event: { heading: "Termin erstellen", intro: "Dieser Termin erscheint im globalen Kalender und im Channel.", submit: "Termin erstellen", busy: "Wird erstellt…" },
+  task: { heading: "Create task", intro: "This task stays linked to the message and the channel.", submit: "Create task", busy: "Creating…" },
+  ticket: { heading: "Create ticket", intro: "For bugs, features or improvements in the Development area.", submit: "Create ticket", busy: "Creating…" },
+  event: { heading: "Create date", intro: "This date appears in the global calendar and in the channel.", submit: "Create date", busy: "Creating…" },
 };
-const PRIORITIES = [["", "Keine"], ["LOW", "Niedrig"], ["MEDIUM", "Mittel"], ["HIGH", "Hoch"], ["URGENT", "Dringend"]] as const;
-/** `datetime-local` value for "the next full hour", so Zeit is never empty-but-required. */
+const PRIORITIES = [["", "None"], ["LOW", "Low"], ["MEDIUM", "Medium"], ["HIGH", "High"], ["URGENT", "Urgent"]] as const;
+/** `datetime-local` value for "the next full hour", so Time is never empty-but-required. */
 const nextHour = () => {
   const when = new Date(Date.now() + 3_600_000);
   when.setMinutes(0, 0, 0);
@@ -69,7 +69,7 @@ export default function WorkItemDrawer(props: {
   const sourceExcerpt = () => resolved()?.excerpt || props.source.excerpt || "";
   const sourceChannel = () => resolved()?.channel_name || resolved()?.channel_id || props.source.channel_id || "";
   const toggleHelper = (id: string) => setHelperIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
-  // Zuständig first, Mitwirkende after — order is the responsibility order.
+  // Owner first, Contributors after — order is the responsibility order.
   const everyone = () => [ownerId(), ...helperIds().filter(id => id !== ownerId())].filter(Boolean);
 
   const close = () => { if (!busy()) props.onClose(); };
@@ -93,11 +93,11 @@ export default function WorkItemDrawer(props: {
   const submit = async (event: SubmitEvent) => {
     event.preventDefault();
     const heading = title().trim();
-    if (!heading) { setError("Bitte einen Titel eingeben."); return; }
+    if (!heading) { setError("Please enter a title."); return; }
     setError(""); setBusy(true);
     try {
       if (props.kind === "task") {
-        if (!profileId()) throw new Error("Dein Profil wird noch geladen.");
+        if (!profileId()) throw new Error("Your profile is still loading.");
         const todo = await personalApi.createTodo({
           profile_id: profileId(), content: heading, notes: body().trim() || null,
           due_date: dueDate() || null, project_id: props.projectId ?? null, done: false,
@@ -105,19 +105,19 @@ export default function WorkItemDrawer(props: {
         });
         props.onCreated?.("task", todo.id);
       } else if (props.kind === "ticket") {
-        if (!props.projectId) throw new Error("Ein Ticket braucht ein Projekt.");
+        if (!props.projectId) throw new Error("A ticket needs a project.");
         const issue = await planningApi.createIssue({
           project_id: props.projectId, title: heading, description: body().trim() || null,
           status_id: null, assignee_id: ownerId() || null, assignee_ids: everyone(),
           created_by: profileId() || null, due_date: null, priority: priority() || null,
           archived: false, ...anchor(),
         });
-        // "Typ" is a planning tag, not a column (see the deviation note on `tags`).
+        // "Type" is a planning tag, not a column (see the deviation note on `tags`).
         if (typeTagId()) await planningApi.setTags(issue.id, [typeTagId()]);
         props.onCreated?.("ticket", issue.id);
       } else {
         const starts = Math.floor(new Date(startsAt()).getTime() / 1000);
-        if (!Number.isFinite(starts)) throw new Error("Bitte eine gültige Zeit wählen.");
+        if (!Number.isFinite(starts)) throw new Error("Please pick a valid time.");
         const id = crypto.randomUUID();
         await meetingsApi.create({
           id, title: heading, description: body().trim() || null,
@@ -148,44 +148,44 @@ export default function WorkItemDrawer(props: {
       </header>
       <form class="wid-form" onSubmit={submit}>
         <Show when={props.kind === "ticket"}>
-          <label class="wid-field"><span>Typ</span>
-            <Show when={(tags() ?? []).length} fallback={<select class="wid-input" disabled><option>Keine Ticket-Typen in diesem Projekt</option></select>}>
+          <label class="wid-field"><span>Type</span>
+            <Show when={(tags() ?? []).length} fallback={<select class="wid-input" disabled><option>No ticket types in this project</option></select>}>
               <select class="wid-input" value={typeTagId()} onChange={event => setTypeTagId(event.currentTarget.value)}>
-                <option value="">Ohne Typ</option>
+                <option value="">No type</option>
                 <For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For>
               </select>
             </Show>
           </label>
         </Show>
-        <label class="wid-field"><span>Titel</span>
+        <label class="wid-field"><span>Title</span>
           {/* Prefilled from the message, always editable: work is created deliberately. */}
-          <input class="wid-input" ref={firstField} value={title()} onInput={event => setTitle(event.currentTarget.value)} placeholder="Worum geht es?" />
+          <input class="wid-input" ref={firstField} value={title()} onInput={event => setTitle(event.currentTarget.value)} placeholder="What is this about?" />
         </label>
         <Show when={props.kind === "event"} fallback={
-          <label class="wid-field"><span>Beschreibung</span>
-            <textarea class="wid-input" value={body()} onInput={event => setBody(event.currentTarget.value)} placeholder="Kontext aus der Nachricht" />
+          <label class="wid-field"><span>Description</span>
+            <textarea class="wid-input" value={body()} onInput={event => setBody(event.currentTarget.value)} placeholder="Context from the message" />
           </label>
         }>
-          <div class="wid-field wid-when"><span>Zeit</span>
+          <div class="wid-field wid-when"><span>Time</span>
             <div class="wid-when-row">
-              <input class="wid-input" type="datetime-local" aria-label="Zeit" value={startsAt()} onInput={event => setStartsAt(event.currentTarget.value)} />
-              <select class="wid-input" aria-label="Dauer" value={String(minutes())} onChange={event => setMinutes(Number(event.currentTarget.value))}>
-                <For each={[15, 30, 45, 60, 90, 120]}>{value => <option value={String(value)}>{value} Min.</option>}</For>
+              <input class="wid-input" type="datetime-local" aria-label="Time" value={startsAt()} onInput={event => setStartsAt(event.currentTarget.value)} />
+              <select class="wid-input" aria-label="Duration" value={String(minutes())} onChange={event => setMinutes(Number(event.currentTarget.value))}>
+                <For each={[15, 30, 45, 60, 90, 120]}>{value => <option value={String(value)}>{value} min</option>}</For>
               </select>
             </div>
           </div>
         </Show>
         <Show when={props.kind !== "event"}>
-          <label class="wid-field"><span>Zuständig</span>
+          <label class="wid-field"><span>Owner</span>
             <select class="wid-input" value={ownerId()} onChange={event => setOwnerId(event.currentTarget.value)}>
-              <option value="">Niemand</option>
+              <option value="">Nobody</option>
               <For each={people()}>{person => <option value={person.id}>{person.display_name || person.username}</option>}</For>
             </select>
           </label>
         </Show>
         <Show when={props.kind !== "ticket"}>
-          <fieldset class="wid-field wid-people"><legend>{props.kind === "event" ? "Teilnehmende" : "Mitwirkende"}</legend>
-            <Show when={people().length} fallback={<p class="wid-hint">Dieses Projekt hat noch keine Mitglieder.</p>}>
+          <fieldset class="wid-field wid-people"><legend>{props.kind === "event" ? "Participants" : "Contributors"}</legend>
+            <Show when={people().length} fallback={<p class="wid-hint">This project has no members yet.</p>}>
               <For each={people()}>{person => <label class="wid-person">
                 <input type="checkbox" checked={helperIds().includes(person.id)} onChange={() => toggleHelper(person.id)} />
                 <span>{person.display_name || person.username}</span>
@@ -194,33 +194,33 @@ export default function WorkItemDrawer(props: {
           </fieldset>
         </Show>
         <Show when={props.kind === "task"}>
-          <label class="wid-field"><span>Fällig</span>
+          <label class="wid-field"><span>Due</span>
             <input class="wid-input" type="date" value={dueDate()} onInput={event => setDueDate(event.currentTarget.value)} />
           </label>
         </Show>
         <Show when={props.kind === "ticket"}>
-          <label class="wid-field"><span>Priorität</span>
+          <label class="wid-field"><span>Priority</span>
             <select class="wid-input" value={priority()} onChange={event => setPriority(event.currentTarget.value)}>
               <For each={PRIORITIES}>{([value, label]) => <option value={value}>{label}</option>}</For>
             </select>
           </label>
         </Show>
         <Show when={props.kind === "event"}>
-          <label class="wid-field"><span>Vorbereitung</span>
-            <textarea class="wid-input" value={body()} onInput={event => setBody(event.currentTarget.value)} placeholder="Was vorher geklärt sein muss" />
+          <label class="wid-field"><span>Preparation</span>
+            <textarea class="wid-input" value={body()} onInput={event => setBody(event.currentTarget.value)} placeholder="What has to be settled beforehand" />
           </label>
         </Show>
-        {/* Quelle is shown, never edited: the anchor is a fact about where this came
+        {/* Source is shown, never edited: the anchor is a fact about where this came
             from, so the person can see exactly what will be linked before submitting. */}
-        <section class="wid-field wid-source" aria-label="Quelle">
-          <span>Quelle</span>
+        <section class="wid-field wid-source" aria-label="Source">
+          <span>Source</span>
           <div class="wid-source-card">
-            <Show when={!resolved.loading} fallback={<p class="wid-hint">Quelle wird geladen…</p>}>
+            <Show when={!resolved.loading} fallback={<p class="wid-hint">Loading source…</p>}>
               <p class="wid-source-line">
-                <Show when={sourceChannel()} fallback={<em>Unbekannter Channel</em>}>{name => <strong>#{name()}</strong>}</Show>
+                <Show when={sourceChannel()} fallback={<em>Unknown channel</em>}>{name => <strong>#{name()}</strong>}</Show>
                 <Show when={resolved()?.author_name}>{name => <span> · {name()}</span>}</Show>
               </p>
-              <Show when={sourceExcerpt()} fallback={<p class="wid-hint">Diese Nachricht ist nicht mehr abrufbar — die Verknüpfung bleibt trotzdem erhalten.</p>}>
+              <Show when={sourceExcerpt()} fallback={<p class="wid-hint">This message is no longer available — the link is kept anyway.</p>}>
                 <p class="wid-source-excerpt">{sourceExcerpt()}</p>
               </Show>
             </Show>
@@ -228,7 +228,7 @@ export default function WorkItemDrawer(props: {
         </section>
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">
-          <button type="button" class="wid-btn" onClick={close} disabled={busy()}>Abbrechen</button>
+          <button type="button" class="wid-btn" onClick={close} disabled={busy()}>Cancel</button>
           <button type="submit" class="wid-btn wid-primary" disabled={busy() || !title().trim()}>{busy() ? COPY[props.kind].busy : COPY[props.kind].submit}</button>
         </footer>
       </form>
