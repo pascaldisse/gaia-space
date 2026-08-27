@@ -47,13 +47,19 @@ export const entityView = (entityType: string) => entityRoutes[entityType]?.view
 export const toSlug = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
-// The empty path lands on the layout's own home. Chat-first opens the calendar
-// Home of the redesign; the older layouts keep their Dashboard landing. Read from
-// storage, not from nav.ts, so the router keeps its zero-import independence.
-export const FALLBACK_VIEW = (() => {
-  try { return localStorage.getItem("space.nav.layout") === "grouped" || localStorage.getItem("space.nav.layout") === "flat" ? "Dashboard" : "Home"; }
-  catch { return "Home"; }
-})();
+// An unparseable route degrades to Dashboard. That is the grammar's error value and
+// it is deliberately layout-independent — do not tie it to the nav layout.
+export const FALLBACK_VIEW = "Dashboard";
+/** The EMPTY path is a different question: it lands on the layout's own home.
+ *  Chat-first opens the calendar Home of the redesign; the older layouts keep
+ *  Dashboard. Read from storage, not from nav.ts, so the router keeps its
+ *  zero-import independence. */
+const homeView = (): string => {
+  try {
+    const layout = localStorage.getItem("space.nav.layout");
+    return layout === "grouped" || layout === "flat" ? FALLBACK_VIEW : "Home";
+  } catch { return FALLBACK_VIEW; }
+};
 const NO_CONTAINER = "-"; // placeholder for a document container with a null container_id
 export const documentContainers = ["my-docs", "project", "kb"] as const;
 const isDocumentContainer = (value: string): value is typeof documentContainers[number] =>
@@ -112,7 +118,7 @@ export function parsePath(path: string): Route {
   // Search/hash state is owned by a view, never by the route grammar or entity id.
   const pathname = path.split(/[?#]/, 1)[0];
   const segs = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean).map(dec);
-  if (!segs.length) return { view: FALLBACK_VIEW };
+  if (!segs.length) return { view: homeView() };
   const [head, ...rest] = segs;
 
   // /projects/<projectId>[/issues/<issueId>|/tasks|/calendar]
@@ -231,7 +237,7 @@ export const createMemoryAdapter = (initial = ""): RouterAdapter => {
 };
 
 let adapter: RouterAdapter = createMemoryAdapter();
-const [route, setRoute] = createSignal<Route>({ view: FALLBACK_VIEW });
+const [route, setRoute] = createSignal<Route>({ view: homeView() });
 export { route };
 export const activeView = () => route().view;
 export const isViewAvailable = (view: string) => known(view);
