@@ -30,8 +30,8 @@ export default function PageHeader(props: {
   const kicker = () => (props.kicker !== undefined ? props.kicker : orgName()) || "\u00a0";
   return (
     <header class="page-header" classList={props.class ? { [props.class]: true } : undefined}>
-      <div class="ph-row">
-        <div class="ph-title">
+      <div class="pgh-row">
+        <div class="pgh-title">
           <div class="kicker">{kicker()}</div>
           <h1>{props.title}</h1>
           <Show when={props.subline}>
@@ -39,12 +39,12 @@ export default function PageHeader(props: {
           </Show>
         </div>
         <Show when={props.chips || props.actions}>
-          <div class="ph-edge">
+          <div class="pgh-edge">
             <Show when={props.chips}>
               <div class="header-metrics">{props.chips}</div>
             </Show>
             <Show when={props.actions}>
-              <div class="ph-actions">{props.actions}</div>
+              <div class="pgh-actions">{props.actions}</div>
             </Show>
           </div>
         </Show>

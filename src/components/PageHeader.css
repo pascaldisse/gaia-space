@@ -12,14 +12,14 @@
   margin-bottom: var(--view-head-gap, 22px);
 }
 
-.ph-row {
+.pgh-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 22px;
 }
 
-.ph-title { min-width: 0; }
+.pgh-title { min-width: 0; }
 
 /* .kicker's type voice is owned by spaceLightType.css (12px / 680 / .08em
    uppercase). Restated structurally here so the dark layouts get the same
@@ -56,16 +56,19 @@
   max-width: 62ch;
 }
 
-.ph-edge {
+.pgh-edge {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
   flex: none;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 .header-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.ph-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+/* A picker in the action edge is label-over-control, a button is just a
+   control — align on the BOTTOM edge so they share one baseline. */
+.pgh-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.pgh-actions .picker { min-width: 0; }
 
 .metric-pill {
   min-height: 34px;
@@ -83,9 +86,9 @@
 .metric-pill strong { color: var(--text-strong); font-weight: var(--type-weight-strong, 700); }
 
 @media (max-width: 720px) {
-  .ph-row { flex-direction: column; }
-  .ph-edge { justify-content: flex-start; }
-  .header-metrics, .ph-actions { justify-content: flex-start; }
+  .pgh-row { flex-direction: column; }
+  .pgh-edge { justify-content: flex-start; }
+  .header-metrics, .pgh-actions { justify-content: flex-start; }
 }
 
 /* Filter bars are NOT here: the paper-card filter idiom lives with the rest of
