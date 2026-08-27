@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "./runtime";
 
 declare global {
   interface Window {
@@ -6,7 +7,7 @@ declare global {
   }
 }
 
-const hasTauri = () => typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
+const hasTauri = () => isTauriRuntime();
 export const isMobileShell = () => hasTauri() && window.__GAIA_SPACE_MOBILE__ === true;
 /** A mobile shell loading a remote GAIA Space server, not its bundled setup screen. */
 export const isMobileServer = () => isMobileShell() && window.location.hostname !== "tauri.localhost" && window.location.protocol !== "tauri:";

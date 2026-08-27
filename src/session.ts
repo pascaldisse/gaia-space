@@ -2,10 +2,11 @@ import { createEffect, createRoot, createSignal } from "solid-js";
 import { platformApi, type Profile, type Project } from "./api/platform";
 import { authApi, type User } from "./api/auth";
 import { isMobileServer } from "./mobile";
+import { isTauriRuntime } from "./runtime";
 
-/** True for a server-backed client: browser or mobile shell after it connects. */
-export const isWeb = (): boolean =>
-  typeof window !== "undefined" && (window.__TAURI_INTERNALS__ === undefined || isMobileServer());
+/** True for an explicitly online, server-backed client; false for the local Tauri shell. */
+export const isWeb = (online = true): boolean =>
+  online && typeof window !== "undefined" && (!isTauriRuntime() || isMobileServer());
 
 export type Workspace = { id: string; name: string; server: string };
 const WORKSPACES_KEY = "space.workspaces";
@@ -81,8 +82,8 @@ const auth = createRoot(() => {
   const [currentUser, setCurrentUser] = createSignal<User | null>(null);
   const [authChecked, setAuthChecked] = createSignal(!isWeb()); // Tauri: nothing to check.
 
-  const checkAuth = async () => {
-    if (!isWeb()) { setAuthChecked(true); return; }
+  const checkAuth = async (online = true) => {
+    if (!isWeb(online)) { setAuthChecked(true); return; }
     try {
       const { user } = await authApi.me();
       setCurrentUser(user);

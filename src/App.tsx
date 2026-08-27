@@ -42,6 +42,7 @@ import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntit
 import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
+type AppProps = { online?: boolean };
 const personalViews:View[]=[{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
@@ -54,7 +55,8 @@ const projectOverviewView:View={name:"Project Overview",icon:"home",component:Pr
 const projectSteeringView:View={name:"Project Steering",icon:"target",component:Steering};
 const projectSettingsView:View={name:"Project Settings",icon:"settings",component:ProjectSettings};
 
-export default function App() {
+export default function App({ online = true }: AppProps) {
+  const web = () => isWeb(online);
   const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
 const [fullTextOpen,setFullTextOpen]=createSignal(false);
@@ -62,8 +64,8 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const [menuOpen,setMenuOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
-    if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
-    if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
+    if(web()) list=list.filter(v=>!localOnlyViews.includes(v));
+    if(web()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
     return list;
   };
   const views=()=>[...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView];
@@ -71,16 +73,16 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
     registerViews([...personalViews,...workspaceViews,usersView,leadsView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
-    setRoutePending(isWeb()&&!authChecked());
-    initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
-    void checkAuth();
+    setRoutePending(web()&&!authChecked());
+    initRouter(web()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
+    void checkAuth(online);
     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==="f"){event.preventDefault();setFullTextOpen(open=>!open)} else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
     const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
     window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
     onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
   });
   createEffect(()=>{
-    setRoutePending(isWeb()&&!authChecked());
+    setRoutePending(web()&&!authChecked());
     setAvailableViews([...personalViews,...visibleWorkspaceViews(),teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
@@ -91,8 +93,8 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{name}</a>;
   return <Switch>
     <Match when={isMobileSetup()}><ServerConnect/></Match>
-    <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>
-    <Match when={isWeb()&&!currentUser()}><Login/></Match>
+    <Match when={web()&&!authChecked()}><div class="space-shell-loading"/></Match>
+    <Match when={web()&&!currentUser()}><Login/></Match>
     <Match when={true}>
       <div class="space-shell">
         <header class="topbar">
@@ -101,7 +103,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
           <nav class="topnav" aria-label="Workspace navigation"><Show when={navLayout()==="grouped"} fallback={<><For each={personalViews}>{nav}</For><For each={visibleWorkspaceViews()}>{nav}</For></>}><For each={groups()}>{groupNav}</For></Show></nav>
           <div class="topbar-right">
             <button class="topbar-search" aria-label="Open Go to search" title="Search (Ctrl/Cmd + K)" onClick={()=>setGotoOpen(true)}><span class="nav-icon" aria-hidden="true"><Icon name="search" size={16} /></span><span class="topbar-search-hint">Go to</span></button>
-            <Show when={isWeb()}><button class="topbar-account account-trigger" aria-label="Open account menu" aria-expanded={accountOpen()} onClick={()=>setAccountOpen(v=>!v)}><span class="account-avatar" aria-hidden="true">{(currentUser()?.display_name??currentUser()?.username??"?").slice(0,1).toUpperCase()}</span></button><Show when={accountOpen()}><div class="account-dropdown"><AccountFooter/></div></Show></Show>
+            <Show when={web()}><button class="topbar-account account-trigger" aria-label="Open account menu" aria-expanded={accountOpen()} onClick={()=>setAccountOpen(v=>!v)}><span class="account-avatar" aria-hidden="true">{(currentUser()?.display_name??currentUser()?.username??"?").slice(0,1).toUpperCase()}</span></button><Show when={accountOpen()}><div class="account-dropdown"><AccountFooter/></div></Show></Show>
           </div>
         </header>
         <Show when={menuOpen()}>
