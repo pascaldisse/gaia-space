@@ -1,0 +1,130 @@
+/* Light content area for the chat surface (GAIA Space redesign, stage 2).
+
+   HARD RULE: every selector in this file starts at `.theme-space-light`, the class the
+   chat-first shell puts on its root (SpaceShell.tsx). The grouped and flat layouts never
+   set it, so the shipped dark chat is visually untouched — same markup, same rules.
+
+   Colour law: teal = action/open, amber = due soon/waiting, red = critical/blocked. */
+
+.theme-space-light .chat-shell,
+.theme-space-light .chat-view { background: var(--wash); color: var(--ink); }
+.theme-space-light .chat-center { border-right: 0; }
+
+/* ── message area: paper on wash, hairline rows ───────────────────────────── */
+.theme-space-light .message-pane {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  margin: 18px 24px 0;
+  padding: 6px 20px 14px;
+  box-shadow: var(--shadow);
+  gap: 0;
+}
+
+.theme-space-light .message-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 13px;
+  padding: 14px 0;
+  border-radius: 0;
+  border-top: 1px solid rgba(225, 216, 204, .65);
+}
+.theme-space-light .message-row:first-child { border-top: 0; }
+.theme-space-light .message-row:hover { background: transparent; }
+.theme-space-light .message-row > *:not(.message-avatar) { grid-column: 2; }
+
+.theme-space-light .message-avatar {
+  display: grid;
+  grid-row: 1 / span 99;
+  grid-column: 1;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.theme-space-light .message-head { align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.theme-space-light .message-author { font-weight: 700; letter-spacing: -.012em; color: var(--ink); }
+.theme-space-light .message-time,
+.theme-space-light .message-edited { color: var(--quiet); font-size: 13px; }
+.theme-space-light .message-text {
+  max-width: 780px;
+  font-size: 15px;
+  line-height: 1.52;
+  letter-spacing: -.008em;
+  color: var(--ink);
+}
+
+/* Hover-revealed action row. The buttons are Chat.tsx's own (reply in thread, pin,
+   edit, delete); the work-item actions of the prototype ("Aufgabe erstellen",
+   "Ticket erstellen") arrive with WorkItemDrawer and are NOT faked here. */
+.theme-space-light .message-actions { gap: 8px; flex-wrap: wrap; margin-top: 9px; font-size: 12px; }
+.theme-space-light .message-actions button {
+  border: 1px solid var(--line);
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: #fffdfa;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.theme-space-light .message-actions button:hover { background: var(--teal-soft); color: #006b5e; border-color: transparent; }
+.theme-space-light .reaction-row { opacity: 0; transition: opacity .12s ease; }
+.theme-space-light .message-row:hover .reaction-row,
+.theme-space-light .message-row:focus-within .reaction-row { opacity: 1; }
+.theme-space-light .thread-badge { color: #116ba8; font-size: 13px; font-weight: 650; margin-top: 8px; }
+
+/* ── composer: bordered card, hint line, teal round send ──────────────────── */
+.theme-space-light .composer {
+  margin: 20px 24px 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  align-items: flex-end;
+  padding: 0 14px 14px;
+}
+.theme-space-light .composer-hint {
+  display: block;
+  flex: 1 0 100%;
+  height: 38px;
+  line-height: 38px;
+  margin: 0 -14px 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--quiet);
+  font-size: 13px;
+}
+.theme-space-light .composer textarea {
+  min-height: 60px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  resize: vertical;
+}
+.theme-space-light .composer textarea::placeholder { color: var(--quiet); }
+.theme-space-light .composer .primary {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--teal);
+  color: transparent;
+  font-size: 0;
+  display: grid;
+  place-items: center;
+}
+/* The label text stays in the DOM (accessible name); only its glyph is replaced. */
+.theme-space-light .composer .primary:after { content: "➜"; color: #021f1b; font-size: 17px; font-weight: 760; }
+.theme-space-light .composer .primary:disabled { opacity: .45; }
+.theme-space-light .composer .attachment-button,
+.theme-space-light .composer .schedule-button,
+.theme-space-light .composer .poll-button { color: var(--muted); }

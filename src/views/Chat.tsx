@@ -53,6 +53,10 @@ const POLL_OPTIONS = [
   { label: "off", ms: 0 },
 ];
 
+/** Two-letter monogram for the message avatar (light shell only). */
+const avatarInitials = (label: string) =>
+  label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
+
 function when(ts: number | null) {
   if (!ts) return "";
   return new Date(ts * 1000).toLocaleString(undefined, {
@@ -860,6 +864,10 @@ export default function Chat() {
     const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
     return (
       <div class="message-row">
+        {/* Avatar circle: markup only, `display:none` by default (Chat.css). It becomes
+            visible under `.theme-space-light` — the chat-first shell — so the dark theme
+            renders exactly what it rendered before. */}
+        <span class="message-avatar" aria-hidden="true">{avatarInitials(profileName(m.author_id))}</span>
         <Show
           when={editingId() === m.id}
           fallback={
@@ -1236,6 +1244,9 @@ export default function Chat() {
             </div>
           </Show>
           <div class="composer composer-wrap">
+            {/* Real affordances only: this line states what the composer actually does.
+                Hidden by default; the light shell shows it as the prototype's hint row. */}
+            <div class="composer-hint" aria-hidden="true">Enter senden · Shift+Enter neue Zeile · 📎 Datei · 🕒 später · 📊 Umfrage</div>
             <textarea
               placeholder="Message…"
               value={draft()}

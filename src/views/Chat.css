@@ -209,6 +209,11 @@
   border-radius: 6px;
 }
 
+/* Light-shell-only chrome. Present in the markup for every theme, drawn in none but
+   `.theme-space-light` (see ChatSpaceLight.css), so grouped/flat render unchanged. */
+.message-avatar,
+.composer-hint { display: none; }
+
 .message-row:hover {
   background: #141d30;
 }
