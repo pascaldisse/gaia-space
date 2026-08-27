@@ -1,0 +1,49 @@
+/* ── GAIA Space redesign palette (communication-first shell) ───────────────
+   Ported 1:1 from FINAL_GAIA_SPACE_PROTOTYP.html `:root`.
+
+   SCOPED ON PURPOSE. The shipped dark theme lives in App.css `:root` and is
+   what all 27 existing views are drawn against. These light tokens are only
+   in scope inside `.theme-space-light`, which the chat-first layout sets on
+   the shell root — switch the layout back to grouped/flat and not a single
+   custom property here applies.
+
+   Colour law (briefing): teal = action/open, amber = due soon/waiting,
+   red = critical/blocked. Nothing else may use those three. */
+.theme-space-light {
+  --ink: #1f2328;
+  --muted: #68717d;
+  --quiet: #8a929d;
+  --paper: #ffffff;
+  --wash: #faf8f4;
+  --wash-2: #f0ebe4;
+
+  --line: #e5ddd3;
+  --line-strong: #d2c6b9;
+
+  --purple-0: #2b0630;
+  --purple-1: #4a1454;
+  --purple-2: #63266f;
+  --purple-3: #7a4087;
+  --nav-text: #fff7ff;
+  --nav-muted: #dcc5df;
+
+  /* action / open */
+  --teal: #00bfa6;
+  --teal-dark: #008d7b;
+  --teal-soft: #dcf7f2;
+  /* due soon / waiting */
+  --amber: #d99b24;
+  --amber-soft: #fff1d3;
+  /* critical / blocked */
+  --red: #bd3f3f;
+  --red-soft: #fbe3e0;
+
+  --green: #258b58;
+  --green-soft: #e4f1e9;
+  --blue: #4b5fc7;
+
+  --shadow: 0 18px 44px rgba(31, 35, 40, .08);
+
+  /* Prototype rail gradient, kept as a token so rail + badge borders agree. */
+  --rail-gradient: linear-gradient(180deg, #3b0640 0%, #4b0646 56%, #330631 100%);
+}
