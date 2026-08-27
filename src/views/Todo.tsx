@@ -3,6 +3,7 @@ import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import SourceLink from "../components/SourceLink";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
@@ -118,10 +119,16 @@ export default function Todo() {
           <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
           <Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show>
           <For each={todo.assignee_ids}>{id=><span class="task-tag assignee">{nameOf(id)}</span>}</For>
-          <Show when={todo.source_entity_type}><span class="task-tag source">{todo.source_entity_type}: {todo.source_entity_id}</span></Show>
         </div>
       </Show>
     </button>
+    {/* Outside the edit button on purpose: a link inside a button is not clickable
+        (and not valid), and the origin must stay reachable, not editable-by-accident. */}
+    <Show when={todo.source_entity_type}>{kind=><span class="task-meta task-source-row">
+      <Show when={kind()==="message"} fallback={<span class="task-tag source">{kind()}: {todo.source_entity_id}</span>}>
+        <SourceLink entityType={kind()} entityId={todo.source_entity_id!} />
+      </Show>
+    </span>}</Show>
     <div class="task-row-actions">
       <Show when={!todo.done}>
         <button type="button" class="ghost small" title="Postpone by one day" aria-label={`Postpone ${todo.content} by a day`} onClick={()=>postpone(todo,1)}>+1d</button>

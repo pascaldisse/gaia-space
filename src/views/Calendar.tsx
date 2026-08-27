@@ -8,6 +8,7 @@ import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { ProfilePicker } from "../components/Pickers";
+import SourceLink from "../components/SourceLink";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, type QuickKind } from "../calendar";
 import "./Calendar.css";
 import "./Meetings.css";
@@ -247,6 +248,8 @@ return <section class="calendar-view">
 <label>Repeat<input value={item().rrule??""} onInput={e=>setDraft({...item(),rrule:e.currentTarget.value||null})}/></label>
 <label>Call status<select aria-label="Call status" value={item().video_status} disabled={item().video_status !== "scheduled"} onChange={e=>setDraft({...item(),video_status:e.currentTarget.value as Meeting["video_status"]})}><option value="scheduled">Scheduled</option><option value="cancelled">Cancelled</option></select></label>
 <Show when={item().video_room_id}>{room=><p class="hint" data-meeting-room>Call room: {room()} · {item().join_url}</p>}</Show>
+{/* A date arranged in a channel leads back to the message that arranged it. */}
+<Show when={item().source_entity_type==="message"&&item().source_entity_id}>{id=><p class="meeting-source">Aus Nachricht: <SourceLink entityType="message" entityId={id() as string}/></p>}</Show>
 <a class="meeting-permalink" {...linkProps({view:"Calendar",entityType:"meeting",entityId:item().id})}>Link to this meeting</a><Show when={item().channel_id} fallback={<button onClick={async()=>{ try { const channel_id=await meetingsApi.attachChannel(item().id); setDraft({...item(),channel_id}); reloadMeetings(); } catch(reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({view:"Chat",entityType:"channel",entityId:item().channel_id!})}>Open discussion</a></Show>
 <section class="rsvp">
 <h3>Participants</h3>
