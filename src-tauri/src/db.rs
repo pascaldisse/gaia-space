@@ -2667,7 +2667,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title, "Legacy issue", "issue content untouched");
-        assert_eq!((kind, anchor), (None, None), "an unanchored issue is normal");
+        assert_eq!(
+            (kind, anchor),
+            (None, None),
+            "an unanchored issue is normal"
+        );
         let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
             .query_row(
                 "SELECT title,source_entity_type,source_entity_id FROM meetings WHERE id='legacy-meeting'",

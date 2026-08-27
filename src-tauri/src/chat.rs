@@ -2543,7 +2543,11 @@ fn resolve_message_source(c: &Connection, entity_id: &str) -> Result<SourceRef> 
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("No message found for source anchor {entity_id}"))
 }
-fn resolve_source_ref_impl(c: &Connection, entity_type: &str, entity_id: &str) -> Result<SourceRef> {
+fn resolve_source_ref_impl(
+    c: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<SourceRef> {
     match entity_type {
         "message" => resolve_message_source(c, entity_id),
         other => Err(format!("Cannot resolve a {other} source anchor")),
@@ -3075,7 +3079,10 @@ mod tests {
             "a dangling anchor names itself: {missing}"
         );
         let unknown = resolve_source_ref_impl(&c, "asteroid", "m-1").unwrap_err();
-        assert!(unknown.contains("asteroid"), "unknown kinds fail loudly: {unknown}");
+        assert!(
+            unknown.contains("asteroid"),
+            "unknown kinds fail loudly: {unknown}"
+        );
     }
 
     /// An excerpt is a preview, not a payload: long bodies are cut on a char boundary

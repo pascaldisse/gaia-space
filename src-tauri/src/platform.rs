@@ -1729,7 +1729,12 @@ pub fn set_project_lead(
     actor_profile_id: Option<String>,
 ) -> Result<Project> {
     let c = db::conn()?;
-    set_project_lead_for_actor_on(&c, &project_id, lead_id.as_deref(), actor_profile_id.as_deref())
+    set_project_lead_for_actor_on(
+        &c,
+        &project_id,
+        lead_id.as_deref(),
+        actor_profile_id.as_deref(),
+    )
 }
 /// Gate + write in one place so the desktop command, the web dispatch and the tests
 /// exercise the identical path. Desktop passes its local identity; web passes none

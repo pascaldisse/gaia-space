@@ -148,7 +148,11 @@ fn assignee_is_active(c: &Connection, profile_id: &str) -> Result<bool> {
 fn normalized_project_id(project_id: Option<String>) -> Option<String> {
     project_id.and_then(|id| (!id.trim().is_empty()).then(|| id.trim().to_string()))
 }
-pub(crate) fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn project_member_on(
+    c: &Connection,
+    project_id: &str,
+    profile_id: &str,
+) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2)))", params![project_id, profile_id], |row| row.get(0)))
 }
 pub fn project_member_by(project_id: &str, profile_id: &str) -> Result<bool> {
@@ -366,12 +370,10 @@ pub(crate) fn list_project_todos_on(
         project_todo_visibility("?2")
     );
     let mut statement = err(c.prepare(&sql))?;
-    let mut todos = err(statement.query_map(
-        params![project_id, profile_id, include_done],
-        read_todo,
-    ))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
+    let mut todos =
+        err(statement.query_map(params![project_id, profile_id, include_done], read_todo))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
@@ -2083,7 +2085,9 @@ mod tests {
         // Clearing the lead changes nobody's reach either.
         crate::platform::set_project_lead_on(&c, "project", None).unwrap();
         assert_eq!(
-            list_project_todos_on(&c, "project", "r", false).unwrap().len(),
+            list_project_todos_on(&c, "project", "r", false)
+                .unwrap()
+                .len(),
             2
         );
     }
