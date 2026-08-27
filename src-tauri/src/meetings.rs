@@ -52,6 +52,13 @@ pub struct Meeting {
     pub video_ended_at: Option<i64>,
     #[serde(default)]
     pub video_ended_by: Option<String>,
+    /// Where this date came from, e.g. `("message", <message id>)` for a meeting
+    /// arranged out of a channel conversation. Free-form by design (see `db` V133)
+    /// and both-or-neither, exactly like the todo anchor it mirrors.
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
 }
 fn default_video_status() -> String {
     "scheduled".into()
@@ -95,7 +102,18 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         video_started_at: r.get(16)?,
         video_ended_at: r.get(17)?,
         video_ended_by: r.get(18)?,
+        source_entity_type: r.get(19)?,
+        source_entity_id: r.get(20)?,
     })
+}
+
+/// An anchor names its source with BOTH halves or neither; half an anchor is a
+/// dangling pointer nothing can render. Mirrors `personal::valid_anchor`.
+fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
+    if entity_type.is_some() != entity_id.is_some() {
+        return Err("Source anchors require both entity type and entity ID".into());
+    }
+    Ok(())
 }
 
 fn validate_meeting(meeting: &Meeting) -> Result<()> {
@@ -105,6 +123,7 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     if meeting.ends_at <= meeting.starts_at {
         return Err("Meeting end must be after its start".into());
     }
+    valid_anchor(&meeting.source_entity_type, &meeting.source_entity_id)?;
     if let Some(rule) = &meeting.rrule {
         parse_rule(rule)?;
     }
@@ -127,7 +146,7 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by,m.source_entity_type,m.source_entity_id";
 /// Private meetings are organizer-only; participant meetings additionally expose
 /// themselves to invited people and the legacy project-channel audience; public
 /// meetings are visible to every authenticated profile.
@@ -326,7 +345,7 @@ fn attach_meeting_channel_on(c: &rusqlite::Connection, id: &str) -> Result<Strin
 pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id]).map_err(|e| e.to_string())?;
     if meeting.channel_id.is_none() {
         meeting.channel_id = Some(attach_meeting_channel_on(&c, &meeting.id)?);
     }
@@ -345,7 +364,7 @@ pub fn update_meeting(meeting: Meeting) -> Result<()> {
         )
         .map_err(|_| "Meeting not found".to_string())?;
     validate_calendar_video_status_transition(&current, &meeting.video_status)?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14,source_entity_type=?15,source_entity_id=?16 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -716,6 +735,8 @@ mod tests {
             video_started_at: None,
             video_ended_at: None,
             video_ended_by: None,
+            source_entity_type: None,
+            source_entity_id: None,
         }
     }
     #[test]

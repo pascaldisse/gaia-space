@@ -1,0 +1,167 @@
+/* Channel workspace — header, tab row and right rail (GAIA Space redesign, stage 2).
+
+   Every rule here is reached ONLY through the chat-first shell, which mounts this
+   component under `.theme-space-light` (SpaceShell). The grouped/flat layouts never
+   render `.channel-workspace`, so the shipped dark theme is untouched by this file. */
+
+.channel-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+  background: var(--wash);
+  color: var(--ink);
+}
+
+/* ── header ───────────────────────────────────────────────────────────────── */
+.cw-header {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  padding: 18px 28px 0;
+}
+.cw-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 22px;
+  margin-bottom: 12px;
+}
+.cw-title { min-width: 0; }
+.cw-kicker {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.cw-title h1 {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.12;
+  letter-spacing: -.045em;
+  font-weight: 720;
+}
+.cw-subtitle { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+
+.cw-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cw-pill {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  background: #fbfaf8;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.cw-pill strong { color: var(--ink); font-weight: 700; }
+
+.cw-tabs { display: flex; align-items: center; gap: 24px; overflow-x: auto; }
+.cw-tab {
+  padding: 13px 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+  position: relative;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.cw-tab.active { color: var(--ink); }
+.cw-tab.active:after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--teal);
+}
+
+/* ── body ─────────────────────────────────────────────────────────────────── */
+.cw-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+.cw-body.with-rail { grid-template-columns: minmax(0, 1fr) 308px; }
+.cw-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.cw-panel.cw-chat { overflow: hidden; }
+
+/* The wrapped Chat view keeps its own logic; the workspace already draws the channel
+   list (shell sidebar) and the channel title (header), so those two duplicates are
+   hidden here — hidden in this wrapper only, never removed from Chat.tsx. */
+.cw-chat .chat-view { height: 100%; }
+.cw-chat .chat-sidebar,
+.cw-chat .chat-project-head,
+.cw-chat .chat-topbar { display: none; }
+.cw-chat .chat-center { border-right: 0; }
+
+.cw-empty { padding: 28px; }
+.cw-empty h2 { margin: 0 0 6px; font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
+.cw-empty p { margin: 0; color: var(--muted); }
+
+/* ── right rail ───────────────────────────────────────────────────────────── */
+.cw-rail {
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: #fbfaf7;
+  padding: 18px;
+}
+.cw-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 15px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 22px rgba(31, 35, 40, .04);
+}
+.cw-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 720; letter-spacing: -.025em; }
+.cw-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.cw-stat strong { color: var(--ink); font-weight: 720; }
+.cw-quiet { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+/* Colour law: teal = action/open, amber = due soon/waiting, red = critical/blocked. */
+.cw-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  background: #f7f5f1;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.cw-tag.teal { background: var(--teal-soft); color: #006b5e; border-color: transparent; }
+.cw-tag.amber { background: var(--amber-soft); color: #7b5207; border-color: transparent; }
+
+.cw-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.cw-mini {
+  width: 26px; height: 26px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 720;
+  background: var(--blue);
+}

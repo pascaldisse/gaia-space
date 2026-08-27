@@ -20,7 +20,10 @@ const quickKinds:QuickKind[] = ["meeting","task","deadline"];
 /** One time surface: the calendar shows meetings, task dates and deadlines,
 *  and meetings are created, edited and answered here — there is no second
 *  "Meetings" destination to keep in sync. */
-export default function Calendar() {
+export default function Calendar(props: { projectId?: string } = {}) {
+// Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Kalender"
+// tab) > URL. Everything below reads this one accessor, never route().projectId directly.
+const scopeProjectId = () => props.projectId || route().projectId;
 const [cursor,setCursor] = createSignal(startOfDay(new Date()));
 const [view,setView] = createSignal<"month"|"week"|"day"|"schedule">("month");
 const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
@@ -52,7 +55,7 @@ const [participants,{refetch:reloadParticipants}] = createResource(() => draft()
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=route().projectId; const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const prefs=options(); return filtered.filter(item => (prefs?.show_todos !== false || item.kind!=="task") && (!prefs?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=prefs.working_hours_start&&hour<prefs.working_hours_end;})())); };
+const scoped = () => { const project=scopeProjectId(); const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const prefs=options(); return filtered.filter(item => (prefs?.show_todos !== false || item.kind!=="task") && (!prefs?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=prefs.working_hours_start&&hour<prefs.working_hours_end;})())); };
 // Each view steps by its own span: a month, a week, a day, or a schedule window.
 const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
 const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(options()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };
@@ -117,7 +120,7 @@ const invite = async () => { const item=draft(); if (!item || !invitee().trim())
 const rsvp = async (participant:MeetingParticipant, status:MeetingParticipant["status"]) => { try { await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status); reloadParticipants(); } catch (reason) { setError(humanError(reason)); } };
 const itemHref = (item:CalendarItem) => item.kind==="meeting" ? linkProps({view:"Calendar",entityType:"meeting",entityId:meetingIdOf(item)}) : item.kind==="deadline" && item.project_id ? linkProps({view:"Projects",projectId:item.project_id}) : linkProps({view:"Todo"});
 return <section class="calendar-view">
-<WorkspaceHeader icon="calendar-nav" title={route().projectId ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
+<WorkspaceHeader icon="calendar-nav" title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
 <button aria-label="Previous range" onClick={()=>shift(-1)}>←</button>
 <strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
 <button aria-label="Next range" onClick={()=>shift(1)}>→</button>

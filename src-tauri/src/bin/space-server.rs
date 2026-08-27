@@ -704,6 +704,9 @@ async fn app_create_issue(
         due_date: None,
         priority: None,
         archived: None,
+        // The application API has no conversation to point back at.
+        source_entity_type: None,
+        source_entity_id: None,
     })
     .map(Json)
     .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
@@ -906,6 +909,8 @@ async fn app_create_room(
         video_started_at: None,
         video_ended_at: None,
         video_ended_by: None,
+        source_entity_type: None,
+        source_entity_id: None,
     };
     meetings::create_meeting(room.clone())
         .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
@@ -2539,6 +2544,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
         "get_channel" | "get_channel_by_entity" | "ensure_thread_channel" | "get_profile_email_status" => CommandPolicy::Session,
+        // Resolving a work item's source anchor reads channel/author/excerpt metadata
+        // the caller already sees in the channel it points at; it creates nothing.
+        "resolve_source_ref" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
@@ -5128,6 +5136,7 @@ async fn cmd(
     "get_channel_notification_preference" => chat::get_channel_notification_preference(profile_id: String, channel_id: String),
     "save_channel_notification_preference" => chat::save_channel_notification_preference(preference: chat::ChannelNotificationPreference),
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
+    "resolve_source_ref" => chat::resolve_source_ref(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_issue" => issues::get_issue(id: String),
     "get_issue_detail" => issues::get_issue_detail(id: String),

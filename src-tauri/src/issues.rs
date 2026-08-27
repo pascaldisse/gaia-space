@@ -67,6 +67,21 @@ pub struct Issue {
     /// Everybody working this issue. `assignee_id` is the first of these.
     #[serde(default)]
     pub assignee_ids: Vec<String>,
+    /// Where this ticket came from, e.g. `("message", <message id>)` for a ticket
+    /// raised out of a channel conversation. Free-form by design (see `db` V133) and
+    /// both-or-neither, exactly like the todo anchor it mirrors.
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
+}
+/// An anchor names its source with BOTH halves or neither; half an anchor is a
+/// dangling pointer nothing can render. Mirrors `personal::valid_anchor`.
+fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
+    if entity_type.is_some() != entity_id.is_some() {
+        return Err("Source anchors require both entity type and entity ID".into());
+    }
+    Ok(())
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IssueStatus {
@@ -254,6 +269,10 @@ pub struct IssueInput {
     pub due_date: Option<String>,
     pub priority: Option<String>,
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct StatusInput {
@@ -368,6 +387,8 @@ fn read_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<Issue> {
         due_date: r.get(8)?,
         priority: r.get(9)?,
         archived: r.get(10)?,
+        source_entity_type: r.get(11)?,
+        source_entity_id: r.get(12)?,
         assignee_ids: Vec::new(),
     })
 }
@@ -430,7 +451,7 @@ fn list_issues_on(
     custom_field_value_json: Option<&str>,
     include_archived: bool,
 ) -> Result<Vec<Issue>> {
-    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
+    let mut sql = String::from("SELECT DISTINCT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived,i.source_entity_type,i.source_entity_id FROM issues i LEFT JOIN issue_tags it ON it.issue_id=i.id");
     sql.push_str(" WHERE (?1 IS NULL OR i.project_id=?1) AND (?2 IS NULL OR lower(i.title) LIKE '%' || lower(?2) || '%' OR lower(coalesce(i.description,'')) LIKE '%' || lower(?2) || '%') AND (?3 IS NULL OR i.status_id=?3) AND (?4 IS NULL OR i.assignee_id=?4) AND (?5 IS NULL OR it.tag_id=?5) AND (?6 IS NULL OR EXISTS(SELECT 1 FROM cf_values cv WHERE cv.entity_id=i.id AND cv.definition_id=?6 AND (?7 IS NULL OR cv.value_json=?7))) AND (?8=1 OR i.archived=0) ORDER BY i.project_id,i.number");
     let mut s = err(c.prepare(&sql))?;
     let rows = err(s.query_map(
@@ -577,7 +598,7 @@ pub fn list_issue_activities(issue_id: String) -> Result<Vec<IssueActivity>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue(id: String) -> Result<Option<Issue>> {
     let c = db::conn()?;
-    let issue = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1",[&id],read_issue).optional())?;
+    let issue = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1",[&id],read_issue).optional())?;
     match issue {
         Some(mut issue) => {
             issue.assignee_ids = assignees_on(&c, &issue.id)?;
@@ -588,6 +609,7 @@ pub fn get_issue(id: String) -> Result<Option<Issue>> {
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_issue(input: IssueInput) -> Result<Issue> {
+    valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("issue"));
     let number: i64 = err(c.query_row(
@@ -595,7 +617,7 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
         [&input.project_id],
         |r| r.get(0),
     ))?;
-    err(c.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,input.project_id,number,input.title,input.description,input.status_id,input.assignee_id,input.created_by,input.due_date,input.priority,input.archived.unwrap_or(false)]))?;
+    err(c.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![id,input.project_id,number,input.title,input.description,input.status_id,input.assignee_id,input.created_by,input.due_date,input.priority,input.archived.unwrap_or(false),input.source_entity_type,input.source_entity_id]))?;
     let people = if input.assignee_ids.is_empty() {
         input.assignee_id.into_iter().collect()
     } else {
@@ -619,7 +641,7 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
     let c = db::conn()?;
-    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?
+    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?
         .ok_or_else(|| "Issue not found".to_string())?;
     if source.project_id == input.target_project_id {
         return Err("Choose a different project".into());
@@ -642,7 +664,8 @@ pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
     ))?;
     let id = new_id("issue");
     let tx = err(c.unchecked_transaction())?;
-    err(tx.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![&id,&input.target_project_id,number,&source.title,&source.description,&target_status,&source.assignee_id,&source.created_by,&source.due_date,&source.priority,source.archived]))?;
+    // A clone keeps the origin: the copy was still raised by that conversation.
+    err(tx.execute("INSERT INTO issues(id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", params![&id,&input.target_project_id,number,&source.title,&source.description,&target_status,&source.assignee_id,&source.created_by,&source.due_date,&source.priority,source.archived,&source.source_entity_type,&source.source_entity_id]))?;
     for assignee in assignees_on(&tx, &source.id)? {
         err(tx.execute(
             "INSERT OR IGNORE INTO issue_assignees(issue_id,profile_id) VALUES(?1,?2)",
@@ -718,7 +741,7 @@ pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_issue_to_project(input: IssueTransferInput) -> Result<Issue> {
     let c = db::conn()?;
-    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?.ok_or_else(|| "Issue not found".to_string())?;
+    let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?.ok_or_else(|| "Issue not found".to_string())?;
     if source.project_id == input.target_project_id {
         return Ok(source);
     }
@@ -770,8 +793,9 @@ pub fn move_issue_to_project(input: IssueTransferInput) -> Result<Issue> {
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_issue(issue: Issue) -> Result<Issue> {
+    valid_anchor(&issue.source_entity_type, &issue.source_entity_id)?;
     let c = db::conn()?;
-    err(c.execute("UPDATE issues SET title=?2,description=?3,status_id=?4,assignee_id=?5,due_date=?6,priority=?7,archived=?8 WHERE id=?1",params![issue.id,issue.title,issue.description,issue.status_id,issue.assignee_id,issue.due_date,issue.priority,issue.archived]))?;
+    err(c.execute("UPDATE issues SET title=?2,description=?3,status_id=?4,assignee_id=?5,due_date=?6,priority=?7,archived=?8,source_entity_type=?9,source_entity_id=?10 WHERE id=?1",params![issue.id,issue.title,issue.description,issue.status_id,issue.assignee_id,issue.due_date,issue.priority,issue.archived,issue.source_entity_type,issue.source_entity_id]))?;
     // The people list wins when it is sent; a legacy single-assignee write still works.
     let people = if issue.assignee_ids.is_empty() {
         issue.assignee_id.clone().into_iter().collect()
@@ -1089,7 +1113,7 @@ pub fn move_issue_on_board(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_board_issues(board_id: String, sprint_id: Option<String>) -> Result<Vec<Issue>> {
     let c = db::conn()?;
-    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issue_board_positions p JOIN issues i ON i.id=p.issue_id WHERE p.board_id=?1 AND (?2 IS NULL OR p.sprint_id=?2) ORDER BY p.position"))?;
+    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived,i.source_entity_type,i.source_entity_id FROM issue_board_positions p JOIN issues i ON i.id=p.issue_id WHERE p.board_id=?1 AND (?2 IS NULL OR p.sprint_id=?2) ORDER BY p.position"))?;
     let mut rows = err(s.query_map(params![board_id, sprint_id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1104,7 +1128,7 @@ pub fn list_backlog_issues(board_id: String) -> Result<Vec<Issue>> {
         [&board_id],
         |r| r.get(0),
     ))?;
-    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i WHERE i.project_id=?1 AND i.archived=0 AND NOT EXISTS(SELECT 1 FROM issue_board_positions p WHERE p.issue_id=i.id AND p.board_id=?2) ORDER BY i.number"))?;
+    let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived,i.source_entity_type,i.source_entity_id FROM issues i WHERE i.project_id=?1 AND i.archived=0 AND NOT EXISTS(SELECT 1 FROM issue_board_positions p WHERE p.issue_id=i.id AND p.board_id=?2) ORDER BY i.number"))?;
     let mut rows = err(s.query_map(params![project, board_id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1906,7 +1930,7 @@ pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     let comments = list_issue_comments(id.clone())?;
     let activities = list_issue_activities(id.clone())?;
     let tracker_links = list_issue_tracker_links(id.clone())?;
-    let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
+    let mut child_s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived,i.source_entity_type,i.source_entity_id FROM issues i JOIN issue_links l ON l.linked_issue_id=i.id WHERE l.issue_id=?1 AND l.link_type='PARENT_CHILD'"))?;
     let mut children = err(child_s.query_map([id], read_issue))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;

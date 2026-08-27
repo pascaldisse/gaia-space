@@ -345,6 +345,7 @@ pub fn run() {
             chat::list_channel_members,
             chat::create_entity_channel,
             chat::get_channel_by_entity,
+            chat::resolve_source_ref,
             chat::ensure_thread_channel,
             chat::list_messages,
             chat::list_pinned_messages,

@@ -38,6 +38,7 @@ import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
 import ServerConnect from "./components/ServerConnect";
 import SpaceShell from "./components/SpaceShell";
+import ChannelWorkspace from "./views/ChannelWorkspace";
 import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { isMobileSetup } from "./mobile";
@@ -103,7 +104,10 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     <Match when={isWeb()&&!currentUser()}><Login/></Match>
     <Match when={navLayout()==="chat-first"}>
       <SpaceShell views={views().map(v=>({name:v.name,icon:v.icon}))} active={active()} onOpenSearch={()=>setGotoOpen(true)}>
-        <Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show>
+        {/* A channel URL with a tab is the channel WORKSPACE: the same Chat view, wrapped
+            in its header/tabs/rail. Without a tab (and in every other layout) the plain
+            Chat view keeps rendering, unchanged. */}
+        <Show when={route().entityType==="channel"&&route().tab} fallback={<Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show>}><ChannelWorkspace/></Show>
         <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </SpaceShell>
     </Match>

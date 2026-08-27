@@ -361,6 +361,8 @@ mod tests {
             video_started_at: None,
             video_ended_at: None,
             video_ended_by: None,
+            source_entity_type: None,
+            source_entity_id: None,
         }
     }
 

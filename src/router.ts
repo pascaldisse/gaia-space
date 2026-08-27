@@ -22,9 +22,10 @@ export type Route = {
 };
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;
- *  the remaining briefing tabs (overview/tasks/…) land when their views exist, and an
- *  unknown tab degrades to the plain channel link rather than to the fallback view. */
-export const channelTabs = ["messages"] as const;
+ *  the work tabs mount EXISTING views scoped to the channel's project (ChannelWorkspace),
+ *  and an unknown tab degrades to the fallback view rather than inventing a surface.
+ *  A channel WITHOUT a project renders `messages` only — the tab row is not drawn at all. */
+export const channelTabs = ["messages", "overview", "tasks", "calendar", "files", "notes"] as const;
 const isChannelTab = (value: string): value is typeof channelTabs[number] =>
   channelTabs.includes(value as typeof channelTabs[number]);
 

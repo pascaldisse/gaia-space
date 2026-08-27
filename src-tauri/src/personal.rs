@@ -498,6 +498,10 @@ pub fn convert_todo_to_issue(
         due_date: todo.due_date.clone(),
         priority: None,
         archived: Some(false),
+        // The conversion inherits the to-do's origin: a task raised in a channel that
+        // becomes a ticket was still raised by that message.
+        source_entity_type: todo.source_entity_type.clone(),
+        source_entity_id: todo.source_entity_id.clone(),
     })?;
     let c = db::conn()?;
     err(c.execute(

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 132;
+pub const SCHEMA_VERSION: i64 = 133;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -870,6 +870,24 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // identical access with or without it (see `platform::Project::lead_id`).
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
+    }
+    // V133: work created out of a conversation must keep pointing back at it. Todos
+    // already carry the generic `(source_entity_type, source_entity_id)` anchor; issues
+    // and meetings did not, so a ticket or a date born in a channel lost its origin the
+    // moment it was saved. Two nullable TEXT columns each, deliberately UNCONSTRAINED
+    // and unreferenced: the anchor names a row in another table by convention
+    // (`("message", <id>)`), never by foreign key, so deleting the source degrades the
+    // back-link instead of deleting the work. Both-or-neither is enforced in Rust
+    // (`valid_anchor`), not by the schema, exactly as it already is for todos.
+    if version < 133 {
+        if table_exists(&tx, "issues")? {
+            add_column_if_missing(&tx, "issues", "source_entity_type", "TEXT")?;
+            add_column_if_missing(&tx, "issues", "source_entity_id", "TEXT")?;
+        }
+        if table_exists(&tx, "meetings")? {
+            add_column_if_missing(&tx, "meetings", "source_entity_type", "TEXT")?;
+            add_column_if_missing(&tx, "meetings", "source_entity_id", "TEXT")?;
+        }
     }
     // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
@@ -2324,7 +2342,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 132);
+        assert_eq!(SCHEMA_VERSION, 133);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2626,6 +2644,40 @@ mod tests {
         assert_eq!(deadline.as_deref(), Some("2030-01-01"));
         assert_eq!(lead, None, "a project without a lead is normal");
         migrate(&conn).expect("V132 re-run is idempotent");
+    }
+
+    /// V133 is additive: a database stamped at V132 gains nullable source anchors on
+    /// issues and meetings, and every existing row keeps its content untouched.
+    #[test]
+    fn v132_database_gains_source_anchor_columns_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO projects(id,name,key,created_by,archived) VALUES('p-anchor','Anchor','ANC','default-org',0)", []).unwrap();
+        conn.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('legacy-issue','p-anchor',1,'Legacy issue',0)", []).unwrap();
+        conn.execute("INSERT INTO meetings(id,title,starts_at,ends_at,archived) VALUES('legacy-meeting','Legacy meeting',10,20,0)", []).unwrap();
+        conn.pragma_update(None, "user_version", 132)
+            .expect("V132 stamp");
+        migrate(&conn).expect("V133 migration");
+        let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title,source_entity_type,source_entity_id FROM issues WHERE id='legacy-issue'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy issue", "issue content untouched");
+        assert_eq!((kind, anchor), (None, None), "an unanchored issue is normal");
+        let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title,source_entity_type,source_entity_id FROM meetings WHERE id='legacy-meeting'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy meeting", "meeting content untouched");
+        assert_eq!((kind, anchor), (None, None));
+        migrate(&conn).expect("V133 re-run is idempotent");
     }
 
     #[test]

@@ -46,7 +46,7 @@ function when(ts: number | null) {
   });
 }
 
-export default function Documents() {
+export default function Documents(props: { container?: ContainerType; containerId?: string } = {}) {
   const [error, setError] = createSignal<string | null>(null);
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
@@ -401,6 +401,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const r = route();
     if (r.view !== "Documents" || !r.containerType) return;
     applyContainer(r.containerType, r.containerId);
+  });
+  // embedded -> container switch. The channel workspace mounts this same view for its
+  // "Dateien und Links" tab, where the container comes from the channel's project instead
+  // of from the URL (the URL is the channel's). No route is written: the address bar keeps
+  // naming the channel.
+  createEffect(() => {
+    if (!props.container) return;
+    applyContainer(props.container, props.containerId);
   });
   useDeepLink("document", (id) => {
     setSelectedDocumentId(id);

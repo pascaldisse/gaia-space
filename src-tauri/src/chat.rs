@@ -2498,6 +2498,65 @@ pub fn create_entity_channel(
 pub fn get_channel_by_entity(entity_type: String, entity_id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &entity_channel_id(&entity_type, &entity_id))
 }
+/// Enough of an anchor's target to render a back-link into the conversation it came
+/// from. Work created out of a message (`todos`/`issues`/`meetings.source_entity_*`)
+/// stores only the pair `(entity_type, entity_id)`; this is the one reader that turns
+/// that pair back into something a person can click.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceRef {
+    pub entity_type: String,
+    pub entity_id: String,
+    pub channel_id: String,
+    pub channel_name: Option<String>,
+    pub author_name: Option<String>,
+    pub created_at: i64,
+    /// A short, single-line rendering of the message body — never the whole text.
+    pub excerpt: String,
+}
+/// One line, at most `SOURCE_EXCERPT_CHARS` characters, cut on a char boundary.
+const SOURCE_EXCERPT_CHARS: usize = 160;
+fn source_excerpt(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= SOURCE_EXCERPT_CHARS {
+        return flat;
+    }
+    let head: String = flat.chars().take(SOURCE_EXCERPT_CHARS).collect();
+    format!("{head}\u{2026}")
+}
+fn resolve_message_source(c: &Connection, entity_id: &str) -> Result<SourceRef> {
+    c.query_row(
+        "SELECT m.channel_id,ch.name,p.display_name,m.created_at,m.text FROM messages m JOIN channels ch ON ch.id=m.channel_id LEFT JOIN profiles p ON p.id=m.author_id WHERE m.id=?1",
+        [entity_id],
+        |r| {
+            Ok(SourceRef {
+                entity_type: "message".into(),
+                entity_id: entity_id.to_string(),
+                channel_id: r.get(0)?,
+                channel_name: r.get(1)?,
+                author_name: r.get(2)?,
+                created_at: r.get(3)?,
+                excerpt: source_excerpt(&r.get::<_, String>(4)?),
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("No message found for source anchor {entity_id}"))
+}
+fn resolve_source_ref_impl(c: &Connection, entity_type: &str, entity_id: &str) -> Result<SourceRef> {
+    match entity_type {
+        "message" => resolve_message_source(c, entity_id),
+        other => Err(format!("Cannot resolve a {other} source anchor")),
+    }
+}
+/// Resolve one `(source_entity_type, source_entity_id)` anchor into a renderable
+/// back-link. It is a pure read of already-visible conversation metadata, so it is
+/// session-scoped like `get_channel`; a deleted or unknown source errors cleanly
+/// rather than silently returning an empty card.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn resolve_source_ref(entity_type: String, entity_id: String) -> Result<SourceRef> {
+    resolve_source_ref_impl(&db::conn()?, &entity_type, &entity_id)
+}
 /// Creates (idempotently) the channel that backs one root message's content thread.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ensure_thread_channel(
