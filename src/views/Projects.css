@@ -55,3 +55,100 @@
 
 /* Lead chip on a project card: informational, read-only. Editing lives in Project settings. */
 .project-lead-chip { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--surface-hover, rgba(255,255,255,0.06)); border: 1px solid var(--surface-border); color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════
+   Same family as Issues/Team tasks/To-do: paper cards on the wash, a title
+   line over a muted meta line, one pill, hover as a soft wash. The left-border
+   accent stub is gone — a coloured edge on every card is decoration, and under
+   the colour law only teal/amber/red may mean something. */
+
+.theme-space-light .projects-view { background: var(--wash); color: var(--ink); }
+.theme-space-light .projects-view > header h1 { font-size: 27px; font-weight: 720; letter-spacing: -.045em; line-height: 1.12; color: var(--ink); }
+.theme-space-light .projects-view > header p { color: var(--muted); font-size: 14px; }
+
+/* Create strip: the same rhythm as every other view's filter bar. */
+.theme-space-light .project-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 12px;
+  margin: 0 0 16px;
+}
+.theme-space-light .project-form > input { flex: 1 1 180px; min-width: 0; }
+.theme-space-light .project-form > input[type=date] { flex: 0 0 auto; }
+
+/* Summary tiles read like Home's compact stats: quiet, small, countable. */
+.theme-space-light .pf-summary { gap: 10px; }
+.theme-space-light .pf-metric {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  padding: 14px 16px;
+}
+.theme-space-light .pf-metric-num { font-size: 22px; font-weight: 720; letter-spacing: -.04em; line-height: 1.1; color: var(--ink); }
+.theme-space-light .pf-metric-num.sm { font-size: 16px; }
+.theme-space-light .pf-metric-lbl { color: var(--muted); font-size: 12.5px; }
+.theme-space-light a.pf-metric-link:hover { background: var(--wash); border-color: var(--line-strong); }
+
+/* ── cards ────────────────────────────────────────────────────────────────── */
+.theme-space-light .project-cards { gap: 14px; }
+.theme-space-light .project-card {
+  gap: 9px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+  transition: background .12s ease, box-shadow .12s ease;
+}
+.theme-space-light .project-card:hover {
+  border-color: var(--line);
+  border-left-color: var(--line);
+  background: var(--wash);
+}
+.theme-space-light .project-card.active {
+  border-color: transparent;
+  border-left-color: transparent;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--teal), 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .project-card-head strong { font-size: 15.5px; font-weight: 710; letter-spacing: -.02em; color: var(--ink); }
+.theme-space-light .project-card-head code { color: var(--quiet); font-size: 12px; font-weight: 620; letter-spacing: .04em; }
+.theme-space-light .project-card > p { color: var(--muted); font-size: 13px; }
+.theme-space-light .project-card .pf-open { color: var(--muted); font-size: 12.5px; }
+.theme-space-light .project-card .pf-open b { color: var(--teal-ink); font-weight: 710; }
+.theme-space-light .project-card-foot { gap: 12px; padding-top: 4px; }
+.theme-space-light .project-deadline,
+.theme-space-light .project-deadline .deadline-readonly { color: var(--muted); font-size: 12.5px; }
+.theme-space-light .project-deadline .deadline-readonly span { color: var(--ink); font-weight: 680; }
+.theme-space-light .project-card .row-actions a { color: var(--teal-dark); font-weight: 620; }
+
+.theme-space-light .project-lead-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+/* ── opened project / access ──────────────────────────────────────────────── */
+.theme-space-light .project-open { border-top: 1px solid var(--line); }
+.theme-space-light .project-open-head h2 { font-size: 21px; font-weight: 720; letter-spacing: -.04em; }
+.theme-space-light .project-open-head code { color: var(--quiet); }
+.theme-space-light .project-access {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .project-access > summary { color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
+.theme-space-light .project-role-list li {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--wash);
+  padding: 10px 12px;
+}
+.theme-space-light .project-role-list li.hint { border-style: dashed; border-color: var(--line-strong); color: var(--quiet); }

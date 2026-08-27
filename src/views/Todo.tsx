@@ -1,5 +1,6 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { personalApi, type Todo as TodoItem } from "../api/personal";
+import "../components/paper.css";
 import "./Todo.css";
 import { ProfilePicker } from "../components/Pickers";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
