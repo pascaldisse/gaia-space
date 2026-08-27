@@ -2,6 +2,10 @@ import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switc
 import { Dynamic } from "solid-js/web";
 import "./App.css";
 import "./spaceTheme.css";
+// Generated light restatement of the literals the token remap cannot reach.
+// Imported here so hand-written light surfaces (ChatSpaceLight, HomeCalendar)
+// still win on equal specificity. See tools/lightOverrides.mjs.
+import "./spaceLightOverrides.css";
 import Dashboard from "./views/Dashboard";
 import Home from "./views/Home";
 import Development from "./views/Development";
