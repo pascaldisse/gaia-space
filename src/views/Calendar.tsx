@@ -10,6 +10,7 @@ import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { ProfilePicker } from "../components/Pickers";
 import SourceLink from "../components/SourceLink";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, type QuickKind } from "../calendar";
+import "../components/paper.css";
 import "./Calendar.css";
 import "./Meetings.css";
 const startOfDay = (date:Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -20,7 +21,17 @@ const atHour = (day:Date, hour:number) => { const at=new Date(day); at.setHours(
 const quickKinds:QuickKind[] = ["meeting","task","deadline"];
 /** One time surface: the calendar shows meetings, task dates and deadlines,
 *  and meetings are created, edited and answered here — there is no second
-*  "Meetings" destination to keep in sync. */
+*  "Meetings" destination to keep in sync.
+*
+*  The month grid is NOT shared as a component with views/HomeCalendar.tsx, on
+*  purpose. Home renders 42 `<button class="day">` pills — a day picker, with no
+*  content inside a cell. This renders `<article role="gridcell">` cells that
+*  carry events, a per-day add affordance, roving-tabindex keyboard handling and
+*  three further shapes (week, day, schedule) off the same element. A component
+*  covering both would take a mode flag and two a11y contracts, i.e. a rewrite of
+*  the thing it was meant to de-duplicate. What actually drifted between the two
+*  was the LOOK, and that is shared — in Calendar.css's space-light section and
+*  components/paper.css, both written against HomeCalendar.css. */
 export default function Calendar(props: { projectId?: string } = {}) {
 // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Kalender"
 // tab) > URL. Everything below reads this one accessor, never route().projectId directly.
@@ -64,6 +75,9 @@ const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
 const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
 const weekdayHeads = () => view()==="day" ? [cursor().toLocaleDateString(undefined,{weekday:"short"})] : ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+// "Today" is a ring on the date chip, the same signal Home uses; it is derived
+// per render so a session left open overnight does not keep ringing yesterday.
+const today = () => startOfDay(new Date());
 // Only projects the session may still give a first deadline to are offered here;
 // existing deadlines are edited in Projects, where the whole project is in view.
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
@@ -137,7 +151,7 @@ return <section class="calendar-view">
 <ul class="calendar-legend" aria-label="Event kinds">
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
-<div class="calendar-filters"><Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Display</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
+<div class="calendar-filters paper-filters"><Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Display</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">
@@ -158,7 +172,7 @@ return <section class="calendar-view">
 <For each={weekdayHeads()}>{day=><strong class="calendar-weekday" role="columnheader">{day}</strong>}</For>
 <For each={days()}>{day=><article role="gridcell" tabindex={dateKey(day)===dateKey(selectedDay())?0:-1} aria-selected={dateKey(day)===dateKey(selectedDay())}
   aria-label={day.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
-  classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),selected:dateKey(day)===dateKey(selectedDay())}}
+  classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),today:dateKey(day)===dateKey(today()),selected:dateKey(day)===dateKey(selectedDay())}}
   onClick={()=>{setSelectedDay(day);setComposerDay(undefined);}}
   onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelectedDay(day);setComposerDay(undefined);} if(e.key==="n"||e.key==="N"){e.preventDefault();openComposer(day);} }}
   onDblClick={()=>openComposer(day)}>

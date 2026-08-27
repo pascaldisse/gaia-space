@@ -82,3 +82,226 @@
 .calendar-filters{display:flex;flex-wrap:wrap;align-items:end;gap:var(--cal-space-xl);margin:0 0 var(--cal-space-2xl)}.calendar-filters .picker,.calendar-filters .calendar-filter{margin:0}
 
 .calendar-options{display:flex;gap:var(--cal-space-lg);border:0;padding:0;margin:0;color:var(--text-faint);font-size:var(--cal-fs-sm)}.calendar-options label{display:flex;gap:var(--cal-space-3xs);align-items:center}
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════
+   The month grid was a bordered spreadsheet while Home was a calm paper card,
+   which is exactly the "mix of the new variant and the old one" the product
+   owner saw. Everything below re-draws Calendar in HomeCalendar's language:
+   the grid IS the card, days are number chips (today ringed, selection filled
+   teal), and an event is a quiet line with a coloured dot — never a colour
+   block. Scoped to `.theme-space-light` so grouped/flat stay untouched.
+
+   Deliberately NOT shared as a component with HomeCalendar: see the note at
+   the top of Calendar.tsx. The look is shared here, in CSS, which is the part
+   that actually drifted. */
+
+.theme-space-light .calendar-view { background: var(--wash); color: var(--ink); }
+
+/* ── the grid is the card ─────────────────────────────────────────────────── */
+.theme-space-light .calendar-grid {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 22px 24px 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  gap: 6px 10px;
+  overflow: visible;
+}
+.theme-space-light .calendar-weekday {
+  padding: 0 0 8px;
+  background: transparent;
+  border: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+/* ── days ─────────────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-day {
+  min-height: 78px;
+  padding: 6px 6px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  align-content: start;
+}
+.theme-space-light .calendar-day:hover { background: var(--wash); }
+.theme-space-light .calendar-day.selected { background: var(--wash); box-shadow: none; }
+.theme-space-light .calendar-day.muted { background: transparent; }
+
+/* The date is a chip, so "today" can be a ring and "selected" a teal fill
+   without the whole cell turning into a colour block. Same shape as Home. */
+.theme-space-light .calendar-day time {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 4px;
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1;
+}
+.theme-space-light .calendar-day.muted time { color: var(--quiet); }
+.theme-space-light .calendar-day.today time { box-shadow: inset 0 0 0 1.5px var(--teal); }
+.theme-space-light .calendar-day.selected time {
+  background: var(--teal);
+  color: #04211d;
+  box-shadow: 0 10px 22px rgba(0, 191, 166, .22);
+}
+.theme-space-light .calendar-day:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: none; }
+
+.theme-space-light .calendar-day-add {
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--wash-2);
+  color: var(--muted);
+}
+.theme-space-light .calendar-day-add:hover { background: var(--teal-soft); color: var(--teal-ink); }
+
+/* ── an event is a line, not a block ──────────────────────────────────────── */
+/* The kind still reads at a glance, but through one small dot obeying the
+   colour law rather than a filled bar per row. */
+.theme-space-light .calendar-event {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.theme-space-light .calendar-event::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+.theme-space-light .calendar-event:hover { background: var(--wash-2); }
+.theme-space-light .calendar-event.task::before,
+.theme-space-light .calendar-event.blog::before { background: var(--amber); }
+.theme-space-light .calendar-event.deadline::before { background: var(--red); }
+.theme-space-light .calendar-event.external::before { background: var(--quiet); }
+.theme-space-light .calendar-event.deadline { font-weight: 600; }
+/* Inside a cell the dot already says which kind it is; a second label per row
+   is the noise that made the old grid unreadable. */
+.theme-space-light .calendar-day .cal-tag { display: none; }
+
+/* ── legend ───────────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-legend { gap: 14px; margin-bottom: 14px; color: var(--muted); font-size: 12.5px; }
+.theme-space-light .cal-key::before { width: 7px; height: 7px; }
+
+/* The agenda column is the same 360px paper column Home uses, so the two
+   screens line up when placed side by side. */
+.theme-space-light .calendar-main { grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; }
+
+/* ── side panel ───────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-side {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 20px;
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .cal-side-head { border-bottom: 0; padding-bottom: 0; margin-bottom: 14px; }
+.theme-space-light .cal-side-head h2 { font-size: 21px; font-weight: 720; letter-spacing: -.04em; line-height: 1.15; }
+.theme-space-light .cal-side-head span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+.theme-space-light .cal-agenda { gap: 0; }
+.theme-space-light .cal-agenda li { gap: 10px; border-top: 1px solid var(--line); }
+.theme-space-light .cal-agenda li:first-child { border-top: 0; }
+.theme-space-light .cal-agenda li > button {
+  gap: 3px;
+  padding: 11px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  transition: background .12s ease;
+}
+.theme-space-light .cal-agenda li > button:hover { background: var(--wash); border: 0; }
+.theme-space-light .cal-agenda li.active > button { background: var(--teal-soft); border: 0; }
+.theme-space-light .cal-agenda-time { text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--muted); font-weight: 680; }
+.theme-space-light .cal-agenda li > button strong { font-size: 14.5px; font-weight: 710; letter-spacing: -.015em; }
+.theme-space-light .cal-agenda-link {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+  font-size: 12px;
+  font-weight: 680;
+}
+.theme-space-light .cal-side-add {
+  margin-top: 14px;
+  padding: 11px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  color: var(--muted);
+  font-weight: 620;
+}
+.theme-space-light .cal-side-add:hover { background: var(--wash); color: var(--ink); border-color: var(--teal); }
+
+/* ── schedule ─────────────────────────────────────────────────────────────── */
+.theme-space-light .cal-schedule {
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+}
+.theme-space-light .cal-schedule-day h3 {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+/* In the schedule there is no grid position to read the kind from, so the one
+   pill per row is allowed back. */
+.theme-space-light .cal-schedule .calendar-event { padding: 8px 6px; border-top: 1px solid var(--line); border-radius: 0; grid-template-columns: 6px minmax(0, 1fr) auto; }
+.theme-space-light .cal-schedule .cal-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+/* ── composer / detail ────────────────────────────────────────────────────── */
+.theme-space-light .calendar-detail {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .calendar-error,
+.theme-space-light .calendar-notice { border-radius: 14px; }
+
+@media (max-width: 1100px) {
+  .theme-space-light .calendar-grid { padding: 18px; }
+  .theme-space-light .calendar-day { min-height: 68px; }
+}
+/* Must restate the collapse: the scoped two-column rule above outranks the
+   unscoped one further up this file, so it would otherwise survive narrow. */
+@media (max-width: 56.25em) {
+  .theme-space-light .calendar-main { grid-template-columns: minmax(0, 1fr); }
+}

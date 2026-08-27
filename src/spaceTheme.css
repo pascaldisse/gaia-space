@@ -63,7 +63,7 @@
   /* brand system — navy is only ever used as INK ON TEAL inside views
      (button.primary, avatars, project marks); the page background comes from
      :root, which this scope does not reach. So it becomes a deep teal ink. */
-  --brand-navy: #08302b;
+  --brand-navy: #021f1b; /* prototype ink on teal (.btn.primary, .send) */
   --brand-teal: var(--teal);
   --brand-teal-bright: var(--teal-dark);
   --brand-ice: var(--ink);
@@ -107,15 +107,89 @@
   --status-risk-medium: #caa64a;
   --status-risk-low: var(--teal);
 
-  /* controls — filled paper fields on a wash canvas, real hairlines */
-  --ctl-bg: var(--paper);
+  /* controls — filled paper fields on a wash canvas, real hairlines.
+     SHAPE + TYPE come from the prototype `.input` / `.btn` (stage 5a):
+       .input { min-height:40px; border:1px solid var(--line); radius:11px;
+                padding:10px 11px; background:#fbfaf8; font-size:14px }
+       .btn   { border:1px solid var(--line-strong); radius:11px;
+                background:var(--paper); padding:9px 12px; 13px/650 } */
+  --ctl-bg: #fbfaf8;            /* prototype .input fill — a hair off paper */
   --ctl-bg-hover: #f6f2ec;
   --ctl-bg-raised: var(--paper);
   --ctl-bg-raised-hover: #f6f2ec;
-  --ctl-border: var(--line-strong);
-  --ctl-border-hover: var(--quiet);
+  --ctl-border: var(--line);
+  --ctl-border-hover: var(--line-strong);
   --ctl-placeholder: var(--quiet);
   --ctl-focus-ring: 0 0 0 3px rgba(0, 191, 166, .22);
+
+  --ctl-radius: 11px;
+  --ctl-radius-sm: 9px;
+  --ctl-pad-y: 10px;
+  --ctl-pad-x: 11px;
+  --ctl-font-size: 14px;
+  --ctl-font-weight: 500;
+  --ctl-line: 1.35;
+
+  /* ── TYPOGRAPHY ──────────────────────────────────────────────────────────
+     The prototype has no brand face at all: one system stack, and the voice
+     comes from size/weight/tracking. Poppins-for-headings is the single
+     biggest reason the rest of the app reads as a different product from the
+     Home calendar, so BOTH tokens re-point here. */
+  --font-head: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* prototype heading scale, harvested verbatim */
+  --type-h1: 27px;      --type-h1-ls: -.045em;  --type-h1-lh: 1.12;
+  --type-h2: 18px;      --type-h2-ls: -.035em;
+  --type-h3: 15px;      --type-h3-ls: -.025em;
+  --type-h4: 13.5px;    --type-h4-ls: -.015em;
+  --type-weight-head: 720;   /* .surface h2 / h1 / .drawer h2 all 720 */
+  --type-weight-strong: 700; /* .item-title, .author, .stat-row strong */
+  --type-kicker: 12px;
+  --type-kicker-weight: 680;
+  --type-kicker-ls: .08em;
+  --type-body: 15px;         /* .text */
+  --type-body-lh: 1.52;
+  --type-sub: 14px;          /* .subtitle, .side-link, .tab */
+  --type-meta: 13px;         /* .item-sub, .time, .metric-pill */
+  --type-micro: 12px;        /* .tag, .action-btn, labels */
+
+  /* ── SPACING + SHAPE ─────────────────────────────────────────────────────
+     .feed padding 22px 28px 30px · .page-header 18px 28px 0 · HomeCalendar
+     18px 28px 32px. The old 26/34/44 rhythm is wider and looser than either. */
+  --view-pad-y: 18px;
+  --view-pad-x: 28px;
+  --view-pad-bottom: 32px;
+  --view-head-gap: 16px;
+
+  /* .surface / .table 18px · .side-card / .composer-box / .summary-card 16px
+     · .tag / .action-btn 8px · .task-meter 12px */
+  --radius-control: 11px;
+  --radius-option: 10px;
+  --radius-event: 6px;
+  --radius-card: 18px;
+  --radius-card-sm: 16px;
+  --radius-chip-sq: 8px;
+
+  /* calendar shape: the Home calendar is the reference surface */
+  --cal-radius-grid: 18px;
+  --cal-radius-agenda: 12px;
+  --cal-radius-toggle: 10px;
+  --cal-radius-key: 3px;
+
+  /* documents / knowledge radius ladder, lifted to the paper language */
+  --dk-radius-md: 8px;
+  --dk-radius-lg: 10px;
+  --dk-radius-xl: 12px;
+  --dk-radius-2xl: 14px;
+  --dk-radius-3xl: 16px;
+  --dk-radius-4xl: 18px;
+
+  /* elevation ladder, prototype-exact */
+  --shadow-card: var(--shadow);
+  --shadow-card-sm: 0 12px 30px rgba(31, 35, 40, .06);
+  --shadow-side: 0 8px 22px rgba(31, 35, 40, .04);
+  --shadow-btn: 0 1px 0 rgba(0, 0, 0, .03);
 
   /* surface / elevation ladder — cards are paper, the canvas behind is wash */
   --surface: var(--paper);

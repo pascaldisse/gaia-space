@@ -6,6 +6,9 @@ import "./spaceTheme.css";
 // Imported here so hand-written light surfaces (ChatSpaceLight, HomeCalendar)
 // still win on equal specificity. See tools/lightOverrides.mjs.
 import "./spaceLightOverrides.css";
+// Typography / control shape / spacing restatement (stage 5a). Imported AFTER
+// the generated colour layer: where both touch a control it must win.
+import "./spaceLightType.css";
 import Dashboard from "./views/Dashboard";
 import Home from "./views/Home";
 import Development from "./views/Development";
