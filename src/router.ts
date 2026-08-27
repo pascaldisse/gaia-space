@@ -18,7 +18,15 @@ export type Route = {
   projectId?: string;      // issue context: /projects/<projectId>/issues/<id>
   containerType?: string;  // document context: /documents/<containerType>/<containerId>/<id>
   containerId?: string;
+  tab?: string;            // channel workspace tab: /channel/<channelId>/<tab>
 };
+
+/** Channel workspace tabs (communication-first shell). `messages` is the default surface;
+ *  the remaining briefing tabs (overview/tasks/…) land when their views exist, and an
+ *  unknown tab degrades to the plain channel link rather than to the fallback view. */
+export const channelTabs = ["messages"] as const;
+const isChannelTab = (value: string): value is typeof channelTabs[number] =>
+  channelTabs.includes(value as typeof channelTabs[number]);
 
 export type ViewSpec = { name: string; slug?: string; aliases?: string[] };
 
@@ -114,6 +122,10 @@ if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks
       return norm({ view: "Projects", entityType: "project", entityId: projectId });
   }
 
+  // /channel/<channelId>/<tab> — the channel as a workspace, opening on its chat.
+  if (head === "channel" && rest.length === 2 && isChannelTab(rest[1]))
+    return norm({ view: "Chat", entityType: "channel", entityId: rest[0], tab: rest[1] });
+
   // /documents/<id> | /documents/<containerType>/<containerId>[/<id>]
   if (head === "documents" && rest.length) {
     if (rest.length === 1) return norm({ view: "Documents", entityType: "document", entityId: rest[0] });
@@ -145,6 +157,8 @@ export function buildPath(r: Route): string {
 if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
 if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
+  if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
+    return `channel/${enc(r.entityId)}/${r.tab}`;
   if (desc && r.entityId) {
     if (desc.parent === "project" && r.projectId)
       return `projects/${enc(r.projectId)}/${desc.segment}/${enc(r.entityId)}`;

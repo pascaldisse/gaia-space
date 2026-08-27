@@ -159,6 +159,17 @@ describe("grammar", () => {
     expect(entityView("channel")).toBe("Chat");
   });
 
+  test("the channel workspace tab round-trips and opens the Chat view", () => {
+    expect(parsePath("channel/c-1/messages"))
+      .toMatchObject({ view: "Chat", entityType: "channel", entityId: "c-1", tab: "messages" });
+    expect(buildPath({ view: "Chat", entityType: "channel", entityId: "c-1", tab: "messages" }))
+      .toBe("channel/c-1/messages");
+    // An unknown tab is not a route: it degrades to the fallback, never to a blank Chat.
+    expect(parsePath("channel/c-1/nonsense")).toMatchObject({ view: "Dashboard" });
+    // The tab-free channel link keeps its existing canonical form.
+    expect(buildPath({ view: "Chat", entityType: "channel", entityId: "c-1" })).toBe("channels/c-1");
+  });
+
   test("ids with unusual characters survive a round trip", () => {
     const id = "a/b c#d?e";
     const path = buildPath({ view: "Meetings", entityType: "meeting", entityId: id });
