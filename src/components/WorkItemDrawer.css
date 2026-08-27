@@ -1,0 +1,125 @@
+/* Every rule is scoped under `.wid-root`, and every prototype token is declared
+   locally with a fallback, so this drawer renders identically whether it is mounted
+   inside the light chat-first shell or on top of the old dark theme — and nothing
+   in here can leak out and repaint either of them. */
+.wid-root {
+  --wid-ink: var(--ink, #1f2328);
+  --wid-muted: var(--muted, #68717d);
+  --wid-paper: var(--paper, #ffffff);
+  --wid-wash: var(--wash, #faf8f4);
+  --wid-line: var(--line, #e5ddd3);
+  --wid-teal: var(--teal, #00bfa6);
+  --wid-teal-dark: var(--teal-dark, #008d7b);
+  --wid-teal-soft: var(--teal-soft, #dcf7f2);
+  --wid-amber: var(--amber, #d99b24);
+  --wid-red: var(--red, #bd3f3f);
+  --wid-red-soft: var(--red-soft, #fbe3e0);
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  color: var(--wid-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.wid-root * { box-sizing: border-box; }
+
+.wid-root .wid-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(25, 16, 30, 0.28);
+}
+
+.wid-root .wid-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 420px;
+  max-width: 92vw;
+  background: var(--wid-paper);
+  box-shadow: -22px 0 60px rgba(31, 35, 40, 0.18);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 18px;
+  overflow: hidden;
+  animation: wid-slide-in 180ms ease-out;
+}
+@keyframes wid-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .wid-root .wid-panel { animation: none; } }
+
+.wid-root .wid-head h2 { margin: 0; font-size: 22px; letter-spacing: -0.04em; font-weight: 720; color: var(--wid-ink); }
+.wid-root .wid-head p { margin: 6px 0 0; color: var(--wid-muted); font-size: 14px; line-height: 1.45; }
+
+.wid-root .wid-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
+.wid-root .wid-field { display: grid; gap: 6px; margin: 0; border: 0; padding: 0; min-width: 0; }
+.wid-root .wid-field > span,
+.wid-root .wid-field > legend {
+  color: var(--wid-muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0;
+}
+.wid-root .wid-input {
+  min-height: 40px;
+  width: 100%;
+  border: 1px solid var(--wid-line);
+  border-radius: 11px;
+  padding: 10px 11px;
+  background: #fbfaf8;
+  color: var(--wid-ink);
+  font: inherit;
+  font-size: 14px;
+}
+.wid-root textarea.wid-input { min-height: 92px; resize: vertical; }
+.wid-root .wid-input:focus-visible { outline: 2px solid var(--wid-teal); outline-offset: 1px; }
+.wid-root .wid-input:disabled { background: var(--wid-wash); color: var(--wid-muted); }
+.wid-root .wid-when-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+
+.wid-root .wid-people { display: grid; gap: 4px; }
+.wid-root .wid-person { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--wid-ink); }
+.wid-root .wid-hint { margin: 0; color: var(--wid-muted); font-size: 13px; line-height: 1.45; }
+
+/* Quelle is a fact, not a field: flat, unclickable, and visibly not an input. */
+.wid-root .wid-source-card {
+  border: 1px solid var(--wid-line);
+  border-left: 3px solid var(--wid-teal);
+  border-radius: 11px;
+  background: var(--wid-wash);
+  padding: 10px 11px;
+  display: grid;
+  gap: 4px;
+}
+.wid-root .wid-source-line { margin: 0; font-size: 13px; color: var(--wid-ink); }
+.wid-root .wid-source-line strong { font-weight: 680; }
+.wid-root .wid-source-line em { color: var(--wid-amber); font-style: normal; }
+.wid-root .wid-source-excerpt { margin: 0; font-size: 13px; line-height: 1.45; color: var(--wid-muted); }
+
+.wid-root .wid-error {
+  margin: 0;
+  border: 1px solid var(--wid-red);
+  border-radius: 11px;
+  background: var(--wid-red-soft);
+  color: var(--wid-red);
+  padding: 9px 11px;
+  font-size: 13px;
+}
+
+.wid-root .wid-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
+.wid-root .wid-btn {
+  min-height: 40px;
+  border: 1px solid var(--wid-line);
+  border-radius: 11px;
+  padding: 0 15px;
+  background: var(--wid-paper);
+  color: var(--wid-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 640;
+  cursor: pointer;
+}
+.wid-root .wid-btn:hover:not(:disabled) { background: var(--wid-wash); }
+.wid-root .wid-primary { background: var(--wid-teal); border-color: var(--wid-teal-dark); color: #05302a; }
+.wid-root .wid-primary:hover:not(:disabled) { background: var(--wid-teal-dark); color: var(--wid-teal-soft); }
+.wid-root .wid-btn:disabled { opacity: 0.55; cursor: not-allowed; }
