@@ -46,8 +46,10 @@
   flex: none;
   border: 0;
   border-radius: 14px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 2px;
   background: transparent;
   color: var(--nav-muted);
@@ -342,14 +344,23 @@
 .space-placeholder p { color: var(--muted); line-height: 1.52; margin: 0; font-size: 14px; }
 
 /* A rail label must never be cut mid-word ("Entwicklun"); it shrinks instead. */
+/* The label box is the RAIL's inner width (64px), not the 48px pill it sits under:
+   the pill keeps its designed size while the word gets the whole column. One line,
+   never hyphenated — a rail label broken into "De-vel-op-men-t" is not a label. */
 .space-chat-shell .rail-label {
-  max-width: 100%;
-  padding-inline: 2px;
-  font-size: clamp(8px, 2.2vw, 9.5px);
-  line-height: 1.15;
+  width: 64px;
+  max-width: none;
+  margin-inline: -8px;
+  padding-inline: 0;
+  font-size: 8.5px;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
   text-align: center;
-  overflow-wrap: anywhere;
-  hyphens: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  hyphens: manual;
 }
 
 /* The section `+` is a real button now: it opens the "new conversation" drawer that
