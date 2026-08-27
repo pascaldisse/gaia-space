@@ -3,6 +3,7 @@ import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
 import { linkProps } from "../router";
+import "../components/paper.css";
 import "./Issues.css";
 import "./TeamTasks.css";
 
@@ -74,12 +75,17 @@ export default function TeamTasks() {
       <h2 class="tt-group-head"><a {...linkProps({ view: "Project Tasks", projectId: group.project_id })}>{group.name}</a> <small>{group.items.length}</small></h2>
       <ul class="issue-list tt-list">
         <For each={group.items}>{task => <li>
+          {/* Same three-part row as Issues: title line, muted meta line, one pill. */}
           <div class="issue-row tt-row" classList={{ overdue: !task.done && !!task.due_date && task.due_date < todayISO() }}>
             <span class="project-task-check" aria-hidden="true">{task.done ? "✓" : "○"}</span>
-            <strong>{task.content}</strong>
+            <span class="row-main">
+              <strong>{task.content}</strong>
+              <span class="row-meta">
+                <span class="tt-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
+                <Show when={task.due_date}>{date => <time>{date()}</time>}</Show>
+              </span>
+            </span>
             <span class="status-name">{nameOf(task.profile_id)}</span>
-            <span class="tt-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
-            <Show when={task.due_date}>{date => <time>{date()}</time>}</Show>
           </div>
         </li>}</For>
       </ul>

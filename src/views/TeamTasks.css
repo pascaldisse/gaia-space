@@ -11,3 +11,20 @@
 .tt-assignees { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .tt-row.overdue time { color: var(--status-danger-ink); font-weight: 600; }
 .tt-row.overdue { border-left: 3px solid var(--status-risk-overdue); }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════
+   Team tasks draws in the `.planning-view` shell, so the row, filter bar and
+   empty state all come from Issues.css's space-light section. Only the group
+   chrome and the overdue tone are local. */
+.theme-space-light .team-tasks-view .tt-list { border: 1px solid var(--line); border-radius: 20px; background: var(--paper); padding: 6px 8px; box-shadow: 0 16px 36px rgba(31, 35, 40, .06); }
+.theme-space-light .tt-group { margin-bottom: 22px; }
+.theme-space-light .tt-group-head { margin-bottom: 8px; gap: 9px; }
+.theme-space-light .tt-group-head a { font-size: 12px; font-weight: 680; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.theme-space-light .tt-group-head a:hover { color: var(--teal-dark); }
+.theme-space-light .tt-group-head small { color: var(--quiet); font-size: 12px; font-weight: 620; }
+.theme-space-light .tt-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; }
+.theme-space-light .tt-row .project-task-check { color: var(--quiet); }
+/* Overdue is critical, and critical is red ink on the date — not a border stub
+   hanging off the side of the row. */
+.theme-space-light .tt-row.overdue { border-left: 0; }
+.theme-space-light .tt-row.overdue .row-meta time { color: var(--red-ink); font-weight: 700; }

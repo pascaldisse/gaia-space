@@ -109,6 +109,11 @@
   min-height: 40px;
   color: var(--ink);
   -webkit-text-fill-color: var(--ink);
+  /* Date/time/number inputs size INTRINSICALLY from font-size + padding, so
+     the step up to the prototype's 14px field type pushed them past the edge
+     of their card in the denser forms (Meetings). Cap them at their column. */
+  max-width: 100%;
+  min-width: 0;
 }
 .theme-space-light textarea { min-height: 92px; }  /* prototype textarea.input */
 .theme-space-light input::placeholder,

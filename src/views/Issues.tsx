@@ -5,9 +5,11 @@ import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, route, useDeepLink } from "../router";
+import "../components/paper.css";
 import "./Issues.css";
 
 const blank = () => ({ title: "", description: "", status_id: "", assignee_id: "", due_date: "" });
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** Workspace issue tracker: filters query the persisted planning domain; the
  * detail panel owns issue fields, tags, checklists, time entries, and children. */
@@ -155,10 +157,22 @@ const createStatus = async () => {
         <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
         <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
         <ul class="issue-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
+          {/* Title line, then a muted meta line, then at most one status pill —
+              the same three-part shape every list surface uses now. */}
           <a class="issue-row" {...linkProps(issueRoute(issue))} onClick={event => followIssue(event, issue)}>
-            <span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong>
-            <Show when={issue.status_id}>{id => <span class="status-name">{statuses()?.find(status => status.id === id())?.name ?? "Status"}</span>}</Show>
-            <Show when={issue.due_date}>{date => <time>{date()}</time>}</Show>
+            <span class="row-main">
+              <strong>{issue.title}</strong>
+              <span class="row-meta">
+                <span class="issue-number">#{issue.number}</span>
+                <Show when={issue.due_date}>{date => <time classList={{ overdue: date() < todayISO() }}>{date()}</time>}</Show>
+              </span>
+            </span>
+            <Show when={issue.status_id}>{id => {
+              const status = () => statuses()?.find(entry => entry.id === id());
+              // Colour law: an unresolved status is open work (teal); a resolved
+              // one is finished and must not keep asking for attention.
+              return <span class="status-name" classList={{ teal: status() ? !status()!.resolved : true }}>{status()?.name ?? "Status"}</span>;
+            }}</Show>
           </a>
         </li>}</For></ul>
       </main>
