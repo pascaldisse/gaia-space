@@ -82,7 +82,7 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
 const channel_id = await meetingsApi.attachChannel(meeting.id);
 const created = { ...meeting, channel_id };

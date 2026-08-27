@@ -102,6 +102,8 @@ export default function Meetings() {
         video_started_at: null,
         video_ended_at: null,
         video_ended_by: null,
+        source_entity_type: null,
+        source_entity_id: null,
       };
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);
