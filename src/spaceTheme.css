@@ -176,6 +176,19 @@
   --dk-icon-border: rgba(0, 191, 166, .30);
 }
 
+/* ── Literals the generator deliberately does not touch ────────────────────
+   tools/lightOverrides.mjs skips any value containing a gradient, so brand
+   marks (teal logo lozenges) keep their treatment. Two panel shells painted a
+   navy gradient rather than a flat colour, and those are surfaces, not marks:
+   restated here by hand. */
+.theme-space-light .today-next,
+.theme-space-light .calendar-overview {
+  background: var(--paper);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+.theme-space-light .call-tile { background: linear-gradient(135deg, var(--teal-soft), var(--wash-2)); }
+
 /* Native widget chrome: App.css pins `color-scheme: dark` on every field. */
 .theme-space-light input,
 .theme-space-light select,
