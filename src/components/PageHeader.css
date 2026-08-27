@@ -1,0 +1,116 @@
+/* ── Page header (redesign stage 6a) ────────────────────────────────────────
+   One idiom for every view. Values are the prototype's `.page-header` /
+   `.title-row` / `.kicker` / `h1` / `.subtitle` / `.metric-pill` block, read
+   through the light token layer (spaceTheme.css) rather than hardcoded, so
+   the same markup renders correctly in the shipped dark theme too — the
+   colour tokens used here (--text-strong, --text-muted, --ctl-*) are defined
+   by BOTH :root (dark) and .theme-space-light.
+
+   Structure only, no decoration: no icon lozenge, no explanatory paragraph. */
+
+.page-header {
+  margin-bottom: var(--view-head-gap, 22px);
+}
+
+.ph-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 22px;
+}
+
+.ph-title { min-width: 0; }
+
+/* .kicker's type voice is owned by spaceLightType.css (12px / 680 / .08em
+   uppercase). Restated structurally here so the dark layouts get the same
+   micro-label instead of inheriting body type. */
+.page-header .kicker {
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 12px);
+  font-weight: var(--type-kicker-weight, 680);
+  letter-spacing: var(--type-kicker-ls, .08em);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: var(--type-h1, 27px);
+  line-height: var(--type-h1-lh, 1.12);
+  letter-spacing: var(--type-h1-ls, -.045em);
+  font-weight: var(--type-weight-head, 720);
+  color: var(--text-strong);
+}
+
+/* ONE line. If a view needs more than this, the words belong next to the
+   control they describe — that is the whole point of stage 6a. */
+.page-header .subtitle {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: var(--type-sub, 14px);
+  line-height: 1.4;
+  max-width: 62ch;
+}
+
+.ph-edge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.header-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ph-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+.metric-pill {
+  min-height: 34px;
+  border: 1px solid var(--ctl-border, var(--surface-line));
+  border-radius: var(--ctl-radius-sm, 10px);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  background: var(--ctl-bg, transparent);
+  color: var(--text-muted);
+  font-size: var(--type-meta, 13px);
+  white-space: nowrap;
+}
+.metric-pill strong { color: var(--text-strong); font-weight: var(--type-weight-strong, 700); }
+
+@media (max-width: 720px) {
+  .ph-row { flex-direction: column; }
+  .ph-edge { justify-content: flex-start; }
+  .header-metrics, .ph-actions { justify-content: flex-start; }
+}
+
+/* ── filter bars ────────────────────────────────────────────────────────────
+   Prototype law: nothing floats naked on the wash. A view's filter row is a
+   paper card with consistent field spacing and kicker-styled labels. */
+.filter-bar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--ctl-border, var(--surface-line));
+  border-radius: var(--ctl-radius, 11px);
+  background: var(--ctl-bg-raised, transparent);
+}
+.filter-bar > * { min-width: 0; }
+.filter-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.filter-field > label,
+.filter-bar .filter-label {
+  color: var(--text-muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 12px);
+  font-weight: var(--type-kicker-weight, 680);
+  letter-spacing: var(--type-kicker-ls, .08em);
+  text-transform: uppercase;
+}
+.filter-bar .filter-spacer { flex: 1 1 auto; }
