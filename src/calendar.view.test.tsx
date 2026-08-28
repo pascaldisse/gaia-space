@@ -122,6 +122,43 @@ describe("calendar day agenda", () => {
     for (const label of actions.querySelectorAll("label")) expect(label.textContent?.trim()).toBe("");
   });
 
+  test("all four view modes switch, and the pill that is chosen is the pill that is marked", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: [] } };
+    const host = mount();
+    await settle();
+    const pill = (label: string) => [...host.querySelectorAll(".cal-viewtoggle button")].find((button) => button.textContent === label) as HTMLButtonElement;
+    const marked = () => [...host.querySelectorAll(".cal-viewtoggle button")].filter((button) => button.classList.contains("active")).map((button) => button.textContent);
+    expect(marked()).toEqual(["Month"]);
+    for (const [label, grid] of [["Week", "week"], ["Day", "day"]] as const) {
+      pill(label).click();
+      await settle();
+      // Exactly one pill is marked, it is the one that was pressed, and the grid
+      // actually changed shape with it.
+      expect(marked()).toEqual([label]);
+      expect(pill(label).getAttribute("aria-pressed")).toBe("true");
+      expect(host.querySelector(".calendar-grid")?.classList.contains(grid)).toBe(true);
+    }
+    pill("Schedule").click();
+    await settle();
+    expect(marked()).toEqual(["Schedule"]);
+    expect(host.querySelector(".cal-schedule")).toBeTruthy();
+    expect(host.querySelector(".calendar-grid")).toBeNull();
+    pill("Month").click();
+    await settle();
+    expect(marked()).toEqual(["Month"]);
+    // The range navigation keeps its names and moves the cursor by the mode's span.
+    const heading = () => host.querySelector(".cal-toolbar strong")?.textContent;
+    const before = heading();
+    (host.querySelector("button[aria-label='Next range']") as HTMLButtonElement).click();
+    await settle();
+    expect(heading()).not.toBe(before);
+    (host.querySelector(".cal-toolbar .ghost-pill") as HTMLButtonElement).click();
+    await settle();
+    expect(heading()).toBe(before);
+  });
+
   test("calendar filter keeps local items and hides external items from other calendars", async () => {
 stubFetch();
 setProfileId("pa");
