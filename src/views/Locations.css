@@ -9,6 +9,14 @@
  * theme-agnostic `--status-danger-*` tokens, so an error stays legible in dark.
  */
 
+/* The page uses the page's width. `.settings-card` caps itself at `--rail-max`
+   (720px) because it was written for the Settings RAIL — a narrow column beside
+   something else. Here there is nothing beside it, so the cap turned a 1338px
+   surface into an 840px strip with half the screen blank. The measure belongs to
+   the page, not to a card borrowed from another one. */
+.locations-view .locations-grid > .settings-card { max-width: none; }
+.locations-view .locations-grid { max-width: var(--view-max, 1160px); }
+
 /* Two columns where there is room: the form is a tool, the list is the point, and
    a form that fills the page while the list is nowhere reads as if the page were a
    form. Below 1100px they stack, form last. */
@@ -116,3 +124,9 @@
   color: var(--ink);
   font-size: 12px;
 }
+
+/* The desk form is one line of fields, not a column of them. Stacked, it made a
+   short tool look like a long questionnaire and pushed its own list off screen. */
+.locations-desk-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 14px; align-items: end; }
+.locations-desk-form > .op-field { min-width: 0; }
+.locations-desk-form .op-hint { grid-column: 1 / -1; margin-top: 0; }

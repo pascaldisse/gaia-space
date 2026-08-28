@@ -481,6 +481,20 @@ export default function Locations() {
         </Show>
 
         {/* ── the list ────────────────────────────────────────────────────── */}
+        {/* AN EMPTY WORKSPACE SHOWS ONE THING. This page used to draw the list card
+            with its own empty state AND the desk card with a second one AND a desk
+            form whose "Choose location…" had nothing to choose — three answers to
+            "there is nothing here yet", one of them a form for work that cannot be
+            done. With no locations, only the lead is drawn. */}
+        <Show when={editorOpen() || (locations() ?? []).length > 0} fallback={
+          <div class="settings-card paper-card locations-lead-card">
+            <EmptyState
+              title="No locations yet"
+              hint="A location is an office, a floor or a room. People and desks are assigned to one."
+              actions={<button class="primary" type="button" onClick={() => openEditor()}>Add the first location</button>}
+            />
+          </div>
+        }>
         <div class="settings-card paper-card">
           <h2 class="paper-section-label">Locations</h2>
 
@@ -536,7 +550,9 @@ export default function Locations() {
                   </span>
                 </span>
                 <Show when={location.channel_id}>
-                  <span class="paper-pill teal">Chat linked</span>
+                  {/* A FACT, NOT AN ACTION. Teal means "open / needs doing" everywhere else; a
+                      channel that exists is neither. */}
+                  <span class="paper-pill">Chat linked</span>
                 </Show>
               </button>
             )}
@@ -544,6 +560,7 @@ export default function Locations() {
         </div>
 
         {/* ── desks ───────────────────────────────────────────────────────── */}
+        <Show when={(locations() ?? []).length > 0}>
         <div class="settings-card paper-card">
           <h2 class="paper-section-label">Desk assignments</h2>
           <p class="op-hint locations-lede">
@@ -715,6 +732,8 @@ export default function Locations() {
             )}
           </For>
         </div>
+        </Show>
+        </Show>
       </div>
     </section>
   );
