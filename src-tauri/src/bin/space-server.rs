@@ -2612,7 +2612,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_checklist_item"
         | "delete_deploy_target"
         | "delete_issue_status"
-        | "delete_message" | "set_message_pinned" => CommandPolicy::Session,
+        // `delete_channel` passes here and is then gated below by Channel.ManageChannel
+        // at the channel's own scope, exactly like every other channel write.
+        | "delete_message" | "set_message_pinned" | "delete_channel" => CommandPolicy::Session,
         // Drafts and typing beats are caller-scoped: `bind_session_identity` rewrites
         // `author_id`/`profile_id`, and the channel ACL check below still applies.
         "save_message_draft"
@@ -2805,7 +2807,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "dependency_overview" => CommandPolicy::PackageRepositoryRead,
         "move_issue_on_board" | "remove_channel_member" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
-        "move_document_folder" => CommandPolicy::DocumentFolderWrite,
+        "move_document_folder" | "delete_document_folder" => CommandPolicy::DocumentFolderWrite,
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
@@ -4217,12 +4219,17 @@ fn authorize_command(
             }
             if matches!(
                 name,
-                "update_channel" | "add_channel_member" | "remove_channel_member"
+                "update_channel"
+                    | "add_channel_member"
+                    | "remove_channel_member"
+                    | "delete_channel"
             ) {
                 let channel_id: String = if name == "update_channel" {
                     body.get("channel")
                         .and_then(|channel| arg(channel, "id").ok())
                         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid channel"))?
+                } else if name == "delete_channel" {
+                    arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
                 } else {
                     arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
                 };
@@ -4232,6 +4239,11 @@ fn authorize_command(
                     "channel",
                     Some(&channel_id),
                 )?;
+                if name == "delete_channel" {
+                    // The library re-checks the same right; who is acting is the
+                    // session, never a name the caller typed into the body.
+                    put_arg(body, "actor_id", json!(user.profile_id));
+                }
             }
             if name == "create_channel" {
                 let supplied: Vec<String> = arg(body, "member_ids").unwrap_or_default();
@@ -5470,6 +5482,7 @@ async fn cmd(
     "mark_notification_read" => personal::mark_notification_read(id: String),
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
+    "delete_document_folder" => documents::delete_document_folder(id: String),
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
@@ -5533,6 +5546,7 @@ async fn cmd(
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
+    "delete_channel" => chat::delete_channel(id: String, actor_id: String),
     "update_deploy_target" => pipelines::update_deploy_target(target: pipelines::DeployTarget),
     "update_document" => documents::update_document(document: documents::Document),
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),

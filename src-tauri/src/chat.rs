@@ -666,6 +666,133 @@ fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String])
     }
     Ok(())
 }
+/// Erase one channel and everything that only exists because of it, in one transaction.
+///
+/// Two rules make this more than a `DELETE`:
+/// 1. A thread is itself a channel (`thread_channels`), so a parent takes its threads
+///    with it — otherwise the thread channel outlives its root message as an
+///    unreachable room full of messages.
+/// 2. A vanished message may not leave a mention notification behind. That is the same
+///    rule `remove_channel_member_impl` applies when someone loses access: the generic
+///    notification list would otherwise still render the body of a message that no
+///    longer exists.
+///
+/// Rows in other domains merely *point* at the channel (a review, a meeting, a team, a
+/// location). Those are not channel content and are never deleted here; their pointer
+/// is cleared, so the review survives without a discussion room.
+fn delete_channel_impl(c: &mut Connection, id: &str, actor_id: &str) -> Result<()> {
+    let exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM channels WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("Channel not found".into());
+    }
+    // Same gate as every other channel write (`update_channel`, member changes):
+    // Channel.ManageChannel at the channel's own scope. A missing right is an error,
+    // never a silent no-op that reports success.
+    crate::platform::require_right_on(
+        c,
+        actor_id,
+        crate::rights::Right::ManageChannel,
+        "channel",
+        Some(id),
+    )?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    // Threads first: `thread_channels.parent_channel_id` names the rooms that only
+    // exist under this one, and each of them is a channel with its own content.
+    let mut pending = vec![id.to_string()];
+    let mut order: Vec<String> = Vec::new();
+    while let Some(current) = pending.pop() {
+        let children: Vec<String> = {
+            let mut s = tx
+                .prepare("SELECT channel_id FROM thread_channels WHERE parent_channel_id=?1")
+                .map_err(|e| e.to_string())?;
+            let rows = s
+                .query_map([&current], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            rows
+        };
+        for child in children {
+            if !order.contains(&child) && child != current {
+                pending.push(child);
+            }
+        }
+        order.retain(|existing| existing != &current);
+        order.push(current);
+    }
+    for channel_id in order.iter().rev() {
+        purge_channel_rows(&tx, channel_id)?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+/// Every table that holds a row *because of* this channel, deepest first. Message-level
+/// rows are removed explicitly rather than left to `ON DELETE CASCADE`: several of these
+/// tables predate the cascade clauses, and this way the guarantee does not depend on the
+/// `foreign_keys` pragma being on for the connection that happens to call us.
+fn purge_channel_rows(tx: &rusqlite::Transaction<'_>, channel_id: &str) -> Result<()> {
+    // A deleted message must not leave a claim on anyone's attention behind.
+    tx.execute(
+        "DELETE FROM notifications WHERE (entity_type='message' AND entity_id IN (SELECT id FROM messages WHERE channel_id=?1)) \
+         OR (entity_type='channel' AND entity_id=?1)",
+        [channel_id],
+    )
+    .map_err(|e| e.to_string())?;
+    const MESSAGE_SCOPED: &[&str] = &[
+        "message_poll_votes WHERE poll_id IN (SELECT id FROM message_polls WHERE channel_id=?1)",
+        "message_poll_options WHERE poll_id IN (SELECT id FROM message_polls WHERE channel_id=?1)",
+        "message_polls WHERE channel_id=?1",
+        "reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_team_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_entity_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_links WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_attachments WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+    ];
+    for clause in MESSAGE_SCOPED {
+        tx.execute(&format!("DELETE FROM {clause}"), [channel_id])
+            .map_err(|e| e.to_string())?;
+    }
+    // Pointers from other domains: cleared, not followed. Their owner keeps existing.
+    for clause in [
+        "UPDATE reviews SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE review_discussions SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE meetings SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE teams SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE locations SET channel_id=NULL WHERE channel_id=?1",
+    ] {
+        tx.execute(clause, [channel_id])
+            .map_err(|e| e.to_string())?;
+    }
+    const CHANNEL_SCOPED: &[&str] = &[
+        "read_state WHERE channel_id=?1",
+        "message_drafts WHERE channel_id=?1",
+        "channel_typing WHERE channel_id=?1",
+        "scheduled_messages WHERE channel_id=?1",
+        "channel_subscriptions WHERE channel_id=?1",
+        "channel_notification_preferences WHERE channel_id=?1",
+        "channel_notes WHERE channel_id=?1",
+        "channel_members WHERE channel_id=?1",
+        "private_feeds WHERE channel_id=?1",
+        "document_discussions WHERE channel_id=?1",
+        "thread_channels WHERE channel_id=?1 OR parent_channel_id=?1 \
+         OR root_message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        // Replies before roots: `messages.thread_of` points at another message.
+        "messages WHERE channel_id=?1 AND thread_of IS NOT NULL",
+        "messages WHERE channel_id=?1",
+        "channels WHERE id=?1",
+    ];
+    for clause in CHANNEL_SCOPED {
+        tx.execute(&format!("DELETE FROM {clause}"), [channel_id])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 fn add_channel_member_impl(
     c: &Connection,
     channel_id: &str,
@@ -2576,6 +2703,12 @@ pub fn update_channel(channel: Channel) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
+}
+/// Delete a channel and its whole content. `actor_id` must hold `Channel.ManageChannel`.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_channel(id: String, actor_id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    delete_channel_impl(&mut c, &id, &actor_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_channel(channel_id: String, profile_id: String) -> Result<()> {
@@ -5355,6 +5488,216 @@ mod tests {
         })
         .unwrap();
         assert_eq!(calls.get(), 1, "a refused link must not be re-fetched");
+        drop(c);
+        drop(path);
+    }
+
+    /// Deleting a channel is the one operation that must leave *nothing* behind: after
+    /// it, no table may still point at the room or at any message that lived in it —
+    /// including the mention notification, which otherwise keeps rendering the body of a
+    /// message that no longer exists (the same defect `remove_channel_member_impl`
+    /// already fixes on exit).
+    #[test]
+    fn deleting_a_channel_leaves_no_row_pointing_at_it() {
+        let (mut c, path) = conn();
+        seed_poll_voters(&c, "chan-doomed");
+        add_channel_member_impl(&c, "chan-doomed", "voter-a", false).unwrap();
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-root".to_string(),
+                channel_id: "chan-doomed".to_string(),
+                author_id: Some("default-org".to_string()),
+                text: "hello @voter-a".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: true,
+                content_kind: default_message_content_kind(),
+                mention_ids: vec!["voter-a".to_string()],
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            mentions_for_impl(&c, "m-root").unwrap(),
+            vec!["voter-a".to_string()],
+            "the fixture must really carry a mention, or the cascade proves nothing"
+        );
+        let mention_notifications: i64 = c
+            .query_row(
+                "SELECT count(*) FROM notifications WHERE entity_type='message' AND entity_id='m-root'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mention_notifications, 1);
+        add_reaction_impl(&c, "m-root", "voter-a", "\u{1f44d}").unwrap();
+        mark_channel_read_impl(&c, "chan-doomed", "voter-a", None).unwrap();
+        save_draft_impl(&c, "chan-doomed", "voter-a", "", "half a thought").unwrap();
+        create_poll_impl(
+            &c,
+            "poll-doomed",
+            "chan-doomed",
+            "default-org",
+            "lunch?",
+            &["Pizza".into(), "Salad".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let thread = ensure_thread_channel_impl(&c, "m-root", None, Some("default-org"))
+            .unwrap()
+            .channel;
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-in-thread".to_string(),
+                channel_id: thread.id.clone(),
+                author_id: Some("default-org".to_string()),
+                text: "in the thread".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: default_message_content_kind(),
+                mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        delete_channel_impl(&mut c, "chan-doomed", "default-org").unwrap();
+
+        assert_eq!(
+            delete_channel_impl(&mut c, "chan-doomed", "default-org").unwrap_err(),
+            "Channel not found",
+            "a second delete has nothing to delete and says so"
+        );
+        // Every table that can name a channel or one of its messages, asked directly.
+        for (table, clause) in [
+            ("channels", "id='chan-doomed'"),
+            ("messages", "channel_id='chan-doomed'"),
+            ("channel_members", "channel_id='chan-doomed'"),
+            ("read_state", "channel_id='chan-doomed'"),
+            ("message_drafts", "channel_id='chan-doomed'"),
+            ("channel_typing", "channel_id='chan-doomed'"),
+            ("scheduled_messages", "channel_id='chan-doomed'"),
+            ("channel_subscriptions", "channel_id='chan-doomed'"),
+            (
+                "channel_notification_preferences",
+                "channel_id='chan-doomed'",
+            ),
+            ("channel_notes", "channel_id='chan-doomed'"),
+            ("message_polls", "channel_id='chan-doomed'"),
+            ("thread_channels", "parent_channel_id='chan-doomed'"),
+            ("reactions", "message_id='m-root'"),
+            ("message_mentions", "message_id='m-root'"),
+            ("message_team_mentions", "message_id='m-root'"),
+            ("message_entity_mentions", "message_id='m-root'"),
+            ("message_links", "message_id='m-root'"),
+            ("message_attachments", "message_id='m-root'"),
+            ("message_poll_votes", "poll_id='poll-doomed'"),
+            ("message_poll_options", "poll_id='poll-doomed'"),
+            (
+                "notifications",
+                "entity_type='message' AND entity_id='m-root'",
+            ),
+            (
+                "notifications",
+                "entity_type='channel' AND entity_id='chan-doomed'",
+            ),
+        ] {
+            let left: i64 = c
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {clause}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(left, 0, "{table} still points at the deleted channel");
+        }
+        // A thread is a channel: it goes with its parent, messages and all.
+        for (table, clause) in [
+            ("channels", format!("id='{}'", thread.id)),
+            ("messages", format!("channel_id='{}'", thread.id)),
+        ] {
+            let left: i64 = c
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {clause}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(left, 0, "the thread channel outlived its parent in {table}");
+        }
+        drop(c);
+        drop(path);
+    }
+
+    /// Deletion is a channel *write*: without `Channel.ManageChannel` it fails loudly and
+    /// the room is still there afterwards. (The catalog is opt-in — a right nobody has
+    /// configured is not yet enforced — so the fixture grants it to a role first.)
+    #[test]
+    fn deleting_a_channel_without_the_right_fails_and_changes_nothing() {
+        let (mut c, path) = conn();
+        seed_scheduler(&c, "chan-guarded");
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('outsider','outsider','Outsider',unixepoch())",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT OR IGNORE INTO rights(id,code,title,right_type,implied_rights_json) VALUES('right-manage-channel','Channel.ManageChannel','Manage channel','Channel','[]')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO roles(id,name) VALUES('role-chan','Channel manager')",
+            [],
+        )
+        .unwrap();
+        let right_id: String = c
+            .query_row(
+                "SELECT id FROM rights WHERE code='Channel.ManageChannel'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_rights(role_id,right_id) VALUES('role-chan',?1)",
+            rusqlite::params![right_id],
+        )
+        .unwrap();
+
+        let refusal = delete_channel_impl(&mut c, "chan-guarded", "outsider").unwrap_err();
+        assert!(
+            !refusal.is_empty(),
+            "a missing right must be an error, never a silent success"
+        );
+        let still_there: i64 = c
+            .query_row(
+                "SELECT count(*) FROM channels WHERE id='chan-guarded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1, "the refused delete must not have run");
+
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('ra-chan','role-chan','outsider','channel','chan-guarded')", []).unwrap();
+        delete_channel_impl(&mut c, "chan-guarded", "outsider").unwrap();
+        let gone: i64 = c
+            .query_row(
+                "SELECT count(*) FROM channels WHERE id='chan-guarded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(gone, 0, "the granted right opens the same door");
         drop(c);
         drop(path);
     }

@@ -686,6 +686,7 @@ pub fn archive_document(id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_document(id: String) -> Result<()> {
     let mut c = db::conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
@@ -1501,6 +1502,43 @@ pub fn update_document_folder(folder: DocumentFolder) -> Result<()> {
         ],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete a folder — only when nothing is inside it. A folder is a container, so deleting
+/// one may never silently take documents or subfolders with it: the caller must empty it
+/// first (or move the content), which keeps the deletion a decision about the folder
+/// alone. Archived children still count as content; they are hidden, not gone.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_document_folder(id: String) -> Result<()> {
+    delete_document_folder_on(&db::conn()?, &id)
+}
+fn delete_document_folder_on(c: &rusqlite::Connection, id: &str) -> Result<()> {
+    let exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1)",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("Folder not found".into());
+    }
+    let occupied: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM document_folders WHERE parent_id=?1) \
+             OR EXISTS(SELECT 1 FROM documents WHERE folder_id=?1)",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if occupied {
+        return Err("Folder is not empty".into());
+    }
+    c.execute("DELETE FROM kb_book_owners WHERE book_id=?1", [&id])
+        .map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM document_folders WHERE id=?1", [&id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2424,6 +2462,53 @@ mod tests {
         assert!(!my_docs.iter().any(|d| d.id == "proj1" || d.id == "kb1"));
         assert!(!proj_docs.iter().any(|d| d.id == "my1" || d.id == "kb1"));
         assert!(!kb_docs.iter().any(|d| d.id == "my1" || d.id == "proj1"));
+    }
+
+    /// A folder is a container, so its deletion is a decision about the folder alone:
+    /// an empty one goes, a populated one refuses by name, and nothing inside it is ever
+    /// removed on the way. Archived content still counts — hidden is not gone.
+    #[test]
+    fn a_folder_is_deleted_only_when_it_is_empty() {
+        let c = test_conn();
+        c.execute(
+            "INSERT INTO document_folders(id,container_type,parent_id,name,archived) VALUES('f-empty','my-docs',NULL,'Empty',0),('f-full','my-docs',NULL,'Full',0),('f-parent','my-docs',NULL,'Parent',0),('f-child','my-docs','f-parent','Child',0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO documents(id,container_type,folder_id,doc_type,title,archived) VALUES('d-in','my-docs','f-full','text','Inside',1)", []).unwrap();
+
+        delete_document_folder_on(&c, "f-empty").unwrap();
+        let empty_gone: i64 = c
+            .query_row(
+                "SELECT count(*) FROM document_folders WHERE id='f-empty'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(empty_gone, 0);
+
+        assert_eq!(
+            delete_document_folder_on(&c, "f-full").unwrap_err(),
+            "Folder is not empty",
+            "an archived document is still content"
+        );
+        assert_eq!(
+            delete_document_folder_on(&c, "f-parent").unwrap_err(),
+            "Folder is not empty",
+            "a subfolder is content too"
+        );
+        assert_eq!(
+            delete_document_folder_on(&c, "f-ghost").unwrap_err(),
+            "Folder not found"
+        );
+        let survivors: i64 = c
+            .query_row(
+                "SELECT (SELECT count(*) FROM documents WHERE id='d-in') + (SELECT count(*) FROM document_folders WHERE id IN ('f-full','f-parent','f-child'))",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(survivors, 4, "a refused delete removes nothing at all");
     }
 
     #[test]
