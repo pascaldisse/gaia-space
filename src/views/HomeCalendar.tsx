@@ -6,7 +6,6 @@ import { profileId } from "../session";
 import { linkProps, toSlug, type Route } from "../router";
 import { dateKey, itemsOnDay, meetingIdOf, monthCells, startOfLocalDay } from "../calendar";
 import { type Tone, urgencyLabel, urgencyOf, urgencyTone } from "../statusTone";
-import { MetricGrid, MetricTile } from "../components/blocks";
 import { attentionCount, attentionLoading, needsYou } from "../attention";
 import "./HomeCalendar.css";
 
@@ -236,31 +235,29 @@ export default function HomeCalendar() {
           </div>
         </section>
 
+        {/* A CARD LIKE THE DAY CARD, not a scoreboard. "1 total / 0 today /
+            0 critical" is three numbers to say "you have one task" — and next to a
+            list that shows the task itself, the numbers add nothing. So the card
+            shows the WORK, the heading is the way through to it, and the tile grid
+            is gone. (The subline here used to read "A small overview, not a second
+            dashboard" — an internal design note that had leaked into the product.) */}
         <section class="agenda-card" aria-label="My tasks">
           <div class="agenda-head">
             <div>
               <div class="agenda-title">My tasks</div>
-              <div class="agenda-sub">A small overview, not a second dashboard</div>
+              <div class="agenda-sub">Yours, and what people put on you</div>
             </div>
+            <a class="home-head-link" {...linkProps({ view: "To-Do" })}>Open →</a>
           </div>
-          {/* THE REFERENCE TILE, NOW SHARED (stage 11, defect 2). This block was
-              `.compact-stat`, the calmest tile in the app and therefore the one
-              every other view should have been using. It is the shared
-              MetricTile now — same hairline, same figure, same muted label — so
-              Projects, Time off and the rails cannot drift from it again.
-              `critical` was already zero-aware by hand; `tone="red"` says the
-              same thing through the one rule (metricTone) that owns it. */}
-          <MetricGrid label="My tasks at a glance" class="compact-stats">
-            <MetricTile value={todos().length} label="total" />
-            <MetricTile value={todosToday().length} label="today" />
-            <MetricTile value={todosCritical().length} label="critical" tone="red" />
-          </MetricGrid>
           <Show when={dashboard.loading}><p class="hint">Loading tasks…</p></Show>
-          <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">No open tasks with a date.</p></Show>
+          <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">Nothing open with a date.</p></Show>
           <For each={highlighted()}>{todo => {
             const state = todoState(todo, today);
             return <Row title={todo.content} sub={projectLabel(todo.project_id)} label={state.label} tone={state.tone} to={todoRoute(todo)} />;
           }}</For>
+          <Show when={todos().length > highlighted().length}>
+            <a class="home-more" {...linkProps({ view: "To-Do" })}>All {todos().length} tasks</a>
+          </Show>
         </section>
 
         {/* RENAMED, because "Open messages" stopped being honest: this now

@@ -285,11 +285,17 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
     });
   }
 
-  // 4. Todos assigned to me — mine to do, or explicitly put on me.
+  // 4. Todos SOMEBODY ELSE put on me.
+  //
+  // Not every task of mine belongs in this list. A worklist answers "what is
+  // directed at me"; my own to-do list answers "what am I doing" — and Home shows
+  // both, side by side, so a task I wrote for myself appeared in the same column
+  // twice under two headings. The discriminator is authorship, not assignment: an
+  // item enters attention because ANOTHER person aimed it here.
   for (const todo of sources.todos) {
     if (todo.done) continue;
-    const assigned = todo.assignee_ids.includes(me) || (todo.profile_id === me && todo.assignee_ids.length === 0);
-    if (!assigned) continue;
+    if (todo.profile_id === me) continue;
+    if (!todo.assignee_ids.includes(me)) continue;
     items.push({
       id: `todo:${todo.id}`,
       kind: "todo",

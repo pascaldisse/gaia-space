@@ -118,11 +118,18 @@ describe("one definition of what needs me", () => {
     expect(countNeedsYou(s)).toBe(1);
   });
 
-  test("assigned work counts, other people's work does not", () => {
+  // The rule tightened: a worklist answers "what is directed at me". A task I wrote
+  // for myself is my own list, not an inbox item — and Home showed it twice, once
+  // under "My tasks" and once under "Needs you". The discriminator is AUTHORSHIP.
+  test("work somebody else put on me counts; my own list and other people's do not", () => {
     const s = sources({
-      todos: [todo({ id: "mine", assignee_ids: [ME] }), todo({ id: "theirs", profile_id: "other", assignee_ids: ["other"] })],
+      todos: [
+        todo({ id: "put-on-me", profile_id: "other", assignee_ids: [ME] }),
+        todo({ id: "my-own", assignee_ids: [ME] }),
+        todo({ id: "theirs", profile_id: "other", assignee_ids: ["other"] }),
+      ],
     });
-    expect(buildNeedsYou(s).map((item) => item.id)).toEqual(["todo:mine"]);
+    expect(buildNeedsYou(s).map((item) => item.id)).toEqual(["todo:put-on-me"]);
   });
 
   test("read notifications and organisation news never reach the worklist", () => {
