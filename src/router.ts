@@ -86,12 +86,14 @@ export function registerViews(views: (string | ViewSpec)[]) {
     for (const alias of spec.aliases ?? []) slugToView[alias] ??= spec.name;
   }
   for (const desc of Object.values(entityRoutes)) slugToView[desc.segment] ??= desc.view;
+  bump();
   resync();
 }
 
 /** Restrict reachable views. Pass null to allow every registered view (Tauri/tests). */
 export function setAvailableViews(names: string[] | null) {
   available = names ? new Set(names) : null;
+  bump();
   resync();
 }
 
@@ -104,6 +106,7 @@ export function setAvailableViews(names: string[] | null) {
 export function setRoutePending(next: boolean) {
   if (pending === next) return;
   pending = next;
+  bump();
   resync();
 }
 
@@ -237,6 +240,13 @@ export const createMemoryAdapter = (initial = ""): RouterAdapter => {
 };
 
 let adapter: RouterAdapter = createMemoryAdapter();
+/** The registry and the adapter are plain module state, so an href built from them is a
+ *  SNAPSHOT: links created before registerViews()/initRouter() froze at the fallback
+ *  ("/dashboard") forever, because nothing ever told their computation to re-run. This
+ *  version signal is that signal — anything that changes how a path is built bumps it,
+ *  and hrefFor() reads it, so every href in the tree corrects itself. */
+const [registryVersion, bumpRegistry] = createSignal(0);
+const bump = () => bumpRegistry((n) => n + 1);
 const [route, setRoute] = createSignal<Route>({ view: homeView() });
 export { route };
 export const activeView = () => route().view;
@@ -254,6 +264,7 @@ function resync() {
 
 export function initRouter(next: RouterAdapter) {
   adapter = next;
+  bump();
   // Back/forward can land on a route that became unavailable since its entry was created.
   // Reuse resync so the rendered route and address bar are canonical together.
   adapter.subscribe(resync);
@@ -268,7 +279,10 @@ export function navigate(routeOrView: string | Route, entityType?: string, entit
 }
 
 /** href for a route — real navigable URL, so links are copyable/middle-clickable. */
-export const hrefFor = (r: Route) => adapter.href(buildPath(r));
+export const hrefFor = (r: Route) => {
+  registryVersion(); // re-run when the registry/availability/adapter changes
+  return adapter.href(buildPath(r));
+};
 
 /**
  * Props for a navigational anchor: real href + SPA interception that preserves

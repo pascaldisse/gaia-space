@@ -208,9 +208,10 @@ export default function SpaceShell(props: {
     [...(channels() ?? [])].filter((c) => !c.archived).sort((a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0))[0];
   const landingRoute = (entry: (typeof RAIL)[number]): Route => {
     if (entry.mode === "chats") {
-      const open = activeChannelId();
-      const target = open ? undefined : newestChannel();
-      if (target) return { view: "Chat", entityType: "channel", entityId: target.id, tab: "messages" };
+      // Already in a conversation: Chats keeps it (it is the mode's current object).
+      // Otherwise open the newest one — a mode must land on something real.
+      const id = activeChannelId() ?? newestChannel()?.id;
+      if (id) return { view: "Chat", entityType: "channel", entityId: id, tab: "messages" };
     }
     return { view: entry.landing };
   };
