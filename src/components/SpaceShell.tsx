@@ -486,9 +486,24 @@ export default function SpaceShell(props: {
             <Icon name="search" size={16} />
             Search messages, tasks, dates and tickets
           </button>
+          {/* ── THE GLOBAL-ACTION RULE ────────────────────────────────────────
+              The GLOBAL bar carries SEARCH plus AT MOST ONE global action, and that
+              action must really ACT — open a composer or a drawer. It must NEVER
+              merely navigate. A nav link in a button's costume promises that
+              something will be created and then only moves the person, and it
+              duplicates the real primary already sitting in the page header of the
+              surface that owns the act. EVERYTHING ELSE BELONGS TO THAT PAGE HEADER.
+
+              What this rule removed here: `Schedule meeting` -> Meetings and
+              `New message` -> Chat. Both only navigated, and both were doubled on
+              screen — Calendar and Meetings each own a real `New meeting`, so
+              `Schedule meeting` was rendered directly above its own duplicate.
+              `Schedule meeting` is gone; the two surfaces that own it keep it.
+              `New message` stays as the ONE global action and now genuinely opens
+              NewChannelDialog — the same act as the sidebar `+`, organisation-scoped
+              (`""` = no project pre-bound), so nothing became unreachable. */}
           <div class="top-actions">
-            <a class="btn" {...linkProps({ view: "Meetings" })}>Schedule meeting</a>
-            <a class="btn primary" {...linkProps({ view: "Chat" })}>New message</a>
+            <button class="btn primary" onClick={() => setNewChannelFor("")}>New message</button>
           </div>
         </header>
         <section class="space-content">{props.children}</section>
