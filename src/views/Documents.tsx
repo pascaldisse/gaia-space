@@ -23,6 +23,7 @@ import {
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
+import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
 import { UI_LOCALE } from "../calendar";
@@ -83,7 +84,11 @@ export default function Documents(props: { container?: ContainerType; containerI
   createEffect(() => {
     if (profileLocked()) return;
     const list = profiles();
-    if (list && list.length && !localProfileId()) setLocalProfileId(list[0].id);
+    if (!list?.length || localProfileId()) return;
+    // Inherit the shell's acting profile; the first profile is only a last resort
+    // for a desktop that has not chosen one yet.
+    const inherited = chatActingProfileId() ?? sessionProfileId();
+    setLocalProfileId(list.find((person) => person.id === inherited)?.id ?? list[0].id);
   });
 
   const [projects] = createResource(() => documentsApi.listProjects());
@@ -1202,20 +1207,11 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       {/* "Yours first" is a true statement about the personal container and a false
          one inside a project's Files & Links tab, where everything shown belongs to
          the project. The title is unchanged; only the subline tells the truth. */}
-      <PageHeader title="Documents" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} actions={<>
-        <Show when={!profileLocked() && !embedded()}>
-        <label>
-          Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => {
-            const id = e.currentTarget.value || null;
-            setActingProfileId(id);
-            if (activeContainer() === "my-docs") linkContainer("my-docs", id ?? undefined);
-          }}>
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
-          </select>
-        </label>
-        </Show>
-      </>} />
+      {/* L1 (audit §3.1): identity is INHERITED, never asked again on a page. The
+         shell owns the one "Acting as" control; this was the second one, and on the
+         standalone route it was the last bare select left here. The acting profile
+         is still switchable — in the shell — and this view follows it. */}
+      <PageHeader title="Documents" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} />
 
       <nav class="container-tabs">
         {/* Every scope control below is wrapped, not disabled: see `embedded`. */}
@@ -1472,15 +1468,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <Show when={isEmpty()}>
               <p class="empty-state">This container has no folders or documents yet.</p>
             </Show>
-            {/* EMBEDDED: two acts, front and centre. The four raw inputs that used
-                to live here (folder name, document title, body type, upload path)
-                each asked for something the drawer or the picker now asks only
-                when you have said you want it. Note this also retires the clipping
-                fix that column needed — the elements it guarded are gone, so that
-                fix is moot here rather than lost; the standalone branch below still
-                carries it. */}
-            <Show when={embedded()}>
-              <div class="doc-actions">
+            {/* TWO ACTS, FRONT AND CENTRE — now on BOTH routes. Lane A gave the
+                embedded tab this pair and left `#/documents` with the old column:
+                folder name, document title, body type, a typed upload path and a
+                "Creating into: (root)" status line, five loose controls at the foot
+                of the tree at all times. They asked for things the drawer and the
+                native file picker only ask once you have said you want them, so the
+                column is gone and the standalone route uses the same two buttons. */}
+            <div class="doc-actions">
                 <Show when={!isWeb()}>
                   {/* Desktop: the native picker returns a real path, which is what
                       `upload_document_file` takes. No path is ever typed. */}
@@ -1515,63 +1510,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
                   New folder
                 </button>
-              </div>
-            </Show>
-
-            <Show when={!embedded()}>
-            <div class="new-item-forms">
-              <div class="new-item-row">
-                <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
-                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim() || !projectReady()}>
-                  + Folder
-                </button>
-              </div>
-              <div class="new-item-row">
-                <input placeholder="New document title" value={newDocTitle()} onInput={(e) => setNewDocTitle(e.currentTarget.value)} />
-                <select aria-label="Document body type" value={newDocBodyFormat()} onChange={(e) => setNewDocBodyFormat(e.currentTarget.value as DocumentBodyFormat)}>
-                  <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
-                </select>
-                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim() || !projectReady()}>
-                  + Document
-                </button>
-              </div>
-              <div class="new-item-row">
-                <Show
-                  when={isWeb()}
-                  fallback={
-                    <>
-                      <input
-                        placeholder="path to a file to upload"
-                        aria-label="File to upload"
-                        value={uploadPath()}
-                        onInput={(e) => setUploadPath(e.currentTarget.value)}
-                      />
-                      <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
-                        {uploading() ? "Uploading…" : "↑ Upload"}
-                      </button>
-                    </>
-                  }
-                >
-                  <label class="upload-picker">
-                    {uploading() ? "Uploading…" : "↑ Upload a file"}
-                    <input
-                      type="file"
-                      aria-label="File to upload"
-                      disabled={uploading() || !projectReady()}
-                      onChange={(e) => {
-                        const picked = e.currentTarget.files?.[0];
-                        e.currentTarget.value = ""; // same file twice must still upload
-                        if (picked) void uploadBrowserFile(picked);
-                      }}
-                    />
-                  </label>
-                </Show>
-              </div>
-              <p class="hint">
-                Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
-              </p>
             </div>
-            </Show>
           </Show>
           </Show>
           </Show>

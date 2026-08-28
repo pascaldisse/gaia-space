@@ -17,6 +17,17 @@
    empty state all come from Issues.css's space-light section. Only the group
    chrome and the overdue tone are local. */
 .theme-space-light .team-tasks-view .tt-list { border: 1px solid var(--line); border-radius: 20px; background: var(--paper); padding: 6px 8px; box-shadow: 0 16px 36px rgba(31, 35, 40, .06); }
+/* `.filter-row > label` is the CAPTION idiom (uppercase kicker over a field).
+   This label is not a caption: its text IS the checkbox's name, so it keeps the
+   body voice instead of shouting SHOW COMPLETED across the filter line. */
+.theme-space-light .team-tasks-view .tt-toggle {
+  font-family: inherit;
+  font-size: var(--ctl-font-size);
+  font-weight: var(--ctl-font-weight);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted);
+}
 .theme-space-light .tt-group { margin-bottom: 22px; }
 .theme-space-light .tt-group-head { margin-bottom: 8px; gap: 9px; }
 .theme-space-light .tt-group-head a { font-size: 12px; font-weight: 680; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }

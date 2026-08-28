@@ -156,8 +156,11 @@ export default function Absences() {
         title="Time off"
         actions={
           <>
+            {/* A filter, not an identity: it stays, but as a pill whose value
+                ("All profiles") is its own label — no caption in the header. */}
             <ProfilePicker
               label="Show time off for"
+              labelHidden
               value={filterProfileId()}
               onChange={setFilterProfileId}
               allowAll

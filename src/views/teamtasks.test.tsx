@@ -69,7 +69,9 @@ describe("team tasks", () => {
     // Only the caller's own identity is sent (authorization subject), never an
     // assignee narrowing — the default view is everybody's work.
     expect(call.args).toMatchObject({ profileId: "me", includeDone: false });
-    const picker = host.querySelector<HTMLSelectElement>(".picker select")!;
+    // The assignee filter is a PillSelect now (value-as-label); it is still the
+    // same native <select>, named by aria-label instead of a caption beside it.
+    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Assignee"]')!;
     expect(picker.value).toBe("");
     const done = host.querySelector<HTMLInputElement>('input[aria-label="Show completed"]')!;
     expect(done.checked).toBe(false);

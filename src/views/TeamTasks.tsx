@@ -3,7 +3,7 @@ import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
 import { linkProps, navigate } from "../router";
-import { GhostPill } from "../components/controls";
+import { GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import { todayISO, urgencyOf } from "../statusTone";
@@ -66,8 +66,10 @@ export default function TeamTasks() {
     <PageHeader title="Team tasks" subline="Everybody's running work, not just yours" />
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load team tasks: {String(tasks.error)}</p></Show>
     <div class="filter-row" aria-label="Team task filters">
-      <input aria-label="Search team tasks" placeholder="Search tasks" value={text()} onInput={event => setText(event.currentTarget.value)} />
-      <ProfilePicker label="Assignee" value={assigneeId()} onChange={setAssigneeId} allowAll />
+      {/* One control language: a quiet search and a pill whose resting value
+          ("All profiles") is its own label — no caption above either. */}
+      <QuietSearch label="Search team tasks" placeholder="Search tasks" value={text()} onInput={setText} />
+      <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
       <label class="tt-toggle"><input type="checkbox" aria-label="Show completed" checked={includeDone()} onChange={event => setIncludeDone(event.currentTarget.checked)} /> Show completed</label>
     </div>
     <Show when={!profileId()}><p class="hint">Your account profile is still loading; team tasks will appear when it is ready.</p></Show>

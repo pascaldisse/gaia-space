@@ -9,6 +9,7 @@ import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { platformApi } from "../api/platform";
 import { humanError, profileId } from "../session";
 import PageHeader from "../components/PageHeader";
+import { PillSelect } from "../components/controls";
 import "./Settings.css";
 
 const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "never";
@@ -67,7 +68,7 @@ const [calendarId, setCalendarId] = createSignal("");
     <form class="feed-connect" onSubmit={connect}>
       <input placeholder="Label, e.g. My Gmail" aria-label="Calendar label" value={label()} onInput={e => setLabel(e.currentTarget.value)} />
       <input placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="Calendar address" value={url()} onInput={e => setUrl(e.currentTarget.value)} />
-      <select aria-label="Calendar destination" value={calendarId()} onChange={e => setCalendarId(e.currentTarget.value)}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></select>
+      <PillSelect label="Calendar destination" value={calendarId()} onChange={setCalendarId}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></PillSelect>
       <button type="submit" class="primary" disabled={busy()}>Connect</button>
     </form>
   </div>;
@@ -146,9 +147,10 @@ export default function Settings() {
 
     <div class="settings-card">
       <h2>Start view</h2>
-      <select value={defaultView()} onChange={event => setDefaultView(event.currentTarget.value)}>
+      {/* The card heading already says "Start view"; the pill carries the value. */}
+      <PillSelect label="Start view" value={defaultView()} onChange={setDefaultView}>
         <For each={allViews()}>{view => <option value={view}>{view}</option>}</For>
-      </select>
+      </PillSelect>
     </div>
   </section>;
 }
