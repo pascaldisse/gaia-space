@@ -1,0 +1,26 @@
+/* Self-scoped with local fallbacks like the other shared controls, so the button is
+   the same red in the light chat-first shell and on the dark theme. */
+.delete-button {
+  --del-danger: var(--danger, #c2384a);
+  --del-danger-dark: #a12b3b;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--del-danger);
+  border-radius: 10px;
+  /* Red at rest, not on hover: the act is recognised before it is read. The fill is
+     a wash rather than solid, so the page's own primary (teal) keeps the lead. */
+  background: color-mix(in srgb, var(--del-danger) 10%, transparent);
+  color: var(--del-danger);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.delete-button:hover { background: var(--del-danger); color: #fff; border-color: var(--del-danger); }
+.delete-button:focus-visible { outline: 2px solid var(--del-danger); outline-offset: 2px; }
+
+/* When the viewer does not own the thing, the button is absent and this says why —
+   quietly, as a fact, never as a disabled control. */
+.delete-denied {
+  color: var(--muted, #68717d);
+  font-size: 0.82rem;
+}
