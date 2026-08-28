@@ -13,13 +13,9 @@
 
 .reviews-toolbar { margin-top: 16px; display: flex; }
 .new-open { display: inline-flex; align-items: center; gap: 6px; }
-.new-review-form { flex: 1; padding: 12px 14px; border: 1px solid var(--surface-border); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
-.new-review-row .row-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-.new-review-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.new-review-row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-muted); }
-.new-review-row input.grow { flex: 1; min-width: 180px; }
-.reviewer-picks { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-.reviewer-pick { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+/* `.reviews-head` (a second identity picker) and `.new-review-form` (the band that
+   rendered as a ~600px empty slab) are GONE from the markup; their rules go with
+   them. Creation lives in `NewReviewDrawer`, styled by WorkItemDrawer.css. */
 
 .reviews-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
 .reviews-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -41,7 +37,7 @@
 .review-detail-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .review-detail-head h2 { margin: 0; font-size: 18px; }
 .review-detail-title .branches { color: var(--text-faint); font-size: 12px; }
-.repo-picker { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.repo-picker { margin-left: auto; }
 
 .review-detail section { border: 1px solid var(--surface-border); border-radius: 8px; padding: 12px 14px; background: var(--surface); }
 .review-detail h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
@@ -93,8 +89,10 @@
 
 .review-list-controls { display: flex; flex-direction: column; gap: 7px; margin: 0 0 9px; font-size: 11px; color: var(--text-muted); }
 .quick-filters { display: flex; gap: 4px; flex-wrap: wrap; }
-.quick-filters button { padding: 2px 6px; font-size: 10px; text-transform: capitalize; }
-.quick-filters button.active { background: var(--accent-soft); border-color: var(--accent); }
+/* These are FILTERS, not actions, so the chosen one is a filled wash and never a
+   teal ring — teal stays reserved for "do something". Same idiom as `.dev-tab`. */
+.quick-filters button { padding: 2px 8px; font-size: 10px; text-transform: capitalize; }
+.quick-filters button.active { background: var(--surface-hover); border-color: var(--surface-border-hover); color: var(--text); }
 .review-status-badge { color: var(--text-dim); font-size: 9px; letter-spacing: .03em; }
 
 .owned-files-filter { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
@@ -102,3 +100,30 @@
 .external-issue-links ul { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .external-issue-links li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .external-issue-links a { color: var(--accent); overflow-wrap: anywhere; }
+
+/* ══ space-light ═══════════════════════════════════════════════════════════
+   Colour only. Every size, grid and position above stays unscoped so the dark
+   grouped/flat layouts keep their geometry. */
+.theme-space-light .reviews-view { background: var(--wash); color: var(--ink); }
+.theme-space-light .reviews-list li {
+  border: 1px solid var(--line); border-radius: 14px; background: var(--paper);
+}
+.theme-space-light .reviews-list li:hover { background: var(--wash); }
+.theme-space-light .reviews-list li.active { background: var(--teal-soft); border-color: transparent; }
+.theme-space-light .reviews-list .num,
+.theme-space-light .reviews-list .branches { color: var(--muted); }
+.theme-space-light .review-detail > section {
+  border: 1px solid var(--line); border-radius: 20px; background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .review-detail h3 { color: var(--muted); }
+.theme-space-light .quick-filters button {
+  min-height: var(--pillctl-h); border-radius: var(--pillctl-r);
+  padding: 0 var(--pillctl-pad-x); font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .quick-filters button:not(.active) { background: var(--wash-2); color: var(--muted); border-color: transparent; }
+.theme-space-light .quick-filters button:not(.active):hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .quick-filters button.active { background: var(--wash-2); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .quick-filters button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.theme-space-light .review-list-controls { gap: 10px; }

@@ -4,9 +4,14 @@ import {
   createEffect,
   createMemo,
   For,
+  onCleanup,
+  onMount,
   Show,
 } from "solid-js";
-import PageHeader from "../components/PageHeader";
+import PageHeader, { Chip } from "../components/PageHeader";
+import { GhostPill, PillSelect } from "../components/controls";
+import EmptyState from "../components/EmptyState";
+import { profileId } from "../session";
 import { api } from "../api";
 import {
   reviewApi,
@@ -19,6 +24,7 @@ import {
 } from "../api/review";
 import { Diff } from "../Diff";
 import { useDeepLink, linkProps, route } from "../router";
+import "../components/WorkItemDrawer.css";
 import "./Reviews.css";
 
 export default function Reviews() {
@@ -28,11 +34,19 @@ export default function Reviews() {
   const [projects] = createResource(() => api.listProjects());
   const [repos] = createResource(() => api.repoList());
 
+  // L1: identity is INHERITED from the shell (`SpaceShell` owns the one "Acting
+  // as" control). The local signal stays because every git-side call below is
+  // performed *as* somebody; it is now fed, never asked for. The first profile
+  // remains the fallback for the case where the session has not resolved yet.
   const [actingProfileId, setActingProfileId] = createSignal("");
   createEffect(() => {
+    const own = profileId();
+    if (own) { if (actingProfileId() !== own) setActingProfileId(own); return; }
     if (!actingProfileId() && profiles()?.length)
       setActingProfileId(profiles()![0].id);
   });
+  /* L3: creating a merge request is a drawer, not a band across the surface. */
+  const [creating, setCreating] = createSignal(false);
 
   // ---------- create merge request ----------
   const [formProjectId, setFormProjectId] = createSignal("");
@@ -82,6 +96,9 @@ export default function Reviews() {
       ? left.title.localeCompare(right.title)
       : right.number - left.number);
   });
+  // Header metric. A count carries NO tone — `0 open` must read as a fact, not
+  // as an alarm, so this is a plain Chip and never a coloured one.
+  const openCount = createMemo(() => (reviews() ?? []).filter((review) => review.state === "Opened").length);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   // Default to the first review once, on load only. After that the URL is the source of
   // truth for the selection, so back-navigating to the view-only URL (which clears the
@@ -135,6 +152,7 @@ export default function Reviews() {
       setDiffRepoPath(formRepoPath());
       await refetchReviews();
       setSelectedId(review.id);
+      setCreating(false);
     } catch (err) {
       setError(String(err));
     }
@@ -530,20 +548,15 @@ async function removeExternalIssueLink(id: string) {
 
   return (
     <section class="reviews-view">
-      <PageHeader title="Code Reviews" subline="Merge requests on real repository branches" />
-      <header class="reviews-head">
-        <label>
-          Acting as
-          <select
-            value={actingProfileId()}
-            onChange={(e) => setActingProfileId(e.currentTarget.value)}
-          >
-            <For each={profiles()?.filter((p) => !p.archived)}>
-              {(p) => <option value={p.id}>{p.display_name}</option>}
-            </For>
-          </select>
-        </label>
-      </header>
+      {/* One header. The old `reviews-head` under it existed only to ask again
+          who you are — the shell already says so. A metric chip carries no tone,
+          so `0 open` is a number and not a colour. */}
+      <PageHeader
+        title="Code Reviews"
+        subline="Merge requests on real repository branches"
+        chips={<Chip value={openCount()} label="open" />}
+        actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>}
+      />
 
       <Show when={error()}>
         <div class="reviews-error" onClick={() => setError(null)}>
@@ -551,88 +564,22 @@ async function removeExternalIssueLink(id: string) {
         </div>
       </Show>
 
-      <form class="new-review-form" onSubmit={createMR}>
-        <div class="new-review-row">
-          <label>
-            Project
-            <select
-              value={formProjectId()}
-              onChange={(e) => setFormProjectId(e.currentTarget.value)}
-            >
-              <For each={projects()}>
-                {(p) => <option value={p.id}>{p.name}</option>}
-              </For>
-            </select>
-          </label>
-          <label>
-            Repo
-            <select
-              value={formRepoPath()}
-              onChange={(e) => {
-                setFormRepoPath(e.currentTarget.value);
-                setFormSource("");
-                setFormTarget("");
-              }}
-            >
-              <For each={repos()}>
-                {(r) => <option value={r.path}>{r.name}</option>}
-              </For>
-            </select>
-          </label>
-          <label>
-            Source branch
-            <select
-              value={formSource()}
-              onChange={(e) => setFormSource(e.currentTarget.value)}
-            >
-              <option value="">select…</option>
-              <For each={formBranches()?.filter((b) => !b.remote)}>
-                {(b) => <option value={b.name}>{b.name}</option>}
-              </For>
-            </select>
-          </label>
-          <label>
-            Target branch
-            <select
-              value={formTarget()}
-              onChange={(e) => setFormTarget(e.currentTarget.value)}
-            >
-              <option value="">select…</option>
-              <For each={formBranches()?.filter((b) => !b.remote)}>
-                {(b) => <option value={b.name}>{b.name}</option>}
-              </For>
-            </select>
-          </label>
-        </div>
-        <div class="new-review-row">
-          <input
-            class="grow"
-            placeholder="Title"
-            value={formTitle()}
-            onInput={(e) => setFormTitle(e.currentTarget.value)}
-          />
-          <div class="reviewer-picks">
-            <span class="hint">Reviewers:</span>
-            <For
-              each={profiles()?.filter(
-                (p) => p.id !== actingProfileId() && !p.archived,
-              )}
-            >
-              {(p) => (
-                <label class="reviewer-pick">
-                  <input
-                    type="checkbox"
-                    checked={formReviewers().includes(p.id)}
-                    onChange={() => toggleReviewer(p.id)}
-                  />
-                  {p.display_name}
-                </label>
-              )}
-            </For>
-          </div>
-          <button class="primary">Open merge request</button>
-        </div>
-      </form>
+      <Show when={creating()}>
+        <NewReviewDrawer
+          projects={projects() ?? []}
+          repos={repos() ?? []}
+          branches={(formBranches() ?? []).filter((b) => !b.remote)}
+          reviewers={(profiles() ?? []).filter((p) => p.id !== actingProfileId() && !p.archived)}
+          projectId={formProjectId()} setProjectId={setFormProjectId}
+          repoPath={formRepoPath()} setRepoPath={(path) => { setFormRepoPath(path); setFormSource(""); setFormTarget(""); }}
+          source={formSource()} setSource={setFormSource}
+          target={formTarget()} setTarget={setFormTarget}
+          title={formTitle()} setTitle={setFormTitle}
+          selectedReviewers={formReviewers()} toggleReviewer={toggleReviewer}
+          onSubmit={createMR}
+          onClose={() => setCreating(false)}
+        />
+      </Show>
 
       <div class="reviews-body">
         <aside class="reviews-list">
@@ -642,11 +589,20 @@ async function removeExternalIssueLink(id: string) {
                 {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{filter === "mine" ? "Needs me" : filter}</button>}
               </For>
             </div>
-            <label>Sort <select value={reviewSort()} onChange={(event) => setReviewSort(event.currentTarget.value as "number" | "title")}><option value="number">Newest</option><option value="title">Title</option></select></label>
+            {/* The value is the label: "Newest" needs no word above it. */}
+            <PillSelect label="Sort" value={reviewSort()} onChange={(value) => setReviewSort(value as "number" | "title")}>
+              <option value="number">Newest</option>
+              <option value="title">Title</option>
+            </PillSelect>
           </div>
+          {/* Two different situations: a quick filter hides them (drop the
+              filter), or no merge request has ever been opened (open one). */}
           <Show
             when={visibleReviews().length}
-            fallback={<p class="hint pad">No reviews match this filter.</p>}
+            fallback={<Show
+              when={quickFilter() === "all"}
+              fallback={<EmptyState variant="no-match" title="No merge requests match this filter." actions={<GhostPill onClick={() => setQuickFilter("all")}>Show all</GhostPill>} />}
+            ><EmptyState title="No merge requests yet" hint="A merge request reviews one branch against another, on a real repository." actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>} /></Show>}
           >
             <ul>
               <For each={visibleReviews()}>
@@ -678,7 +634,7 @@ async function removeExternalIssueLink(id: string) {
 
         <Show
           when={selected()}
-          fallback={<p class="hint pad">Select or open a review.</p>}
+          fallback={<EmptyState title="Nothing selected" hint="Pick a merge request on the left." />}
         >
           {(review) => (
             <section class="review-detail">
@@ -689,17 +645,13 @@ async function removeExternalIssueLink(id: string) {
                 <span class={`state state-${review().state.toLowerCase()}`}>
                   {review().state}
                 </span>
-                <label class="repo-picker">
-                  Git actions repo
-                  <select
-                    value={diffRepoPath()}
-                    onChange={(e) => setDiffRepoPath(e.currentTarget.value)}
-                  >
-                    <For each={repos()}>
-                      {(r) => <option value={r.path}>{r.name}</option>}
-                    </For>
-                  </select>
-                </label>
+                {/* Which checkout git actions run against — the repo name is the
+                    label, so the caption is gone. */}
+                <PillSelect class="repo-picker" label="Repository for git actions" value={diffRepoPath()} onChange={setDiffRepoPath}>
+                  <For each={repos()}>
+                    {(r) => <option value={r.path}>{r.name}</option>}
+                  </For>
+                </PillSelect>
               </header>
 
               <section class="participants">
@@ -1179,5 +1131,95 @@ async function removeExternalIssueLink(id: string) {
         </Show>
       </div>
     </section>
+  );
+}
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/** Opening a merge request, off the surface (L3). Every field of the old band is
+ *  here — project, repo, both branches, title, the reviewer picks — and captions
+ *  are correct inside a drawer, which is why they stay `.wid-field` labels. */
+function NewReviewDrawer(props: {
+  projects: { id: string; name: string }[];
+  repos: { path: string; name: string }[];
+  branches: { name: string }[];
+  reviewers: { id: string; display_name: string }[];
+  projectId: string; setProjectId: (value: string) => void;
+  repoPath: string; setRepoPath: (value: string) => void;
+  source: string; setSource: (value: string) => void;
+  target: string; setTarget: (value: string) => void;
+  title: string; setTitle: (value: string) => void;
+  selectedReviewers: string[]; toggleReviewer: (id: string) => void;
+  onSubmit: (event: SubmitEvent) => void;
+  onClose: () => void;
+}) {
+  let panel!: HTMLElement;
+  let firstField!: HTMLSelectElement;
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") { event.preventDefault(); props.onClose(); return; }
+    if (event.key !== "Tab") return;
+    const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((node) => node.offsetParent !== null || node === document.activeElement);
+    if (!items.length) return;
+    const [first, last] = [items[0], items[items.length - 1]];
+    const active = document.activeElement as HTMLElement | null;
+    if (event.shiftKey && (active === first || !panel.contains(active))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+  };
+  onMount(() => {
+    document.addEventListener("keydown", onKeyDown, true);
+    firstField?.focus();
+    onCleanup(() => document.removeEventListener("keydown", onKeyDown, true));
+  });
+  return (
+    <div class="wid-root">
+      <div class="wid-backdrop" onClick={props.onClose} aria-hidden="true" />
+      <aside class="wid-panel" role="dialog" aria-modal="true" aria-labelledby="new-review-heading" ref={panel}>
+        <header class="wid-head">
+          <h2 id="new-review-heading">Open merge request</h2>
+          <p>Reviews run on real branches of a real repository.</p>
+        </header>
+        <form class="wid-form" onSubmit={props.onSubmit}>
+          <label class="wid-field"><span>Project</span>
+            <select class="wid-input" ref={firstField} value={props.projectId} onChange={(e) => props.setProjectId(e.currentTarget.value)}>
+              <For each={props.projects}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+            </select>
+          </label>
+          <label class="wid-field"><span>Repository</span>
+            <select class="wid-input" value={props.repoPath} onChange={(e) => props.setRepoPath(e.currentTarget.value)}>
+              <For each={props.repos}>{(r) => <option value={r.path}>{r.name}</option>}</For>
+            </select>
+          </label>
+          <label class="wid-field"><span>Source branch</span>
+            <select class="wid-input" value={props.source} onChange={(e) => props.setSource(e.currentTarget.value)}>
+              <option value="">select…</option>
+              <For each={props.branches}>{(b) => <option value={b.name}>{b.name}</option>}</For>
+            </select>
+          </label>
+          <label class="wid-field"><span>Target branch</span>
+            <select class="wid-input" value={props.target} onChange={(e) => props.setTarget(e.currentTarget.value)}>
+              <option value="">select…</option>
+              <For each={props.branches}>{(b) => <option value={b.name}>{b.name}</option>}</For>
+            </select>
+          </label>
+          <label class="wid-field"><span>Title</span>
+            <input class="wid-input" value={props.title} onInput={(e) => props.setTitle(e.currentTarget.value)} placeholder="What does this branch change?" />
+          </label>
+          <fieldset class="wid-field wid-people"><legend>Reviewers</legend>
+            <Show when={props.reviewers.length} fallback={<p class="wid-hint">Nobody else has a profile in this organization yet.</p>}>
+              <For each={props.reviewers}>{(p) => (
+                <label class="wid-person">
+                  <input type="checkbox" checked={props.selectedReviewers.includes(p.id)} onChange={() => props.toggleReviewer(p.id)} />
+                  <span>{p.display_name}</span>
+                </label>
+              )}</For>
+            </Show>
+          </fieldset>
+          <footer class="wid-actions">
+            <button type="button" class="wid-btn" onClick={props.onClose}>Cancel</button>
+            <button type="submit" class="wid-btn wid-primary" disabled={!props.title.trim() || !props.source || !props.target}>Open merge request</button>
+          </footer>
+        </form>
+      </aside>
+    </div>
   );
 }
