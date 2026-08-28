@@ -1,39 +1,57 @@
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { personalApi, type Todo } from "../api/personal";
-import { ProfilePicker, ProjectPicker } from "../components/Pickers";
+import { ProfilePicker } from "../components/Pickers";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import TaskDrawer from "../components/TaskDrawer";
+import TaskRowEdit from "../components/TaskRowEdit";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
+import { todayISO, urgencyOf } from "../statusTone";
 import { takeWorkIntent } from "./workIntent";
 import "./Issues.css";
+import "../components/TaskList.css";
+import "../components/TaskRowEdit.css";
 import "./ProjectTasks.css";
 
-const blankTask = () => ({ content: "", notes: "", due_date: "", assignee_ids: [] as string[] });
-type Pane = { kind: "task"; item: Todo } | { kind: "new-task" };
+/* Two acts, two places: the drawer CREATES a task that does not exist yet, the row
+   CHANGES one that does. The drawer therefore has one mode here. */
 
-/** ── ONE SURFACE, ONE THING (stage 12d) ─────────────────────────────────────
- *  This page shows TASKS. It used to render project tasks AND project tickets as
- *  two stacked lists sharing one detail pane, and a reader could not tell what the
- *  left half of the page was — the owner's words: *"I don't understand the left
- *  half of the page under Tasks."* Two object types, one surface, no explanation.
+/** ── A TASK SURFACE IS A LIST AND A BUTTON (stage 20) ───────────────────────
+ *  The owner, on this tab: *"It should simply be a LIST OF THE RUNNING TASKS plus
+ *  a BUTTON to create a new task."*
  *
- *  WHERE THE TICKETS WENT — nothing was deleted, only moved back to the surfaces
- *  that own them: the tickets view (nav label "Tickets", `Issues`) and the board,
- *  both reachable from the quiet "N open tickets →" link below the header. The
- *  count in that link is `projectDashboard.open_issues`, the SAME aggregate the
- *  project Overview reads, so the two surfaces cannot quote different numbers. */
+ *  WHAT WENT: the two-pane ticket frame (`.issue-layout` + `.issue-detail`), the
+ *  ticket row grid (`.issue-row`, whose `#number | title | status` columns pulled a
+ *  task's check mark, title and creator apart), the always-visible filter row, and
+ *  the project picker in the header — the project workspace names the project in its
+ *  header AND its sidebar, so a third answer to the same question is noise.
+ *
+ *  WHAT CAME: one column of `.task-row`s (components/TaskList.css), one primary
+ *  "New task" opening the shared TaskDrawer, and the filters behind one quiet
+ *  "Filter" pill. Nothing lost: the detail pane's read-only card said *"The task
+ *  owner can edit full task details in My tasks"* — i.e. a project task could not be
+ *  edited HERE at all. Now the row IS the editor: clicking it opens the task in
+ *  place, in the same in-row editor My tasks has always had.
+ *
+ *  WHERE THE TICKETS WENT (stage 12d, unchanged) — the tickets view and the board,
+ *  both reachable from the quiet "N open tickets →" link below the header. The count
+ *  is `projectDashboard.open_issues`, the SAME aggregate the project Overview reads. */
 export default function ProjectTasks(props: { projectId?: string } = {}) {
   // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Tasks"
   // tab, where the project comes from the channel) > URL > session project.
   const selectedProject = () => props.projectId || route().projectId || sessionProject();
   const [text, setText] = createSignal("");
   const [assigneeId, setAssigneeId] = createSignal("");
-  const [pane, setPane] = createSignal<Pane>();
+  const [filtersOpen, setFiltersOpen] = createSignal(false);
+  const [creating, setCreating] = createSignal(false);
+  // ONE ROW OPEN AT A TIME, and the element that opened it is remembered so the
+  // focus can go back where the person left it.
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  let openerEl: HTMLElement | undefined;
   const [error, setError] = createSignal("");
-  const [taskForm, setTaskForm] = createSignal(blankTask());
-  createEffect(() => { selectedProject(); setPane(undefined); setError(""); });
+  createEffect(() => { selectedProject(); setCreating(false); setEditingId(null); setError(""); });
 
   // Project to-dos are a persisted store of their own: this is EVERY member's
   // running project task, not the caller's slice of them.
@@ -45,23 +63,21 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
      this surface and the Overview. Recounting it locally is exactly how the two
      drifted apart before. */
   const [dashboard, { refetch: reloadDashboard }] = createResource(selectedProject, id => id ? personalApi.projectDashboard(id) : Promise.resolve(undefined));
-  const [memberIds] = createResource(selectedProject, id => id ? personalApi.projectMemberIds(id) : Promise.resolve([]));
   // A project is collaborative: another member's write must arrive without making the
   // current user discover a secret reload gesture. Focus refresh is immediate; the
   // bounded interval covers two people who keep the view open side by side.
   onMount(() => {
     /* Arriving from the Overview's one primary ("New task" on an empty project):
-       open that form here, once. See views/workIntent.ts for why this is not a
+       open the drawer here, once. See views/workIntent.ts for why this is not a
        route param. Only the task intent is honoured — tickets are not created on
        a task surface any more. */
-    if (takeWorkIntent() === "new-task") setPane({ kind: "new-task" });
+    if (takeWorkIntent() === "new-task") setCreating(true);
     const refresh = () => { void reloadTasks(); void reloadDashboard(); };
     const interval = window.setInterval(refresh, 15_000);
     window.addEventListener("focus", refresh);
     onCleanup(() => { window.clearInterval(interval); window.removeEventListener("focus", refresh); });
   });
   const project = () => (projects() ?? []).find(item => item.id === selectedProject());
-  const people = () => (profiles() ?? []).filter(person => !person.archived && (memberIds() ?? []).includes(person.id));
   const nameOf = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
   /* Tickets read their project from the session (Issues.tsx), so the scope is
      written before the navigation — the destination never asks again. */
@@ -71,24 +87,6 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     event.preventDefault(); openTickets();
   } });
   const openTicketCount = () => dashboard()?.open_issues ?? 0;
-  const toggleTaskPerson = (id: string) => {
-    const current = taskForm();
-    setTaskForm({ ...current, assignee_ids: current.assignee_ids.includes(id) ? current.assignee_ids.filter(value => value !== id) : [...current.assignee_ids, id] });
-  };
-  const createTask = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const project_id = selectedProject(); const values = taskForm();
-    if (!project_id || !profileId() || !values.content.trim()) { setError("Pick a project and enter a task title."); return; }
-    setError("");
-    try {
-      const task = await personalApi.createTodo({
-        profile_id: profileId(), content: values.content.trim(), notes: values.notes.trim() || null,
-        due_date: values.due_date || null, project_id, done: false, source_entity_type: null,
-        source_entity_id: null, assignee_ids: values.assignee_ids, content_kind: "text",
-      });
-      setTaskForm(blankTask()); await reloadTasks(); void reloadDashboard(); setPane({ kind: "task", item: task });
-    } catch (reason) { setError(humanError(reason)); }
-  };
   const visibleTasks = () => (tasks() ?? []).filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
@@ -103,14 +101,30 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
      "is the store empty" is knowable exactly. */
   const taskFilters = () => !!text().trim() || !!assigneeId();
   const clearFilters = () => { setText(""); setAssigneeId(""); };
-  const newTask = () => { setPane({ kind: "new-task" }); setError(""); };
+  const newTask = () => { setCreating(true); setError(""); };
+  const editTask = (task: Todo, event: { currentTarget: HTMLElement }) => { openerEl = event.currentTarget; setEditingId(task.id); setError(""); };
+  const closeEdit = () => {
+    const opener = openerEl; openerEl = undefined; setEditingId(null);
+    queueMicrotask(() => { if (opener?.isConnected) opener.focus(); });
+  };
+  /* WHO MAY WRITE WHAT is the server's rule, not this view's invention:
+     `update_todo` is owner-only (TodoOwnerWrite), `set_todo_completion` is owner or
+     assignee (TodoCompletionWrite). The row offers each write exactly where it is
+     granted. */
+  const owns = (task: Todo) => task.profile_id === profileId();
+  const mayComplete = (task: Todo) => owns(task) || task.assignee_ids.includes(profileId());
+  const complete = async (task: Todo, done: boolean) => {
+    try { await personalApi.setTodoCompletion(task.id, done); await reloadTasks(); void reloadDashboard(); }
+    catch (reason) { setError(humanError(reason)); }
+  };
+  /* A filter that is ON may never hide behind a closed disclosure — that is how a
+     short list stops being able to explain why it is short. */
+  const toolsOpen = () => filtersOpen() || taskFilters();
 
   return <section class="planning-view project-tasks-view">
     <PageHeader kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." actions={
       <div class="planning-actions">
-        {/* Value-as-label: the project name IS the picker's caption. */}
-        <ProjectPicker labelHidden value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
-        <button type="button" class="primary" onClick={newTask}>Add task</button>
+        <button type="button" class="primary" onClick={newTask}>New task</button>
       </div>
     } />
     {/* The connection to tracked work stays visible without moving it back in:
@@ -121,50 +135,70 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     </p>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>
-    <div class="issue-layout project-issue-layout">
-      <main class="issue-list-pane">
-        <ControlRow label="Task filters" class="filter-row">
-          <QuietSearch label="Search tasks" placeholder="Search tasks" value={text()} onInput={setText} />
-          <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
-        </ControlRow>
-        <section class="project-work-group" aria-labelledby="project-task-heading">
-          <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
-          <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
-          <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
-          <Show when={!tasks.loading && !visibleTasks().length && taskFilters()}>
-            <EmptyState variant="no-match" title="No tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
-          </Show>
-          <Show when={!tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId()}>
-            <EmptyState
-              title={project() ? `No tasks in ${project()!.name} yet` : "No tasks in this project yet"}
-              hint="Tasks are the shared to-dos of this project — everybody's, not only yours."
-              actions={<button type="button" class="primary" onClick={newTask}>New task</button>}
-            />
-          </Show>
-          <ul class="issue-list project-task-list">
-            <For each={visibleTasks()}>{task => <li classList={{ active: pane()?.kind === "task" && (pane() as { item?: Todo }).item?.id === task.id }}>
-              <button type="button" class="issue-row project-task-row" onClick={() => setPane({ kind: "task", item: task })}>
-                <span class="project-task-check" aria-hidden="true">{task.done ? "✓" : "○"}</span>
-                <strong>{task.content}</strong>
-                <span class="status-name">{nameOf(task.profile_id)}</span>
-                <Show when={task.due_date}>{date => <time>{date()}</time>}</Show>
-              </button>
-            </li>}</For>
-          </ul>
-        </section>
-      </main>
-      <aside class="issue-detail project-issue-detail">
-        <Show when={pane()} fallback={<EmptyState title="Nothing selected" hint="Pick a task on the left — or start a new one here." actions={
-          <button type="button" class="primary" onClick={newTask}>New task</button>
-        } />}>{current => <>
-          <Show when={current().kind === "task" ? (current() as { kind: "task"; item: Todo }).item : undefined}>{value => <section class="project-task-detail"><span class="idp-number">Project task</span><h2>{value().content}</h2><Show when={value().notes}><p>{value().notes}</p></Show><dl><dt>Created by</dt><dd>{nameOf(value().profile_id)}</dd><dt>Due</dt><dd>{value().due_date ?? "No due date"}</dd><dt>Status</dt><dd>{value().done ? "Done" : "Open"}</dd><dt>Assignees</dt><dd>{value().assignee_ids.length ? value().assignee_ids.map(nameOf).join(", ") : "Nobody"}</dd></dl><p class="hint">The task owner can edit full task details in My tasks.</p></section>}</Show>
-          <Show when={current().kind === "new-task"}><form class="new-issue project-work-form" onSubmit={createTask}><h2>New project task</h2><input autofocus aria-label="Task title" placeholder="What needs doing?" value={taskForm().content} onInput={event => setTaskForm({ ...taskForm(), content: event.currentTarget.value })} /><textarea aria-label="Task notes" placeholder="Notes" value={taskForm().notes} onInput={event => setTaskForm({ ...taskForm(), notes: event.currentTarget.value })} /><input aria-label="Task due date" type="date" value={taskForm().due_date} onInput={event => setTaskForm({ ...taskForm(), due_date: event.currentTarget.value })} /><PeopleChooser selected={taskForm().assignee_ids} people={people()} toggle={toggleTaskPerson} /><button class="primary" disabled={!taskForm().content.trim()}>Add task</button></form></Show>
-        </>}</Show>
-      </aside>
-    </div>
+    <section class="project-work-group" aria-labelledby="project-task-heading">
+      <div class="task-tools">
+        <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
+        <GhostPill aria-expanded={toolsOpen()} onClick={() => setFiltersOpen(!toolsOpen())}>Filter</GhostPill>
+      </div>
+      <ControlRow label="Task filters" class="filter-row" hidden={!toolsOpen()}>
+        <QuietSearch label="Search tasks" placeholder="Search tasks" value={text()} onInput={setText} />
+        <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
+      </ControlRow>
+      <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
+      <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
+      <Show when={!tasks.loading && !visibleTasks().length && taskFilters()}>
+        <EmptyState variant="no-match" title="No tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
+      </Show>
+      <Show when={!tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId()}>
+        <EmptyState
+          title={project() ? `No tasks in ${project()!.name} yet` : "No tasks in this project yet"}
+          hint="Tasks are the shared to-dos of this project — everybody's, not only yours."
+          actions={<button type="button" class="primary" onClick={newTask}>New task</button>}
+        />
+      </Show>
+      <Show when={visibleTasks().length}>
+        <ul class="task-list-plain project-task-list">
+          <For each={visibleTasks()}>{task => {
+            const urgency = () => task.done ? "none" : urgencyOf(task.due_date, todayISO());
+            return <li>
+              {/* THE ROW IS ITS OWN EDITOR. It opens in place, inside this same <li>,
+                  so the list neither reorders nor loses the reader's place. */}
+              <Show when={editingId() === task.id} fallback={
+              <div class="task-row project-task-row" classList={{ done: task.done }}>
+                <input type="checkbox" class="task-row-check" aria-label={`Mark ${task.content} done`}
+                  disabled={!mayComplete(task)}
+                  checked={task.done} onChange={event => complete(task, event.currentTarget.checked)} />
+                <button type="button" class="task-row-main" aria-label={`Edit ${task.content}`} onClick={event => editTask(task, event)}>
+                  <strong class="task-row-title">{task.content}</strong>
+                  {/* ONE quiet meta line: who made it, who carries it, when it is due.
+                      Tone sits on the DATE alone — statusTone.ts decides, never this file. */}
+                  <span class="task-row-meta">
+                    <span class="ptask-author">{nameOf(task.profile_id)}</span>
+                    <Show when={task.assignee_ids.length}>
+                      <span class="ptask-assignees">{task.assignee_ids.map(nameOf).join(", ")}</span>
+                    </Show>
+                    <Show when={task.due_date}>{date => <time classList={{ [urgency()]: urgency() !== "none" }}>{date()}</time>}</Show>
+                  </span>
+                </button>
+              </div>}>
+                <div class="task-row-editing">
+                  <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
+                    ownerName={nameOf(task.profile_id)}
+                    onCancel={closeEdit}
+                    onSaved={() => { closeEdit(); void reloadTasks(); void reloadDashboard(); }}
+                    onError={setError} />
+                </div>
+              </Show>
+            </li>;
+          }}</For>
+        </ul>
+      </Show>
+    </section>
+    <Show when={creating()}><TaskDrawer
+      projectId={selectedProject()}
+      authorId={profileId()}
+      onClose={() => setCreating(false)}
+      onSaved={() => { void reloadTasks(); void reloadDashboard(); }}
+    /></Show>
   </section>;
-}
-
-function PeopleChooser(props: { selected: string[]; people: { id: string; username: string; display_name: string | null }[]; toggle: (id: string) => void }) {
-  return <fieldset class="project-work-people"><legend>Assignees</legend><Show when={props.people.length} fallback={<p class="hint">Add people in Project settings before assigning work.</p>}><For each={props.people}>{person => <label><input type="checkbox" checked={props.selected.includes(person.id)} onChange={() => props.toggle(person.id)} /> {person.display_name || person.username}</label>}</For></Show></fieldset>;
 }

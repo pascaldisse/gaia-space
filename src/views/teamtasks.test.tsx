@@ -124,9 +124,15 @@ describe("informational-lead law", () => {
     const host = await mount(() => { navigate({ view: "Project Tasks", projectId: "p1" }); return <ProjectTasks /> as any; });
     const rows = Array.from(host.querySelectorAll(".project-task-row strong")).map(node => node.textContent);
     expect(rows).toEqual(["Atlas mine", "Atlas theirs"]);
+    /* MOVED (stage 20): the assignee checkboxes used to live in the detail pane's
+       inline form (`.project-work-people`). That form is gone — creation is the shared
+       TaskDrawer now — so the SAME fact is asserted one address further on, against
+       the drawer's people list (`.wid-people`). The law under test is untouched: a
+       plain member opens creation and may tick every member of the project, the lead
+       included. */
     host.querySelectorAll<HTMLButtonElement>(".planning-actions button")[0].click();
     await settle();
-    const others = Array.from(host.querySelectorAll<HTMLInputElement>(".project-work-people input[type=checkbox]"));
+    const others = Array.from(host.querySelectorAll<HTMLInputElement>(".wid-people input[type=checkbox]"));
     expect(others.length).toBe(2);
     expect(others.every(box => !box.disabled)).toBe(true);
   });
