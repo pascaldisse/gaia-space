@@ -389,3 +389,124 @@
 }
 
 .theme-space-light .cal-viewopts-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* ── the sweep: everything else that still spoke the old idiom ─────────────
+   Applied by reading the four modes and the two panes side by side with
+   #/home, which is the acceptance question. */
+
+/* The per-day quick-create was a small SQUARE with a hairline — the only
+   square control left on the page. It is the rail `+` now: round, soft, and
+   it appears on hover/focus exactly as before. */
+.theme-space-light .calendar-day-add { border-radius: 999px; }
+
+/* The composer's kind switch (Meeting · Task · Deadline) is a switch, like the
+   view switcher — so it is the same pill family, not a bordered segment box. */
+.theme-space-light .calendar-kind-picker {
+  gap: 8px;
+  padding: 0;
+  margin-bottom: 18px;
+  border: 0;
+  background: transparent;
+}
+.theme-space-light .calendar-kind-picker button {
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  border-radius: var(--pillctl-r);
+  background: var(--wash-2);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .calendar-kind-picker button:hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .calendar-kind-picker button.active { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
+.theme-space-light .calendar-kind-picker button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* ── composer / detail forms ───────────────────────────────────────────────
+   A FORM is the one place a visible caption above a field is right — you are
+   filling in named values, not filtering a list — so the captions stay. What
+   was wrong is that they flowed as one long horizontal wall, caption and field
+   on the same line, wrapping wherever the width ran out. Two columns of
+   labelled fields, each caption over its own control.
+
+   Scoped under `.calendar-detail` on purpose: `.meeting-create`,
+   `.detail-actions` and `.meeting-detail` are also Meetings.css's vocabulary,
+   which another lane owns. Nothing here reaches outside this view. */
+.theme-space-light .calendar-detail { padding: 22px 24px; }
+.theme-space-light .calendar-detail h2 {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 720;
+  letter-spacing: -.03em;
+}
+.theme-space-light .calendar-detail form,
+.theme-space-light .calendar-detail .meeting-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+}
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > :is(h2, .detail-actions, .hint, .rsvp, .meeting-source, .meeting-permalink, [data-meeting-room]) { grid-column: 1 / -1; }
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 11px);
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+/* One field silhouette, the same height and radius as every pill on the page,
+   soft at rest and a hairline only where you are working. */
+.theme-space-light .calendar-detail :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--wash-2);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.theme-space-light .calendar-detail :is(input, select, textarea):hover { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .calendar-detail :is(input, select, textarea):focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.theme-space-light .calendar-detail input::placeholder { color: var(--quiet); }
+.theme-space-light .calendar-detail .meeting-title { font-size: 17px; font-weight: 700; }
+.theme-space-light .calendar-detail .hint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.theme-space-light .calendar-detail .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+/* Secondary actions in a form are quiet pills; the teal one stays the only
+   loud thing, and `danger` keeps its warning colour. */
+.theme-space-light .calendar-detail .detail-actions button {
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid var(--line);
+  border-radius: var(--pillctl-r);
+  background: var(--paper);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .calendar-detail .detail-actions button:hover { border-color: var(--line-strong); background: var(--wash-2); color: var(--ink); }
+.theme-space-light .calendar-detail .detail-actions button.primary { border-color: transparent; }
+.theme-space-light .calendar-detail .detail-actions button.danger { color: var(--red); }
+.theme-space-light .calendar-detail .rsvp { margin: 0; }
+.theme-space-light .calendar-detail .rsvp h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.theme-space-light .calendar-detail .inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.theme-space-light .calendar-detail .participant { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
