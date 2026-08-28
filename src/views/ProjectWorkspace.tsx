@@ -4,11 +4,12 @@ import { personalApi, type Todo } from "../api/personal";
 import { planningApi } from "../api/issues";
 import { pipelinesApi } from "../api/pipelines";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
-import { linkProps, projectTabs, route, type ProjectTab, type Route } from "../router";
+import { linkProps, navigate, projectTabs, route, type ProjectTab, type Route } from "../router";
 import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
 import { SectionHeading } from "../components/blocks";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import { requestWorkIntent } from "./workIntent";
 import NotesLog from "../components/NotesLog";
 import { deadlineTone, metricTone } from "../statusTone";
 import { UI_LOCALE } from "../calendar";
@@ -181,11 +182,12 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
                 </a>
               )}
             </Show>
-            {/* NOT TABS, ON PURPOSE: the owner named five tabs and meant five.
-                Steering and Settings stay one quiet click away, and they keep their
-                own addresses, so nothing became unreachable. */}
+            {/* NOT TABS, AND NOT ALL OF THEM UP HERE EITHER. Settings is the one thing
+                a person opens FROM a project that is not one of its five sections.
+                Steering was the second, and the owner removed it: it is a report, it
+                has its own address and it is listed under More — it does not need a
+                permanent seat next to the project's name. */}
             <div class="pw-header-actions">
-              <GhostPill {...linkProps({ view: "Project Steering", projectId: projectIdOf() })}>Steering</GhostPill>
               <GhostPill {...linkProps({ view: "Project Settings", projectId: projectIdOf() })}>Settings</GhostPill>
             </div>
           </div>
@@ -246,7 +248,6 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
                 tasksRoute={tabRoute("tasks")}
                 chatsRoute={chatsRoute()}
                 channelRoute={chatsRoute}
-                devRoute={tabRoute("dev")}
               />
             </Show>
 
@@ -292,7 +293,6 @@ function ProjectOverview(props: {
   tasksRoute: Route;
   chatsRoute: Route;
   channelRoute: (channelId: string) => Route;
-  devRoute: Route;
 }): JSX.Element {
   const PREVIEW = 8;
   const taskPreview = () => props.tasks.slice(0, PREVIEW);
@@ -310,10 +310,14 @@ function ProjectOverview(props: {
         <Show when={props.tasksError}><p class="error" role="alert">Could not load running tasks: {props.tasksError}</p></Show>
         <Show when={props.tasksLoading}><p class="paper-loading">Loading running tasks…</p></Show>
         <Show when={!props.tasksLoading && !props.tasksError && !props.tasks.length}>
+          {/* The offer must answer the sentence above it. "No task is running" is
+              answered by starting one — not by leaving for the Dev tab, which was a
+              leftover from the ticket bridge and sent the reader away from the very
+              thing the card is about. */}
           <EmptyState
             title="Nothing is running in this project"
-            hint="No task is in flight right now. Tracked work lives on the Dev tab."
-            actions={<GhostPill {...linkProps(props.devRoute)}>Open Dev →</GhostPill>}
+            hint="No task is in flight right now."
+            actions={<button type="button" class="primary" onClick={() => { requestWorkIntent("new-task"); navigate(props.tasksRoute); }}>New task</button>}
           />
         </Show>
         <ul class="pw-rows">
