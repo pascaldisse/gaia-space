@@ -129,3 +129,14 @@
   padding: 10px 12px;
 }
 .theme-space-light .project-role-list li.hint { border-style: dashed; border-color: var(--line-strong); color: var(--quiet); }
+
+/* ── the portfolio reads like Home ─────────────────────────────────────────
+   One measure for the page, not one per block: the tile strip ran the full
+   window while the cards stopped short, so the page had two right edges.      */
+.theme-space-light .projects-view .metric-grid,
+.theme-space-light .project-cards { max-width: var(--view-max, 1160px); }
+/* Cards fill the measure instead of leaving a void beside two of them. */
+.theme-space-light .project-cards { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* Archive sits apart from the two ways in — same row, not the same group. */
+.theme-space-light .project-card-aside { margin-left: auto; }
+.theme-space-light .project-card-foot .row-actions { display: flex; align-items: center; gap: 8px; width: 100%; }

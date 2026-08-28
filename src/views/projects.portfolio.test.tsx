@@ -124,12 +124,15 @@ describe("portfolio summary and open-issue counts", () => {
     const links = [...host.querySelectorAll<HTMLAnchorElement>(".project-card a.project-open-link")];
     expect(links.map((a) => a.getAttribute("href"))).toEqual(["/projects/p1", "/projects/p2"]);
 
+    // The strip carries what the CARDS cannot say at a glance. "Active projects"
+    // moved to the header chip and "Carrying a deadline" was dropped — four tiles
+    // summarising two cards is not a summary. The guarantee under test is unchanged:
+    // the totals come from ONE read, not one per card (the call assertions below).
     const metrics = [...host.querySelectorAll(".metric-tile")].map((n) => n.textContent);
-    expect(metrics[0]).toContain("2Active projects");
-    expect(metrics[1]).toContain("3Open tickets");
-    expect(metrics[2]).toContain("1Carrying a deadline");
-    expect(metrics[3]).toContain("2030-01-02");
-    expect(metrics[3]).toContain("Next: Borea");
+    expect(metrics[0]).toContain("3Open tickets");
+    expect(metrics[1]).toContain("Open tasks");
+    expect(metrics[2]).toContain("2030-01-02");
+    expect(metrics[2]).toContain("Next: Borea");
   });
 
   test("a refused issue read is an error on screen, never a silent zero", async () => {

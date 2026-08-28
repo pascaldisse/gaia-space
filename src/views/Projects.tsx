@@ -130,7 +130,12 @@ export default function Projects() {
     if (by) for (const value of by.values()) sum += value;
     return sum;
   });
-  const withDeadline = createMemo(() => live().filter((project) => project.deadline).length);
+  /** Same aggregate the cards read, summed once — never a second derivation. */
+  const openTaskTotal = createMemo(() => {
+    let sum = 0; const by = taskCounts();
+    if (by) for (const value of by.values()) sum += value;
+    return sum;
+  });
   const nextDeadline = createMemo(() => live()
     .filter((project) => project.deadline && project.deadline >= todayISO())
     .sort((a, b) => (a.deadline ?? "").localeCompare(b.deadline ?? ""))[0]);
@@ -222,10 +227,13 @@ export default function Projects() {
     <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 
     <Show when={live().length}>
+      {/* FOUR TILES FOR TWO CARDS IS NOT A SUMMARY. "Active projects" is already the
+          header chip, and "Carrying a deadline" answers a question nobody asked while
+          the next deadline itself is the useful fact. What is left is what the cards
+          below CANNOT tell you at a glance: the totals, and what is due first. */}
       <MetricGrid label="Portfolio at a glance">
-        <MetricTile value={live().length} label="Active projects" />
         <MetricTile value={countsFailed() ? "—" : openTotal()} label="Open tickets" tone="teal" />
-        <MetricTile value={withDeadline()} label="Carrying a deadline" />
+        <MetricTile value={countsFailed() ? "—" : openTaskTotal()} label="Open tasks" />
         <Show when={nextDeadline()} fallback={<MetricTile value="—" label="Next deadline" small />}>{next => {
           const target = () => openRoute(next().id);
           return <MetricTile
@@ -331,7 +339,13 @@ export default function Projects() {
           <div class="row-actions">
             <GhostPill {...linkProps({ view: "Project Workspace", projectId: project.id, tab: "tasks" })}>Tasks</GhostPill>
             <GhostPill {...linkProps({ view: "Project Workspace", projectId: project.id, tab: "calendar" })}>Calendar</GhostPill>
-            <GhostPill onClick={() => void update(project, { archived: !project.archived })}>{project.archived ? "Restore" : "Archive"}</GhostPill>
+            {/* ARCHIVE IS NOT A PEER OF "Tasks". Two ways in and one way to put the
+                project away sat in one row at one weight, so the destructive act was
+                the easiest thing to hit by accident. It keeps its place — last, apart,
+                and quiet — rather than a seat in the navigation. */}
+            <span class="project-card-aside">
+              <GhostPill onClick={() => void update(project, { archived: !project.archived })}>{project.archived ? "Restore" : "Archive"}</GhostPill>
+            </span>
           </div>
         </div>
       </li>;
