@@ -10,6 +10,7 @@ import ProjectTasks from "./ProjectTasks";
 import Calendar from "./Calendar";
 import Documents from "./Documents";
 import "./ChannelWorkspace.css";
+import { UI_LOCALE } from "../calendar";
 
 /**
  * The channel as a workspace (GAIA Space redesign, stage 2).
@@ -38,7 +39,7 @@ const TABS: { key: TabKey; label: string; needsProject: boolean }[] = [
 ];
 
 const hhmm = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
 
 const initials = (label: string) =>
   label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";

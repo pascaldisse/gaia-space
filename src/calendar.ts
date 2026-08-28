@@ -1,5 +1,15 @@
 import type { CalendarItem } from "./api/personal";
 
+/** The UI ships in English, so dates must render in English too. `undefined` hands
+ *  the decision to the operating system, which prints German month and weekday
+ *  names on a German Mac inside an English interface. One constant, read by every
+ *  surface that formats a date. */
+export const UI_LOCALE = "en-US";
+/** One weekday vocabulary for every calendar grid in the product: the letter is
+ *  what a quiet month grid shows, the full name is what a screen reader says. */
+export const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
 /** Local calendar day key. Never `toISOString()`: that renders the UTC day and
  *  shifts every date-only item for sessions east/west of UTC (H4). */
 export const dateKey = (date: Date) => {

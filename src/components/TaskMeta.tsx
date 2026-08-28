@@ -3,6 +3,7 @@ import type { JSX } from "solid-js";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import "./TaskMeta.css";
+import { UI_LOCALE } from "../calendar";
 
 /**
  * One shell for every piece of metadata a task carries. The three composer
@@ -104,7 +105,7 @@ export const readableDate = (iso: string) => {
   if (!iso) return "";
   const parsed = new Date(iso + "T00:00:00");
   if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return parsed.toLocaleDateString(UI_LOCALE, { weekday: "short", month: "short", day: "numeric" });
 };
 export const isoInDays = (days: number, from = new Date()) => {
   const day = new Date(from);

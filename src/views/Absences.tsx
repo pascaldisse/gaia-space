@@ -16,6 +16,7 @@ import {
   profiles as sessionProfiles,
 } from "../session";
 import "./Absences.css";
+import { UI_LOCALE } from "../calendar";
 
 const leaveTypes = [
   "Vacation",
@@ -54,7 +55,7 @@ function statusFor(absence: Absence) {
 function dateRange(from: string, to: string) {
   const format = (value: string) =>
     value
-      ? new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
+      ? new Date(`${value}T00:00:00`).toLocaleDateString(UI_LOCALE, {
           month: "short",
           day: "numeric",
           year: "numeric",

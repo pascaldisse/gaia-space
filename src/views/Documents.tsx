@@ -24,6 +24,7 @@ import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
+import { UI_LOCALE } from "../calendar";
 
 // Two places, not three. A document lives either with a person ("My Documents") or
 // with a project ("Project Docs"); the knowledge base is not a third home, it is a
@@ -39,7 +40,7 @@ const tabFor = (container: ContainerType): ContainerType =>
 
 function when(ts: number | null) {
   if (!ts) return "";
-  return new Date(ts * 1000).toLocaleString(undefined, {
+  return new Date(ts * 1000).toLocaleString(UI_LOCALE, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",

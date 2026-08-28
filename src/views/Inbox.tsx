@@ -11,6 +11,7 @@ import PageHeader, { Chip } from "../components/PageHeader";
 import { entityView, linkProps } from "../router";
 import { humanError, profileId } from "../session";
 import "./Inbox.css";
+import { UI_LOCALE } from "../calendar";
 
 // Inbox — the human notification feed for the active profile. Same store the
 // Overview summarises, surfaced as a first-class destination: read/unread
@@ -62,9 +63,9 @@ const relativeTime = (seconds: number) => {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(seconds * 1000).toLocaleDateString(UI_LOCALE, { month: "short", day: "numeric" });
 };
-const timestamp = (seconds: number) => new Date(seconds * 1000).toLocaleString();
+const timestamp = (seconds: number) => new Date(seconds * 1000).toLocaleString(UI_LOCALE);
 
 // Best-effort routing from the anchored entity to the view that owns it, using
 // the app's existing registry — every link lands on a real URL.

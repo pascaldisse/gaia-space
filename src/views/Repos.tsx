@@ -4,10 +4,11 @@ import { api, type Commit, type RepoRef } from "../api";
 import { Diff } from "../Diff";
 import { Resizer, paneWidth } from "../components/Resizer";
 import "../App.css";
+import { UI_LOCALE } from "../calendar";
 
 function when(ts: number) {
   const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString(UI_LOCALE, {
     year: "2-digit",
     month: "short",
     day: "2-digit",

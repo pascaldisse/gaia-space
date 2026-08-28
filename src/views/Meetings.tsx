@@ -1,6 +1,6 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
-import { localInput, meetingDraftError } from "../calendar";
+import { localInput, meetingDraftError, UI_LOCALE} from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
 import { humanError, isWeb, profileId } from "../session";
@@ -20,7 +20,7 @@ const recurrenceLabel = (rrule: string | null) => {
   const frequency = rrule.match(/FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/)?.[1]?.toLowerCase();
   return frequency ? `Repeats ${frequency}` : "Custom recurrence";
 };
-const displayDate = (seconds: number) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const displayDate = (seconds: number) => new Date(seconds * 1000).toLocaleString(UI_LOCALE, { dateStyle: "medium", timeStyle: "short" });
 const recurrenceOptions = [
   ["", "Does not repeat"],
   ["FREQ=DAILY", "Daily"],

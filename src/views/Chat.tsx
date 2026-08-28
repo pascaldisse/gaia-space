@@ -39,6 +39,7 @@ import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
+import { UI_LOCALE } from "../calendar";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -61,7 +62,7 @@ const avatarInitials = (label: string) =>
 
 function when(ts: number | null) {
   if (!ts) return "";
-  return new Date(ts * 1000).toLocaleString(undefined, {
+  return new Date(ts * 1000).toLocaleString(UI_LOCALE, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -439,7 +440,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   const scheduledLabel = (row: ScheduledMessage) =>
-    new Date(row.scheduled_at * 1000).toLocaleString();
+    new Date(row.scheduled_at * 1000).toLocaleString(UI_LOCALE);
 
   function refreshScheduled() {
     const ch = activeChannelId();

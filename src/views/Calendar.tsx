@@ -9,7 +9,7 @@ import { linkProps, route, useDeepLink } from "../router";
 import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
 import SourceLink from "../components/SourceLink";
-import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, type QuickKind } from "../calendar";
+import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
 import "../components/paper.css";
 import "./Calendar.css";
 import "./Meetings.css";
@@ -77,7 +77,11 @@ const days = () => { const [start,end]=range(); const result:Date[]=[]; for(cons
 const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
 const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
-const weekdayHeads = () => view()==="day" ? [cursor().toLocaleDateString(undefined,{weekday:"short"})] : ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+// One letter, not three: the month grid must read as quietly as the Home calendar,
+// which is the reference. The full name still reaches assistive tech via aria-label.
+const weekdayHeads = () => view()==="day"
+  ? [{ letter: WEEKDAY_LETTERS[cursor().getDay()], name: WEEKDAY_NAMES[cursor().getDay()] }]
+  : WEEKDAY_LETTERS.map((letter,index) => ({ letter, name: WEEKDAY_NAMES[index] }));
 // "Today" is a ring on the date chip, the same signal Home uses; it is derived
 // per render so a session left open overnight does not keep ringing yesterday.
 const today = () => startOfDay(new Date());
@@ -140,7 +144,7 @@ const itemHref = (item:CalendarItem) => item.kind==="meeting" ? linkProps({view:
 return <section class="calendar-view">
 <PageHeader kicker={scopeName()} title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
 <button aria-label="Previous range" onClick={()=>shift(-1)}>←</button>
-<strong>{cursor().toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong>
+<strong>{cursor().toLocaleDateString(UI_LOCALE,{month:"long",year:"numeric"})}</strong>
 <button aria-label="Next range" onClick={()=>shift(1)}>→</button>
 <button class="cal-today" onClick={()=>{const today=startOfDay(new Date()); setCursor(today); setSelectedDay(today);}}>Today</button>
 <div class="cal-viewtoggle" role="group" aria-label="Calendar range">
@@ -164,7 +168,7 @@ return <section class="calendar-view">
 {/* Empty days are not rows: a schedule lists what is scheduled. */}
 <Show when={schedule().length} fallback={<p class="cal-side-empty">Nothing scheduled in the next {SCHEDULE_DAYS} days.</p>}>
 <For each={schedule()}>{row=><section class="cal-schedule-day" role="listitem">
-<h3><time datetime={row.key}>{row.day.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})}</time></h3>
+<h3><time datetime={row.key}>{row.day.toLocaleDateString(UI_LOCALE,{weekday:"long",day:"numeric",month:"long"})}</time></h3>
 <For each={row.items}>{event=><button class={`calendar-event ${event.kind}`} onClick={()=>{setSelectedDay(row.day);openEvent(event);}}><span class={`cal-tag ${event.kind}`}>{kindLabels[event.kind]}</span> {event.title}</button>}</For>
 </section>}</For>
 </Show>
@@ -172,9 +176,9 @@ return <section class="calendar-view">
 </Show>
 <Show when={view()!=="schedule"}>
 <div classList={{"calendar-grid":true,week:view()==="week",day:view()==="day"}} role="grid" aria-label="Calendar days">
-<For each={weekdayHeads()}>{day=><strong class="calendar-weekday" role="columnheader">{day}</strong>}</For>
+<For each={weekdayHeads()}>{day=><strong class="calendar-weekday" role="columnheader" aria-label={day.name}>{day.letter}</strong>}</For>
 <For each={days()}>{day=><article role="gridcell" tabindex={dateKey(day)===dateKey(selectedDay())?0:-1} aria-selected={dateKey(day)===dateKey(selectedDay())}
-  aria-label={day.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+  aria-label={day.toLocaleDateString(UI_LOCALE,{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
   classList={{"calendar-day":true,muted:view()==="month"&&day.getMonth()!==cursor().getMonth(),today:dateKey(day)===dateKey(today()),selected:dateKey(day)===dateKey(selectedDay())}}
   onClick={()=>{setSelectedDay(day);setComposerDay(undefined);}}
   onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelectedDay(day);setComposerDay(undefined);} if(e.key==="n"||e.key==="N"){e.preventDefault();openComposer(day);} }}
@@ -188,7 +192,7 @@ return <section class="calendar-view">
 </div>
 <aside class="calendar-side" aria-label="Selected day">
 <div class="cal-side-head">
-<h2>{selectedDay().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})}</h2>
+<h2>{selectedDay().toLocaleDateString(UI_LOCALE,{weekday:"long",day:"numeric",month:"long"})}</h2>
 <div class="cal-side-head-actions"><span>{agenda().length} item{agenda().length===1?"":"s"}</span></div>
 </div>
 {/* Loading, failure and "nothing scheduled" are three different answers and are
@@ -199,7 +203,7 @@ return <section class="calendar-view">
 <ul class="cal-agenda">
 <For each={agenda()}>{item=><li classList={{[item.kind]:true,active:selected()?.id===item.id}}>
 <button onClick={()=>openEvent(item)}>
-<span class="cal-agenda-time">{kindLabels[item.kind]}{item.kind==="meeting" ? ` · ${new Date(item.starts_at*1000).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})}` : item.date ? ` · ${item.date}` : ""}</span>
+<span class="cal-agenda-time">{kindLabels[item.kind]}{item.kind==="meeting" ? ` · ${new Date(item.starts_at*1000).toLocaleTimeString(UI_LOCALE,{hour:"2-digit",minute:"2-digit"})}` : item.date ? ` · ${item.date}` : ""}</span>
 <strong>{item.title}</strong>
 </button>
 <Show when={item.kind!=="external"}><a class="cal-agenda-link" {...itemHref(item)}>Open</a></Show>

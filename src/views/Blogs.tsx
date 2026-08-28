@@ -7,7 +7,8 @@ import PageHeader from "../components/PageHeader";
 import { humanError, profileId } from "../session";
 import { linkEntity, linkProps, useDeepLink } from "../router";
 import "./Blogs.css";
-const date = (seconds:number) => new Date(seconds * 1000).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+import { UI_LOCALE } from "../calendar";
+const date = (seconds:number) => new Date(seconds * 1000).toLocaleDateString(UI_LOCALE,{month:"short",day:"numeric",year:"numeric"});
 export default function Blogs() {
   const [term,setTerm]=createSignal(""); const [author,setAuthor]=createSignal(""); const [team,setTeam]=createSignal(""); const [project,setProject]=createSignal(""); const [location,setLocation]=createSignal("");
   const [calendarEventTitle,setCalendarEventTitle]=createSignal(""); const [calendarEventDate,setCalendarEventDate]=createSignal("");

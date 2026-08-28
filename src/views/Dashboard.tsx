@@ -1,7 +1,7 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi, type Follow } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { calendarEntries, dateKey } from "../calendar";
+import { calendarEntries, dateKey, UI_LOCALE} from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
 import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
@@ -18,13 +18,13 @@ const dayStart = (date = new Date()) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const stamp = (date: Date) => Math.floor(date.getTime() / 1000);
 const dayLabel = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleDateString(undefined, {
+  new Date(seconds * 1000).toLocaleDateString(UI_LOCALE, {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
 const timeLabel = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleTimeString(undefined, {
+  new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, {
     hour: "2-digit",
     minute: "2-digit",
   });
