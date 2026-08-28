@@ -10,7 +10,7 @@ import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, type ActivityFilter } from "../attention";
-import { isViewAvailable, linkEntity, linkProps, route, type Route } from "../router";
+import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
 import { railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
 /**
@@ -34,6 +34,7 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
   // project work — is the second entry of that mode's sidebar.
   { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
+  { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
@@ -79,6 +80,9 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "My tasks", view: "To-Do", icon: "check", strong: true },
     { label: "Team tasks", view: "Team Tasks", icon: "users" },
   ],
+  // Projects lists the PROJECTS, the way Chats lists the channels — they are this
+  // mode's objects. "All projects" is the only fixed entry; everything else is data.
+  projects: [{ label: "All projects", view: "Projects", icon: "layers", strong: true }],
   calendar: [
     { label: "Calendar", view: "Calendar", icon: "calendar", strong: true },
     { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
@@ -101,7 +105,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 
 const MODE_TITLE: Record<RailMode, string> = {
   home: "Home", chats: "Chats", activity: "Activity",
-  tasks: "Tasks", calendar: "Calendar", development: "Development", more: "More",
+  tasks: "Tasks", projects: "Projects", calendar: "Calendar", development: "Development", more: "More",
 };
 
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
@@ -366,15 +370,28 @@ export default function SpaceShell(props: {
         <div class="side-mode" data-mode={mode()}>
         <For each={sideEntries()}>{sideLink}</For>
 
-        <Show when={mode() === "tasks"}>
+        {/* The projects are the PROJECTS mode's objects, the way channels are Chats'.
+            Tasks no longer repeats them: "Project Tasks" now lives in the projects
+            mode, so listing it under Tasks would have switched mode on click — the
+            one thing a sidebar entry must never do. */}
+        <Show when={mode() === "projects"}>
           <div class="section">
-            <div class="section-head"><span>By project</span></div>
+            <div class="section-head">
+              <span>Projects</span>
+              <button
+                type="button"
+                class="section-add"
+                title="New project"
+                aria-label="New project"
+                onClick={() => navigate({ view: "Projects" })}
+              >+</button>
+            </div>
             <For each={projectList()}>
               {(project) => (
                 <a
                   class="side-link"
-                  classList={{ active: route().view === "Project Tasks" && route().projectId === project.id }}
-                  {...navLink(() => ({ view: "Project Tasks", projectId: project.id }))}
+                  classList={{ active: route().projectId === project.id }}
+                  {...navLink(() => ({ view: "Project Overview", projectId: project.id }))}
                 >
                   <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
                   {project.name}

@@ -40,7 +40,9 @@ describe("rail mode derived from the view", () => {
   });
 
   it("sends unmapped/registry views to More, so nothing becomes unreachable", () => {
-    for (const view of ["Documents", "Blogs", "Projects", "Admin", "Settings", "A Brand New View"])
+    // "Projects" left this list on purpose: it now has a rail mode of its own, so
+    // the four project surfaces no longer pile up in the drawer for the homeless.
+    for (const view of ["Documents", "Blogs", "Admin", "Settings", "A Brand New View"])
       expect(railModeOfView(view)).toBe("more");
   });
 
@@ -73,7 +75,9 @@ describe("deep links arrive with the right mode", () => {
   });
 
   it("task and calendar URLs keep their mode across project scoping", () => {
-    expect(modeOfPath("projects/p-1/tasks")).toBe("tasks");
+    // A project-scoped task surface belongs to the project, not to the personal
+    // task list: it is reached from inside a project and must not switch the mode.
+    expect(modeOfPath("projects/p-1/tasks")).toBe("projects");
     expect(modeOfPath("team-tasks")).toBe("tasks");
     expect(modeOfPath("to-do")).toBe("tasks");
     expect(modeOfPath("projects/p-1/calendar")).toBe("calendar");

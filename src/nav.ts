@@ -82,7 +82,7 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "activity" | "tasks" | "calendar" | "development" | "more";
+export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "development" | "more";
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -94,7 +94,15 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Inbox: "activity",
   "To-Do": "tasks",
   "Team Tasks": "tasks",
-  "Project Tasks": "tasks",
+  // Every project-scoped surface belongs to the PROJECTS mode, not to Tasks and not
+  // to More. They were unmapped, so all four fell into More and piled up there as
+  // "Projects, Project Overview, Project Steering, Project Settings" — four entries
+  // for one thing, in the drawer meant for what has no home.
+  Projects: "projects",
+  "Project Overview": "projects",
+  "Project Steering": "projects",
+  "Project Settings": "projects",
+  "Project Tasks": "projects",
   Calendar: "calendar",
   Meetings: "calendar",
   Absences: "calendar",
