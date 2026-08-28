@@ -425,16 +425,6 @@ const [showArchived, setShowArchived] = createSignal(false);
       fail(e);
     }
   }
-  async function moveFolderTo(f: DocumentFolder, newParentId: string) {
-    const parentId = newParentId === "" ? rootParentId() : newParentId;
-    if (parentId === f.id) return; // no-op: can't be its own parent
-    try {
-      await documentsApi.moveDocumentFolder(f.id, parentId);
-      await refetchFolders();
-    } catch (e) {
-      fail(e);
-    }
-  }
 
   // ---- document CRUD ----
   const [newDocTitle, setNewDocTitle] = createSignal("");
@@ -1352,13 +1342,20 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     </button>
                   )}
                 </Show>
-                <span class="documents-empty-icon" aria-hidden="true"><Icon name="books" size={26} /></span>
-                <h2>{libraryTitle()}</h2>
-                <p>
-                  {libraryFolders().length + libraryDocuments().length
-                    ? "Open a document to read, edit, or preview it."
-                    : "This container has no folders or documents yet — upload a file or create a document to start."}
-                </p>
+                {/* The library states itself once, at its own top-left, the way every
+                    other page in the product does. Only a genuinely EMPTY library keeps
+                    the centred card — there it is the whole content, not a header. */}
+                <div class="documents-library-head">
+                  <span class="documents-empty-icon" aria-hidden="true"><Icon name="books" size={26} /></span>
+                  <div class="documents-library-headtext">
+                    <h2>{libraryTitle()}</h2>
+                    <p>
+                      {libraryFolders().length + libraryDocuments().length
+                        ? "Open a document, or drag it onto a shelf to file it."
+                        : "This container has no folders or documents yet — upload a file or create a document to start."}
+                    </p>
+                  </div>
+                </div>
 
 
 
@@ -1509,22 +1506,22 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                                 <button class="ghost small" onClick={() => saveRenameFolder(folder)}>✓</button>
                               </Show>
                               {/* Shelf upkeep stays reachable but quiet: on hover or focus only. */}
+                              {/* MOVING IS DRAGGING. The shelf is grabbable and takes drops,
+                                  so the old "move…" dropdown was a second way to do the same
+                                  act — and the uglier one, hanging out of the tile on hover.
+                                  What is left is what a drag cannot say: a new name, and
+                                  putting the shelf away. */}
                               <span class="folder-actions">
-                                <button class="ghost small" title="rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>✎</button>
-                                <select
-                                  class="folder-move-select"
-                                  title="move to…"
-                                  aria-label={`Move ${folder.name} to`}
-                                  value=""
-                                  onChange={(e) => e.currentTarget.value && moveFolderTo(folder, e.currentTarget.value)}
+                                <button class="shelf-action" title="Rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>
+                                  <Icon name="edit" size={14} />
+                                </button>
+                                <button
+                                  class="shelf-action"
+                                  title={folder.archived ? "Restore" : "Archive"}
+                                  aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`}
+                                  onClick={() => toggleFolderArchived(folder)}
                                 >
-                                  <option value="">move…</option>
-                                  <For each={displayFolders().filter((o) => o.id !== folder.id)}>
-                                    {(o) => <option value={o.id}>{o.name}</option>}
-                                  </For>
-                                </select>
-                                <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(folder)}>
-                                  {folder.archived ? "restore" : "archive"}
+                                  <Icon name={folder.archived ? "enter" : "close"} size={14} />
                                 </button>
                               </span>
                             </div>
