@@ -61,6 +61,10 @@ export default function TeamTasks() {
     return (tasks() ?? []).find(task => task.project_id && !projects()?.some(item => item.id === task.project_id))?.project_id;
   });
   const loadError = () => tasks.error ?? projectError() ?? (missingProjectId() ? "Project metadata is unavailable." : undefined);
+  /** True while the empty state below draws its own creation primary. The no-match
+   *  state offers "Clear filters" instead, so it does not suppress the header. */
+  const showsEmptyPrimary = () => !loadError() && !tasks.loading && !projectsLoading() && !groups().length && !filtered() && !!profileId();
+
   const visible = () => (tasks() ?? []).filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
@@ -100,10 +104,18 @@ export default function TeamTasks() {
 
   return <section class="planning-view team-tasks-view">
     {/* Sibling sentences live in Todo.tsx and ProjectTasks.tsx: whose work, how wide. */}
+    {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
+        the same act, so only one of them is ever drawn: while the surface is empty
+        the empty state carries it (that is where the eye already is, and where the
+        owner asked for it to be obvious), and the moment there is content the header
+        takes it back. Two identical buttons on one screen is the defect this rule
+        exists to prevent. */}
     <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." actions={
-      <div class="planning-actions">
-        <button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>
-      </div>
+      <Show when={!showsEmptyPrimary()}>
+        <div class="planning-actions">
+          <button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>
+        </div>
+      </Show>
     } />
     <Show when={loadError()}>{error => <p class="planning-error" role="alert">Could not load team tasks: {String(error())}</p>}</Show>
     <Show when={rowError()}><p class="planning-error" role="alert">{rowError()}</p></Show>

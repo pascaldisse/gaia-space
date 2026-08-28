@@ -116,12 +116,24 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   /* A filter that is ON may never hide behind a closed disclosure — that is how a
      short list stops being able to explain why it is short. */
   const toolsOpen = () => filtersOpen() || taskFilters();
+  /** True while the empty state below is drawing its own "New task": the header must
+   *  not draw a second one. The no-match state offers "Clear filters", not creation,
+   *  so it does NOT suppress the header primary. */
+  const showsEmptyPrimary = () => !tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId();
 
   return <section class="planning-view project-tasks-view">
+    {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
+        the same act, so only one of them is ever drawn: while the surface is empty
+        the empty state carries it (that is where the eye already is, and where the
+        owner asked for it to be obvious), and the moment there is content the header
+        takes it back. Two identical buttons on one screen is the defect this rule
+        exists to prevent. */}
     <PageHeader kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." actions={
-      <div class="planning-actions">
-        <button type="button" class="primary" onClick={newTask}>New task</button>
-      </div>
+      <Show when={!showsEmptyPrimary()}>
+        <div class="planning-actions">
+          <button type="button" class="primary" onClick={newTask}>New task</button>
+        </div>
+      </Show>
     } />
     {/* The connection to tracked work stays visible without moving it back in:
         one quiet line, the count from the shared aggregate, and a way through. */}

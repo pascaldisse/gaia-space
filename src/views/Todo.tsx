@@ -66,6 +66,8 @@ export default function Todo() {
   /** Open work of any kind. Zero of it, with tasks on the list, is its own state:
    *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
   const openCount=()=>openTodos().length;
+  /** True while an EmptyState on this surface is showing its own "New task". */
+  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!(todos()??[]).length||!openCount());
   const doneList=()=>todos()?.filter(todo=>todo.done)??[];
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
@@ -123,8 +125,16 @@ export default function Todo() {
           My tasks     — only yours, across every project.
           Team tasks   — everybody's, across every project you are in.
           Project Tasks— everybody's, in one project. */}
+    {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
+        the same act, so only one of them is ever drawn: while the surface is empty
+        the empty state carries it (that is where the eye already is, and where the
+        owner asked for it to be obvious), and the moment there is content the header
+        takes it back. Two identical buttons on one screen is the defect this rule
+        exists to prevent. */}
     <PageHeader title="My tasks" subline="Only your tasks — yours and what people put on you, across every project." actions={
-      <button type="button" class="primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
+      <Show when={!showsEmptyPrimary()}>
+        <button type="button" class="primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
+      </Show>
     }/>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
     <div class="view-cols todo-cols">
