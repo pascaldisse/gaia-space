@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
+    chatbot, db,
     devenv, documents, events, issues, meetings, oauth, organization, package_registry,
     payload_dispatch, personal, pipelines, platform, review,
 };
@@ -2359,6 +2360,13 @@ enum CommandPolicy {
     TodoCreate,
     TodoOwnerWrite,
     TodoCompletionWrite,
+    /// The channel Notes & Decisions log. Read and write share one posture: the session
+    /// identity is rebound onto the request (`bind_session_identity` already covers
+    /// `profile_id`/`author_id`), and `channel_notes.rs` then applies project membership
+    /// for reads and appends, authorship for edits and deletes. The chokepoint's own job
+    /// is only to refuse an id-only write whose author cannot be resolved.
+    ChannelNoteRead,
+    ChannelNoteWrite,
     NotificationWrite,
     ProjectCreate,
     ProjectWrite,
@@ -2438,6 +2446,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
             CommandPolicy::TodoOwnerWrite
         }
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
+        "list_channel_notes" => CommandPolicy::ChannelNoteRead,
+        "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
+            CommandPolicy::ChannelNoteWrite
+        }
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
@@ -3539,6 +3551,36 @@ fn authorize_command(
                 }
             }
             put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        // Reads: the channel id is the scope and `channel_notes::list_channel_notes`
+        // refuses a non-member outright, so there is nothing left to decide here beyond
+        // pinning the reader to their own session — which the rebinding above already did.
+        CommandPolicy::ChannelNoteRead => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        // Writes: membership (append) and authorship (edit/delete) are enforced in Rust
+        // against the STORED row, never against the payload, so a forged `author_id`
+        // cannot buy anything. A global admin gets no extra door: an entry in a log is
+        // somebody's statement, and rewriting another person's statement is exactly what
+        // the visible-edit rule exists to prevent.
+        CommandPolicy::ChannelNoteWrite => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            if name == "delete_channel_note" {
+                let note_id: String =
+                    arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let author = channel_notes::note_author(&note_id)
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                // A note that exists but is not the caller's is answered exactly like a
+                // missing one, so the endpoint cannot be used to probe for note ids.
+                if author.as_deref() != Some(user.profile_id.as_str()) {
+                    return Err(err(
+                        StatusCode::FORBIDDEN,
+                        "only the author can delete this note",
+                    ));
+                }
+            }
             Ok(())
         }
         CommandPolicy::MessageAttachmentWrite => {
@@ -5127,6 +5169,10 @@ async fn cmd(
     "delete_swimlane" => issues::delete_swimlane(id: String),
     "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
     "delete_todo" => personal::delete_todo(id: String),
+    "list_channel_notes" => channel_notes::list_channel_notes(channel_id: String, profile_id: String),
+    "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
+    "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
+    "delete_channel_note" => channel_notes::delete_channel_note(id: String, profile_id: String),
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
@@ -8343,6 +8389,80 @@ mod tests {
             .unwrap();
         assert_eq!(left, 0);
     }
+    /// The notes log over HTTP: a member appends and reads, an outsider gets nothing, and
+    /// a forged author buys nothing because the session identity is rebound before dispatch.
+    #[tokio::test]
+    async fn channel_note_endpoints_bind_the_author_and_refuse_outsiders() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr-n','Notes','NOTE','pa',1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr-n','pb')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO channels(id,content_type,name,project_id,archived) VALUES('ch-n','public','Notes','pr-n',0)", []).unwrap();
+        drop(c);
+
+        let (status, _) = call(HeaderMap::new(), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // Alice writes a decision while claiming Bob wrote it. The session wins.
+        let (status, value) = call(
+            cookie("ta"),
+            "create_channel_note",
+            json!({"input":{"channel_id":"ch-n","kind":"decision","body":"Ship on Friday","author_id":"pb"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let note = value["value"].clone();
+        assert_eq!(note["author_id"], json!("pa"), "a forged author is replaced by the session");
+        assert_eq!(note["project_id"], json!("pr-n"), "the project is read off the channel");
+        assert!(note["edited_at"].is_null());
+        let note_id = note["id"].as_str().unwrap().to_string();
+
+        // A member reads the log; a non-member is refused, not given an empty list.
+        let (status, value) =
+            call(cookie("tb"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"].as_array().unwrap().len(), 1);
+        let (_, value) =
+            call(cookie("td"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(value["ok"], json!(false), "an outsider is refused: {value}");
+
+        // Only the author edits, and the edit is stamped.
+        let mut foreign = note.clone();
+        foreign["body"] = json!("Bob overrules");
+        let (_, value) = call(cookie("tb"), "update_channel_note", json!({"note":foreign})).await;
+        assert_eq!(value["ok"], json!(false), "a member is not an author: {value}");
+        let mut own = note.clone();
+        own["body"] = json!("Ship on Monday");
+        let (status, value) = call(cookie("ta"), "update_channel_note", json!({"note":own})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["body"], json!("Ship on Monday"));
+        assert!(
+            value["value"]["edited_at"].as_i64().is_some(),
+            "an edit is never silent: {value}"
+        );
+
+        // Deletion is the author's alone, and an unknown id is answered identically.
+        let (status, _) =
+            call(cookie("tb"), "delete_channel_note", json!({"id":&note_id})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) =
+            call(cookie("tb"), "delete_channel_note", json!({"id":"no-such-note"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an unknown id discloses nothing");
+        let (status, value) =
+            call(cookie("ta"), "delete_channel_note", json!({"id":&note_id})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let c = db::conn().unwrap();
+        let left: i64 = c
+            .query_row("SELECT count(*) FROM channel_notes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
         let _serial = test_lock();
