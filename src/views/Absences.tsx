@@ -8,6 +8,8 @@ import { platformApi, type CfDefinition } from "../api/platform";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
+import { MetricGrid, MetricTile } from "../components/blocks";
+import { metricTone } from "../statusTone";
 import EmptyState from "../components/EmptyState";
 import {
   currentUser,
@@ -305,12 +307,16 @@ export default function Absences() {
         fallback={
           <div class="view-cols timeoff-cols timeoff-onboarding">
             <div class="view-main">
-              <AvailabilityBoard
-                current={current()}
-                upcoming={upcoming()}
-                pending={pending()}
-                nameFor={displayName}
-              />
+              {/* ONE EMPTY STATE, NOT FOUR (stage 11, defect 6b). This branch used
+                  to render the AvailabilityBoard as well, so an empty workspace
+                  said "nothing here" FOUR times: three status cards ('Everyone is
+                  currently available', 'No upcoming time off is recorded',
+                  'Everything is approved') and then the dashed empty state under
+                  them. The board is a SUMMARY OF RECORDS — with no records it has
+                  nothing to summarise, so it belongs to the populated branch
+                  below, where it still renders the moment one record exists. What
+                  survives here is the one empty state that carries the primary
+                  action, which is the only thing this screen can honestly offer. */}
               {/* NOTHING YET, and the action is the real one this view owns:
                   `openForm` opens the record dialog, already scoped to whichever
                   person the filter names — it never re-asks. */}
@@ -489,23 +495,39 @@ function AvailabilityBoard(props: {
   nameFor: (id: string) => string;
   onApprove?: (absence: Absence) => void;
 }) {
+  /* THE ZERO RULE, BEYOND CHIPS (stage 11, defect 3). Each panel used to carry a
+     coloured 3px top border unconditionally, so on an empty workspace three
+     cards shouted about nothing and `Needs approval 0` read amber. The tone is
+     now computed the one way the app computes tone — statusTone.metricTone — so
+     a count of 0 arrives untoned and the accent simply does not exist.
+
+     The colour law also decides WHICH tone each panel may claim:
+       · Away now      → teal. People are out; that is the open, actionable fact.
+       · Coming up     → no tone. A future date is not urgent, and colouring it
+                          would spend a colour on the calmest thing on screen.
+       · Needs approval→ amber. It is WAITING on somebody, which is exactly what
+                          amber means. It was --status-info-ink, a fourth colour
+                          the law does not have. */
   const panels = () => [
     {
       className: "now",
       title: "Away now",
       records: props.current,
+      tone: metricTone(props.current.length, "teal"),
       empty: "Everyone is currently available.",
     },
     {
       className: "upcoming",
       title: "Coming up",
       records: props.upcoming,
+      tone: "" as const,
       empty: "No upcoming time off is recorded.",
     },
     {
       className: "pending",
       title: "Needs approval",
       records: props.pending,
+      tone: metricTone(props.pending.length, "amber"),
       empty: "Everything is approved.",
     },
   ];
@@ -513,7 +535,7 @@ function AvailabilityBoard(props: {
     <section class="availability-board" aria-label="Availability at a glance">
       <For each={panels()}>
         {(panel) => (
-          <div class={`availability-panel ${panel.className}`}>
+          <div class={`availability-panel ${panel.className}${panel.tone ? ` ${panel.tone}` : ""}`}>
             <div class="availability-panel-head">
               <h2>{panel.title}</h2>
               <span>{panel.records.length}</span>
@@ -560,29 +582,20 @@ function OverviewRail(props: {
 }) {
   return (
     <div class="rail-card">
-      <h3>
-        <Icon name="clock-nav" size={13} /> Overview
-      </h3>
-      <div class="rail-metrics">
-        <div class="rail-metric accent">
-          <span class="rail-num">{props.current}</span>
-          <span class="rail-lbl">Away now</span>
-        </div>
-        <div class="rail-metric warn">
-          <span class="rail-num">{props.pending}</span>
-          <span class="rail-lbl">Pending</span>
-        </div>
-        <div class="rail-metric">
-          <span class="rail-num">{props.upcoming}</span>
-          <span class="rail-lbl">Upcoming</span>
-        </div>
+      {/* A section heading, not a shouted kicker with a clock glued to it. */}
+      <h3>Overview</h3>
+      {/* ONE TILE FOR THE WHOLE APP (defect 2): `.rail-metric` was this view's own
+          shape. `pairs` is the rail's two-column form of the same block. Tone is
+          decided inside MetricTile by metricTone, so every one of these is quiet
+          while the workspace is empty. */}
+      <MetricGrid label="Time off overview" class="pairs">
+        <MetricTile value={props.current} label="Away now" tone="teal" />
+        <MetricTile value={props.pending} label="Pending" tone="amber" />
+        <MetricTile value={props.upcoming} label="Upcoming" />
         <Show when={props.total !== undefined}>
-          <div class="rail-metric">
-            <span class="rail-num">{props.total}</span>
-            <span class="rail-lbl">Total</span>
-          </div>
+          <MetricTile value={props.total} label="Total" />
         </Show>
-      </div>
+      </MetricGrid>
     </div>
   );
 }
