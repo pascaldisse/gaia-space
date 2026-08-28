@@ -259,6 +259,11 @@
 /* Display toggles AND the colour key live here. See the note in Calendar.tsx:
    both are consulted once and then not again, so neither earns a permanent
    line above the calendar — but neither is deleted. */
+/* controls.css gives header GhostPills a resting hairline because nothing sits
+   behind them there; this one is a grandchild of `.pgh-actions`, so it has to
+   ask for the same concession by name rather than inherit it. */
+.theme-space-light .pgh-actions .cal-viewopts > .ghost-pill { border-color: var(--line); }
+.theme-space-light .pgh-actions .cal-viewopts > .ghost-pill:hover { border-color: var(--line-strong); background: var(--wash-2); }
 .theme-space-light .cal-viewopts-menu {
   padding: 14px 16px;
   border: 1px solid var(--line);
