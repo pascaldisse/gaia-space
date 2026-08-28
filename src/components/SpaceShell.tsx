@@ -8,7 +8,7 @@ import NewChannelDialog from "./NewChannelDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
-import { chatApi, type ChannelSummary } from "../api/chat";
+import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { documentsApi } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
@@ -158,7 +158,7 @@ export default function SpaceShell(props: {
   const actingPeople = () => (profiles() ?? []).filter((person) => !person.archived);
   const chatActing = () => chatActingProfileId() ?? actingProfileId() ?? "";
 
-  const [channels] = createResource(actingProfileId, (id) =>
+  const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
   );
   // projects() is lazy (auth must land first); ask once so group headers can resolve names.
@@ -207,6 +207,64 @@ export default function SpaceShell(props: {
       setPendingChannel(null);
     } finally {
       setDeletingChannel(false);
+    }
+  };
+
+  /* ── DROPPING THINGS WHERE THEY BELONG ────────────────────────────────────
+     Knowledge proved the gesture: you carry a thing to the place that should hold
+     it. The sidebar is the one list that is always on screen, so it is where the
+     two cross-surface moves live.
+
+       · a DOCUMENT dropped on a conversation is shared into it — one message,
+         written by you, carrying the title and the way back to the document;
+       · a CHANNEL dropped on a project's section head joins that project, which
+         is the same act the channel page offers as "Attach to project".
+
+     Payload types decide, never guesswork: a document carries
+     `application/x-gaia-document`, a channel `application/x-gaia-channel`. A file
+     dragged in from the desktop carries `Files` and is ignored here. */
+  const [dropTarget, setDropTarget] = createSignal<string | null>(null);
+  const [dropNote, setDropNote] = createSignal("");
+  const readPayload = <T,>(event: DragEvent, kind: string): T | null => {
+    const raw = event.dataTransfer?.getData(kind);
+    if (!raw) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  };
+  const carries = (event: DragEvent, kind: string) => !!event.dataTransfer?.types.includes(kind);
+
+  const shareDocumentInto = async (channel: ChannelSummary, document: { id: string; title: string; path: string }) => {
+    const author = actingProfileId();
+    if (!author) return;
+    try {
+      await chatApi.createMessage({
+        id: newMessageId("msg"),
+        channel_id: channel.id,
+        author_id: author,
+        // Plain text is what a message is; the path is a real in-app link once the
+        // conversation renders it, and remains readable if it does not.
+        text: `Shared a document: ${document.title} ${document.path}`,
+        created_at: Math.floor(Date.now() / 1000),
+        edited_at: null,
+        thread_of: null,
+        archived: false,
+      });
+      setDropNote(`Shared “${document.title}” in ${channel.name ?? "the conversation"}`);
+      setTimeout(() => setDropNote(""), 4000);
+    } catch (reason) {
+      setChannelError(String(reason));
+    }
+  };
+
+  const attachChannelToProject = async (channelId: string, projectId: string) => {
+    try {
+      const channel = await chatApi.getChannel(channelId);
+      if (!channel || channel.project_id === projectId) return;
+      await chatApi.updateChannel({ ...channel, project_id: projectId });
+      await refetchChannels();
+      setDropNote(`${channel.name ? "#" + channel.name : "The conversation"} now belongs to this project`);
+      setTimeout(() => setDropNote(""), 4000);
+    } catch (reason) {
+      setChannelError(String(reason));
     }
   };
 
@@ -374,6 +432,9 @@ export default function SpaceShell(props: {
         onConfirm={() => void deleteChannel()}
         onCancel={() => setPendingChannel(null)}
       />
+      <Show when={dropNote()}>
+        <p class="space-shell-note" role="status">{dropNote()}</p>
+      </Show>
       <Show when={channelError()}>
         <p class="space-shell-error" role="alert">{channelError()}</p>
       </Show>
@@ -557,7 +618,25 @@ export default function SpaceShell(props: {
         <For each={groups()}>
           {(group) => (
             <div class="section">
-              <div class="section-head">
+              <div
+                class="section-head"
+                classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
+                onDragOver={(event) => {
+                  // Only a real project takes a conversation; "Other channels" is the
+                  // absence of one, so it is not a destination.
+                  if (!group.id || !carries(event, "application/x-gaia-channel")) return;
+                  event.preventDefault();
+                  setDropTarget(`project:${group.id}`);
+                }}
+                onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
+                onDrop={(event) => {
+                  const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
+                  setDropTarget(null);
+                  if (!channelId || !group.id) return;
+                  event.preventDefault();
+                  void attachChannelToProject(channelId, group.id);
+                }}
+              >
                 <span>{group.label}</span>
                 {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
                 <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
@@ -566,7 +645,26 @@ export default function SpaceShell(props: {
                 {(channel) => (
                   <a
                     class="channel"
-                    classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+                    classList={{
+                      active: activeChannelId() === channel.id,
+                      unread: channel.unread_count > 0,
+                      "drop-into": dropTarget() === `channel:${channel.id}`,
+                    }}
+                    draggable={true}
+                    onDragStart={(event) => event.dataTransfer?.setData("application/x-gaia-channel", channel.id)}
+                    onDragOver={(event) => {
+                      if (!carries(event, "application/x-gaia-document")) return;
+                      event.preventDefault();
+                      setDropTarget(`channel:${channel.id}`);
+                    }}
+                    onDragLeave={() => setDropTarget((current) => (current === `channel:${channel.id}` ? null : current))}
+                    onDrop={(event) => {
+                      const payload = readPayload<{ id: string; title: string; path: string }>(event, "application/x-gaia-document");
+                      setDropTarget(null);
+                      if (!payload) return;
+                      event.preventDefault();
+                      void shareDocumentInto(channel, payload);
+                    }}
                     onContextMenu={(event) => openChannelMenu(event, channel)}
                     {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                   >

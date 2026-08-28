@@ -10,7 +10,7 @@ import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import DeleteButton from "../components/DeleteButton";
 import { Icon } from "../components/Icon";
-import { useDeepLink, linkEntity, linkProps, navigate, route } from "../router";
+import { useDeepLink, hrefFor, linkEntity, linkProps, navigate, route } from "../router";
 import {
   documentsApi,
   newId,
@@ -1699,7 +1699,16 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                                 class="documents-library-card"
                                 classList={{ archived: document.archived }}
                                 draggable={true}
-                                onDragStart={(event) => event.dataTransfer?.setData("text/plain", `document:${document.id}`)}
+                                onDragStart={(event) => {
+                                  // Two payloads, two audiences: the library's own shelves read
+                                  // the short form; a surface OUTSIDE Knowledge — a conversation —
+                                  // needs the title and the way back to the document.
+                                  event.dataTransfer?.setData("text/plain", `document:${document.id}`);
+                                  event.dataTransfer?.setData(
+                                    "application/x-gaia-document",
+                                    JSON.stringify({ id: document.id, title: document.title, path: hrefFor(docRoute(document.id)) }),
+                                  );
+                                }}
                                 onContextMenu={(event) => openCardMenu(event, documentMenu(document))}
                                 {...linkProps(docRoute(document.id))}
                               >

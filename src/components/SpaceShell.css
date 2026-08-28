@@ -424,3 +424,20 @@
   border: 1px solid var(--danger, #c2384a); border-radius: 10px;
   background: var(--paper, #fff); color: var(--danger, #c2384a); font-size: 0.9rem;
 }
+
+/* A drop target says YES before you let go — the same rule the library's shelves
+   follow, so the gesture reads the same wherever it is used. */
+.space-chat-shell .channel.drop-into,
+.space-chat-shell .section-head.drop-into {
+  outline: 2px dashed var(--teal, #00bfa6);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+/* What just happened, said once and then gone. */
+.space-chat-shell .space-shell-note {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 95; margin: 0; padding: 8px 14px;
+  border: 1px solid var(--line, #e5ddd3); border-radius: 10px;
+  background: var(--paper, #fff); color: var(--ink, #1f2328); font-size: 0.9rem;
+  box-shadow: 0 10px 30px rgba(31, 35, 40, .16);
+}
