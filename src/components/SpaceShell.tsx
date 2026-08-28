@@ -162,7 +162,12 @@ export default function SpaceShell(props: {
   // it is one page, so anything listed beside it could only be another mode's
   // landing — the rail printed twice. Chats keeps its column even when the entry
   // list is short, because the channels below it ARE its objects.
-  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || mode() === "chats");
+  // Which modes show the conversation list. Home does, and that is the point of a
+  // communication-first product: the channels are the objects you steer by, so they
+  // stay in view even on the start page. Home still lists no DESTINATIONS — those
+  // were the rail printed twice.
+  const showsChannels = createMemo(() => mode() === "chats" || mode() === "home");
+  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels());
 
   /** Named channels grouped by owning project; project-less channels land in a final section.
    *  DMs/threads carry no name and are not part of the project channel list. */
@@ -321,8 +326,8 @@ export default function SpaceShell(props: {
         <input
           class="side-search"
           type="search"
-          placeholder={mode() === "chats" ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
-          aria-label={mode() === "chats" ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
+          placeholder={showsChannels() ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
+          aria-label={showsChannels() ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
           value={filter()}
           onInput={(event) => setFilter(event.currentTarget.value)}
         />
@@ -371,7 +376,7 @@ export default function SpaceShell(props: {
           </div>
         </Show>
 
-        <Show when={mode() === "chats"}>
+        <Show when={showsChannels()}>
         <For each={groups()}>
           {(group) => (
             <div class="section">
