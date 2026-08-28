@@ -4,84 +4,59 @@ import "../components/paper.css";
 import "./Todo.css";
 import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
-import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import EmptyState from "../components/EmptyState";
+import TaskDrawer from "../components/TaskDrawer";
+import TaskRowEdit from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
 import { todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
 import { MetricGrid, MetricTile } from "../components/blocks";
 
-const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
-type MemberLookup = { ids?: string[]; failed?: string };
 /* The rail's coloured numbers used to be hard-coded classes, then a local
    `metricClass` helper. Both are gone: the shared MetricTile applies `metricTone`
    itself, so "0 Overdue" cannot be red no matter what a caller passes. */
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
-  const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
+  /* ONE CREATION ACT, ONE SHAPE (stage 20). The always-open inline composer is gone:
+     it was ~180px of form standing between the reader and the list on the surface the
+     owner named first ("This left area bothers me on Tasks"). NOTHING it could do was
+     lost — title, project, due date, assignees, notes, the markdown switch and the
+     source bookmark are all in the drawer (`advanced` turns the last two on, and My
+     tasks is the only surface that ever had them). Editing an existing task did NOT
+     move: it still happens in place, in the row (`.task-card-editing`, below). */
+  const [creating,setCreating]=createSignal(false); const [error,setError]=createSignal("");
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
-  // A refused member read is carried as a value: the composer must say the list could
-  // not be loaded, never quietly offer "nobody" as if the project were empty.
-  const loadMembers=async(id:string):Promise<MemberLookup>=>{
-    if(!id) return { ids: [] };
-    try { return { ids: await personalApi.projectMemberIds(id) }; }
-    catch(reason){ return { failed: humanError(reason) }; }
-  };
-  const [projectMembers]=createResource(()=>form().project_id,loadMembers);
-  const idsOf=(value:MemberLookup|undefined)=>value&&"ids" in value?value.ids??[]:[];
-  const failedOf=(value:MemberLookup|undefined)=>value&&"failed" in value?value.failed??"":"";
-  const memberIds=()=>idsOf(projectMembers());
-  const membersFailed=()=>failedOf(projectMembers());
+  /* The project-member read, the assignable-people list and the project list moved
+     WITH the editor into components/TaskRowEdit.tsx — including the rule that a
+     refused member read is carried as a value and said out loud, never shown as
+     "nobody". This view keeps only what its own rows and rail need. */
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
-  const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
-  // A person is on or off this task; the popover stays open so several can be picked.
-  const toggleAssignee=(id:string)=>{ form().assignee_ids.includes(id) ? removeAssignee(id) : addAssignee(id); };
-  // Assignable people are the project's members: the project decides who may carry
-  // its work, and the server refuses anybody else.
-  const assignableFrom=(ids:string[])=>active().filter(person=>ids.includes(person.id)).map(person=>({id:person.id,label:person.display_name||person.username,sub:person.username}));
-  const assignable=()=>assignableFrom(memberIds());
-  const selectableProjects=()=>(projects()??[]).filter(project=>!project.archived).map(project=>({id:project.id,name:project.name,key:project.key}));
-  const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
-  const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
-  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
-  /* The composer is always on this page, so the empty state's primary action is
-     "put the cursor in it", not a second copy of it. */
-  const focusComposer=()=>{ const field=document.querySelector<HTMLInputElement>(".todo-view .composer-title"); field?.focus(); field?.scrollIntoView({block:"center"}); };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
-  // ── edit an existing task (content/notes/due date/project/assignees/source) ──
-  // One row editable at a time, same shape as the composer, reusing its own
-  // controls so editing never looks like a second, different UI.
+  /* ── EDIT AN EXISTING TASK: IN THE ROW ──────────────────────────────────────
+     One row open at a time. The editor itself moved to components/TaskRowEdit.tsx
+     UNCHANGED IN SUBSTANCE (same controls, same classes, same Save/Cancel), because
+     the project and team surfaces now open the SAME editor with the same gesture.
+     This surface keeps what is its own: which row is open, and where the focus goes
+     when it closes. */
   const [editingId,setEditingId]=createSignal<string|null>(null);
-  const [editForm,setEditForm]=createSignal(blank());
-  const [editMembers]=createResource(()=>editForm().project_id,loadMembers);
-  const editMemberIds=()=>idsOf(editMembers());
-  const editMembersFailed=()=>failedOf(editMembers());
-  const startEdit=(todo:TodoItem)=>{
+  // FOCUS RETURNS TO THE ROW ON CLOSE: the element that opened the editor is
+  // remembered, and given the focus back once the row is drawn again.
+  let openerEl:HTMLElement|undefined;
+  const startEdit=(todo:TodoItem,event?:{currentTarget:HTMLElement})=>{
+    openerEl=event?.currentTarget;
     setEditingId(todo.id);
-    setEditForm({ content:todo.content, notes:todo.notes??"", due_date:todo.due_date??"", project_id:todo.project_id??"", source_entity_type:todo.source_entity_type??"", source_entity_id:todo.source_entity_id??"", assignee_ids:[...todo.assignee_ids], content_kind:todo.content_kind??"text" });
     setError("");
   };
-  const cancelEdit=()=>setEditingId(null);
-  const selectEditProject=(id:string)=>setEditForm({...editForm(),project_id:id,assignee_ids:id?editForm().assignee_ids:[]});
-  const addEditAssignee=(id:string)=>{ if(!id || !editForm().project_id) return; const f=editForm(); if(f.assignee_ids.includes(id)) return; setEditForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
-  const removeEditAssignee=(id:string)=>{ const f=editForm(); setEditForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
-  const toggleEditAssignee=(id:string)=>{ editForm().assignee_ids.includes(id) ? removeEditAssignee(id) : addEditAssignee(id); };
-  const saveEdit=async(todo:TodoItem)=>{
-    try {
-      const f=editForm();
-      if(!f.content.trim()) throw new Error("Task content cannot be empty.");
-      if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together.");
-      // Everything not in the edit form (id, profile_id, done…) survives untouched.
-      await personalApi.updateTodo({...todo,content:f.content.trim(),notes:f.notes.trim()||null,due_date:f.due_date||null,project_id:f.project_id||null,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind});
-      setEditingId(null);
-      refetch();
-    } catch(reason) { setError(humanError(reason)); }
+  const closeEdit=()=>{
+    setEditingId(null);
+    const opener=openerEl; openerEl=undefined;
+    queueMicrotask(()=>opener?.isConnected?opener.focus():document.querySelector<HTMLElement>(".todo-view .task-body-edit")?.focus());
   };
 
   const today=todayISO;
@@ -103,25 +78,19 @@ export default function Todo() {
   const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const editRow=(todo:TodoItem)=><article class="task-card task-card-editing">
     <div class="task-body">
-      <input class="composer-title" autofocus aria-label="Task title" value={editForm().content} onInput={e=>setEditForm({...editForm(),content:e.currentTarget.value})} onKeyDown={e=>{ if(e.key==="Escape") cancelEdit(); }}/>
-      <div class="composer-meta tm-row">
-        <ProjectControl value={editForm().project_id} projects={selectableProjects()} onChange={selectEditProject}/>
-        <DueDateControl value={editForm().due_date} onChange={iso=>setEditForm({...editForm(),due_date:iso})}/>
-        <AssigneeControl value={editForm().assignee_ids} people={assignableFrom(editMemberIds())} onToggle={toggleEditAssignee}
-          disabled={!editForm().project_id} disabledReason="Select a project before assigning members"
-          emptyNote={editMembersFailed()?`The project's members could not be loaded: ${editMembersFailed()}`:"This project has no members available for assignment."}/>
-      </div>
-      <Show when={editMembersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
-      <Show when={editForm().assignee_ids.length}><ul class="assignee-chips"><For each={editForm().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeEditAssignee(id)}>×</button></li>}</For></ul></Show>
-      <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={editForm().notes} onInput={e=>setEditForm({...editForm(),notes:e.currentTarget.value})}/></label>
-      <label class="fld-check"><input type="checkbox" checked={editForm().content_kind==="markdown"} onChange={e=>setEditForm({...editForm(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
-      <details class="composer-source" open={Boolean(editForm().source_entity_type||editForm().source_entity_id)}><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={editForm().source_entity_type} onInput={e=>setEditForm({...editForm(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={editForm().source_entity_id} onInput={e=>setEditForm({...editForm(),source_entity_id:e.currentTarget.value})}/></div></details>
-      <div class="composer-actions task-edit-actions"><button type="button" class="ghost" onClick={cancelEdit}>Cancel</button><button type="button" class="primary composer-submit" onClick={()=>saveEdit(todo)}>Save</button></div>
+      {/* My tasks is the surface that has always carried the markdown switch and the
+          source bookmark, so it is the one that asks for them (`advanced`).
+          This is the caller's OWN list, so the caller owns every row in it — the
+          server's owner rule (TodoOwnerWrite) is satisfied by construction here. */}
+      <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)}
+        onCancel={closeEdit}
+        onSaved={()=>{ closeEdit(); refetch(); }}
+        onError={setError}/>
     </div>
   </article>;
   const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <button type="button" class="task-body task-body-edit" aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
+    <button type="button" class="task-body task-body-edit" aria-label={`Edit ${todo.content}`} onClick={e=>startEdit(todo,e)}>
       <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
       <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
 <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
@@ -160,57 +129,24 @@ export default function Todo() {
           My tasks     — only yours, across every project.
           Team tasks   — everybody's, across every project you are in.
           Project Tasks— everybody's, in one project. */}
-    <PageHeader title="My tasks" subline="Only your tasks — yours and what people put on you, across every project."/>
+    <PageHeader title="My tasks" subline="Only your tasks — yours and what people put on you, across every project." actions={
+      <button type="button" class="primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
+    }/>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
     <div class="view-cols todo-cols">
       <div class="view-main">
-        {/* THE ONE COMPOSER THAT STAYS ON ITS SURFACE (L3, decided deliberately).
-            Capture is the act this page exists for, and a capture box you must open
-            first is a capture box people stop using. What was wrong here was SIZE,
-            not existence: the list started ~700px down behind notes, a markdown
-            switch and two raw id fields. Those are EDITING, and every one of them is
-            still here — one fold away, and in the row editor a click away. The
-            resting composer is one line: say it, file it. */}
-        <form class="task-composer" onSubmit={save}>
-          <div class="composer-line">
-          <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
-          <button class="primary composer-submit" disabled={!form().content.trim()}>Add task</button>
-          </div>
-          <div class="composer-meta tm-row">
-            <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject}/>
-            <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
-            <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee}
-              disabled={!form().project_id} disabledReason="Select a project before assigning members"
-              emptyNote={membersFailed()?`The project's members could not be loaded: ${membersFailed()}`:"This project has no members available for assignment."}/>
-          </div>
-          <Show when={membersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
-          <Show when={form().project_id&&!projectMembers.loading&&!membersFailed()&&!memberIds().length}><p class="hint">This project has no members available for assignment.</p></Show>
-          <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
-          {/* Everything a task can carry beyond its name, folded: notes, the markdown
-              switch, and the source bookmark's two identifier fields. Nothing was
-              taken away — it stopped being the first thing on the page. */}
-          <details class="composer-more">
-            <summary>More — notes, formatting, source</summary>
-            <div class="composer-more-body">
-              <label class="todo-field todo-field-notes"><textarea class="composer-notes" rows="3" aria-label="Notes" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
-              <label class="fld-check"><input type="checkbox" checked={form().content_kind==="markdown"} onChange={e=>setForm({...form(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
-              <div class="composer-source-fields"><input aria-label="Source entity type" placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input aria-label="Source entity ID" placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div>
-            </div>
-          </details>
-        </form>
         <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-        {/* NOTHING YET, for the whole surface. The creation action is the composer
-            directly above, so the primary FOCUSES it instead of duplicating it —
-            two "Add task" buttons two inches apart is not an offer, it is noise. */}
+        {/* NOTHING YET, for the whole surface: the same primary the header carries,
+            opening the same drawer. */}
         <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
           <EmptyState
             title="No tasks yet"
             hint="Your own list — personal to-dos, and anything assigned to you from a project."
-            actions={<button type="button" class="primary" onClick={focusComposer}>New task</button>}
+            actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
           />
         </Show>
-        {/* Per-section lines stay QUIET: with tasks in other sections and the
-            composer in view, a call to action here would fire on every filter of
+        {/* Per-section lines stay QUIET: with tasks in other sections and the primary
+            in the header, a call to action here would fire on every filter of
             the calendar the person is already reading. */}
         <Show when={!!(todos() ?? []).length}>
         <section class="task-list">
@@ -260,5 +196,9 @@ export default function Todo() {
         </div>
       </aside>
     </div>
+    {/* THE SAME DRAWER the project and team surfaces open. `advanced` because this is
+        the surface that has always carried the markdown switch and the source
+        bookmark — the drawer does not grow fields anywhere they never existed. */}
+    <Show when={creating()}><TaskDrawer advanced authorId={profileId()} onClose={()=>setCreating(false)} onSaved={()=>refetch()}/></Show>
   </section>;
 }
