@@ -1197,14 +1197,19 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <button class="doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
               New document
             </button>
-            <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
+            {/* FOUR ACTS, FOUR BUTTONS, ONE RANK ORDER. Upload leads; the other three
+                are equals and are dressed as equals — two of them used to be underlined
+                text, which reads as a link into somewhere else, not as an act done here.
+                Import is offered in EVERY library, including a project's: the command
+                takes the container it is called from, so withholding it there was an
+                arbitrary difference, not a rule. */}
+            <button class="doc-action-secondary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
               New folder
             </button>
-            <Show when={!embedded()}>
-              <button class="link doc-action-tertiary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
-                {importOpen() ? "Close import" : "Import library"}
-              </button>
-              <Show when={importOpen()}>
+            <button class="doc-action-secondary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
+              {importOpen() ? "Close import" : "Import library"}
+            </button>
+            <Show when={importOpen()}>
                 <div class="import-library-panel">
                   <p>Import a local Markdown or Confluence export.</p>
                   <input
@@ -1223,7 +1228,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     {(summary) => <span class="hint">{summary().documents_created} page(s), {summary().folders_created} folder(s)</span>}
                   </Show>
                 </div>
-              </Show>
             </Show>
         </div>
 
