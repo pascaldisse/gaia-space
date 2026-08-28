@@ -14,6 +14,7 @@ import Calendar from "./Calendar";
 import Documents from "./Documents";
 import "./ChannelWorkspace.css";
 import { UI_LOCALE } from "../calendar";
+import { metricTone } from "../statusTone";
 
 /**
  * The channel as a workspace (GAIA Space redesign, stage 2).
@@ -130,8 +131,13 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={memberCount() > 0}>
               <span class="cw-pill"><strong>{memberCount()}</strong> members</span>
             </Show>
+            {/* Waiting on me -> amber, but ONLY when there is something to wait for:
+                `metricTone` refuses a tone to zero, so this chip can never become a
+                coloured warning about nothing (audit §3.7). */}
             <Show when={repliesNeeded() > 0}>
-              <span class="cw-pill"><strong>{repliesNeeded()}</strong> replies needed</span>
+              <span class="cw-pill" classList={{ [metricTone(repliesNeeded(), "amber") || "untoned"]: true }}>
+                <strong>{repliesNeeded()}</strong> replies needed
+              </span>
             </Show>
             {/* No channel-bound meeting -> no chip. The prototype's "14:30 Meeting" has no
                 other honest source: meetings bind to a channel, never to a project. */}

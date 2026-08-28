@@ -147,6 +147,12 @@
 .cw-tag.teal { background: var(--teal-soft); color: #006b5e; border-color: transparent; }
 .cw-tag.amber { background: var(--amber-soft); color: #7b5207; border-color: transparent; }
 
+/* Same law on the header chips. The tone is handed out by statusTone `metricTone`,
+   which returns "" for zero — so `.cw-pill.amber` can only ever describe a real
+   number of waiting replies. `.untoned` is the resting state and carries no rule. */
+.cw-pill.amber { background: var(--amber-soft); color: #7b5207; border-color: transparent; }
+.cw-pill.amber strong { color: inherit; }
+
 .cw-person {
   display: flex;
   align-items: center;
