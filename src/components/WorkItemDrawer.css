@@ -143,6 +143,10 @@
 .wid-root .wid-people { display: grid; gap: 4px; }
 .wid-root .wid-person { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--wid-ink); }
 .wid-root .wid-hint { margin: 0; color: var(--wid-muted); font-size: 13px; line-height: 1.45; }
+/* The task drawer's assignee list is a fieldset, so it needs the field's own gap
+   back; its source bookmark is the one place two inputs share a line. */
+.wid-root .task-drawer-people { gap: 8px; }
+.wid-root .task-drawer-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* Quelle is a fact, not a field: flat, unclickable, and visibly not an input. */
 .wid-root .wid-source-card {

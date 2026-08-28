@@ -493,13 +493,17 @@ export function IconButton(props: IconButtonProps): JSX.Element {
 }
 
 /** The container that makes the four read as one calm line inside a paper card. */
-export function ControlRow(props: { label: string; class?: string; children: JSX.Element }): JSX.Element {
+export function ControlRow(props: { label: string; class?: string; hidden?: boolean; children: JSX.Element }): JSX.Element {
   return (
     <div
       class="control-row"
       classList={props.class ? { [props.class]: true } : undefined}
       role="group"
       aria-label={props.label}
+      /* A row put away behind a disclosure stays IN THE DOM and says it is not
+         shown. Unmounting it would throw away the filter's own state — and every
+         reader that could find it before. */
+      hidden={props.hidden}
     >
       {props.children}
     </div>

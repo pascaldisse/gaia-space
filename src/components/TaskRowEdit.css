@@ -1,0 +1,35 @@
+/* The in-row editor's shell (stage 20). The CONTROLS come from Todo.css — this is the
+   editor My tasks already had, lifted so the project and team surfaces open the same
+   one. Only what is new about opening it inside a plain list row lives here.
+
+   STRUCTURE IS UNSCOPED; only the paper restyle sits under `.theme-space-light`. */
+
+.task-edit { display: grid; gap: 12px; min-width: 0; }
+.task-edit .composer-title { font-size: 16px !important; }
+.task-edit-readonly { margin: 0; color: var(--text-muted); font-size: 12px; }
+.task-edit-done { justify-self: start; }
+/* Cancel left, Save right — the same footer the composer has. */
+.task-edit-actions { display: flex; justify-content: space-between; gap: 10px; }
+
+/* THE ROW KEEPS ITS PLACE WHILE OPEN. The editor is rendered inside the same <li>
+   the row occupies, so the list never re-orders under the person editing it; this
+   only marks the open row so it stays findable. */
+.task-row-editing {
+  display: block;
+  padding: 14px 12px;
+  border-top: 1px solid var(--surface-border);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-raised);
+}
+.task-list-plain > li:first-child > .task-row-editing { border-top: 0; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════ */
+.theme-space-light .task-row-editing {
+  border-left: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--teal-soft);
+  padding: 16px 14px;
+}
+.theme-space-light .task-edit .composer-title { color: var(--ink); }
+.theme-space-light .task-edit-readonly { color: var(--muted); }
