@@ -1,0 +1,37 @@
+/* Locations — the little that is genuinely local to this view.
+ *
+ * Everything with a shape already lives elsewhere: the card is `paper-card`,
+ * the fields are `operatorForm.css`, the pickers are `PillSelect`, the rows are
+ * `paper-row`. What is left here is spacing between those blocks, which is why
+ * this file is short — and it is UNSCOPED, because spacing is structure and the
+ * dark theme needs exactly the same spacing. Only colour is scoped below.
+ */
+
+.locations-grid { display: grid; gap: 0; }
+
+/* The schedule field is a block of JSON, not a line in the filter row, so it
+   breaks out of `.op-form`'s flex line and takes the card's full width. */
+.locations-schedule { margin-top: 12px; }
+.locations-schedule textarea { width: 100%; }
+
+.locations-view .op-hint { margin-top: 6px; }
+
+.locations-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* The desk form is seven controls; without an explicit gap the date fields
+   collide with the number fields on a narrow window. */
+.locations-desk-form { margin-bottom: 4px; }
+
+/* A desk row is a record, not a link: no pointer, no hover lift — only the
+   Remove pill inside it is actionable. */
+.locations-desk-row { cursor: default; }
+.theme-space-light .locations-desk-row:hover { background: transparent; }
+
+/* Inline code inside a hint is a value, not a block of source. */
+.theme-space-light .locations-view .op-hint code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--wash-2);
+  color: var(--ink);
+  font-size: 12px;
+}
