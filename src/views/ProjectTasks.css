@@ -1,0 +1,16 @@
+/* Project Tasks draws in the `.planning-view` / `.issue-layout` shell from
+   Issues.css. Only the ticket bridge is local: the one quiet line that keeps
+   the connection to tracked work visible after the ticket LIST moved back to
+   the surface that owns it (stage 12d).
+
+   STRUCTURE IS UNSCOPED (it must exist in every theme); only the paper-theme
+   restyle sits under `.theme-space-light`. */
+.pt-tickets-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
+.pt-tickets-link { color: var(--accent-text, var(--accent)); font-size: 12px; font-weight: 600; text-decoration: none; }
+.pt-tickets-link:hover { color: var(--accent-hover, var(--accent-text, var(--accent))); text-decoration: underline; }
+.pt-tickets-hint { color: var(--text-dim); font-size: 11px; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════ */
+.theme-space-light .project-tasks-view .pt-tickets-line { margin-bottom: 18px; gap: 12px; }
+.theme-space-light .project-tasks-view .pt-tickets-link { color: var(--teal-dark); font-size: 13px; font-weight: 660; }
+.theme-space-light .project-tasks-view .pt-tickets-hint { color: var(--quiet); font-size: 12px; }
