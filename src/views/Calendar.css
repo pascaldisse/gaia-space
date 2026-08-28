@@ -390,3 +390,5 @@
 @media (max-width: 56.25em) {
   .theme-space-light .calendar-main { grid-template-columns: minmax(0, 1fr); }
 }
+
+.theme-space-light .cal-viewopts-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }

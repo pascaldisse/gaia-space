@@ -2,9 +2,10 @@ import { For, Show, createMemo, createResource, createSignal, type JSX } from "s
 import Issues from "./Issues";
 import { reviewApi, type Review } from "../api/review";
 import { projectId as sessionProject } from "../session";
-import { linkProps } from "../router";
+import { isViewAvailable, linkProps } from "../router";
 import PageHeader from "../components/PageHeader";
 import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
@@ -82,8 +83,23 @@ export default function Development(): JSX.Element {
       <Show when={section() === "pull-requests"}>
         <div class="dev-section">
           <Show when={reviews.loading}><p class="hint">Loading pull requests…</p></Show>
+          {/* NOTHING YET, and there is no "create a pull request" command in this
+              product — a PR is opened from a repository. So no primary is drawn:
+              a button that cannot do the thing is worse than no button. The two
+              secondaries go where the work actually is, pre-scoped. */}
           <Show when={!reviews.loading && !projectReviews().length}>
-            <p class="empty-state">No pull requests in this project yet.</p>
+            <EmptyState
+              title="No pull requests in this project yet"
+              hint="Pull requests appear here once a branch is pushed and a review is opened in the repository."
+              actions={<>
+                {/* Repos is desktop-only: on web the view is not reachable, so the
+                    pill is not drawn at all rather than pointing at a fallback. */}
+                <Show when={isViewAvailable("Repos")}>
+                  <GhostPill {...linkProps({ view: "Repos" })}>Open repositories</GhostPill>
+                </Show>
+                <GhostPill onClick={() => setSection("tickets")}>Back to tickets</GhostPill>
+              </>}
+            />
           </Show>
           <Show when={projectReviews().length}>
           <ul class="issue-list paper-list">
@@ -113,10 +129,14 @@ export default function Development(): JSX.Element {
           {/* HONEST EMPTY STATE: there is no release store behind this app. */}
           {/* The PageHeader above already says "Releases"; saying it twice was the
               old two-title idiom. */}
-          <div class="dev-empty" role="status">
-            <p>Not available yet — nothing in the workspace records releases. Pipelines run builds; a release is not one of their outputs today.</p>
-            <GhostPill {...linkProps({ view: "Pipelines" })}>Open pipelines</GhostPill>
-          </div>
+          {/* Nothing RECORDS a release, so there is nothing to create and no
+              primary is drawn. The one honest action is the surface that does
+              build the artefacts people come here looking for. */}
+          <EmptyState
+            title="Nothing in the workspace records releases yet"
+            hint="Pipelines run the builds; a release is not one of their outputs today."
+            actions={<Show when={isViewAvailable("Pipelines")}><GhostPill {...linkProps({ view: "Pipelines" })}>Open pipelines</GhostPill></Show>}
+          />
         </div>
       </Show>
     </section>

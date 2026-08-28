@@ -14,6 +14,8 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
+import { GhostPill } from "../components/controls";
 import { linkProps, useDeepLink } from "../router";
 import { profileId as sessionProfileId } from "../session";
 import "./Members.css";
@@ -94,6 +96,16 @@ export default function Members() {
       return !locationFilter() || (locations() ?? []).some((item) => item.profile_id === profile.id && item.location === locationFilter());
     });
   });
+  /* "Filtered away" vs "nothing here" for the directory. `includeArchived` is
+     not counted: it only ever ADDS rows, so it can never be why a list is empty. */
+  const directoryFiltered = () => !!directoryQuery().trim() || !!positionFilter() || !!locationFilter();
+  const clearDirectoryFilters = () => { setDirectoryQuery(""); setPositionFilter(""); setLocationFilter(""); };
+  /* An empty state whose create form is already on screen focuses that form
+     instead of drawing a second control for the same command. */
+  const focusField = (selector: string) => {
+    const field = document.querySelector<HTMLInputElement>(selector);
+    field?.focus(); field?.scrollIntoView({ block: "center" });
+  };
   const listedTeams = createMemo(() =>
     (teams() ?? []).filter((team) => includeArchived() || !team.archived),
   );
@@ -412,16 +424,26 @@ export default function Members() {
           <Show when={profiles.loading}>
             <p class="org-hint">Loading…</p>
           </Show>
-          <Show when={profiles() && listedProfiles().length === 0}>
-            <div class="org-empty-inline">
-              <div class="org-empty-icon">
-                <Icon name="user" size={22} />
-              </div>
-              <p>
-                No people yet. Add your first teammate above to start the
-                directory.
-              </p>
-            </div>
+          {/* TWO CASES. The directory has a search and two filters, so an empty
+              list usually means "you filtered them away" — offering "add a
+              person" there would invite a duplicate of the person being searched
+              for. Only a genuinely empty directory gets the create action, and
+              since the add form is the block directly above, the primary puts
+              the cursor in it rather than repeating the command. */}
+          <Show when={profiles() && listedProfiles().length === 0 && directoryFiltered()}>
+            <EmptyState
+              variant="no-match"
+              title="No people match these filters."
+              actions={<GhostPill onClick={clearDirectoryFilters}>Clear filters</GhostPill>}
+            />
+          </Show>
+          <Show when={profiles() && listedProfiles().length === 0 && !directoryFiltered()}>
+            <EmptyState
+              icon={<Icon name="user" size={18} />}
+              title="Nobody in the directory yet"
+              hint="People here can be assigned work, added to teams and mentioned in messages."
+              actions={<button type="button" class="primary" onClick={() => focusField(".org-form input[placeholder='Display name']")}>Add the first person</button>}
+            />
           </Show>
           <ul class="org-list">
             <For each={listedProfiles()}>
@@ -487,14 +509,12 @@ export default function Members() {
             <button class="primary">Add</button>
           </form>
           <Show when={teams() && listedTeams().length === 0}>
-            <div class="org-empty-inline">
-              <div class="org-empty-icon">
-                <Icon name="org" size={22} />
-              </div>
-              <p>
-                No teams yet. Create one above, then add members on the right.
-              </p>
-            </div>
+            <EmptyState
+              icon={<Icon name="org" size={18} />}
+              title="No teams yet"
+              hint="A team groups people so a whole group can carry a project role at once."
+              actions={<button type="button" class="primary" onClick={() => focusField(".org-form-inline input[placeholder='New team name']")}>Create the first team</button>}
+            />
           </Show>
           <ul class="org-team-list">
             <For each={listedTeams()}>
@@ -531,12 +551,14 @@ export default function Members() {
           <Show
             when={activeTeam()}
             fallback={
-              <div class="org-empty-inline tall">
-                <div class="org-empty-icon">
-                  <Icon name="users" size={22} />
-                </div>
-                <p>Select a team to see and manage who belongs to it.</p>
-              </div>
+              /* Not an empty store — a missing SELECTION. Nothing to create, so
+                 nothing is offered; the teams are one click to the left. */
+              <EmptyState
+                variant="no-match"
+                icon={<Icon name="users" size={18} />}
+                title="No team selected"
+                hint="Pick a team on the left to see and manage who belongs to it."
+              />
             }
           >
             {(team) => (
@@ -585,9 +607,10 @@ export default function Members() {
                     !memberships.loading
                   }
                 >
-                  <div class="org-empty-inline">
-                    <p>No members yet — add the first person above.</p>
-                  </div>
+                  <EmptyState
+                    title="This team has nobody in it yet"
+                    hint="Add the first member with the picker above — the team is already chosen."
+                  />
                 </Show>
                 <div class="org-form">
                   <select value={approverId()} onChange={(event) => setApproverId(event.currentTarget.value)} aria-label="Membership edit approver">

@@ -5,6 +5,9 @@ import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import PageHeader from "../components/PageHeader";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
+import { linkProps } from "../router";
 import { projectName } from "../orgScope";
 import { projectId as sessionProject, setProjectId as setSessionProject, humanError, profiles, reloadProfiles } from "../session";
 
@@ -257,7 +260,17 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
       </div>
     </Show>
 
-    <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
+    {/* NOTHING YET. The board is created for THIS project — the picker in the
+        header already fixed it — so the primary opens the creation popover
+        directly instead of asking again. */}
+    <Show when={board()} fallback={<EmptyState
+      title="No board in this project yet"
+      hint="A board comes with its columns ready to use — tickets move across them."
+      actions={<>
+        <button type="button" class="primary" disabled={!projectId()} onClick={event => { event.stopPropagation(); togglePanel("board"); }}>New board</button>
+        <GhostPill {...linkProps({ view: "Issues", projectId: projectId() })}>Open tickets</GhostPill>
+      </>}
+    />}>{b => <>
       <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected tickets"><strong>{selected().length} selected</strong>
         <select aria-label="Move selected tickets to column" value={bulkColumnId()} onChange={e => setBulkColumnId(e.currentTarget.value)}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></select><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
         <select aria-label="Assign selected tickets to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
@@ -265,7 +278,16 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
       </div></Show>
       <div class="board-split" classList={{ "with-rail": showBacklog() || !!openIssue() }}>
         <div class="board-canvas">
-        <Show when={laneGroups().length} fallback={<p class="hint pad">No tickets in this board.</p>}>
+        {/* NOTHING YET on this board — tickets exist in the project and are put
+            ON a board from the backlog, which is exactly what the primary opens. */}
+        <Show when={laneGroups().length} fallback={<EmptyState
+          title="No tickets on this board yet"
+          hint="Tickets reach a board from the backlog, or by being filed straight into a column."
+          actions={<>
+            <button type="button" class="primary" onClick={event => { event.stopPropagation(); setShowBacklog(true); }}>Open backlog</button>
+            <GhostPill {...linkProps({ view: "Issues", projectId: projectId() })}>New ticket</GhostPill>
+          </>}
+        />}>
 <For each={laneGroups()}>{lane => <section class="swimlane-row">
 <Show when={swimlaneGroup() !== "none"}><header><strong>{lane.name}</strong><small>{lane.laneIssues.length} tickets</small></header></Show>
 <div class="kanban">
@@ -313,7 +335,9 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
         </div>
 </section>}</For>
 </Show>
-        <Show when={!columns()?.length}><p class="hint pad">This board has no columns yet — add one above.</p></Show>
+        {/* The "Add a column" field is drawn right beside this, so the line only
+            has to point at it — a second create button would be noise. */}
+        <Show when={!columns()?.length}><EmptyState title="This board has no columns yet" hint="Add one with the field above — a column maps one or more ticket statuses." /></Show>
         </div>
 
         {/* One right rail: the open card owns it, otherwise the backlog does. */}
@@ -389,7 +413,10 @@ function Backlog(props: { boardId: string; columns: BoardColumn[]; sprintId?: st
   const add = async (ids: string[]) => { const column = props.columns[0]; if (!column || !ids.length) return; await planningApi.bulkMove({ board_id: props.boardId, issue_ids: ids, column_id: column.id, sprint_id: props.sprintId ?? null, swimlane_id: props.swimlaneId ?? null }); setSelected([]); refetch(); props.moved(); };
   return <>
     <Show when={selected().length}><button disabled={!props.columns.length} onClick={() => void add(selected())}>Add {selected().length} selected to board</button></Show>
-    <Show when={!items()?.length}><p class="hint">Nothing in the backlog.</p></Show>
+    {/* The backlog is a DERIVED list — every ticket of the project that is not on
+       this board. There is nothing to create here and nothing to un-filter, so it
+       states the fact and stops. */}
+    <Show when={!items()?.length}><EmptyState variant="no-match" title="Every ticket is already on this board." /></Show>
     <For each={items()}>{issue => <div class="backlog-row"><input aria-label={`Select backlog ticket #${issue.number}`} type="checkbox" checked={selected().includes(issue.id)} onChange={event => toggle(issue.id, event.currentTarget.checked)} /><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => void add([issue.id])}>Add to board</button></div>}</For>
   </>;
 }
@@ -404,7 +431,7 @@ const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.loca
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
 <label class="chip chip-select"><span>Rows</span> <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
-<Show when={props.issues.length} fallback={<p class="hint">No board tickets for this matrix.</p>}>
+<Show when={props.issues.length} fallback={<EmptyState variant="no-match" title="No board tickets to report on yet." />}>
 <table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
 </Show>
 </section>;

@@ -4,6 +4,8 @@ import { documentsApi, newId, type Document } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { humanError, profileId } from "../session";
 import { linkEntity, linkProps, useDeepLink } from "../router";
 import "./Blogs.css";
@@ -29,6 +31,11 @@ export default function Blogs() {
     } catch(reason) { setError(humanError(reason)); } finally { setPublishing(false); }
   };
   const result=()=>posts()??[];
+  /* `team`/`project`/`location` are shared with the COMPOSER's targeting, so they
+     are not read as list filters here; only the two list controls are. */
+  const blogFiltered=()=>!!term().trim()||!!author();
+  const clearBlogFilters=()=>{setTerm("");setAuthor("");};
+  const focusComposer=()=>{const field=document.querySelector<HTMLInputElement>(".blogs-compose input[aria-label='Article title']");field?.focus();field?.scrollIntoView({block:"center"});};
   return <section class="blogs-view">
     <PageHeader title="Blogs" subline="Organization articles, published from drafts" />
     <Show when={error()}><p class="blogs-error" role="alert">{error()}</p></Show>
@@ -42,7 +49,11 @@ export default function Blogs() {
         <button class="primary" disabled={publishing()} onClick={publish}>{publishing()?"Publishing…":"Publish article"}</button>
       </aside>
       <section class="blogs-list"><div class="blogs-filter"><input value={term()} onInput={e=>setTerm(e.currentTarget.value)} placeholder="Filter articles"/><select value={author()} onChange={e=>setAuthor(e.currentTarget.value)}><option value="">All authors</option><For each={profiles()??[]}>{item=><option value={item.id}>{item.display_name}</option>}</For></select></div>
-        <Show when={posts.loading}><p class="hint">Loading articles…</p></Show><Show when={!posts.loading&&!result().length}><p class="empty-state">No published articles match these filters.</p></Show><For each={result()}>{post=><a classList={{"blog-row":true,active:selectedPost()?.id===post.id}} {...linkProps({view:"Blogs",entityType:"blog",entityId:post.id})} onClick={event=>{linkProps({view:"Blogs",entityType:"blog",entityId:post.id}).onClick(event);setSelected(post.id)}}><strong>{post.title}</strong><span>{date(post.published_at)} · {post.project_id ? "Project article" : post.team_id ? "Team article" : "Organization"}</span></a>}</For>
+        <Show when={posts.loading}><p class="hint">Loading articles…</p></Show>{/* Two cases: a filter hides the articles (clear it), or nothing has been
+            published (write one — the composer is the left column of this very
+            view, so the primary focuses it rather than duplicating it). */}
+        <Show when={!posts.loading&&!result().length&&blogFiltered()}><EmptyState variant="no-match" title="No articles match these filters." actions={<GhostPill onClick={clearBlogFilters}>Clear filters</GhostPill>}/></Show>
+        <Show when={!posts.loading&&!result().length&&!blogFiltered()}><EmptyState title="No articles published yet" hint="Announcements and write-ups for the whole organization live here." actions={<button type="button" class="primary" onClick={focusComposer}>Write the first article</button>}/></Show><For each={result()}>{post=><a classList={{"blog-row":true,active:selectedPost()?.id===post.id}} {...linkProps({view:"Blogs",entityType:"blog",entityId:post.id})} onClick={event=>{linkProps({view:"Blogs",entityType:"blog",entityId:post.id}).onClick(event);setSelected(post.id)}}><strong>{post.title}</strong><span>{date(post.published_at)} · {post.project_id ? "Project article" : post.team_id ? "Team article" : "Organization"}</span></a>}</For>
       </section>
       <article class="blog-detail"><Show when={selectedPost()} fallback={<p class="hint">Select an article to read it.</p>}>{post=><BlogDetail post={post()}/>}</Show></article>
     </div>

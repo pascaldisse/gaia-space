@@ -30,9 +30,17 @@ const quickKinds:QuickKind[] = ["meeting","task","deadline"];
  *
  *  Keyboard contract, same as components/TaskMeta.tsx: Escape closes and hands
  *  focus back to the trigger, a click outside closes, and the trigger states
- *  what it owns (`aria-haspopup`, `aria-expanded`, `aria-controls`). */
-function ViewOptions(props:{ label:string; children:JSX.Element }) {
-  const [open,setOpen] = createSignal(false);
+ *  what it owns (`aria-haspopup`, `aria-expanded`, `aria-controls`).
+ *
+ *  OPEN/CLOSE IS OWNED BY THE VIEW, not by this component — found by probing
+ *  the running app: `PageHeader`'s `actions` is a prop expression, so the whole
+ *  action lane is re-created whenever a resource it reads settles. A signal
+ *  living inside this component was therefore reset to `false` between the
+ *  click and the next frame, and the popover never appeared. State that must
+ *  survive a re-creation lives in the surrounding view. */
+function ViewOptions(props:{ label:string; open:boolean; setOpen:(open:boolean)=>void; children:JSX.Element }) {
+  const open = () => props.open;
+  const setOpen = (value:boolean) => props.setOpen(value);
   const menuId = createUniqueId();
   let root!:HTMLDivElement;
   // The trigger is read off the DOM rather than through a `ref` prop: GhostPill
@@ -46,7 +54,7 @@ function ViewOptions(props:{ label:string; children:JSX.Element }) {
     onCleanup(() => { window.removeEventListener("mousedown", away); window.removeEventListener("keydown", key); });
   });
   return <div class="cal-viewopts" ref={root}>
-    <GhostPill aria-haspopup="dialog" aria-expanded={open()} aria-controls={menuId} onClick={()=>setOpen(was=>!was)}>{props.label}</GhostPill>
+    <GhostPill aria-haspopup="dialog" aria-expanded={open()} aria-controls={menuId} onClick={()=>props.setOpen(!props.open)}>{props.label}</GhostPill>
     <Show when={open()}>
       <div class="cal-viewopts-menu" id={menuId} role="dialog" aria-label={props.label}>{props.children}</div>
     </Show>
@@ -86,6 +94,7 @@ const [calendarFilter,setCalendarFilter] = createSignal("all");
 const [targetProfile,setTargetProfile] = createSignal("");
 const [targetLocation,setTargetLocation] = createSignal("");
 const [notice,setNotice] = createSignal("");
+const [viewOptionsOpen,setViewOptionsOpen] = createSignal(false);
 const [invitee,setInvitee] = createSignal("");
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
@@ -96,17 +105,25 @@ const [meetings,{refetch:reloadMeetings}] = createResource(() => profileId(), pr
 const [projects] = createResource(() => platformApi.projects());
 const [calendars] = createResource(() => profileId(), owner => owner ? calendarsApi.list(owner) : Promise.resolve([]));
 const [options,{refetch:reloadOptions}] = createResource(() => profileId(), owner => owner ? personalApi.calendarOptions(owner) : Promise.resolve(undefined));
-const updateOptions = async (patch:Record<string,boolean|number>) => { const current=options(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
+// Same law as `loaded()` below, learned the hard way here: reading a FAILED
+// resource re-throws inside whatever computation touches it. `calendarOptions`
+// fails whenever the session cannot name an actor, and every read of it sat in
+// a render path — so one failing preferences call took the whole calendar with
+// it (it took down the View options popover the moment it was opened). Display
+// preferences are a nicety; their absence must degrade to "defaults", never to
+// a broken page.
+const prefs = () => { if (options.error) return undefined; return options(); };
+const updateOptions = async (patch:Record<string,boolean|number>) => { const current=prefs(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=scopeProjectId(); const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const prefs=options(); return filtered.filter(item => (prefs?.show_todos !== false || item.kind!=="task") && (!prefs?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=prefs.working_hours_start&&hour<prefs.working_hours_end;})())); };
+const scoped = () => { const project=scopeProjectId(); const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const active=prefs(); return filtered.filter(item => (active?.show_todos !== false || item.kind!=="task") && (!active?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=active.working_hours_start&&hour<active.working_hours_end;})())); };
 // Each view steps by its own span: a month, a week, a day, or a schedule window.
 const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
-const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(options()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };
+const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(prefs()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };
 const events = (day:Date) => itemsOnDay(scoped(), day);
 const agenda = createMemo(() => itemsOnDay(scoped(), selectedDay()));
 const schedule = createMemo(() => scheduleDays(scoped(), cursor()));
@@ -195,8 +212,20 @@ return <section class="calendar-view">
 <For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For>
 </PillSelect>
 </Show>
-<ViewOptions label="View options">
-<Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Show</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show>
+{/* WHY THE LEGEND IS IN HERE AND NOT UNDER THE TITLE.
+    It is a lookup table, consulted once and then never again — and only for
+    the month grid, because the agenda, the schedule and the detail pane all
+    print the kind as a word next to the dot. Something read once must not
+    hold a permanent line above the calendar; it also must not be deleted,
+    because three hues are not self-evident on first sight. So it keeps every
+    word, one click away, in the popover that already answers "how is this
+    calendar shown?". */}
+<ViewOptions label="View options" open={viewOptionsOpen()} setOpen={setViewOptionsOpen}>
+<Show when={prefs()} fallback={<p class="cal-viewopts-note">Display preferences could not be loaded; showing the defaults.</p>}>{prefs=><fieldset class="calendar-options"><legend>Show</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show>
+<p class="cal-viewopts-title" id="cal-legend-title">Colours</p>
+<ul class="calendar-legend" aria-labelledby="cal-legend-title">
+<For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
+</ul>
 </ViewOptions>
 <button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
 </>}/>

@@ -33,6 +33,10 @@ describe("meetings view", () => {
   test("books a described recurring meeting and links back to Calendar", async () => {
     const host = mount(); await settle();
     expect(host.querySelector(".meeting-calendar-link")?.getAttribute("href")).toContain("calendar");
+    // The composer is no longer permanent furniture on the surface — it is a drawer
+    // opened by the header's primary action. Opening it is the only step added here;
+    // every field, label and assertion below is unchanged.
+    (host.querySelector("button.meeting-new") as HTMLButtonElement).click(); await settle();
     const form = host.querySelector("form[aria-label='New meeting']") as HTMLFormElement;
     const title = form.querySelector("input[aria-label='Meeting title']") as HTMLInputElement;
     title.value = "Planning"; title.dispatchEvent(new Event("input", { bubbles: true }));

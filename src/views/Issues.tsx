@@ -8,6 +8,7 @@ import { humanError, projectId as sessionProject, setProjectId } from "../sessio
 import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { ControlRow, GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
@@ -40,6 +41,15 @@ export default function Issues(props: { filterTagName?: string; sections?: JSX.E
   const [error, setError] = createSignal("");
   const [drawerOpen, setDrawerOpen] = createSignal(false);
   const [statusEditorOpen, setStatusEditorOpen] = createSignal(false);
+  /* A pinned tag (Development › Bugs) is the view's IDENTITY, not a filter the
+     reader set — so it never counts as "you filtered this away". */
+  const filtered = () => !!query().trim() || !!statusFilter() || !!assigneeFilter() || !!customFieldFilter()
+    || (!props.filterTagName && !!tagFilter());
+  const clearFilters = () => {
+    setQuery(""); setStatusFilter(""); setAssigneeFilter("");
+    setCustomFieldFilter(""); setCustomValueFilter("");
+    if (!props.filterTagName) setTagFilter("");
+  };
   const [issues, { refetch: reloadIssues }] = createResource(
     () => [projectId(), query(), statusFilter(), tagFilter(), assigneeFilter(), customFieldFilter(), customValueFilter()] as const,
     ([project_id, text, status_id, tag_id, assignee_id, custom_field_id, custom_value]) => planningApi.issues({
@@ -186,12 +196,33 @@ const createStatus = async () => {
         </ControlRow>
         <Show when={pinnedTagMissing()}>
           {/* Honest: no such tag in this project, so there is no list to show — not
-              "every issue" pretending to be the bug list. */}
-          <p class="empty-state">This project has no “{props.filterTagName}” tag yet. Tag a ticket to build this list.</p>
+              "every issue" pretending to be the bug list. NOTHING YET, and the way
+              out is a ticket carrying that tag, so the primary opens the drawer in
+              THIS project — no picker, the project is already known. */}
+          <EmptyState
+            title={`No “${props.filterTagName}” ticket in this project yet`}
+            hint="This list is built from the tag. File one and tag it to start it."
+            actions={<button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>}
+          />
         </Show>
         <Show when={!pinnedTagMissing()}>
         <Show when={issues.loading}><p class="hint">Loading tickets…</p></Show>
-        <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No tickets match these filters.</p></Show>
+        {/* The two cases, kept apart. Tickets are filtered SERVER-side, so an
+            empty result cannot tell us whether the project is empty — but with no
+            filter set at all, an empty result IS an empty project. */}
+        <Show when={!issues.loading && !issues()?.length && filtered()}>
+          <EmptyState variant="no-match" title="No tickets match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
+        </Show>
+        <Show when={!issues.loading && !issues()?.length && !filtered()}>
+          <EmptyState
+            title="No tickets in this project yet"
+            hint="A ticket is tracked work with a status — bugs, features, anything that belongs on the board."
+            actions={<>
+              <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>
+              <GhostPill {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</GhostPill>
+            </>}
+          />
+        </Show>
         <ul class="issue-list paper-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
           {/* Title line, then a muted meta line, then at most one status pill —
               the same three-part shape every list surface uses now. */}

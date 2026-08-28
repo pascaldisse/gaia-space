@@ -1,5 +1,6 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, profiles, projectId as sessionProject, reloadProfiles, setProjectId } from "../session";
@@ -76,7 +77,10 @@ function ProjectRoles(props: { projectId: string }) {
       <input placeholder="Role name (optional with a template)" aria-label="Project role name" value={roleName()} onInput={e=>setRoleName(e.currentTarget.value)}/>
       <button class="primary">Add role</button>
     </form>
-    <ul class="project-role-list"><For each={roles()} fallback={<li class="hint">No roles yet.</li>}>{role=>
+    {/* The "Add role" form is directly above: the line points at it instead of
+        drawing a second button for the same command. */}
+    <Show when={!roles()?.length}><EmptyState title="No project roles yet" hint="Add one above — from a template, or with a name of your own." /></Show>
+    <ul class="project-role-list"><For each={roles()}>{role=>
       <li classList={{ archived: role.archived }}>
         <strong>{role.name}</strong> <code>{role.role_kind}</code>
         <Show when={role.template_id}><span class="hint"> from template</span></Show>
@@ -97,7 +101,8 @@ function ProjectRoles(props: { projectId: string }) {
       </select></label>
       <button class="primary">Bind team</button>
     </form>
-    <ul class="project-role-list"><For each={bindings()} fallback={<li class="hint">No team carries a role in this project.</li>}>{binding=>
+    <Show when={!bindings()?.length}><EmptyState title="No team carries a role in this project yet" hint="Bind a team to a role with the form above." /></Show>
+    <ul class="project-role-list"><For each={bindings()}>{binding=>
       <li>
         <strong>{teamName(binding.team_id)}</strong> → {roleName_(binding.project_role_id)}
         <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.removeProjectTeamRole(binding.project_id, binding.team_id, binding.project_role_id); await bindingsResource.refetch(); })}>Remove</button>
@@ -198,6 +203,10 @@ export default function Projects() {
       setDeadlineState({ ...deadlineState(), [project.id]: { status: "failed", message: humanError(reason) } });
     }
   };
+  const focusProjectForm = () => {
+    const field = document.querySelector<HTMLInputElement>(".projects-view .project-form input[aria-label='Project name']");
+    field?.focus(); field?.scrollIntoView({ block: "center" });
+  };
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
   return <section class="resource-view projects-view"><PageHeader title="Projects" subline="Owned workspaces and their deadlines" chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>} /><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
@@ -214,7 +223,18 @@ export default function Projects() {
           </a>;
         }}</Show>
       </div>
-    </Show><ul class="project-cards"><For each={items()}>{project=>{
+    </Show>
+    {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty
+        result can only be an empty workspace. The create form is the block
+        directly above, so the primary focuses it rather than repeating it. */}
+    <Show when={!items.loading && !items()?.length}>
+      <EmptyState
+        title="No projects yet"
+        hint="A project carries the tickets, boards, tasks and documents of one piece of work."
+        actions={<button type="button" class="primary" onClick={focusProjectForm}>New project</button>}
+      />
+    </Show>
+    <ul class="project-cards"><For each={items()}>{project=>{
       const open=(event:MouseEvent)=>{
         // The whole card selects the project — except where a real control lives
         // (deadline field, archive button, the per-project links).

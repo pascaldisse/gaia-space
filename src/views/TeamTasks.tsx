@@ -2,7 +2,9 @@ import { createResource, createSignal, For, onCleanup, onMount, Show } from "sol
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
-import { linkProps } from "../router";
+import { linkProps, navigate } from "../router";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import { todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
@@ -43,6 +45,11 @@ export default function TeamTasks() {
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
       && (!assigneeId() || task.assignee_ids.includes(assigneeId()));
   });
+  /* Two different facts about "the list is empty": a filter is hiding the work,
+     or there is no work. `includeDone` is NOT a filter for this purpose — it
+     only ever ADDS rows, so it can never be the reason nothing is shown. */
+  const filtered = () => !!text().trim() || !!assigneeId();
+  const clearFilters = () => { setText(""); setAssigneeId(""); };
   /** Grouped by project, project names ordered alphabetically so the list is stable. */
   const groups = () => {
     const by = new Map<string, Todo[]>();
@@ -65,7 +72,22 @@ export default function TeamTasks() {
     </div>
     <Show when={!profileId()}><p class="hint">Your account profile is still loading; team tasks will appear when it is ready.</p></Show>
     <Show when={tasks.loading}><p class="hint">Loading team tasks…</p></Show>
-    <Show when={!tasks.loading && !groups().length}><p class="empty-state">No team tasks match these filters.</p></Show>
+    {/* FILTERS MATCH NOTHING: the store has work, this filter simply hides it,
+        so the only right offer is to clear the filter — never "create", which
+        would invite a duplicate of the task being searched for. */}
+    <Show when={!tasks.loading && !groups().length && filtered()}>
+      <EmptyState variant="no-match" title="No team tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
+    </Show>
+    {/* NOTHING YET across every project the caller is a member of. This surface
+        has no composer of its own; creation lives in My tasks, so that is where
+        the primary goes — named for what it does, not for where it lands. */}
+    <Show when={!tasks.loading && !groups().length && !filtered() && !!profileId()}>
+      <EmptyState
+        title="Nobody has a running task yet"
+        hint="This is everyone's work across your projects — it fills up as people add tasks."
+        actions={<button type="button" class="primary" onClick={() => navigate({ view: "To-Do" })}>Add the first task</button>}
+      />
+    </Show>
     <For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
       <h2 class="tt-group-head"><a {...linkProps({ view: "Project Tasks", projectId: group.project_id })}>{group.name}</a> <small>{group.items.length}</small></h2>
       <ul class="issue-list tt-list">

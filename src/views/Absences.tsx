@@ -8,6 +8,7 @@ import { platformApi, type CfDefinition } from "../api/platform";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
 import {
   currentUser,
   humanError,
@@ -307,24 +308,17 @@ export default function Absences() {
                 pending={pending()}
                 nameFor={displayName}
               />
-              <section class="timeoff-empty">
-                <div class="timeoff-empty-card">
-                  <div class="timeoff-empty-icon">
-                    <Icon name="clock-nav" size={26} />
-                  </div>
-                  <h2>Start your availability record</h2>
-                  <p>
-                    Log vacations, sick days, and other leave
-                    {filterProfileId()
-                      ? ` for ${displayName(filterProfileId())}`
-                      : " across the organization"}
-                    .
-                  </p>
-                  <button class="primary timeoff-empty-cta" onClick={openForm}>
-                    <Icon name="plus" size={15} /> Record time off
-                  </button>
-                </div>
-              </section>
+              {/* NOTHING YET, and the action is the real one this view owns:
+                  `openForm` opens the record dialog, already scoped to whichever
+                  person the filter names — it never re-asks. */}
+              <EmptyState
+                icon={<Icon name="clock-nav" size={20} />}
+                title={filterProfileId()
+                  ? `No time off recorded for ${displayName(filterProfileId())} yet`
+                  : "No time off recorded yet"}
+                hint="Vacations, sick days and other leave — so everyone can see who is available."
+                actions={<button type="button" class="primary" onClick={openForm}>Record time off</button>}
+              />
             </div>
             <aside class="view-rail timeoff-rail">
               <OverviewRail

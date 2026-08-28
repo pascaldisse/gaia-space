@@ -2,13 +2,15 @@ import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import { localInput, meetingDraftError, UI_LOCALE} from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
+import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
 import PageHeader from "../components/PageHeader";
 import { humanError, isWeb, profileId } from "../session";
 import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
 import "./Meetings.css";
 
-type MeetingForm = Pick<Meeting, "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference">;
+// MeetingForm now lives beside the drawer that owns the composer; re-exported
+// shape, same fields, so nothing about the create payload changed.
 
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
@@ -21,18 +23,15 @@ const recurrenceLabel = (rrule: string | null) => {
   return frequency ? `Repeats ${frequency}` : "Custom recurrence";
 };
 const displayDate = (seconds: number) => new Date(seconds * 1000).toLocaleString(UI_LOCALE, { dateStyle: "medium", timeStyle: "short" });
-const recurrenceOptions = [
-  ["", "Does not repeat"],
-  ["FREQ=DAILY", "Daily"],
-  ["FREQ=WEEKLY", "Weekly"],
-  ["FREQ=MONTHLY", "Monthly"],
-  ["FREQ=YEARLY", "Yearly"],
-] as const;
 
 export default function Meetings() {
   const [meetings, { refetch }] = createResource(() => profileId(), (id) => id ? meetingsApi.list(id) : Promise.resolve([]));
   const [selected, setSelected] = createSignal<Meeting>();
   const [form, setForm] = createSignal<MeetingForm>(newForm());
+  // The composer is an act you opt into, not furniture the surface wears.
+  const [composing, setComposing] = createSignal(false);
+  // Invitees named before the meeting exists; sent once create() mints an id.
+  const [draftInvitees, setDraftInvitees] = createSignal<string[]>([]);
   const [query, setQuery] = createSignal("");
   const [showHistory, setShowHistory] = createSignal(false);
   const [invitee, setInvitee] = createSignal("");
@@ -109,9 +108,21 @@ export default function Meetings() {
       if (invalid) throw new Error(invalid);
       await meetingsApi.create(meeting);
       const channel_id = await meetingsApi.attachChannel(meeting.id);
+      // The drawer collects people before there is a meeting to invite them to,
+      // so the invites land here, once. A failing invite must not lose the
+      // meeting that was already created.
+      const invited: string[] = [];
+      for (const person of draftInvitees()) {
+        try { await meetingsApi.invite(meeting.id, person); invited.push(person); }
+        catch (reason) { setError(humanError(reason)); }
+      }
       setSelected({ ...meeting, channel_id });
       setForm(newForm());
-      setNotice("Meeting created. Add participants or open it on the calendar.");
+      setDraftInvitees([]);
+      setComposing(false);
+      setNotice(invited.length
+        ? `Meeting created and ${invited.length} person(s) invited.`
+        : "Meeting created. Add participants or open it on the calendar.");
       await refetch();
     } catch (reason) {
       setError(humanError(reason));
@@ -190,27 +201,27 @@ export default function Meetings() {
   }, () => setSelected(undefined));
 
   return <section class="meetings-view">
-    <PageHeader title="Meetings" actions={<a class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</a>} />
+    <PageHeader title="Meetings" actions={<>
+      <a class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</a>
+      <button type="button" class="primary meeting-new" onClick={() => { setError(""); setNotice(""); setComposing(true); }}>New meeting</button>
+    </>} />
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="meeting-notice" role="status">{notice()}</p></Show>
 
-    <div class="meetings-layout">
-      <aside class="meeting-create">
-        <form onSubmit={create} aria-label="New meeting">
-          <div class="mc-head"><h2>New meeting</h2><p>Set the time, participants, and recurrence for this series.</p></div>
-          <div class="mc-field"><label for="meeting-title">Title</label><input id="meeting-title" aria-label="Meeting title" class="mc-title-input" required placeholder="Weekly product review" value={form().title} onInput={(event) => setFormField("title", event.currentTarget.value)}/></div>
-          <div class="mc-field"><label for="meeting-description">Description</label><textarea id="meeting-description" aria-label="Meeting description" placeholder="Agenda, preparation, or joining details" value={form().description ?? ""} onInput={(event) => setFormField("description", event.currentTarget.value || null)}/></div>
-          <div class="mc-field mc-when"><div><label for="meeting-start">Start</label><input id="meeting-start" type="datetime-local" required value={localInput(form().starts_at)} onInput={(event) => setFormField("starts_at", epoch(event.currentTarget.value))}/></div><div><label for="meeting-end">End</label><input id="meeting-end" type="datetime-local" required value={localInput(form().ends_at)} onInput={(event) => setFormField("ends_at", epoch(event.currentTarget.value))}/></div></div>
-          <div class="mc-field"><label for="meeting-location">Location</label><input id="meeting-location" placeholder="Room, video link, or hybrid details" value={form().location ?? ""} onInput={(event) => setFormField("location", event.currentTarget.value || null)}/></div>
-          <div class="mc-field mc-organizer"><ProfilePicker label="Organizer" identity value={form().organizer_id ?? profileId()} onChange={(id) => setFormField("organizer_id", id)}/></div>
-          <div class="mc-field"><label for="meeting-visibility">Visibility</label><select id="meeting-visibility" value={form().visibility} onChange={(event) => setFormField("visibility", event.currentTarget.value as Meeting["visibility"])}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></div>
-          <div class="mc-field"><label for="meeting-modification">Who can edit?</label><select id="meeting-modification" value={form().modification_preference} onChange={(event) => setFormField("modification_preference", event.currentTarget.value as Meeting["modification_preference"])}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></div>
-          <div class="mc-field"><label for="meeting-repeat">Repeat</label><select id="meeting-repeat" value={form().rrule ?? ""} onChange={(event) => setFormField("rrule", event.currentTarget.value || null)}><For each={recurrenceOptions}>{([value, label]) => <option value={value}>{label}</option>}</For></select><span class="mc-hint">For a bounded or custom series, enter an RRULE below.</span></div>
-          <div class="mc-field"><label for="meeting-rrule">RRULE</label><input id="meeting-rrule" aria-label="RRULE recurrence" placeholder="FREQ=WEEKLY;BYDAY=MO,WE;COUNT=8" value={form().rrule ?? ""} onInput={(event) => setFormField("rrule", event.currentTarget.value || null)}/></div>
-          <button class="primary mc-submit">Create meeting</button>
-        </form>
-      </aside>
+    <Show when={composing()}>
+      <MeetingDrawer
+        form={form()}
+        setField={setFormField}
+        invitees={draftInvitees()}
+        addInvitee={(id) => setDraftInvitees((people) => people.includes(id) ? people : [...people, id])}
+        removeInvitee={(id) => setDraftInvitees((people) => people.filter((person) => person !== id))}
+        error={error()}
+        onSubmit={create}
+        onClose={() => setComposing(false)}
+      />
+    </Show>
 
+    <div class="meetings-layout">
       <main class="meeting-list" aria-label="Meetings">
         <div class="meeting-list-head"><div><h2>{showHistory() ? "All meetings" : "Upcoming meetings"}</h2><p>{visibleMeetings().length} visible</p></div><button type="button" onClick={() => setShowHistory(!showHistory())}>{showHistory() ? "Hide history" : "Show history"}</button></div>
         <input class="meeting-filter" type="search" aria-label="Filter meetings" placeholder="Filter by title, place, or organizer" value={query()} onInput={(event) => setQuery(event.currentTarget.value)}/>

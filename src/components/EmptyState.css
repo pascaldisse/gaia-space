@@ -31,7 +31,10 @@
 
 /* ── light theme ─────────────────────────────────────────────────────────── */
 .theme-space-light .empty-lead {
-  margin: 0;
+  /* Capped and centred: a dashed frame stretched across a 1500px panel reads as
+     a broken region, not as a calm answer. */
+  margin: 0 auto;
+  max-width: 680px;
   padding: 30px 24px 26px;
   border: 1px dashed var(--line-strong);
   border-radius: 18px;

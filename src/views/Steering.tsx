@@ -8,6 +8,8 @@ import { pipelinesApi } from "../api/pipelines";
 import { linkProps, route, type Route } from "../router";
 import { humanError, profileId, projects, setProjectId } from "../session";
 import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
+import { GhostPill } from "../components/controls";
 import { projectName } from "../orgScope";
 import { DEADLINE_SOON_DAYS, deadlineTone, urgencyOf } from "../statusTone";
 import "./Steering.css";
@@ -66,7 +68,16 @@ export default function Steering(){
   </a>;
  };
  const rows=(items:Work[])=><ul><For each={items.slice(0,6)}>{item=><li><b>{item.kind}</b> <Show when={item.number}>{n=><span>#{n()} </span>}</Show><a {...linkProps(item.kind==="Ticket"?{view:"Issues",entityType:"issue",entityId:item.id,projectId:project()}:{view:"Project Tasks",projectId:project()})}>{item.title}</a><Show when={item.due}>{d=><time> {d()}</time>}</Show></li>}</For></ul>;
- const work=()=>data()??[]; const bucket=(label:string,items:Work[])=><section class="steering-bucket"><h2>{label} <small>{items.length}</small></h2><Show when={items.length} fallback={<p>All clear.</p>}>{rows(items)}</Show></section>;
+ const work=()=>data()??[];
+ /* A bucket with nothing in it is GOOD NEWS about the project, not a missing
+    thing to create: "no overdue work" must never grow a "create overdue work"
+    button. So the buckets stay one quiet line. */
+ const bucket=(label:string,items:Work[])=><section class="steering-bucket"><h2>{label} <small>{items.length}</small></h2><Show when={items.length} fallback={<EmptyState variant="no-match" title="All clear."/>}>{rows(items)}</Show></section>;
+ /* "Current work" empty is the other case: the project genuinely has no open
+    work yet, and the two places to make some are one click away, pre-scoped. */
+ const workActions=()=>{const target={view:"Project Tasks",projectId:project()} as Route;const props=linkProps(target);
+  return <><a class="primary" href={props.href} onClick={event=>{props.onClick(event);setProjectId(project());}}>Open project work</a>
+  <GhostPill {...linkProps({view:"Boards",projectId:project()})}>Open board</GhostPill></>;};
  return <section class="resource-view"><PageHeader kicker={projectName(project())} title="Steering" subline="Work requiring attention" />
   <Show when={deadline()}>{info=>
    <a class="st-deadline" classList={{[info().tone]:true}} {...linkProps({view:"Calendar",projectId:project()})}>
@@ -85,5 +96,5 @@ export default function Steering(){
     {stat("Packages",value().packages,{view:"Packages",projectId:project()})}
    </div>}
   </Show>
-  <Show when={data.loading}><p>Loading project work…</p></Show><Show when={data.error}>{e=><p class="error" role="alert">Could not load Steering: {String(e())}</p>}</Show><Show when={data()}><div class="steering-grid">{bucket("Overdue",work().filter(x=>urgencyOf(x.due,date(),DEADLINE_SOON_DAYS)==="overdue"))}{bucket("Due soon",work().filter(x=>["today","soon"].includes(urgencyOf(x.due,date(),DEADLINE_SOON_DAYS))))}{bucket("Unassigned",work().filter(x=>"unassigned" in x&&x.unassigned))}</div><section><h2>Current work</h2>{rows(work())}</section></Show></section>;
+  <Show when={data.loading}><p>Loading project work…</p></Show><Show when={data.error}>{e=><p class="error" role="alert">Could not load Steering: {String(e())}</p>}</Show><Show when={data()}><div class="steering-grid">{bucket("Overdue",work().filter(x=>urgencyOf(x.due,date(),DEADLINE_SOON_DAYS)==="overdue"))}{bucket("Due soon",work().filter(x=>["today","soon"].includes(urgencyOf(x.due,date(),DEADLINE_SOON_DAYS))))}{bucket("Unassigned",work().filter(x=>"unassigned" in x&&x.unassigned))}</div><section><h2>Current work</h2><Show when={work().length} fallback={<EmptyState title="No open work in this project yet" hint="Steering watches the tickets and tasks of this project — it fills as work is filed." actions={workActions()}/>}>{rows(work())}</Show></section></Show></section>;
 }

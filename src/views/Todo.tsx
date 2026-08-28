@@ -6,6 +6,7 @@ import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
+import EmptyState from "../components/EmptyState";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
 import { todayISO, urgencyOf } from "../statusTone";
@@ -45,6 +46,9 @@ export default function Todo() {
   const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
   const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
   const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  /* The composer is always on this page, so the empty state's primary action is
+     "put the cursor in it", not a second copy of it. */
+  const focusComposer=()=>{ const field=document.querySelector<HTMLInputElement>(".todo-view .composer-title"); field?.focus(); field?.scrollIntoView({block:"center"}); };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
   // ── edit an existing task (content/notes/due date/project/assignees/source) ──
@@ -169,6 +173,20 @@ export default function Todo() {
           <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
         </form>
         <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
+        {/* NOTHING YET, for the whole surface. The creation action is the composer
+            directly above, so the primary FOCUSES it instead of duplicating it —
+            two "Add task" buttons two inches apart is not an offer, it is noise. */}
+        <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
+          <EmptyState
+            title="No tasks yet"
+            hint="Your own list — personal to-dos, and anything assigned to you from a project."
+            actions={<button type="button" class="primary" onClick={focusComposer}>New task</button>}
+          />
+        </Show>
+        {/* Per-section lines stay QUIET: with tasks in other sections and the
+            composer in view, a call to action here would fire on every filter of
+            the calendar the person is already reading. */}
+        <Show when={!!(todos() ?? []).length}>
         <section class="task-list">
           <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
           <Show when={todayList().length} fallback={<p class="personal-empty">Nothing due today.</p>}><For each={todayList()}>{todoRow}</For></Show>
@@ -177,6 +195,7 @@ export default function Todo() {
           <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
           <Show when={laterList().length} fallback={<p class="personal-empty">Nothing scheduled ahead.</p>}><For each={laterList()}>{todoRow}</For></Show>
         </section>
+        </Show>
         <Show when={somedayList().length}>
           <section class="task-list">
             <h3 class="task-group-title">No date<span class="rail-count">{somedayList().length}</span></h3>
