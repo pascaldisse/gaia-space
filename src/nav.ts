@@ -67,3 +67,52 @@ export const groupOfView = (groups: NavGroup[], view: string) => groups.find(gro
  *  product's word, the URL keeps the app's own name. */
 const VIEW_LABELS: Record<string, string> = { Issues: "Tickets" };
 export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
+
+// ---------------------------------------------------------------------------
+// Rail modes (chat-first shell).
+//
+// The rail selects a MODE and the sidebar shows that mode's objects. The mode is
+// never stored: it is DERIVED from the current route, so a deep link into a
+// channel / ticket / document always arrives with the sidebar its target belongs
+// to. Storing it would let the two disagree, which is exactly the defect this
+// mapping exists to prevent.
+// ---------------------------------------------------------------------------
+export type RailMode = "home" | "chats" | "activity" | "tasks" | "calendar" | "development" | "more";
+
+/** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
+ *  "more", whose sidebar is built from the LIVE view registry — so a newly
+ *  registered view can never become unreachable, it simply lands in More. */
+const MODE_OF_VIEW: Record<string, RailMode> = {
+  Home: "home",
+  Dashboard: "home",
+  Chat: "chats",
+  Inbox: "activity",
+  "To-Do": "tasks",
+  "Team Tasks": "tasks",
+  "Project Tasks": "tasks",
+  Calendar: "calendar",
+  Meetings: "calendar",
+  Absences: "calendar",
+  Locations: "calendar",
+  Development: "development",
+  Issues: "development",
+  Boards: "development",
+  Repos: "development",
+  "Code Reviews": "development",
+  Pipelines: "development",
+  "Dev Environments": "development",
+  Packages: "development",
+};
+
+export const railModeOfView = (view: string): RailMode => MODE_OF_VIEW[view] ?? "more";
+
+/** Route -> mode. The entity type wins where a view is SHARED: a channel URL renders
+ *  the Chat view, and a channel is always a conversation. Everything else is decided
+ *  by the view name, which is the routing key itself. */
+export const railModeOfRoute = (route: { view: string; entityType?: string }): RailMode =>
+  route.entityType === "channel" ? "chats" : railModeOfView(route.view);
+
+/** Views that own a rail mode's landing surface — used to keep the More sidebar
+ *  free of duplicates without hand-maintaining a second list. */
+export const viewsInMode = (mode: RailMode): string[] =>
+  Object.keys(MODE_OF_VIEW).filter((view) => MODE_OF_VIEW[view] === mode);

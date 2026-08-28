@@ -258,6 +258,13 @@
 .space-chat-shell .channel .hash { color: #bda7c2; font-weight: 680; }
 .space-chat-shell .side-empty { padding: 0 9px; color: var(--nav-muted); font-size: 13px; opacity: .8; }
 
+/* The mode body: the part of the sidebar that follows the rail. Structure only —
+   the sidebar's identity (plum, width, type, search) is defined above and does not
+   change with the mode. */
+.space-chat-shell .side-mode { display: flex; flex-direction: column; min-width: 0; }
+.space-chat-shell .side-mode .side-link .side-icon { flex: none; }
+.space-chat-shell .side-mode > .section:first-child { margin-top: 14px; }
+
 /* ── main column ──────────────────────────────────────────────────────── */
 .space-chat-shell .space-main {
   display: grid;

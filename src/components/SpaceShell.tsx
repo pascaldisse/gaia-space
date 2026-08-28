@@ -9,8 +9,8 @@ import { actingProfileId as chatActingProfileId, setActingProfileId } from "../c
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
-import { linkEntity, linkProps, route } from "../router";
-import { viewLabel } from "../nav";
+import { isViewAvailable, linkEntity, linkProps, route, type Route } from "../router";
+import { railModeOfRoute, viewLabel, type RailMode } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -24,26 +24,67 @@ import { viewLabel } from "../nav";
 
 export type ShellView = { name: string; icon: IconName };
 
-/** view name -> rail entry. Labels are the product's own words; views are the app's own names. */
-const RAIL: { label: string; view: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
-  { label: "Home", view: "Home", icon: "home" },
-  { label: "Chats", view: "Chat", icon: "chat", badge: "chat" },
-  { label: "Activity", view: "Inbox", icon: "inbox", badge: "mentions" },
-  // "Tasks" is the SHARED work surface — everybody's running project work (Team Tasks),
-  // not the private To-Do list. To-Do stays reachable through the rail's "More" panel,
-  // which is built from the live view registry.
-  { label: "Tasks", view: "Team Tasks", icon: "check" },
-  { label: "Calendar", view: "Calendar", icon: "calendar" },
-  { label: "Development", view: "Development", icon: "target" },
+/** The rail is a set of MODES. `landing` is the view the mode opens on when no more
+ *  specific object is known — a mode must never land on a naked sidebar. */
+const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
+  { mode: "home", label: "Home", landing: "Home", icon: "home" },
+  { mode: "chats", label: "Chats", landing: "Chat", icon: "chat", badge: "chat" },
+  { mode: "activity", label: "Activity", landing: "Inbox", icon: "inbox", badge: "mentions" },
+  // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
+  // project work — is the second entry of that mode's sidebar.
+  { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
+  { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
+  { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 
-const SIDE_LINKS: { label: string; view: string; icon: IconName; strong?: boolean; badge?: "chat" | "mentions" }[] = [
-  { label: "Today", view: "Home", icon: "home", strong: true },
-  { label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" },
-  { label: "Mentions", view: "Inbox", icon: "inbox", badge: "mentions" },
-  { label: "Calendar", view: "Calendar", icon: "calendar" },
-  { label: "Development", view: "Development", icon: "target" },
-];
+type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; badge?: "chat" | "mentions" };
+
+/** Per-mode sidebar links. Threads and Mentions are no longer permanent global entries:
+ *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
+ *  of that mode's filters). Nothing lost — both are one click from their own mode. */
+const MODE_LINKS: Record<RailMode, SideEntry[]> = {
+  home: [
+    { label: "Today", view: "Home", icon: "home", strong: true },
+    { label: "Schedule", view: "Calendar", icon: "calendar" },
+    { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
+    { label: "My tasks", view: "To-Do", icon: "check" },
+    { label: "Activity", view: "Inbox", icon: "inbox", badge: "mentions" },
+  ],
+  chats: [{ label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" }],
+  activity: [
+    { label: "All", view: "Inbox", icon: "inbox", strong: true },
+    { label: "Mentions", view: "Inbox", icon: "chat", badge: "mentions" },
+    { label: "Assigned", view: "Team Tasks", icon: "check" },
+    { label: "Reviews", view: "Code Reviews", icon: "review" },
+  ],
+  tasks: [
+    { label: "My tasks", view: "To-Do", icon: "check", strong: true },
+    { label: "Team tasks", view: "Team Tasks", icon: "users" },
+  ],
+  calendar: [
+    { label: "Calendar", view: "Calendar", icon: "calendar", strong: true },
+    { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
+    { label: "People", view: "Members", icon: "org" },
+    { label: "Locations", view: "Locations", icon: "org" },
+    { label: "Time off", view: "Absences", icon: "clock-nav" },
+  ],
+  development: [
+    { label: "Overview", view: "Development", icon: "target", strong: true },
+    { label: "Tickets", view: "Issues", icon: "target" },
+    { label: "Boards", view: "Boards", icon: "columns" },
+    { label: "Pull requests", view: "Code Reviews", icon: "review" },
+    { label: "Repositories", view: "Repos", icon: "repo" },
+    { label: "Pipelines", view: "Pipelines", icon: "pipeline" },
+    { label: "Releases", view: "Packages", icon: "package" },
+    { label: "Dev environments", view: "Dev Environments", icon: "repo" },
+  ],
+  more: [],
+};
+
+const MODE_TITLE: Record<RailMode, string> = {
+  home: "Home", chats: "Chats", activity: "Activity",
+  tasks: "Tasks", calendar: "Calendar", development: "Development", more: "More",
+};
 
 const initials = (label: string) =>
   label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
@@ -94,6 +135,10 @@ export default function SpaceShell(props: {
 
   const activeChannelId = () => (route().entityType === "channel" ? route().entityId : undefined);
 
+  /** THE derivation: the rail mode is a pure function of the live route, computed on every
+   *  render and stored nowhere. Deep links therefore cannot arrive with the wrong sidebar. */
+  const mode = createMemo<RailMode>(() => railModeOfRoute(route()));
+
   /** Named channels grouped by owning project; project-less channels land in a final section.
    *  DMs/threads carry no name and are not part of the project channel list. */
   const groups = createMemo(() => {
@@ -118,16 +163,56 @@ export default function SpaceShell(props: {
     return sections;
   });
 
-  const railViews = new Set(RAIL.map((entry) => entry.view));
-  const moreViews = () => props.views.filter((view) => !railViews.has(view.name));
+  /** Direct messages: channels WITHOUT a name. They live in the Chats mode only. */
+  const directs = createMemo(() => {
+    const term = filter().trim().toLowerCase();
+    return (channels() ?? [])
+      .filter((channel) => !channel.archived && !channel.name)
+      .filter((channel) => !term || (channel.content_type ?? "").toLowerCase().includes(term));
+  });
+
+  /** Projects, for the Tasks mode's "by project" section. */
+  const projectList = () =>
+    [...(projects() ?? [])]
+      .filter((project) => matches(project.name ?? ""))
+      .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+
+  /** "More" is everything else, still built from the LIVE registry — minus whatever a
+   *  rail mode already owns, so nothing is offered twice and nothing is lost. */
+  const ownedViews = new Set(Object.values(MODE_LINKS).flat().map((entry) => entry.view));
+  const moreViews = () =>
+    props.views.filter((view) => !ownedViews.has(view.name) && matches(viewLabel(view.name)));
+
+  /** Where a rail mode lands. Chats opens the newest conversation, not a naked sidebar;
+   *  with no channels at all it falls back to Chat's own (honest) empty surface. */
+  const newestChannel = () =>
+    [...(channels() ?? [])].filter((c) => !c.archived).sort((a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0))[0];
+  const landingRoute = (entry: (typeof RAIL)[number]): Route => {
+    if (entry.mode === "chats") {
+      const open = activeChannelId();
+      const target = open ? undefined : newestChannel();
+      if (target) return { view: "Chat", entityType: "channel", entityId: target.id, tab: "messages" };
+    }
+    return { view: entry.landing };
+  };
+
+  /** The search field belongs to the sidebar's identity, so it keeps working in every
+   *  mode: it filters whatever that mode lists. */
+  const matches = (label: string) => {
+    const term = filter().trim().toLowerCase();
+    return !term || label.toLowerCase().includes(term);
+  };
+  const sideEntries = () =>
+    MODE_LINKS[mode()].filter((entry) => isViewAvailable(entry.view) && matches(entry.label));
 
   const railItem = (entry: (typeof RAIL)[number]) => (
     <a
       class="rail-item"
       title={entry.label}
       aria-label={entry.label}
-      classList={{ active: props.active === entry.view }}
-      {...linkProps({ view: entry.view })}
+      aria-current={mode() === entry.mode ? "true" : undefined}
+      classList={{ active: mode() === entry.mode }}
+      {...linkProps(landingRoute(entry))}
     >
       <span class="rail-icon" aria-hidden="true"><Icon name={entry.icon} size={18} /></span>
       <span class="rail-label">{entry.label}</span>
@@ -135,8 +220,13 @@ export default function SpaceShell(props: {
     </a>
   );
 
-  const sideLink = (entry: (typeof SIDE_LINKS)[number]) => (
-    <a class="side-link" classList={{ active: props.active === entry.view }} {...linkProps({ view: entry.view })}>
+  const sideLink = (entry: SideEntry) => (
+    <a
+      class="side-link"
+      aria-current={props.active === entry.view ? "page" : undefined}
+      classList={{ active: props.active === entry.view }}
+      {...linkProps({ view: entry.view })}
+    >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
       {entry.strong ? <strong>{entry.label}</strong> : entry.label}
       <Show when={badgeOf(entry.badge) > 0}><span class="count">{badgeOf(entry.badge)}</span></Show>
@@ -153,7 +243,8 @@ export default function SpaceShell(props: {
           title="More"
           aria-label="More"
           aria-expanded={moreOpen()}
-          classList={{ active: moreOpen() }}
+          aria-current={mode() === "more" ? "true" : undefined}
+          classList={{ active: moreOpen() || mode() === "more" }}
           onClick={() => setMoreOpen((open) => !open)}
         >
           <span class="rail-icon" aria-hidden="true"><Icon name="menu" size={18} /></span>
@@ -188,7 +279,7 @@ export default function SpaceShell(props: {
         </nav>
       </Show>
 
-      <aside class="space-sidebar" aria-label="Channels">
+      <aside class="space-sidebar" aria-label={`${MODE_TITLE[mode()]} navigation`}>
         <div class="workspace-name">
           <strong>{workspaceName()}</strong>
           <div class="tiny-actions">
@@ -203,13 +294,57 @@ export default function SpaceShell(props: {
         <input
           class="side-search"
           type="search"
-          placeholder="Search conversations"
-          aria-label="Search conversations"
+          placeholder={mode() === "chats" ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
+          aria-label={mode() === "chats" ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
           value={filter()}
           onInput={(event) => setFilter(event.currentTarget.value)}
         />
-        <For each={SIDE_LINKS}>{sideLink}</For>
+        {/* The sidebar's CONTENT follows the rail mode; its identity (plum, width, type,
+            search field above) does not. Keyed on the mode so the swapped list is a new
+            subtree and focus never lands on a node that no longer exists. */}
+        <div class="side-mode" data-mode={mode()}>
+        <For each={sideEntries()}>{sideLink}</For>
 
+        <Show when={mode() === "tasks"}>
+          <div class="section">
+            <div class="section-head"><span>By project</span></div>
+            <For each={projectList()}>
+              {(project) => (
+                <a
+                  class="side-link"
+                  classList={{ active: route().view === "Project Tasks" && route().projectId === project.id }}
+                  {...linkProps({ view: "Project Tasks", projectId: project.id })}
+                >
+                  <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
+                  {project.name}
+                </a>
+              )}
+            </For>
+            <Show when={!projectList().length}>
+              <div class="side-empty">No projects yet.</div>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={mode() === "more"}>
+          <div class="section">
+            <div class="section-head"><span>All views</span></div>
+            <For each={moreViews()}>
+              {(view) => (
+                <a
+                  class="side-link"
+                  classList={{ active: props.active === view.name }}
+                  {...linkProps({ view: view.name })}
+                >
+                  <span class="side-icon" aria-hidden="true"><Icon name={view.icon} size={15} /></span>
+                  {viewLabel(view.name)}
+                </a>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        <Show when={mode() === "chats"}>
         <For each={groups()}>
           {(group) => (
             <div class="section">
@@ -234,9 +369,29 @@ export default function SpaceShell(props: {
             </div>
           )}
         </For>
-        <Show when={!groups().length}>
-          <div class="section"><div class="side-empty">No channels yet.</div></div>
+        <Show when={directs().length > 0}>
+          <div class="section">
+            <div class="section-head"><span>Direct messages</span></div>
+            <For each={directs()}>
+              {(channel) => (
+                <a
+                  class="channel"
+                  classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+                  {...linkProps({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" })}
+                >
+                  <span class="hash" aria-hidden="true">@</span>
+                  {channel.name ?? "Direct message"}
+                  <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
+                </a>
+              )}
+            </For>
+          </div>
         </Show>
+        <Show when={!groups().length && !directs().length}>
+          <div class="section"><div class="side-empty">No conversations yet.</div></div>
+        </Show>
+        </Show>
+        </div>
 
         <Show when={!isWeb() && actingPeople().length > 1}>
           {/* The value is the label: "Acting as" is a caption above a boxed field,
