@@ -55,7 +55,12 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // An empty list here is not a gap: it is the honest answer, and Home gets the
   // width back.
   home: [],
-  chats: [{ label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" }],
+  // THREADS IS NOT A DESTINATION. It never was: no command listed threads, so this
+  // entry only ever opened Chat — a label with nothing behind it. A thread with unread
+  // replies is WORK, so it now appears in the one worklist (`src/attention.ts`, source 0,
+  // backed by `list_unread_threads`) and therefore in Activity, the rail badge and Home.
+  // Do not restore a destination here; add to the worklist rule instead.
+  chats: [],
   activity: [
     { label: "All", view: "Inbox", icon: "inbox", strong: true },
     { label: "Mentions", view: "Inbox", icon: "chat", provisional: true, badge: "mentions" },
