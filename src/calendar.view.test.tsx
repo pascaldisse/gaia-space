@@ -86,8 +86,40 @@ describe("calendar day agenda", () => {
     expect(agenda.map((li) => li.className.split(" ")[0]).sort()).toEqual(["deadline", "meeting", "task"]);
     // Every agenda item leaves through a real anchor, never a click handler on a div.
     for (const li of agenda) expect(li.querySelector("a")?.getAttribute("href")).toBeTruthy();
-    // The typed legend names all three kinds.
+    // The typed legend still names all three kinds — it moved out from under the
+    // h1 into the View options popover (a lookup table is read once, so it does
+    // not hold a permanent line), and it is reachable and complete there.
+    expect(host.querySelector(".calendar-legend")).toBeNull();
+    const viewOptions = host.querySelector(".cal-viewopts button") as HTMLButtonElement;
+    expect(viewOptions.getAttribute("aria-expanded")).toBe("false");
+    viewOptions.click();
+    await settle();
+    expect(viewOptions.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector(".cal-viewopts-menu")?.getAttribute("role")).toBe("dialog");
     expect(host.querySelector(".calendar-legend")?.textContent).toBe("MeetingTaskDeadline");
+  });
+
+  test("the filters are named pills in the header, not captioned fields in a card", async () => {
+    stubFetch();
+    setProfileId("pa");
+    const today = new Date();
+    replies = { calendar_aggregate: { ok: true, value: [] }, list_meetings: { ok: true, value: [
+      { id: "m1", title: "Standup", description: null, starts_at: Math.floor(today.getTime() / 1000), ends_at: Math.floor(today.getTime() / 1000) + 3600, rrule: null, location: "Berlin HQ", organizer_id: "pa", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null },
+    ] } };
+    const host = mount();
+    await settle();
+    // The card of captioned fields is gone in every theme, not merely restyled.
+    expect(host.querySelector(".calendar-filters")).toBeNull();
+    expect(host.querySelector(".calendar-filter")).toBeNull();
+    // Both filters live in the header action lane and keep an accessible name,
+    // with the VALUE as the visible label.
+    const actions = host.querySelector(".pgh-actions")!;
+    const location = actions.querySelector("select[aria-label='Location calendar']") as HTMLSelectElement;
+    expect(actions.querySelector("select[aria-label='Member calendar']")).toBeTruthy();
+    expect(location).toBeTruthy();
+    expect([...location.options].map((option) => option.textContent)).toEqual(["All locations", "Berlin HQ"]);
+    // A caption above a filter is what was removed; none may come back.
+    for (const label of actions.querySelectorAll("label")) expect(label.textContent?.trim()).toBe("");
   });
 
   test("calendar filter keeps local items and hides external items from other calendars", async () => {

@@ -308,7 +308,9 @@ return <section class="calendar-view">
 <Show when={quickKind()==="meeting"}>
 <form onSubmit={create} aria-label="New meeting">
 <h2>New meeting — {day().toLocaleDateString(UI_LOCALE)}</h2>
-<input autofocus placeholder="Title" aria-label="Meeting title" value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/>
+{/* The title carries a caption like every other field in this form; the
+    aria-label stays, because it is the name tests and assistive tech use. */}
+<label>Title<input autofocus placeholder="What is the meeting about?" aria-label="Meeting title" value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/></label>
 <label>Start<input type="datetime-local" value={form().starts_at} onInput={e=>setForm({...form(),starts_at:e.currentTarget.value})}/></label>
 <label>End<input type="datetime-local" value={form().ends_at} onInput={e=>setForm({...form(),ends_at:e.currentTarget.value})}/></label>
 <label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
@@ -321,7 +323,7 @@ return <section class="calendar-view">
 <Show when={quickKind()==="task"}>
 <form onSubmit={createTask} aria-label="New task">
 <h2>New task — {day().toLocaleDateString(UI_LOCALE)}</h2>
-<input autofocus placeholder="What needs doing?" aria-label="Task title" value={taskForm().title} onInput={e=>setTaskForm({...taskForm(),title:e.currentTarget.value})}/>
+<label>Title<input autofocus placeholder="What needs doing?" aria-label="Task title" value={taskForm().title} onInput={e=>setTaskForm({...taskForm(),title:e.currentTarget.value})}/></label>
 <label>Due<input type="date" value={taskForm().day} onInput={e=>setTaskForm({...taskForm(),day:e.currentTarget.value})}/></label>
 <div class="detail-actions"><button class="primary">Add task</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
@@ -345,7 +347,7 @@ return <section class="calendar-view">
 <Show when={draft()} fallback={<div><h2>{event().title}</h2><p><span class={`cal-tag ${event().kind}`}>{kindLabels[event().kind]}</span> {event().date ?? new Date(event().starts_at*1000).toLocaleString(UI_LOCALE)}</p><Show when={event().kind==="external"}><p class="hint">Synced from a connected calendar (read-only) — edit it at the source; see Settings to manage the connection.</p></Show><Show when={event().kind!=="meeting"&&event().kind!=="external"}><p class="hint">Open the owning view to edit this item.</p></Show><Show when={event().kind!=="external"}><a {...itemHref(event())}>Open this item</a></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
 {item=><div class="meeting-detail">
 <div class="detail-actions"><button onClick={save}>Save</button><button class="danger" onClick={archive}>Archive</button><button onClick={()=>{setSelected(undefined);setDraft(undefined)}}>Close</button></div>
-<input class="meeting-title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/>
+<label>Title<input class="meeting-title" aria-label="Meeting title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/></label>
 <label>Start<input type="datetime-local" value={localInput(item().starts_at)} onInput={e=>setDraft({...item(),starts_at:epoch(e.currentTarget.value)})}/></label>
 <label>End<input type="datetime-local" value={localInput(item().ends_at)} onInput={e=>setDraft({...item(),ends_at:epoch(e.currentTarget.value)})}/></label>
 <label>Location<input value={item().location??""} onInput={e=>setDraft({...item(),location:e.currentTarget.value||null})}/></label>
