@@ -95,8 +95,9 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   createEffect(() => {
     const authenticated = currentUser()?.profile_id;
     if (isWeb() && authenticated) { setActingProfileId(authenticated); return; }
-    const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
+    // No seeding from profiles()[0] any more: that guessed an identity (it picked the
+    // organisation profile here) and locked the caller out of their own private feed.
+    // chatIdentity falls back to the session profile, which is the real answer.
   });
 
   // polling
