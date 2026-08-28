@@ -83,7 +83,7 @@ export default function ProjectHome(props: { project?: Project }) {
           Every project member keeps identical ability to see all tasks and to create
           tasks for themselves AND for others. The only lead-related restriction anywhere
           is WHO MAY EDIT the field (owner-or-admin, in Project settings). */}
-      <p class="ph-lead">Lead <strong>{value().lead_id ? nameOf(value().lead_id!) : "No lead yet"}</strong></p>
+      <Show when={value().lead_id}>{id => <p class="ph-lead">Responsible <strong>{nameOf(id())}</strong></p>}</Show>
 
       <section class="ph-card">
         <div class="ph-card-head"><h2>Running tasks</h2><a class="ph-link" {...linkProps(tasksRoute())}>All project tasks →</a></div>

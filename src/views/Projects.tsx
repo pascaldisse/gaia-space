@@ -277,7 +277,7 @@ export default function Projects() {
             <code>{project.key}</code>
             {/* LAW: lead is PURELY INFORMATIONAL — a name on a row, read-only here,
                 gating nothing. Editing it lives in Project settings. */}
-            <Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Project lead (informational)">Lead: {leadName(lead())}</span>}</Show>
+            <Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Who is responsible for this project (informational)">Responsible: {leadName(lead())}</span>}</Show>
           </div>
           <Show when={project.description}><p>{project.description}</p></Show>
           {/* THE HEALTH LINE. Every chip is one fact and one element; zero carries no

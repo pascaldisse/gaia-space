@@ -119,10 +119,10 @@ function ProjectLead(props: { projectId: string; leadId: string | null; canManag
     finally { setBusy(false); }
   };
   return <section class="ps-panel">
-    <div class="ps-panel-head"><h2>Project lead</h2></div>
+    <div class="ps-panel-head"><h2>Responsible person</h2></div>
     <p class="ps-hint">The lead is the one main responsible person. It is informational only: every member keeps the same access to this project's work.</p>
     <Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show>
-    <label class="ps-field"><span>Lead <em>optional</em></span>
+    <label class="ps-field"><span>Responsible <em>optional</em></span>
       <select ref={picker} aria-label="Project lead" disabled={!props.canManage || busy()} value={props.leadId ?? ""} onChange={event => void save(event.currentTarget.value)}>
         <option value="">No lead</option>
         <For each={candidates()}>{profile => <option value={profile.id}>{profile.display_name || profile.username}</option>}</For>

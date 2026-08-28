@@ -166,9 +166,14 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
               </a>
               <Show when={project()?.key}>{(value) => <code class="pw-key">{value()}</code>}</Show>
             </h1>
-            <p class="pw-lead">
-              Lead <strong>{project()?.lead_id ? nameOf(project()!.lead_id!) : "No lead yet"}</strong>
-            </p>
+            {/* NO LINE FOR AN EMPTY FACT. "Lead — No lead yet" occupied the most
+                prominent line under the project's name to say that nothing had been
+                decided, and next to the Leads area (landing-page contacts) the word
+                read as a sales term. It says WHO is responsible, when somebody is;
+                it is assigned in Settings. */}
+            <Show when={project()?.lead_id}>
+              {(id) => <p class="pw-lead">Responsible <strong>{nameOf(id())}</strong></p>}
+            </Show>
           </div>
           <div class="pw-edge">
             {/* A deadline is the one figure that earns colour up here, and only when

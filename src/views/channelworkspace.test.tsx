@@ -91,6 +91,6 @@ describe("channel workspace", () => {
     expect(stats[1]).toContain("2");
     // Project members, with the informational lead role, come from the project — not the channel.
     expect(host.textContent).toContain("Other Person · Member");
-    expect(host.textContent).toContain("Me · Lead");
+    expect(host.textContent).toContain("Me · Responsible");
   });
 });

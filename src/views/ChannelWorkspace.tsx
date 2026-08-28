@@ -116,7 +116,7 @@ export default function ChannelWorkspace(): JSX.Element {
     const person = profiles()?.find((item) => item.id === id);
     return person?.display_name || person?.username || id;
   };
-  const roleOf = (id: string) => (project()?.lead_id === id ? "Lead" : "Member");
+  const roleOf = (id: string) => (project()?.lead_id === id ? "Responsible" : "Member");
 
   /* THE REDIRECT. A shipped `/channel/<id>/tasks` link must still land on the tasks
      of that channel's project — it just lands there in the ONE place those tasks
