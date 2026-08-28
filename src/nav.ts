@@ -94,6 +94,7 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Meetings: "calendar",
   Absences: "calendar",
   Locations: "calendar",
+  Members: "calendar",
   Development: "development",
   Issues: "development",
   Boards: "development",

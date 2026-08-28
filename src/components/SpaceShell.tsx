@@ -10,7 +10,7 @@ import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { isViewAvailable, linkEntity, linkProps, route, type Route } from "../router";
-import { railModeOfRoute, viewLabel, type RailMode } from "../nav";
+import { railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -37,7 +37,10 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 
-type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; badge?: "chat" | "mentions" };
+/** `provisional` = the entry has no route of its own YET (Activity's filters land on the
+ *  Inbox until Lane 1's two-stream Activity view ships). It navigates, but it never claims
+ *  to be the selected object — two lit pills for one URL is a lie. */
+type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; provisional?: boolean; badge?: "chat" | "mentions" };
 
 /** Per-mode sidebar links. Threads and Mentions are no longer permanent global entries:
  *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
@@ -45,6 +48,7 @@ type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean
 const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   home: [
     { label: "Today", view: "Home", icon: "home", strong: true },
+    { label: "Dashboard", view: "Dashboard", icon: "grid" },
     { label: "Schedule", view: "Calendar", icon: "calendar" },
     { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
     { label: "My tasks", view: "To-Do", icon: "check" },
@@ -53,7 +57,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   chats: [{ label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" }],
   activity: [
     { label: "All", view: "Inbox", icon: "inbox", strong: true },
-    { label: "Mentions", view: "Inbox", icon: "chat", badge: "mentions" },
+    { label: "Mentions", view: "Inbox", icon: "chat", provisional: true, badge: "mentions" },
     { label: "Assigned", view: "Team Tasks", icon: "check" },
     { label: "Reviews", view: "Code Reviews", icon: "review" },
   ],
@@ -179,9 +183,8 @@ export default function SpaceShell(props: {
 
   /** "More" is everything else, still built from the LIVE registry — minus whatever a
    *  rail mode already owns, so nothing is offered twice and nothing is lost. */
-  const ownedViews = new Set(Object.values(MODE_LINKS).flat().map((entry) => entry.view));
   const moreViews = () =>
-    props.views.filter((view) => !ownedViews.has(view.name) && matches(viewLabel(view.name)));
+    props.views.filter((view) => railModeOfView(view.name) === "more" && matches(viewLabel(view.name)));
 
   /** Where a rail mode lands. Chats opens the newest conversation, not a naked sidebar;
    *  with no channels at all it falls back to Chat's own (honest) empty surface. */
@@ -223,8 +226,8 @@ export default function SpaceShell(props: {
   const sideLink = (entry: SideEntry) => (
     <a
       class="side-link"
-      aria-current={props.active === entry.view ? "page" : undefined}
-      classList={{ active: props.active === entry.view }}
+      aria-current={!entry.provisional && props.active === entry.view ? "page" : undefined}
+      classList={{ active: !entry.provisional && props.active === entry.view }}
       {...linkProps({ view: entry.view })}
     >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>

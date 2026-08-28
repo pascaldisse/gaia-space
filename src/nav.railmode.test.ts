@@ -40,8 +40,15 @@ describe("rail mode derived from the view", () => {
   });
 
   it("sends unmapped/registry views to More, so nothing becomes unreachable", () => {
-    for (const view of ["Documents", "Blogs", "Projects", "Members", "Admin", "Settings", "A Brand New View"])
+    for (const view of ["Documents", "Blogs", "Projects", "Admin", "Settings", "A Brand New View"])
       expect(railModeOfView(view)).toBe("more");
+  });
+
+  it("keeps people/locations with the calendars and Dashboard with Home", () => {
+    expect(railModeOfView("Members")).toBe("calendar");
+    expect(railModeOfView("Locations")).toBe("calendar");
+    expect(railModeOfView("Absences")).toBe("calendar");
+    expect(railModeOfView("Dashboard")).toBe("home");
   });
 });
 
