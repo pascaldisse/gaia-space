@@ -1,0 +1,275 @@
+/* ── Control primitives ─────────────────────────────────────────────────────
+   The companion sheet to controls.tsx. Read the header comment there for the
+   law; this file only realises it.
+
+   HARD RULE, same as paper.css / ChatSpaceLight.css: every selector starts at
+   `.theme-space-light`. The grouped/flat DARK layouts never set that class, so
+   they keep App.css's boxed controls byte-for-byte. The one exception is the
+   shared-geometry block below, which declares custom properties only — a
+   custom property that is never read changes nothing.
+
+   Colour comes from the light tokens (--wash-2, --line, --muted, --teal…) and
+   NEVER from a literal. */
+
+/* ── shared geometry ───────────────────────────────────────────────────────
+   ONE height and ONE radius. This is the whole reason a filter row stops
+   looking like a stack of boxes: four different controls, one silhouette.
+
+   ── UNSCOPED STRUCTURE FIRST ────────────────────────────────────
+   CAUGHT BY SCREENSHOT, and the reason this block exists: the first version put
+   EVERYTHING behind `.theme-space-light`, including the size of the chevron and
+   the magnifier. In the dark grouped layout that class is never set, so the two
+   inline SVGs fell back to the default replaced-element size and rendered as
+   200px glyphs across the page.
+
+   The rule the mistake teaches: `.theme-space-light` may own COLOUR, fill and
+   weight. It may NOT own whether a box has a size. Layout that any theme needs
+   in order to render at all belongs out here.
+
+   This is safe for the dark theme precisely because these four class names are
+   NEW — nothing rendered them before this file existed — so an unscoped rule on
+   them cannot change one pixel of a pre-existing dark surface. Their dark
+   colours keep coming from App.css's global `select` / `input` / `.ghost`
+   rules, which is why GhostPill also still carries `ghost` in its class list. */
+.pill-select { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
+/* SECOND SCREENSHOT CATCH: with `appearance` left native in the dark theme,
+   every picker drew TWO chevrons — App.css's background arrow plus the one this
+   component renders. Suppressing the native chassis is not a light-theme
+   opinion, it is the direct consequence of drawing our own glyph, so it is
+   unscoped like the rest of the structure. The right padding that keeps text
+   off that glyph travels with it for the same reason. */
+.pill-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 100%;
+  padding-right: 28px;
+  background-image: none;
+  text-overflow: ellipsis;
+}
+/* THIRD (and last) SCREENSHOT CATCH: absolute placement is what makes the
+   glyph OVERLAY the select rather than sit next to it as a third element in
+   the row. Position is structure; only the ink is thematic. */
+.pill-select-chevron {
+  position: absolute;
+  right: 11px;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.quiet-search { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.quiet-search.grow { flex: 1 1 240px; }
+.quiet-search-icon { flex: none; width: 14px; height: 14px; }
+.quiet-search input { flex: 1 1 auto; min-width: 0; }
+
+.ghost-pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; }
+
+.control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.control-row .control-row-gap { flex: 1 1 auto; min-width: 0; }
+
+.theme-space-light {
+  --pillctl-h: 36px;
+  --pillctl-r: 999px;
+  --pillctl-pad-x: 14px;
+  --pillctl-font: 13.5px;
+  --pillctl-weight: 620;
+}
+
+/* Every primitive answers to this: same box model, same focus ring, same
+   disabled voice. Differences below are fill and content, nothing structural. */
+.theme-space-light :is(.pill-select, .quiet-search, .ghost-pill, .icon-button) {
+  box-sizing: border-box;
+  min-height: var(--pillctl-h);
+  border-radius: var(--pillctl-r);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+  letter-spacing: normal;
+  text-transform: none;
+  line-height: 1.2;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.theme-space-light :is(.pill-select, .quiet-search) :is(select, input):focus-visible,
+.theme-space-light :is(.ghost-pill, .icon-button):focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+/* Safari/Firefox fall back to :focus on a <select> opened by keyboard. */
+.theme-space-light .pill-select:focus-within { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .quiet-search:focus-within { border-color: var(--line-strong); background: var(--paper); }
+
+/* ── PillSelect ────────────────────────────────────────────────────────────
+   A real <select>, stripped of its native chassis. The selected option's text
+   IS the resting label, which is why no word floats above it. */
+.theme-space-light .pill-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid transparent;   /* reserved, so hover does not resize the row */
+  background: var(--wash-2);
+  color: var(--ink);
+}
+.theme-space-light .pill-select:hover { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .pill-select select {
+  min-height: 0;
+  height: calc(var(--pillctl-h) - 2px);
+  max-width: 100%;
+  margin: 0;
+  padding: 0 calc(var(--pillctl-pad-x) + 14px) 0 var(--pillctl-pad-x);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.theme-space-light .pill-select select:hover { background: transparent; }
+/* The native popup list is drawn by the platform; give its options readable ink. */
+.theme-space-light .pill-select option { color: var(--ink); background: var(--paper); }
+.theme-space-light .pill-select-chevron { color: var(--muted); }
+.theme-space-light .pill-select:has(select:disabled) { background: var(--wash); color: var(--quiet); }
+.theme-space-light .pill-select:has(select:disabled) .pill-select-chevron { color: var(--quiet); }
+.theme-space-light .pill-select select:disabled { cursor: not-allowed; }
+
+/* ── QuietSearch ───────────────────────────────────────────────────────────
+   The shell's "Search conversations" field: magnifier INSIDE, soft fill, full
+   rounding, no resting border. Replaces the full-width heavy box. */
+.theme-space-light .quiet-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  background: var(--wash-2);
+  color: var(--ink);
+}
+.theme-space-light .quiet-search.grow { flex: 1 1 240px; }
+.theme-space-light .quiet-search:hover { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .quiet-search-icon { flex: none; width: 14px; height: 14px; color: var(--muted); }
+.theme-space-light .quiet-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: calc(var(--pillctl-h) - 2px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+}
+.theme-space-light .quiet-search input:hover { background: transparent; border: 0; }
+.theme-space-light .quiet-search input::placeholder { color: var(--quiet); -webkit-text-fill-color: var(--quiet); }
+/* The type=search cancel cross is a second, differently-shaped control in the
+   middle of the row — the field clears with the keyboard like any other. */
+.theme-space-light .quiet-search input::-webkit-search-decoration,
+.theme-space-light .quiet-search input::-webkit-search-cancel-button { appearance: none; display: none; }
+
+/* ── GhostPill ─────────────────────────────────────────────────────────────
+   Secondary action. NO fill at rest — that is what keeps the teal primary the
+   only loud thing in the row — but a real pill footprint, so it reads as
+   pressable instead of as a bare underlineless link. */
+.theme-space-light .ghost-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.theme-space-light .ghost-pill:hover:not(:disabled) { background: var(--wash-2); color: var(--ink); }
+.theme-space-light .ghost-pill[aria-expanded="true"] { background: var(--wash-2); color: var(--ink); }
+.theme-space-light .ghost-pill:disabled { color: var(--quiet); cursor: not-allowed; opacity: 1; }
+
+/* ── IconButton ────────────────────────────────────────────────────────────
+   The rail `+`, generalised. Round means round: width is pinned to the shared
+   height so it cannot drift into a lozenge. */
+.theme-space-light .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--pillctl-h);
+  height: var(--pillctl-h);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--wash-2);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.theme-space-light .icon-button:hover:not(:disabled) { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .icon-button:disabled { color: var(--quiet); cursor: not-allowed; }
+
+/* ── ControlRow ────────────────────────────────────────────────────────────
+   The filter line itself. `align-items: center` (not `end`) is the fix for the
+   old stack: with no labels above the fields there is no baseline to hang
+   from, so everything centres on one line. */
+.theme-space-light .control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+}
+/* Inside a control row, the teal primary keeps its own colour but joins the
+   shared silhouette so the line does not step up in height at the end. */
+.theme-space-light .control-row :is(button.primary, .primary) {
+  min-height: var(--pillctl-h);
+  border-radius: var(--pillctl-r);
+}
+/* A separator that pushes trailing actions to the right edge of the line. */
+.theme-space-light .control-row .control-row-gap { flex: 1 1 auto; min-width: 0; }
+
+/* ── the floating-label sweep ──────────────────────────────────────────────
+   `label.picker` (Pickers.tsx) prints its name ABOVE the field. Where a picker
+   is asked to be silent, the views pass `labelHidden`, which puts the name in
+   `aria-label` and drops the text node — see Pickers.tsx. Nothing here hides
+   text with CSS: a label removed visually but left in the DOM still takes part
+   in the layout and still gets read twice by a screen reader. */
+
+/* Header actions are a control row without the card. */
+.theme-space-light .pgh-actions :is(.ghost-pill, .pill-select, .icon-button) { min-height: var(--pillctl-h); }
+
+/* ── two placement corrections, from reading the screenshot ────────────────
+
+   1. A GhostPill with no fill AND no border, sitting on the page header where
+      there is no card behind it, is still just a word — which was the original
+      complaint about `Statuses` / `Export CSV` / `Open board`. In a CARD (the
+      filter row) the card supplies the footprint and no-fill is right. On the
+      bare header lane nothing does, so there it gets a hairline at rest. Same
+      primitive, one honest concession to placement. */
+.theme-space-light .pgh-actions > .ghost-pill { border-color: var(--line); }
+.theme-space-light .pgh-actions > .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); background: var(--wash-2); }
+.theme-space-light .pgh-actions > .ghost-pill:disabled { border-color: var(--line); }
+
+/* 2. A control row nested inside a paper card was drawing a second frame around
+      the first — the "boxes inside boxes" the redesign is removing, in
+      miniature. Inside a card the row keeps its rhythm and gives up its border;
+      one hairline underneath separates it from the list. */
+.theme-space-light .paper-card .control-row,
+.theme-space-light .issue-list-pane > .control-row,
+.theme-space-light .project-work-group > .control-row {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 4px;
+  margin-bottom: 6px;
+}
