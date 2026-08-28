@@ -2678,6 +2678,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "search_book_documents" => CommandPolicy::BookRead,
         "list_book_access" | "update_book_access" => CommandPolicy::BookManage,
         "list_channels_with_meta"
+        | "list_unread_threads"
         | "list_checklist_items"
         | "list_checklists"
         | "list_deploy_targets"
@@ -5321,6 +5322,7 @@ async fn cmd(
     "list_channel_members" => chat::list_channel_members(channel_id: String),
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
+    "list_unread_threads" => chat::list_unread_threads(profile_id: String),
     "list_checklist_items" => issues::list_checklist_items(checklist_id: String),
     "list_checklists" => issues::list_checklists(issue_id: String),
     "list_deploy_targets" => pipelines::list_deploy_targets(),

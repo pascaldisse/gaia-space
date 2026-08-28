@@ -33,6 +33,19 @@ pub struct ChannelSummary {
     pub unread_count: i64,
     pub last_message_at: Option<i64>,
 }
+/// One thread that is waiting on the caller. Carries everything a worklist row
+/// needs (who replied, where, how many) so the surface makes no second round trip.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UnreadThread {
+    pub channel_id: String,
+    pub parent_channel_id: String,
+    pub parent_channel_name: Option<String>,
+    pub root_message_id: String,
+    pub root_excerpt: String,
+    pub unread_count: i64,
+    pub last_reply_at: Option<i64>,
+    pub last_reply_author: Option<String>,
+}
 /// A content thread is a channel linked to one root item in its parent channel.
 /// `skip_first_message` keeps that root in the parent pane rather than duplicating it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -465,6 +478,100 @@ fn channel_allows_actor(
         Some(profile_id) => channel_allows_profile(c, channel_id, profile_id),
         None => Ok(false),
     }
+}
+/// Threads that are asking the caller something. THREE conditions, all required:
+///
+///  1. PARTICIPATION — they wrote the root message, or replied in the thread. An
+///     unread reply in a thread you never joined is somebody else's conversation;
+///     the worklist is for what is ADDRESSED to you, and joining a thread is that
+///     address. (Deliberately NOT widened to "member of the parent channel": that
+///     is every busy channel's traffic, exactly the noise `attention.ts` excludes.)
+///  2. UNREAD REPLIES BY SOMEBODY ELSE — the read-state definition is the shared
+///     `unread_count_impl`; authorship is added on top because posting does not mark
+///     a channel read, so without it every reply YOU send would file a task against
+///     yourself. Your own message is never a claim on your attention.
+///  3. THE PARENT'S ACL ADMITS THEM — through `channel_allows_profile`, which is the
+///     same predicate the rest of chat uses and which resolves a thread to its parent
+///     itself. No second ACL path exists here, so the inheritance law cannot drift.
+fn list_unread_threads_impl(c: &Connection, profile_id: &str) -> Result<Vec<UnreadThread>> {
+    let mut s = c
+        .prepare(
+            "SELECT tc.channel_id, tc.parent_channel_id, pc.name, tc.root_message_id, m.text, m.author_id \
+             FROM thread_channels tc \
+             JOIN channels ch ON ch.id=tc.channel_id AND ch.archived=0 \
+             JOIN channels pc ON pc.id=tc.parent_channel_id \
+             JOIN messages m ON m.id=tc.root_message_id AND m.archived=0",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, Option<String>, String, String, Option<String>)> = s
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut out: Vec<UnreadThread> = Vec::new();
+    for (channel_id, parent_channel_id, parent_channel_name, root_message_id, root_text, root_author) in rows {
+        // (3) first: never compute anything about a thread the caller cannot see.
+        if !channel_allows_profile(c, &channel_id, profile_id)? {
+            continue;
+        }
+        // (1) participation.
+        let replied: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND archived=0 AND author_id=?2",
+                rusqlite::params![channel_id, profile_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let participates = root_author.as_deref() == Some(profile_id) || replied > 0;
+        if !participates {
+            continue;
+        }
+        // (2) unread at all, by the shared definition …
+        if unread_count_impl(c, &channel_id, profile_id)? <= 0 {
+            continue;
+        }
+        // … and unread because somebody ELSE wrote it.
+        let (unread_count, last_reply_at): (i64, Option<i64>) = c
+            .query_row(
+                "SELECT COUNT(*), MAX(created_at) FROM messages WHERE channel_id=?1 AND archived=0 \
+                 AND author_id IS NOT ?2 AND created_at > \
+                 COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0)",
+                rusqlite::params![channel_id, profile_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        if unread_count <= 0 {
+            continue;
+        }
+        let last_reply_author: Option<String> = c
+            .query_row(
+                "SELECT COALESCE(p.display_name, m.author_id) FROM messages m \
+                 LEFT JOIN profiles p ON p.id=m.author_id \
+                 WHERE m.channel_id=?1 AND m.archived=0 AND m.author_id IS NOT ?2 AND m.created_at > \
+                 COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0) \
+                 ORDER BY m.created_at DESC LIMIT 1",
+                rusqlite::params![channel_id, profile_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        out.push(UnreadThread {
+            channel_id,
+            parent_channel_id,
+            parent_channel_name,
+            root_message_id,
+            root_excerpt: root_text.chars().take(140).collect(),
+            unread_count,
+            last_reply_at,
+            last_reply_author,
+        });
+    }
+    out.sort_by(|a, b| b.last_reply_at.cmp(&a.last_reply_at));
+    Ok(out)
 }
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
     // Thread channels are opened from their root item, never shown as peer channels.
@@ -2449,6 +2556,14 @@ pub fn save_channel_notification_preference(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channels_with_meta(profile_id: String) -> Result<Vec<ChannelSummary>> {
     list_channels_with_meta_impl(&db::conn()?, &profile_id)
+}
+/// Threads with replies the caller has not read. `list_channels_with_meta` filters
+/// thread channels out on purpose (they are opened from their root, never listed as
+/// peers), which left unread replies invisible to every surface. This is the read that
+/// makes them visible — as attention, not as a destination.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_unread_threads(profile_id: String) -> Result<Vec<UnreadThread>> {
+    list_unread_threads_impl(&db::conn()?, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_channel(channel: Channel, member_ids: Vec<String>) -> Result<Channel> {
@@ -4516,6 +4631,170 @@ mod tests {
         assert_eq!(replies.len(), 1);
         assert_eq!(replies[0].message.text, "reply message");
         assert_eq!(replies[0].message.thread_of.as_deref(), Some("msg-root"));
+        drop(c);
+        drop(path);
+    }
+
+    /// Builds `parent` (private, members = `members`), a root message by `root_author`,
+    /// its thread channel, and returns the thread channel id. Replies are added by the
+    /// caller so each test controls authorship and time explicitly.
+    fn seed_thread(c: &Connection, parent: &str, members: &[&str], root_author: &str) -> String {
+        create_channel_impl(
+            c,
+            &Channel {
+                id: parent.into(),
+                content_type: "private".into(),
+                name: Some("Design".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &members.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let root = format!("{parent}-root");
+        reply_at(c, parent, &root, root_author, 10, "the root question");
+        ensure_thread_channel_impl(c, &root, Some("Discuss".into()), Some(root_author))
+            .unwrap()
+            .channel
+            .id
+    }
+    fn reply_at(c: &Connection, channel: &str, id: &str, author: &str, at: i64, text: &str) {
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some(author.into()),
+                text: text.into(),
+                created_at: at,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: "text".into(),
+                mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+
+    /// The whole point: I asked, somebody answered, and that answer is work for me.
+    /// The row must arrive complete — a worklist that needs a second call to say who
+    /// replied would render "someone replied somewhere".
+    #[test]
+    fn a_participant_sees_their_thread_with_unread_replies_and_the_row_is_complete() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let thread = seed_thread(&c, "chan-unread", &["asker", "answerer"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "first answer");
+        reply_at(&c, &thread, "r2", "answerer", 30, "second answer");
+
+        let rows = list_unread_threads_impl(&c, "asker").unwrap();
+        assert_eq!(rows.len(), 1, "the thread I started and have not read");
+        let row = &rows[0];
+        assert_eq!(row.channel_id, thread);
+        assert_eq!(row.parent_channel_id, "chan-unread");
+        assert_eq!(row.parent_channel_name.as_deref(), Some("Design"));
+        assert_eq!(row.root_message_id, "chan-unread-root");
+        assert_eq!(row.root_excerpt, "the root question");
+        assert_eq!(row.unread_count, 2);
+        assert_eq!(row.last_reply_at, Some(30));
+        assert_eq!(row.last_reply_author.as_deref(), Some("answerer-user"));
+        drop(c);
+        drop(path);
+    }
+
+    /// Participation is the address. A member of the parent channel who never touched
+    /// the thread is a bystander; putting that traffic in the worklist is the exact
+    /// noise the one attention rule exists to keep out.
+    #[test]
+    fn a_non_participant_of_the_thread_is_not_asked_to_attend_it() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer", "bystander"]);
+        let thread = seed_thread(&c, "chan-bystander", &["asker", "answerer", "bystander"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "answer");
+
+        assert!(
+            channel_allows_profile(&c, &thread, "bystander").unwrap(),
+            "the bystander CAN read the thread — so absence below is the participation \
+             rule, not an access failure"
+        );
+        assert!(list_unread_threads_impl(&c, "bystander").unwrap().is_empty());
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    /// THE INHERITANCE LAW. A thread never widens its parent's boundary, and this read
+    /// must not be the hole. Checked through `channel_allows_profile`, the same
+    /// predicate the rest of chat uses — there is no second ACL path here to drift.
+    #[test]
+    fn a_non_member_of_the_parent_channel_never_sees_the_thread() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "outsider"]);
+        let thread = seed_thread(&c, "chan-private", &["asker", "outsider"], "asker");
+        // The outsider even PARTICIPATES: they replied while they were still a member,
+        // and were then removed from the PARENT. Participation survives in the data;
+        // the parent's boundary must still overrule it.
+        reply_at(&c, &thread, "r1", "outsider", 20, "answer");
+        reply_at(&c, &thread, "r2", "asker", 25, "thanks");
+        remove_channel_member_impl(&c, "chan-private", "outsider").unwrap();
+
+        assert!(!channel_allows_profile(&c, &thread, "outsider").unwrap());
+        assert!(
+            list_unread_threads_impl(&c, "outsider").unwrap().is_empty(),
+            "the parent ACL overrules participation"
+        );
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    /// The worklist EMPTIES. Reading the replies is the resolution, and it must clear
+    /// the row through the ordinary read-state write — no separate dismissal state.
+    #[test]
+    fn reading_the_replies_clears_the_thread_from_the_worklist() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let thread = seed_thread(&c, "chan-clear", &["asker", "answerer"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "answer");
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+
+        mark_channel_read_impl(&c, &thread, "asker", None).unwrap();
+        assert!(list_unread_threads_impl(&c, "asker").unwrap().is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    /// A thread with nothing new is not work. Includes the case that would otherwise
+    /// make this feature self-defeating: posting does NOT mark a channel read, so
+    /// without the authorship condition your own reply would file a task against you.
+    #[test]
+    fn a_thread_with_no_unread_replies_from_others_is_absent() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let quiet = seed_thread(&c, "chan-quiet", &["asker", "answerer"], "asker");
+        assert!(
+            list_unread_threads_impl(&c, "asker").unwrap().is_empty(),
+            "a thread nobody has replied in yet"
+        );
+
+        reply_at(&c, &quiet, "mine", "asker", 20, "following up on myself");
+        assert!(
+            list_unread_threads_impl(&c, "asker").unwrap().is_empty(),
+            "my own reply is never a claim on my attention"
+        );
+
+        reply_at(&c, &quiet, "theirs", "answerer", 30, "real answer");
+        assert_eq!(
+            list_unread_threads_impl(&c, "asker").unwrap()[0].unread_count,
+            1,
+            "only the other person's reply counts"
+        );
         drop(c);
         drop(path);
     }

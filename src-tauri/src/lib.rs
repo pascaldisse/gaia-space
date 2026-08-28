@@ -346,6 +346,7 @@ pub fn run() {
             chat::get_channel_notification_preference,
             chat::save_channel_notification_preference,
             chat::list_channels_with_meta,
+            chat::list_unread_threads,
             chat::create_channel,
             chat::update_channel,
             chat::join_channel,
