@@ -5,7 +5,7 @@ import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import PageHeader, { useEmbedded } from "../components/PageHeader";
-import { GhostPill, PillSelect } from "../components/controls";
+import { GhostPill, PillMenu, PillSelect } from "../components/controls";
 import { Disclosure } from "../components/blocks";
 import EmptyState from "../components/EmptyState";
 import { linkProps } from "../router";
@@ -252,9 +252,17 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
           </div>
         </div>
 
-        <PillSelect class="chip chip-select" label="Swimlane grouping" value={swimlaneGroup()} onChange={value => setSwimlaneGroup(value as "none" | "assignee" | "creator" | "due_date")}>
-          <option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option>
-        </PillSelect>
+        {/* Four fixed words that will never grow — PillMenu, so the open list is
+           ours. Sprint and Swimlane above stay native: those are project data,
+           they grow without bound, and the platform popup handles a long list
+           better than anything we would hand-build. */}
+        <PillMenu class="chip chip-select" label="Swimlane grouping" value={swimlaneGroup()} onChange={value => setSwimlaneGroup(value as "none" | "assignee" | "creator" | "due_date")}
+          options={[
+            { value: "none", label: "No grouping" },
+            { value: "assignee", label: "Assignee" },
+            { value: "creator", label: "Created by" },
+            { value: "due_date", label: "Due date" },
+          ]} />
 
         <div class="chip-wrap" onClick={event => event.stopPropagation()}>
           <button class="chip" aria-expanded={panel() === "fields"} aria-haspopup="dialog" onClick={() => togglePanel("fields")}>Card fields <small>{cardSettings()?.fields?.length ?? 0}</small></button>
@@ -443,7 +451,8 @@ const rowName = (issue: Issue) => axis() === "priority" ? (issue.priority ?? "No
 const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.localeCompare(b));
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
-<PillSelect class="chip chip-select" label="Rows" value={axis()} onChange={value => setAxis(value as "assignee" | "priority")}><option value="assignee">Rows: Assignee</option><option value="priority">Rows: Priority</option></PillSelect>
+<PillMenu class="chip chip-select" label="Rows" value={axis()} onChange={value => setAxis(value as "assignee" | "priority")}
+  options={[{ value: "assignee", label: "Rows: Assignee" }, { value: "priority", label: "Rows: Priority" }]} />
 <Show when={props.issues.length} fallback={<EmptyState variant="no-match" title="No board tickets to report on yet." />}>
 <table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
 </Show>

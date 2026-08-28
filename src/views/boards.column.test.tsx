@@ -92,10 +92,16 @@ describe("board columns accept work", () => {
     dispose = render(() => <Boards />, host);
     await settle();
 
-    const grouping = host.querySelector('[aria-label="Swimlane grouping"]') as HTMLSelectElement;
-    grouping.value = "assignee";
-    grouping.dispatchEvent(new Event("change", { bubbles: true }));
+    // Grouping is a PillMenu since stage 13 — a fixed four-word list, so the open
+    // state is ours. Driven as a person drives it: open, arrow down, commit.
+    const grouping = host.querySelector('[aria-label="Swimlane grouping"]') as HTMLButtonElement;
+    grouping.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
     await settle();
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    await settle();
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await settle();
+    expect(grouping.textContent).toContain("Assignee");
     expect(host.querySelector(".swimlane-row header")?.textContent).toContain("Unassigned");
     expect(host.querySelectorAll(".swimlane-row .board-column").length).toBe(2);
   });

@@ -1,5 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import type { DocumentBodyFormat } from "../api/documents";
+import { PillMenu } from "./controls";
 import "./DocumentCreateDrawer.css";
 
 /** ── WHY THIS EXISTS ────────────────────────────────────────────────────────
@@ -66,20 +67,20 @@ export default function DocumentCreateDrawer(props: DocumentCreateDrawerProps): 
           </label>
 
           <Show when={isDoc()}>
-            <label class="dcd-field">
+            <div class="dcd-field">
               <span>Type</span>
-              <select
-                class="dcd-input"
-                aria-label="Document body type"
+              <PillMenu
+                label="Document body type"
                 value={props.bodyFormat}
-                onChange={(event) => props.setBodyFormat(event.currentTarget.value as DocumentBodyFormat)}
-              >
-                <option value="text">Text / Markdown</option>
-                <option value="rich-text">Rich text</option>
-                <option value="checklist">Checklist</option>
-                <option value="code">Code</option>
-              </select>
-            </label>
+                onChange={(value) => props.setBodyFormat(value as DocumentBodyFormat)}
+                options={[
+                  { value: "text", label: "Text / Markdown" },
+                  { value: "rich-text", label: "Rich text" },
+                  { value: "checklist", label: "Checklist" },
+                  { value: "code", label: "Code" },
+                ]}
+              />
+            </div>
           </Show>
 
           <div class="dcd-actions">

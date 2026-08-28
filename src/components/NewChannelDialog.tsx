@@ -3,6 +3,7 @@ import { chatApi, newId, type Channel, type ChannelContentType } from "../api/ch
 import { authApi } from "../api/auth";
 import { actingProfileId } from "../chatIdentity";
 import { humanError, isWeb } from "../session";
+import { PillMenu } from "./controls";
 import "./WorkItemDrawer.css";
 
 /**
@@ -83,14 +84,16 @@ export default function NewChannelDialog(props: {
         <p>{props.projectLabel ? `A channel in ${props.projectLabel}.` : "A channel or a direct message."}</p>
       </header>
       <form class="wid-form" onSubmit={submit}>
-        <label class="wid-field"><span>Type</span>
-          <select class="wid-input" aria-label="Conversation type" value={kind()} onChange={(event) => setKind(event.currentTarget.value as ChannelContentType)}>
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-            <option value="dm">Direct message</option>
-            <option value="entity-bound">Entity-bound</option>
-          </select>
-        </label>
+        {/* Four fixed kinds — the shortest possible list, and every word ours. */}
+        <div class="wid-field"><span>Type</span>
+          <PillMenu label="Conversation type" value={kind()} onChange={(value) => setKind(value as ChannelContentType)}
+            options={[
+              { value: "public", label: "Public" },
+              { value: "private", label: "Private" },
+              { value: "dm", label: "Direct message" },
+              { value: "entity-bound", label: "Entity-bound" },
+            ]} />
+        </div>
         <Show when={kind() !== "dm"} fallback={
           <label class="wid-field"><span>To</span>
             <select class="wid-input" aria-label="Direct message recipient" value={recipientId()} disabled={!candidates().length} onChange={(event) => setRecipientId(event.currentTarget.value)}>

@@ -1,6 +1,7 @@
 import { For, Show, createSignal, type JSX } from "solid-js";
 import type { Meeting } from "../api/meetings";
 import { localInput } from "../calendar";
+import { PillMenu } from "./controls";
 import { ProfilePicker } from "./Pickers";
 import { profileId } from "../session";
 import "./MeetingDrawer.css";
@@ -164,40 +165,45 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
                 onChange={(id) => props.setField("organizer_id", id)} />
             </div>
 
-            <label class="mtd-field">
+            {/* Three closed vocabularies of two to four words each: the exact case
+               PillMenu exists for, and a `<label>` cannot wrap a button, so the
+               caption sits beside the control and names it through `label`. */}
+            <div class="mtd-field">
               <span>Visibility</span>
-              <select class="mtd-input" value={props.form.visibility}
-                onChange={(event) => props.setField("visibility", event.currentTarget.value as Meeting["visibility"])}>
-                <option value="participants">Participants</option>
-                <option value="private">Private</option>
-                <option value="public">Public</option>
-              </select>
-            </label>
+              <PillMenu label="Visibility" value={props.form.visibility}
+                onChange={(value) => props.setField("visibility", value as Meeting["visibility"])}
+                options={[
+                  { value: "participants", label: "Participants" },
+                  { value: "private", label: "Private" },
+                  { value: "public", label: "Public" },
+                ]} />
+            </div>
 
-            <label class="mtd-field">
+            <div class="mtd-field">
               <span>Who can edit?</span>
-              <select class="mtd-input" value={props.form.modification_preference}
-                onChange={(event) => props.setField("modification_preference", event.currentTarget.value as Meeting["modification_preference"])}>
-                <option value="organizer-only">Organizer only</option>
-                <option value="participants">Participants</option>
-              </select>
-            </label>
+              <PillMenu label="Who can edit?" value={props.form.modification_preference}
+                onChange={(value) => props.setField("modification_preference", value as Meeting["modification_preference"])}
+                options={[
+                  { value: "organizer-only", label: "Organizer only" },
+                  { value: "participants", label: "Participants" },
+                ]} />
+            </div>
 
-            <label class="mtd-field">
+            <div class="mtd-field">
               <span>Repeat</span>
-              <select class="mtd-input" aria-label="Repeat" value={preset()}
-                onChange={(event) => {
-                  const chosen = event.currentTarget.value;
+              <PillMenu label="Repeat" value={preset()}
+                onChange={(chosen) => {
                   // "custom" is a report, not a command: picking it leaves the
                   // existing rule alone so the raw field below stays authoritative.
                   if (chosen === "custom") return;
                   props.setField("rrule", chosen || null);
-                }}>
-                <For each={REPEAT_PRESETS}>{([value, label]) => <option value={value}>{label}</option>}</For>
-                <Show when={preset() === "custom"}><option value="custom">Custom…</option></Show>
-              </select>
+                }}
+                options={[
+                  ...REPEAT_PRESETS.map(([value, label]) => ({ value, label })),
+                  ...(preset() === "custom" ? [{ value: "custom", label: "Custom…" }] : []),
+                ]} />
               <span class="mtd-hint">Bounded or unusual series (COUNT, UNTIL, odd weekdays) go in the RRULE field.</span>
-            </label>
+            </div>
 
             <label class="mtd-field">
               <span>RRULE</span>

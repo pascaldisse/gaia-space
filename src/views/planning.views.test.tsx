@@ -38,7 +38,10 @@ describe("planning views", () => {
     const host = document.createElement("div"); document.body.appendChild(host);
     dispose = render(() => <Issues />, host);
     await settle();
-    expect(host.querySelector('select[aria-label="Filter by status"]')).toBeTruthy();
+    // Status became a PillMenu in stage 13 (a project's statuses are a closed,
+    // short list of its own words); the tag filter stays a native select on
+    // purpose, because tags grow without bound. Both are still asserted here.
+    expect(host.querySelector('button[aria-label="Filter by status"]')).toBeTruthy();
     expect(host.querySelector('select[aria-label="Filter by tag"]')?.textContent).toContain("release");
     expect(host.textContent).toContain("Ship planning");
     expect([...host.querySelectorAll("a")].some(link => link.textContent?.includes("Open board"))).toBe(true);
@@ -58,8 +61,8 @@ describe("planning views", () => {
     dispose = render(() => <ProjectTasks />, host);
     await settle();
     // The two ticket-only filters are gone from this surface.
-    expect(host.querySelector('select[aria-label="Filter by status"]')).toBeNull();
-    expect(host.querySelector('select[aria-label="Filter by tag"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Filter by status"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Filter by tag"]')).toBeNull();
     // And so is the ticket list: a ticket title must not render on a task page.
     expect(host.textContent).not.toContain("Ship planning");
     // The path to them exists, counted from the shared project aggregate.

@@ -1,5 +1,6 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
+import { PillMenu } from "./controls";
 import { ProfilePicker } from "./Pickers";
 import { humanError } from "../session";
 import "./WorkItemDrawer.css";
@@ -89,22 +90,24 @@ export default function IssueCreateDrawer(props: {
         <label class="wid-field"><span>Description</span>
           <textarea class="wid-input" aria-label="Ticket description" value={description()} placeholder="Context, steps, acceptance" onInput={(event) => setDescription(event.currentTarget.value)} />
         </label>
-        <label class="wid-field"><span>Status</span>
-          <select class="wid-input" aria-label="Ticket status" value={statusId()} onChange={(event) => setStatusId(event.currentTarget.value)}>
-            <option value="">No status</option>
-            <For each={props.statuses}>{(status) => <option value={status.id}>{status.name}</option>}</For>
-          </select>
-        </label>
+        {/* STATUS AND PRIORITY ARE PillMenus, NOT SELECTS (stage 13). These two are
+            the controls the product owner clicked: short, closed lists of our own
+            words, where the OPEN state was macOS's grey system popup and nothing
+            of the redesign survived the click. A `<label>` cannot wrap them — a
+            caption labels a form CONTROL, and the control here is a button — so
+            the caption sits beside it in a div and names it via `label`. */}
+        <div class="wid-field"><span>Status</span>
+          <PillMenu label="Ticket status" value={statusId()} onChange={setStatusId}
+            options={[{ value: "", label: "No status" }, ...props.statuses.map(status => ({ value: status.id, label: status.name }))]} />
+        </div>
         {/* A DRAWER IS A FORM, not a filter row: here a visible caption is correct
             and stays. What was wrong was WHICH caption — the picker printed its own,
             in the picker's voice, next to five fields captioned in the form's voice.
             So the form supplies the caption and the control goes silent. */}
         <div class="wid-field"><span>Assignee</span><ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll /></div>
-        <label class="wid-field"><span>Priority</span>
-          <select class="wid-input" aria-label="Ticket priority" value={priority()} onChange={(event) => setPriority(event.currentTarget.value)}>
-            <For each={PRIORITIES}>{(option) => <option value={option.value}>{option.label}</option>}</For>
-          </select>
-        </label>
+        <div class="wid-field"><span>Priority</span>
+          <PillMenu label="Ticket priority" value={priority()} onChange={setPriority} options={[...PRIORITIES]} />
+        </div>
         <label class="wid-field"><span>Due date</span>
           <input class="wid-input" type="date" aria-label="Due date" value={dueDate()} onInput={(event) => setDueDate(event.currentTarget.value)} />
         </label>

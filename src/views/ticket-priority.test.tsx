@@ -37,11 +37,20 @@ describe("ticket priority", () => {
     title.value = "Safari login hangs";
     title.dispatchEvent(new Event("input", { bubbles: true }));
 
-    const priority = host.querySelector<HTMLSelectElement>('select[aria-label="Ticket priority"]')!;
+    // Priority is a PillMenu since stage 13 (the open list is ours, not macOS's),
+    // so it is driven the way a person drives it: open it, type-ahead to the row,
+    // commit with Enter. Same wire value, proven through the real control.
+    const priority = host.querySelector<HTMLButtonElement>('button[aria-label="Ticket priority"]')!;
     expect(priority).toBeTruthy();
-    expect([...priority.options].map((o) => o.value)).toEqual(["", "LOW", "MEDIUM", "HIGH", "URGENT"]);
-    priority.value = "HIGH";
-    priority.dispatchEvent(new Event("change", { bubbles: true }));
+    priority.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await settle();
+    expect(Array.from(document.querySelectorAll(".pill-menu-option")).map((o) => o.textContent))
+      .toEqual(["No priority", "Low", "Medium", "High", "Urgent"]);
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "h", bubbles: true, cancelable: true }));
+    await settle();
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await settle();
+    expect(priority.textContent).toContain("High");
 
     host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await settle();

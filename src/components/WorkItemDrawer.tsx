@@ -4,6 +4,7 @@ import { planningApi } from "../api/issues";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { humanError, profileId, profiles } from "../session";
+import { PillMenu } from "./controls";
 import "./WorkItemDrawer.css";
 
 /** The three shapes a message can become. "Pull Request" is in the briefing's field
@@ -148,14 +149,16 @@ export default function WorkItemDrawer(props: {
       </header>
       <form class="wid-form" onSubmit={submit}>
         <Show when={props.kind === "ticket"}>
-          <label class="wid-field"><span>Type</span>
-            <Show when={(tags() ?? []).length} fallback={<select class="wid-input" disabled><option>No ticket types in this project</option></select>}>
-              <select class="wid-input" value={typeTagId()} onChange={event => setTypeTagId(event.currentTarget.value)}>
-                <option value="">No type</option>
-                <For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For>
-              </select>
+          {/* A project's ticket types are a handful of its own words — short,
+             closed, ours — so this opens OUR menu, not the system popup. */}
+          <div class="wid-field"><span>Type</span>
+            <Show when={(tags() ?? []).length}
+              fallback={<PillMenu label="Ticket type" value="" disabled onChange={() => {}}
+                options={[{ value: "", label: "No ticket types in this project" }]} />}>
+              <PillMenu label="Ticket type" value={typeTagId()} onChange={setTypeTagId}
+                options={[{ value: "", label: "No type" }, ...(tags() ?? []).map(tag => ({ value: tag.id, label: tag.name }))]} />
             </Show>
-          </label>
+          </div>
         </Show>
         <label class="wid-field"><span>Title</span>
           {/* Prefilled from the message, always editable: work is created deliberately. */}
@@ -169,9 +172,8 @@ export default function WorkItemDrawer(props: {
           <div class="wid-field wid-when"><span>Time</span>
             <div class="wid-when-row">
               <input class="wid-input" type="datetime-local" aria-label="Time" value={startsAt()} onInput={event => setStartsAt(event.currentTarget.value)} />
-              <select class="wid-input" aria-label="Duration" value={String(minutes())} onChange={event => setMinutes(Number(event.currentTarget.value))}>
-                <For each={[15, 30, 45, 60, 90, 120]}>{value => <option value={String(value)}>{value} min</option>}</For>
-              </select>
+              <PillMenu label="Duration" value={String(minutes())} onChange={value => setMinutes(Number(value))}
+                options={[15, 30, 45, 60, 90, 120].map(value => ({ value: String(value), label: `${value} min` }))} />
             </div>
           </div>
         </Show>
@@ -199,11 +201,10 @@ export default function WorkItemDrawer(props: {
           </label>
         </Show>
         <Show when={props.kind === "ticket"}>
-          <label class="wid-field"><span>Priority</span>
-            <select class="wid-input" value={priority()} onChange={event => setPriority(event.currentTarget.value)}>
-              <For each={PRIORITIES}>{([value, label]) => <option value={value}>{label}</option>}</For>
-            </select>
-          </label>
+          <div class="wid-field"><span>Priority</span>
+            <PillMenu label="Priority" value={priority()} onChange={setPriority}
+              options={PRIORITIES.map(([value, label]) => ({ value, label }))} />
+          </div>
         </Show>
         <Show when={props.kind === "event"}>
           <label class="wid-field"><span>Preparation</span>

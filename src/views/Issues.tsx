@@ -7,7 +7,7 @@ import IssueCreateDrawer from "../components/IssueCreateDrawer";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
 import PageHeader, { Chip } from "../components/PageHeader";
-import { ControlRow, GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import { ControlRow, GhostPill, PillMenu, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
@@ -186,7 +186,13 @@ const createStatus = async () => {
             pickers, each labelled by its own current value. */}
         <ControlRow label="Ticket filters" class="filter-row">
           <QuietSearch label="Search tickets" placeholder="Search title or description" value={query()} onInput={setQuery} />
-          <PillSelect label="Filter by status" value={statusFilter()} onChange={setStatusFilter}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></PillSelect>
+          {/* A project's workflow statuses are a closed handful of ITS OWN words
+              — the list this row is read by — so it opens our menu. Tags and
+              custom fields below stay native `PillSelect`: those grow with the
+              project, a hundred tags is a real list, and the platform popup is
+              better at a hundred rows than a hand-built one. */}
+          <PillMenu label="Filter by status" value={statusFilter()} onChange={setStatusFilter}
+            options={[{ value: "", label: "All statuses" }, ...(statuses() ?? []).map(status => ({ value: status.id, label: status.name }))]} />
           <Show when={!props.filterTagName}>
             <PillSelect label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={setTagFilter}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></PillSelect>
           </Show>
