@@ -1,3 +1,4 @@
+import PageHeader from "../components/PageHeader";
 import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi, type CalendarItem, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
@@ -165,14 +166,17 @@ export default function HomeCalendar() {
   const todoRoute = (todo: Todo): Route => (todo.project_id ? { view: "Project Tasks", projectId: todo.project_id } : { view: "To-Do" });
 
   return <div class="home-cal">
-    <header class="home-cal-header">
-      <div class="title-row">
-        <div>
-          <div class="kicker">{organization()?.name ?? "\u00a0"}</div>
-          <h1>Calendar</h1>
-          <p class="subtitle">Your day, your tasks and open messages</p>
-        </div>
-        <div class="header-metrics">
+    {/* THE START PAGE IS CALLED HOME. It was titled "Calendar" — the name of one of
+        the things ON it — while the rail entry that opens it says Home, so the page
+        and the way in disagreed. It also carried a hand-built header; the shared one
+        gives it the same kicker, mark and chips every other surface has. */}
+    <PageHeader
+      icon="home"
+      kicker={organization()?.name}
+      title="Home"
+      subline="Your day, your tasks and open messages"
+      chips={
+        <>
           <span class="metric-pill"><strong>{selectedDay().getDate()}</strong> selected</span>
           <Show when={!dashboard.loading && !items.error}>
             <span class="metric-pill"><strong>{meetingsToday().length}</strong> {meetingsToday().length === 1 ? "Meeting" : "Meetings"}</span>
@@ -180,9 +184,9 @@ export default function HomeCalendar() {
           <Show when={!dashboard.loading && !dashboard.error}>
             <span class="metric-pill"><strong>{todosToday().length}</strong> tasks today</span>
           </Show>
-        </div>
-      </div>
-    </header>
+        </>
+      }
+    />
 
     <Show when={items.error}><p class="planning-error" role="alert">Dates could not be loaded: {String(items.error)}</p></Show>
     <Show when={dashboard.error}><p class="planning-error" role="alert">Tasks could not be loaded: {String(dashboard.error)}</p></Show>

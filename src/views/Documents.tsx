@@ -1299,6 +1299,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           reading, or the shelf you are standing in) and it is absent for anyone who
           does not own the library, rather than present and refusing. */}
       <PageHeader
+        icon="books"
         title="Knowledge"
         subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"}
         actions={
