@@ -396,6 +396,12 @@
 /* "Acting as" — desktop-only chat identity, moved here from Chat's sidebar. */
 .space-chat-shell .side-acting { display: block; margin: 10px 9px 14px; }
 .space-chat-shell .side-acting select {
+  /* The light shell sets `color-scheme: light` on every field so date pickers and
+     native menus match the paper. This field does not sit on paper — it sits on the
+     plum sidebar, and under a light colour-scheme the platform paints a select's
+     VALUE in its own dark ink, ignoring our `color`. Hence dark text on a dark
+     surface. The sidebar is dark chrome, so it says so. */
+  color-scheme: dark;
   width: 100%; appearance: none; -webkit-appearance: none;
   min-height: var(--pillctl-h, 36px);
   border-radius: var(--pillctl-r, 999px);
