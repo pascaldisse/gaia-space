@@ -61,6 +61,20 @@ const [profileId, setId] = createSignal(localStorage.getItem("space.profile") ??
     if (pr?.length && !pr.some((x) => x.id === projectId())) setProjectId(pr[0].id);
   };
 
+  // The session settles its own defaults. This used to happen only inside
+  // ProfilePicker/ProjectPicker, so a surface that rendered no picker never got
+  // an identity: `profileId()` stayed empty, every profile-scoped read was
+  // skipped, and the view sat on "Loading…" forever. The redesign deleted those
+  // pickers on purpose, which turned a hidden coupling into a visible defect.
+  // Defaults belong to the session, not to a control that may not be on screen.
+  // Deferred by one microtask on purpose: `ensureDefaults` reads `currentUser`,
+  // which lives in the auth root created *after* this one. Running synchronously
+  // at module init would touch it before initialisation.
+  createEffect(() => {
+    profiles(); projects();
+    queueMicrotask(() => { try { ensureDefaults(); } catch { /* auth not ready yet; the next change re-runs this */ } });
+  });
+
   return {
     workspaceId, workspaces, saveWorkspace, removeWorkspace, selectWorkspace,
 profileId, setProfileId, profiles, reloadProfiles,
