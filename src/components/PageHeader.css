@@ -96,8 +96,35 @@
 }
 .metric-pill strong { color: var(--text-strong); font-weight: var(--type-weight-strong, 700); }
 
+/* Tone on a metric chip. `Chip` only ever sets one of these when the value is
+   non-empty (statusTone.ts `metricTone`) — zero is untoned by construction. */
+.metric-pill.teal { border-color: transparent; background: var(--teal-soft); color: var(--teal-ink, #006b5e); }
+.metric-pill.amber { border-color: transparent; background: var(--amber-soft); color: var(--amber-ink, #7b5207); }
+.metric-pill.red { border-color: transparent; background: var(--red-soft); color: var(--red-ink, #8a1c1c); }
+.metric-pill.done { color: var(--text-muted); }
+.metric-pill.teal strong, .metric-pill.amber strong, .metric-pill.red strong { color: inherit; }
+
+/* ── Embedded form (audit §3.5) ─────────────────────────────────────
+   No kicker, no title — the host already wrote both. What is left is the chips +
+   actions row, and it aligns with the host's tab bar instead of starting a new
+   title block. Structure only, so the dark layouts get the same geometry. */
+.page-header.embedded {
+  margin-bottom: var(--view-head-gap-embedded, 14px);
+}
+.page-header.embedded .pgh-row {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+/* A subline is a fact about the surface, not a repeat of the scope, so it survives
+   — pushed left, sharing the row's single baseline with the actions. */
+.page-header.embedded .pgh-title { flex: 1 1 auto; }
+.page-header.embedded .subtitle { margin: 0; }
+.page-header.embedded .pgh-edge { align-items: center; }
+
 @media (max-width: 720px) {
   .pgh-row { flex-direction: column; }
+  .page-header.embedded .pgh-row { align-items: flex-start; }
   .pgh-edge { justify-content: flex-start; }
   .header-metrics, .pgh-actions { justify-content: flex-start; }
 }

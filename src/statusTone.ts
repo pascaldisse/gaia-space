@@ -116,6 +116,25 @@ export const priorityTone = (priority: string | null | undefined): Tone => {
   return "";
 };
 
+/**
+ * ZERO CARRIES NO TONE.
+ *
+ * A metric states a quantity; its colour states how much that quantity should worry
+ * you. When the quantity is none, there is nothing to worry about, so `0 Overdue`
+ * must not be red — a red zero is a warning about nothing, and it trains the reader
+ * to ignore the real red next to it.
+ *
+ * Callers pass the tone the metric would carry if it were non-empty; this decides
+ * whether the number earns it. Empty means `0`, `"0"`, `null`, `undefined`, `""` and
+ * the em-dash placeholder a surface renders while a figure is still unknown.
+ */
+export const metricTone = (value: unknown, tone: Tone): Tone => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return value === 0 ? "" : tone;
+  const text = String(value).trim();
+  return text === "" || text === "0" || text === "—" || text === "-" ? "" : tone;
+};
+
 /** Legacy class vocabulary used by the project-deadline banner (`.st-deadline.soon`). */
 export type DeadlineClass = "overdue" | "soon" | "ok";
 
