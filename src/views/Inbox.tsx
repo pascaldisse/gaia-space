@@ -6,8 +6,9 @@ import {
   type SubscriptionSetting,
 } from "../api/personal";
 import { Icon, type IconName } from "../components/Icon";
-import { ProfilePicker } from "../components/Pickers";
 import PageHeader, { Chip } from "../components/PageHeader";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { entityView, linkProps } from "../router";
 import { humanError, profileId } from "../session";
 import "./Inbox.css";
@@ -299,14 +300,15 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
         title="Inbox"
         chips={<Show when={unreadAll().length}><Chip value={unreadAll().length} label="unread" /></Show>}
         actions={
-          <>
-            <ProfilePicker identity />
-            <Show when={unreadAll().length}>
-              <button class="primary" onClick={markAllRead}>
-                Mark all read
-              </button>
-            </Show>
-          </>
+          /* The "Acting as" picker is GONE from this header (stage 10a): the
+             shell already carries identity in the account footer, and a second
+             identity control on one page reads as a per-view setting, which it
+             is not. */
+          <Show when={unreadAll().length}>
+            <button class="primary" onClick={markAllRead}>
+              Mark all read
+            </button>
+          </Show>
         }
       />
 
@@ -317,18 +319,15 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
       </Show>
 
       <Show when={!profileId()}>
-        <div class="inbox-blank">
-          <span class="inbox-blank-ic">
-            <Icon name="user" size={22} />
-          </span>
-          <div>
-            <h2>Choose who you're acting as</h2>
-            <p>Pick a profile above — or add one in Organization — to see the notifications addressed to you.</p>
-          </div>
-          <a class="primary inbox-blank-cta" {...linkProps({ view: "Members" })}>
-            Open Organization
-          </a>
-        </div>
+        {/* No profile: not an empty inbox, a missing identity. The picker that
+            used to sit in this header is in the account footer of the shell now,
+            so the copy points there instead of "above". */}
+        <EmptyState
+          icon={<Icon name="user" size={18} />}
+          title="No profile is active"
+          hint="Pick who you're acting as in the account menu at the bottom of the sidebar — or add a profile in Organization."
+          actions={<a class="primary" {...linkProps({ view: "Members" })}>Open Organization</a>}
+        />
       </Show>
 
       <Show when={profileId()}>
@@ -343,36 +342,18 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
         </Show>
 
         <Show when={!notifications.loading && !notifications.error}>
-          {/* Nothing has ever arrived — onboarding composition, not a bare line. */}
+          {/* An empty inbox is GOOD NEWS, and a person looking at good news
+             wants nothing done to them. So: one quiet line, no onboarding
+             composition, no rail of controls for events that do not exist, and
+             above all no "Go to Overview" — a button that leaves the page is not
+             an answer to "there is nothing here". */}
           <Show when={!everything().length}>
-            <div class="view-cols inbox-cols inbox-onboarding">
-              <div class="view-main">
-                <section class="inbox-blank">
-                  <span class="inbox-blank-ic">
-                    <Icon name="inbox" size={22} />
-                  </span>
-                  <div>
-                    <h2>You're all caught up</h2>
-                    <p>
-                      Mentions, assignments, review requests, and updates addressed to you will land in this feed.
-                    </p>
-                  </div>
-                  <a class="ghost inbox-blank-cta" {...linkProps({ view: "Dashboard" })}>
-                    Go to Overview
-                  </a>
-                </section>
-              </div>
-              <aside class="view-rail inbox-rail">
-                {summaryCard()}
-                {subscriptionsCard()}
-                <div class="rail-card">
-                  <h3>How it works</h3>
-                  <p class="rail-empty">
-                    Updates from your work arrive here, with the related item one click away.
-                  </p>
-                </div>
-              </aside>
-            </div>
+            <EmptyState
+              class="inbox-quiet"
+              variant="no-match"
+              title="Nothing needs you right now"
+              hint="Mentions, assignments and review requests will appear here."
+            />
           </Show>
 
           <Show when={everything().length}>
@@ -411,16 +392,31 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
                     <Show
                       when={unread().length}
                       fallback={
-                        <div class="inbox-clear">
-                          <span class="inbox-clear-ic">
-                            <Icon name="check" size={16} />
-                          </span>
-                          <p>
-                            {scope() === "unread" || category() !== "all"
-                              ? "Nothing unread in this filter."
-                              : "You're all caught up — no unread notifications."}
-                          </p>
-                        </div>
+                        /* TWO DIFFERENT FACTS, two different answers: a filter
+                           that excludes everything can be cleared, and is; a
+                           genuinely read inbox has nothing to offer and offers
+                           nothing. */
+                        <Show
+                          when={scope() === "unread" || category() !== "all"}
+                          fallback={
+                            <div class="inbox-clear">
+                              <span class="inbox-clear-ic">
+                                <Icon name="check" size={16} />
+                              </span>
+                              <p>You're all caught up — no unread notifications.</p>
+                            </div>
+                          }
+                        >
+                          <EmptyState
+                            variant="no-match"
+                            title="Nothing unread in this filter."
+                            actions={
+                              <GhostPill onClick={() => { setScope("all"); setCategory("all"); }}>
+                                Clear filters
+                              </GhostPill>
+                            }
+                          />
+                        </Show>
                       }
                     >
                       <ul class="inbox-list">

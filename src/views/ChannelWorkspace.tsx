@@ -3,7 +3,9 @@ import { chatApi, type Channel } from "../api/chat";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { currentUser, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
-import { channelTabs, linkProps, route } from "../router";
+import { channelTabs, linkProps, navigate, route } from "../router";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import ProjectHome from "./ProjectHome";
 import ProjectTasks from "./ProjectTasks";
@@ -93,6 +95,10 @@ export default function ChannelWorkspace(): JSX.Element {
   };
   const roleOf = (id: string) => (project()?.lead_id === id ? "Lead" : "Member");
 
+  /* Tab navigation from inside a panel: the channel is already known, so the
+     move never re-asks for it. */
+  const goTab = (tab: TabKey) =>
+    navigate({ view: "Chat", entityType: "channel", entityId: channelId(), tab });
   const tabs = () => TABS.filter((entry) => !entry.needsProject || !!project());
   const visibleTab = (): TabKey => (tabs().some((entry) => entry.key === tab()) ? tab() : "messages");
 
@@ -154,11 +160,18 @@ export default function ChannelWorkspace(): JSX.Element {
           <Show when={visibleTab() === "notes"}>
             {/* Honest empty state: there is no notes/decisions store in the data model.
                 Documents is the file surface (tab "Files & Links"); minutes and
-                decisions are not documents and are not silently faked as such. */}
-            <div class="cw-empty" role="status">
-              <h2>Notes & Decisions</h2>
-              <p>Not available yet. Decisions live in messages and documents today.</p>
-            </div>
+                decisions are not documents and are not silently faked as such.
+                So the actions here lead to the two places where a decision can
+                actually be written today — both already scoped to this channel.
+                A "New note" button would be a dead button, so it is not drawn. */}
+            <EmptyState
+              title="No notes or decisions store yet"
+              hint="Decisions live in the conversation and in this project's documents today."
+              actions={<>
+                <button type="button" class="primary" onClick={() => goTab("files")}>Open documents</button>
+                <GhostPill onClick={() => goTab("messages")}>Back to messages</GhostPill>
+              </>}
+            />
           </Show>
         </section>
 
@@ -189,7 +202,12 @@ export default function ChannelWorkspace(): JSX.Element {
 
               <section class="cw-card">
                 <h2>Team</h2>
-                <Show when={(memberIds() ?? []).length} fallback={<p class="cw-quiet">No project members.</p>}>
+                {/* NOTHING YET. The action is real: Organization is where people
+                    are added, and it is the only place this can be fixed. */}
+                <Show when={(memberIds() ?? []).length} fallback={<EmptyState
+                  title="Nobody is in this project yet"
+                  actions={<GhostPill {...linkProps({ view: "Members" })}>Add people</GhostPill>}
+                />}>
                   <For each={memberIds()}>
                     {(id) => (
                       <div class="cw-person">

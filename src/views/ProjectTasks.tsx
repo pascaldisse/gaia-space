@@ -4,9 +4,11 @@ import { planningApi, type Issue } from "../api/issues";
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
 import { ControlRow, GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import IssueDetail from "./IssueDetail";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
+import { takeWorkIntent } from "./workIntent";
 import "./Issues.css";
 
 const blankIssue = () => ({ title: "", description: "", status_id: "", due_date: "", priority: "", assignee_ids: [] as string[] });
@@ -49,6 +51,10 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   // current user discover a secret reload gesture. Focus refresh is immediate; the
   // bounded interval covers two people who keep the view open side by side.
   onMount(() => {
+    /* Arriving from another surface's "New task"/"New ticket": open that form
+       here, once. See views/workIntent.ts for why this is not a route param. */
+    const intent = takeWorkIntent();
+    if (intent) setPane({ kind: intent });
     const refresh = () => { void reloadIssues(); void reloadTasks(); };
     const interval = window.setInterval(refresh, 15_000);
     window.addEventListener("focus", refresh);
@@ -107,6 +113,23 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
       && (!assigneeId() || task.assignee_ids.includes(assigneeId()));
   });
 
+  /* ── nothing-yet vs no-match ──────────────────────────────────────────────
+     The two cases get DIFFERENT answers: with nothing in the store there is
+     nothing to un-filter, so we offer creation; with filters on we offer to
+     clear them and never suggest creating a second copy of what is very likely
+     already there, one filter away.
+     Tickets are filtered SERVER-side, so "is the store empty" is not knowable
+     from an empty result — the honest discriminator is whether any filter is
+     set at all. With no filter set, an empty result IS an empty store. */
+  const taskFilters = () => !!text().trim() || !!assigneeId();
+  const issueFilters = () => !!text().trim() || !!assigneeId() || !!statusId() || !!tagId();
+  const clearFilters = () => { setText(""); setAssigneeId(""); setStatusId(""); setTagId(""); };
+  const newTask = () => { setPane({ kind: "new-task" }); setError(""); };
+  const newIssue = () => { setPane({ kind: "new-issue" }); setError(""); };
+  /* The project is already known here (route, session, or the channel that
+     embedded this view) — the board opens pre-scoped, never through a picker. */
+  const goBoard = () => { setProjectId(selectedProject()); navigate({ view: "Boards" }); };
+
   return <section class="planning-view project-tasks-view">
     <PageHeader kicker={project()?.name} title="Work" subline="Shared tasks and tracked tickets" actions={
       <div class="planning-actions">
@@ -131,7 +154,20 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
           <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
           <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
           <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
-          <Show when={!tasks.loading && !visibleTasks().length}><p class="empty-state">No project tasks match these filters.</p></Show>
+          <Show when={!tasks.loading && !visibleTasks().length && taskFilters()}>
+            <EmptyState variant="no-match" title="No tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
+          </Show>
+          <Show when={!tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId()}>
+            <EmptyState
+              title={project() ? `No tasks in ${project()!.name} yet` : "No tasks in this project yet"}
+              hint="Tasks are the shared to-dos of this project. Tickets are tracked work on the board."
+              actions={<>
+                <button type="button" class="primary" onClick={newTask}>New task</button>
+                <GhostPill onClick={newIssue}>New ticket</GhostPill>
+                <GhostPill {...linkProps(board())} onClick={(event: MouseEvent) => { event.preventDefault(); goBoard(); }}>Open board</GhostPill>
+              </>}
+            />
+          </Show>
           <ul class="issue-list project-task-list">
             <For each={visibleTasks()}>{task => <li classList={{ active: pane()?.kind === "task" && (pane() as { item?: Todo }).item?.id === task.id }}>
               <button type="button" class="issue-row project-task-row" onClick={() => setPane({ kind: "task", item: task })}>
@@ -150,7 +186,19 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
             <PillSelect label="Filter by tag" value={tagId()} onChange={setTagId}><option value="">All ticket tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></PillSelect>
           </ControlRow>
           <Show when={issues.loading}><p class="hint">Loading tickets…</p></Show>
-          <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No tickets match these filters.</p></Show>
+          <Show when={!issues.loading && !issues()?.length && issueFilters()}>
+            <EmptyState variant="no-match" title="No tickets match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
+          </Show>
+          <Show when={!issues.loading && !issues()?.length && !issueFilters()}>
+            <EmptyState
+              title="No tickets in this project yet"
+              hint="A ticket is tracked work with a status — bugs, features, anything that belongs on the board."
+              actions={<>
+                <button type="button" class="primary" onClick={newIssue}>New ticket</button>
+                <GhostPill {...linkProps(board())} onClick={(event: MouseEvent) => { event.preventDefault(); goBoard(); }}>Open board</GhostPill>
+              </>}
+            />
+          </Show>
           <ul class="issue-list">
             <For each={issues()}>{issue => <li classList={{ active: pane()?.kind === "issue" && (pane() as { item?: Issue }).item?.id === issue.id }}>
               <button type="button" class="issue-row" onClick={() => setPane({ kind: "issue", item: issue })}>
@@ -164,7 +212,10 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         </section>
       </main>
       <aside class="issue-detail project-issue-detail">
-        <Show when={pane()} fallback={<p class="hint pad">Select work to view it, or add a task or ticket.</p>}>{current => <>
+        <Show when={pane()} fallback={<EmptyState title="Nothing selected" hint="Pick a task or ticket on the left — or start a new one here." actions={<>
+          <button type="button" class="primary" onClick={newTask}>New task</button>
+          <GhostPill onClick={newIssue}>New ticket</GhostPill>
+        </>} />}>{current => <>
           <Show when={current().kind === "issue" ? (current() as { kind: "issue"; item: Issue }).item : undefined}>{value => <IssueDetail issueId={value().id} statuses={statuses()} onChanged={() => void reloadIssues()} />}</Show>
           <Show when={current().kind === "task" ? (current() as { kind: "task"; item: Todo }).item : undefined}>{value => <section class="project-task-detail"><span class="idp-number">Project task</span><h2>{value().content}</h2><Show when={value().notes}><p>{value().notes}</p></Show><dl><dt>Created by</dt><dd>{nameOf(value().profile_id)}</dd><dt>Due</dt><dd>{value().due_date ?? "No due date"}</dd><dt>Status</dt><dd>{value().done ? "Done" : "Open"}</dd><dt>Assignees</dt><dd>{value().assignee_ids.length ? value().assignee_ids.map(nameOf).join(", ") : "Nobody"}</dd></dl><p class="hint">The task owner can edit full task details in My tasks.</p></section>}</Show>
           <Show when={current().kind === "new-task"}><form class="new-issue project-work-form" onSubmit={createTask}><h2>New project task</h2><input autofocus aria-label="Task title" placeholder="What needs doing?" value={taskForm().content} onInput={event => setTaskForm({ ...taskForm(), content: event.currentTarget.value })} /><textarea aria-label="Task notes" placeholder="Notes" value={taskForm().notes} onInput={event => setTaskForm({ ...taskForm(), notes: event.currentTarget.value })} /><input aria-label="Task due date" type="date" value={taskForm().due_date} onInput={event => setTaskForm({ ...taskForm(), due_date: event.currentTarget.value })} /><PeopleChooser selected={taskForm().assignee_ids} people={people()} toggle={toggleTaskPerson} /><button class="primary" disabled={!taskForm().content.trim()}>Add task</button></form></Show>

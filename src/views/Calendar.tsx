@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, createUniqueId, onCleanup, onMount, For, Show, type JSX } from "solid-js";
 import { personalApi, type CalendarItem } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { calendarsApi } from "../api/calendar-feeds";
@@ -8,6 +8,7 @@ import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
+import { GhostPill, PillSelect } from "../components/controls";
 import SourceLink from "../components/SourceLink";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
 import "../components/paper.css";
@@ -19,6 +20,38 @@ const weekRange = (date:Date) => { const start=startOfDay(date); start.setDate(s
 const epoch = (value:string) => Date.parse(value) / 1000;
 const atHour = (day:Date, hour:number) => { const at=new Date(day); at.setHours(hour,0,0,0); return Math.floor(at.getTime()/1000); };
 const quickKinds:QuickKind[] = ["meeting","task","deadline"];
+
+/** "View options" — the one quiet popover this view keeps.
+ *
+ *  It replaced a bordered `.calendar-filters` card that stacked a `Display`
+ *  fieldset next to captioned fields. Display toggles are set once and then
+ *  forgotten; they do not earn a permanent line above the calendar, but they
+ *  must stay reachable, so they live one click away behind a GhostPill.
+ *
+ *  Keyboard contract, same as components/TaskMeta.tsx: Escape closes and hands
+ *  focus back to the trigger, a click outside closes, and the trigger states
+ *  what it owns (`aria-haspopup`, `aria-expanded`, `aria-controls`). */
+function ViewOptions(props:{ label:string; children:JSX.Element }) {
+  const [open,setOpen] = createSignal(false);
+  const menuId = createUniqueId();
+  let root!:HTMLDivElement;
+  // The trigger is read off the DOM rather than through a `ref` prop: GhostPill
+  // renders either a <button> or an <a> and does not declare one.
+  const trigger = () => root?.querySelector<HTMLButtonElement>("button.ghost-pill") ?? undefined;
+  onMount(() => {
+    const away = (event:MouseEvent) => { if (open() && !root.contains(event.target as Node)) setOpen(false); };
+    const key = (event:KeyboardEvent) => { if (event.key==="Escape" && open()) { event.stopPropagation(); setOpen(false); trigger()?.focus(); } };
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", key);
+    onCleanup(() => { window.removeEventListener("mousedown", away); window.removeEventListener("keydown", key); });
+  });
+  return <div class="cal-viewopts" ref={root}>
+    <GhostPill aria-haspopup="dialog" aria-expanded={open()} aria-controls={menuId} onClick={()=>setOpen(was=>!was)}>{props.label}</GhostPill>
+    <Show when={open()}>
+      <div class="cal-viewopts-menu" id={menuId} role="dialog" aria-label={props.label}>{props.children}</div>
+    </Show>
+  </div>;
+}
 /** One time surface: the calendar shows meetings, task dates and deadlines,
 *  and meetings are created, edited and answered here — there is no second
 *  "Meetings" destination to keep in sync.
@@ -87,6 +120,11 @@ const weekdayHeads = () => view()==="day"
 const today = () => startOfDay(new Date());
 // Only projects the session may still give a first deadline to are offered here;
 // existing deadlines are edited in Projects, where the whole project is in view.
+// The location filter matches `meetings.location` exactly on the server, so the
+// options are the locations that ACTUALLY occur on meetings — every entry is
+// guaranteed to select something. The old free-text field could only be used by
+// someone who already knew the string; the value set is unchanged.
+const locationOptions = createMemo(() => [...new Set((meetings() ?? []).map(meeting=>meeting.location?.trim()).filter((location):location is string => !!location))].sort((a,b)=>a.localeCompare(b)));
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
 const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setSelected(undefined); setDraft(undefined); setSelectedDay(day); setComposerDay(day); setQuickKind(kind); setNotice("");
@@ -142,23 +180,41 @@ const invite = async () => { const item=draft(); if (!item || !invitee().trim())
 const rsvp = async (participant:MeetingParticipant, status:MeetingParticipant["status"]) => { try { await meetingsApi.rsvp(participant.meeting_id, participant.profile_id, status); reloadParticipants(); } catch (reason) { setError(humanError(reason)); } };
 const itemHref = (item:CalendarItem) => item.kind==="meeting" ? linkProps({view:"Calendar",entityType:"meeting",entityId:meetingIdOf(item)}) : item.kind==="deadline" && item.project_id ? linkProps({view:"Projects",projectId:item.project_id}) : linkProps({view:"Todo"});
 return <section class="calendar-view">
-<PageHeader kicker={scopeName()} title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<div class="calendar-controls">
-<button aria-label="Previous range" onClick={()=>shift(-1)}>←</button>
-<strong>{cursor().toLocaleDateString(UI_LOCALE,{month:"long",year:"numeric"})}</strong>
-<button aria-label="Next range" onClick={()=>shift(1)}>→</button>
-<button class="cal-today" onClick={()=>{const today=startOfDay(new Date()); setCursor(today); setSelectedDay(today);}}>Today</button>
+{/* FILTERS ARE THE HEADER LANE, not a card of their own. Each one's VALUE is
+    its label ("Jannes", "All locations"), so no caption floats above a field
+    and the row reads like Development's. Names live in `aria-label`. */}
+<PageHeader kicker={scopeName()} title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<>
+<ProfilePicker label="Member calendar" labelHidden value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/>
+<PillSelect label="Location calendar" value={targetLocation()} onChange={setTargetLocation}>
+<option value="">All locations</option>
+<For each={locationOptions()}>{location=><option value={location}>{location}</option>}</For>
+</PillSelect>
+<Show when={(calendars() ?? []).length}>
+<PillSelect label="Calendar filter" value={calendarFilter()} onChange={setCalendarFilter}>
+<option value="all">All calendars</option>
+<For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For>
+</PillSelect>
+</Show>
+<ViewOptions label="View options">
+<Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Show</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show>
+</ViewOptions>
+<button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
+</>}/>
+<div class="calendar-controls cal-toolbar">
 <div class="cal-viewtoggle" role="group" aria-label="Calendar range">
 <button classList={{active:view()==="month"}} aria-pressed={view()==="month"} onClick={()=>setView("month")}>Month</button>
 <button classList={{active:view()==="week"}} aria-pressed={view()==="week"} onClick={()=>setView("week")}>Week</button>
 <button classList={{active:view()==="day"}} aria-pressed={view()==="day"} onClick={()=>{setView("day");setCursor(selectedDay());}}>Day</button>
 <button classList={{active:view()==="schedule"}} aria-pressed={view()==="schedule"} onClick={()=>setView("schedule")}>Schedule</button>
 </div>
-<button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
-</div>}/>
-<ul class="calendar-legend" aria-label="Event kinds">
-<For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
-</ul>
-<div class="calendar-filters paper-filters"><Show when={options()}>{prefs=><fieldset class="calendar-options"><legend>Display</legend><label><input type="checkbox" checked={prefs().show_weekends} onChange={e=>void updateOptions({show_weekends:e.currentTarget.checked})}/> Weekends</label><label><input type="checkbox" checked={prefs().working_hours_only} onChange={e=>void updateOptions({working_hours_only:e.currentTarget.checked})}/> Working hours</label><label><input type="checkbox" checked={prefs().show_todos} onChange={e=>void updateOptions({show_todos:e.currentTarget.checked})}/> Tasks</label></fieldset>}</Show><ProfilePicker label="Member calendar" value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/><label class="calendar-filter">Location <input aria-label="Location calendar" value={targetLocation()} onInput={event=>setTargetLocation(event.currentTarget.value)} placeholder="All locations"/></label><Show when={(calendars() ?? []).length}><label class="calendar-filter">Calendar <select aria-label="Calendar filter" value={calendarFilter()} onChange={event=>setCalendarFilter(event.currentTarget.value)}><option value="all">All calendars</option><For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For></select></label></Show></div>
+<span class="cal-toolbar-gap"/>
+<div class="cal-nav">
+<button class="icon-button" type="button" aria-label="Previous range" title="Previous range" onClick={()=>shift(-1)}><span aria-hidden="true">‹</span></button>
+<strong>{cursor().toLocaleDateString(UI_LOCALE,{month:"long",year:"numeric"})}</strong>
+<button class="icon-button" type="button" aria-label="Next range" title="Next range" onClick={()=>shift(1)}><span aria-hidden="true">›</span></button>
+<GhostPill class="cal-today" onClick={()=>{const today=startOfDay(new Date()); setCursor(today); setSelectedDay(today);}}>Today</GhostPill>
+</div>
+</div>
 <Show when={error()}><p class="calendar-error" role="alert">{error()}</p></Show>
 <Show when={notice()}><p class="calendar-notice" role="status">{notice()}</p></Show>
 <div class="calendar-main">

@@ -4,6 +4,9 @@ import { personalApi, type Todo } from "../api/personal";
 import type { Project } from "../api/platform";
 import { profileId, profiles, projects } from "../session";
 import { linkProps, navigate, route } from "../router";
+import { GhostPill } from "../components/controls";
+import EmptyState from "../components/EmptyState";
+import { requestWorkIntent } from "./workIntent";
 import "./ProjectHome.css";
 
 /** Project overview is deliberately derived: cards and dashboard share the same project id.
@@ -20,7 +23,20 @@ export default function ProjectHome(props: { project?: Project }) {
     ([id, profile_id]) => id && profile_id ? personalApi.projectTodos(id, profile_id, false) : Promise.resolve([] as Todo[]),
   );
   const nameOf = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
-  const openTasks = () => navigate({ view: "Project Tasks", projectId: projectIdOf() });
+  /* Embedded in a channel workspace, "go to the tasks" means THIS channel's
+     Tasks tab — leaving the conversation for the standalone view would be a
+     loss of place. Same project either way; only the address differs. */
+  const inChannel = () => (route().entityType === "channel" ? route().entityId : undefined);
+  const openTasks = () => {
+    const channelId = inChannel();
+    navigate(channelId
+      ? { view: "Chat", entityType: "channel", entityId: channelId, tab: "tasks" }
+      : { view: "Project Tasks", projectId: projectIdOf() });
+  };
+  /* The project is already known on this surface, so both actions are
+     pre-scoped to it and the destination opens the form itself — no picker,
+     and no landing on a second empty page. */
+  const startWork = (intent: "new-task" | "new-issue") => { requestWorkIntent(intent); openTasks(); };
 
   return <section class="ph-view project-home" aria-label={`${project()?.name ?? "Project"} dashboard`}>
     <PageHeader kicker={project()?.name ?? "Project unavailable"} title="Project overview" actions={<button class="ghost small" onClick={() => void refetch()}>Refresh</button>} />
@@ -42,7 +58,18 @@ export default function ProjectHome(props: { project?: Project }) {
       <section class="ph-card">
         <div class="ph-card-head"><h2>Running tasks</h2><a class="ph-link" {...linkProps({ view: "Project Tasks", projectId: value().id })}>All project work</a></div>
         <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
-        <Show when={!tasks.loading && !tasks()?.length}><p class="hint ph-muted">No running tasks in this project.</p></Show>
+        {/* NOTHING YET, not a filtered view: this list has no filters, so an
+            empty result can only mean the project has no running task. */}
+        <Show when={!tasks.loading && !tasks()?.length}>
+          <EmptyState
+            title="No running tasks in this project yet"
+            hint="Start the shared to-do list, or file the first ticket for tracked work."
+            actions={<>
+              <button type="button" class="primary" onClick={() => startWork("new-task")}>New task</button>
+              <GhostPill onClick={() => startWork("new-issue")}>New ticket</GhostPill>
+            </>}
+          />
+        </Show>
         <ul class="ph-list"><For each={tasks()}>{task => <li role="button" tabindex="0" onClick={openTasks} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTasks(); } }}>
           <strong>{task.content}</strong>
           <small>{nameOf(task.profile_id)}</small>
