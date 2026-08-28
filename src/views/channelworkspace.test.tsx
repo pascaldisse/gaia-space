@@ -62,12 +62,21 @@ describe("channel workspace", () => {
     expect(host.querySelector(".cw-title h1")?.textContent).toContain("wasserkocher");
   });
 
-  test("a project-bound channel shows every work tab, kicker first", async () => {
+  test("THE CHANNEL OWNS NO TAB ROW: it points at the project that does", async () => {
+    // THE PRINCIPLE (stage 19, views/ProjectWorkspace.tsx): the tab row belongs to the
+    // PROJECT; which channel you are reading is a selection inside its Chats tab.
+    // This surface used to draw Messages · Overview · Tasks · Calendar · Files & Links
+    // · Notes & Decisions, and five of those six were about the PROJECT while hanging
+    // off the CHANNEL — the same five surfaces reachable two ways, with two tab rows.
     const host = await mount("c-project");
     expect(host.querySelector(".cw-kicker")?.textContent).toBe("Atlas");
-    const tabs = Array.from(host.querySelectorAll(".cw-tab")).map(node => node.textContent);
-    expect(tabs).toEqual(["Messages", "Overview", "Tasks", "Calendar", "Files & Links", "Notes & Decisions"]);
-    expect(host.querySelector(".cw-tab.active")?.textContent).toBe("Messages");
+    expect(host.querySelectorAll(".cw-tab")).toHaveLength(0);
+    expect(host.querySelector(".cw-tabs")).toBeNull();
+    // Nothing became unreachable: the one link out goes to the project workspace,
+    // where all five of those surfaces now live under ONE tab row.
+    const owner = host.querySelector<HTMLAnchorElement>(".cw-owner a");
+    expect(owner?.textContent).toContain("Atlas workspace");
+    expect(owner?.getAttribute("href")).toBe("/projects/p1");
   });
 
   test("Channel status shows PROJECT numbers under the project's own name", async () => {

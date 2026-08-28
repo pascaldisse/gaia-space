@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
@@ -6,13 +6,7 @@ import { currentUser, humanError, profileId, profiles, projects, reloadProfiles,
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
 import EmptyState from "../components/EmptyState";
-import NotesLog from "../components/NotesLog";
-import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
 import Chat from "./Chat";
-import ProjectHome from "./ProjectHome";
-import ProjectTasks from "./ProjectTasks";
-import Calendar from "./Calendar";
-import Documents from "./Documents";
 import "./ChannelWorkspace.css";
 import { UI_LOCALE } from "../calendar";
 import { metricTone } from "../statusTone";
@@ -38,14 +32,36 @@ import { metricTone } from "../statusTone";
  */
 
 type TabKey = (typeof channelTabs)[number];
-const TABS: { key: TabKey; label: string; needsProject: boolean }[] = [
-  { key: "messages", label: "Messages", needsProject: false },
-  { key: "overview", label: "Overview", needsProject: true },
-  { key: "tasks", label: "Tasks", needsProject: true },
-  { key: "calendar", label: "Calendar", needsProject: true },
-  { key: "files", label: "Files & Links", needsProject: true },
-  { key: "notes", label: "Notes & Decisions", needsProject: true },
-];
+
+/** ── THE CHANNEL NO LONGER OWNS A TAB ROW (stage 19) ─────────────────────────
+ *
+ *  THE PRINCIPLE, decided in views/ProjectWorkspace.tsx: the tab row belongs to the
+ *  PROJECT, and which channel you are reading is a selection INSIDE the Chats tab.
+ *
+ *  This surface is what the principle was decided against. It drew
+ *      Messages · Overview · Tasks · Calendar · Files & Links · Notes & Decisions
+ *  and FIVE of those six showed the PROJECT while hanging off the CHANNEL. So the
+ *  same five surfaces were reachable two ways, with two different rows of tabs, and
+ *  neither could be the canonical one.
+ *
+ *  The row is gone. What each tab held is not:
+ *      overview -> the project workspace's landing   (/projects/<id>)
+ *      tasks    -> its Tasks tab                     (/projects/<id>/tasks)
+ *      calendar -> its Calendar tab                  (/projects/<id>/calendar)
+ *      files    -> its Knowledge tab                 (/projects/<id>/knowledge)
+ *      notes    -> the channel's own pane inside the Chats tab (notes are CHANNEL
+ *                  scoped, so they stay with the channel object, not the project)
+ *
+ *  The legacy addresses stay alive rather than 404-ing: `WORK_TABS` below is the
+ *  redirect table, applied once the channel's project is known (it cannot be known
+ *  from the URL alone, which is why this is a runtime redirect and not a route rule). */
+const WORK_TABS: Partial<Record<TabKey, string | undefined>> = {
+  overview: undefined,      // the workspace landing
+  tasks: "tasks",
+  calendar: "calendar",
+  files: "knowledge",
+  notes: "chats",
+};
 
 const hhmm = (seconds: number) =>
   new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
@@ -102,11 +118,21 @@ export default function ChannelWorkspace(): JSX.Element {
   };
   const roleOf = (id: string) => (project()?.lead_id === id ? "Lead" : "Member");
 
-  /* Tab navigation from inside a panel: the channel is already known, so the
-     move never re-asks for it. */
-  const goTab = (tab: TabKey) =>
-    navigate({ view: "Chat", entityType: "channel", entityId: channelId(), tab });
-  const tabs = () => TABS.filter((entry) => !entry.needsProject || !!project());
+  /* THE REDIRECT. A shipped `/channel/<id>/tasks` link must still land on the tasks
+     of that channel's project — it just lands there in the ONE place those tasks
+     live now. `replace`, so the dead address does not sit in the back history. */
+  createEffect(() => {
+    const current = tab();
+    const owner = project()?.id;
+    if (!owner || current === "messages" || !(current in WORK_TABS)) return;
+    const target = WORK_TABS[current];
+    navigate(
+      target === "chats"
+        ? { view: "Project Workspace", projectId: owner, tab: "chats", entityType: "channel", entityId: channelId() }
+        : { view: "Project Workspace", projectId: owner, ...(target ? { tab: target } : {}) },
+      undefined, undefined, true,
+    );
+  });
 
   // A channel without a project shows no work tabs, because there would be nothing
   // behind them. That is not a dead end though: binding it to a project is a real,
@@ -128,17 +154,7 @@ export default function ChannelWorkspace(): JSX.Element {
       setBinding(false);
     }
   };
-  const visibleTab = (): TabKey => (tabs().some((entry) => entry.key === tab()) ? tab() : "messages");
 
-  /* What this host has already decided for its guests. `identityLocked` because the
-     shell owns "Acting as" alone — a channel is entered as one person. */
-  const embeddedScope = createMemo<EmbeddedScope>(() => ({
-    host: `# ${channel()?.name ?? "Channel"}`,
-    projectId: projectIdOf() || undefined,
-    container: "project",
-    containerId: projectIdOf() || undefined,
-    identityLocked: true,
-  }));
 
   return (
     <div class="channel-workspace">
@@ -190,65 +206,31 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={bindError()}><span class="cw-attach-error" role="alert">{bindError()}</span></Show>
           </div>
         </Show>
+        {/* NO TAB ROW. The one link out is to the project this conversation belongs
+            to — where its tasks, calendar, knowledge and overview all live, under the
+            project's own single row of tabs. */}
         <Show when={project()}>
-          <nav class="cw-tabs" aria-label="Channel sections">
-            <For each={tabs()}>
-              {(entry) => (
-                <a
-                  class="cw-tab"
-                  classList={{ active: visibleTab() === entry.key }}
-                  aria-current={visibleTab() === entry.key ? "page" : undefined}
-                  {...linkProps({ view: "Chat", entityType: "channel", entityId: channelId(), tab: entry.key })}
-                >
-                  {entry.label}
-                </a>
-              )}
-            </For>
-          </nav>
+          {(value) => (
+            <div class="cw-owner">
+              <span class="cw-owner-lead">Part of</span>
+              <GhostPill {...linkProps({ view: "Project Workspace", projectId: value().id })}>
+                {value().name} workspace →
+              </GhostPill>
+            </div>
+          )}
         </Show>
       </header>
 
-      <div class="cw-body" classList={{ "with-rail": visibleTab() === "messages" && !!project() }}>
-        <section class="cw-panel" classList={{ "cw-chat": visibleTab() === "messages" }}>
-          <Show when={visibleTab() === "messages"}>
-            {/* The existing chat view: it reads the channel off the same route. `embedded`
-                means "this wrapper already draws the channel list and title" — Chat then
-                renders neither, instead of rendering them hidden. */}
-            <Chat embedded />
-          </Show>
-          {/* One installation covers every guest tab: they read the scope from context. */}
-          <EmbeddedScopeProvider scope={embeddedScope()}>
-            <Show when={visibleTab() === "overview"}><ProjectHome project={project()} /></Show>
-            <Show when={visibleTab() === "tasks"}><ProjectTasks projectId={projectIdOf()} /></Show>
-            <Show when={visibleTab() === "calendar"}><Calendar projectId={projectIdOf()} /></Show>
-            <Show when={visibleTab() === "files"}><Documents container="project" containerId={projectIdOf()} /></Show>
-          </EmbeddedScopeProvider>
-          <Show when={visibleTab() === "notes"}>
-            {/* The store now exists (`channel_notes`), so the honest empty state that
-                stood here has been replaced by the thing it was honest about missing.
-                A LOG, not a document: entries are appended and an edit is stamped, so
-                "where do we stand" is answered by history rather than by a paragraph
-                somebody last rewrote. It inherits the channel's project and the acting
-                profile — this surface asks for neither. Files still belong to the
-                "Files & Links" tab; a note LINKS a document, it never stores bytes. */}
-            <Show
-              when={projectIdOf()}
-              fallback={
-                <EmptyState
-                  title="This channel has no project"
-                  hint="Notes and decisions are project-scoped, so there is nothing to log here."
-                  actions={<GhostPill onClick={() => goTab("messages")}>Back to messages</GhostPill>}
-                />
-              }
-            >
-              {(projectId) => (
-                <NotesLog channelId={channelId()} projectId={projectId()} authorId={actingProfileId()} />
-              )}
-            </Show>
-          </Show>
+      <div class="cw-body" classList={{ "with-rail": !!project() }}>
+        <section class="cw-panel cw-chat">
+          {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
+              that used to be mounted here are mounted by views/ProjectWorkspace.tsx
+              instead, under the project's single tab row — one home each, not two.
+              The scope provider goes with them; nothing here is a guest any more. */}
+          <Chat embedded />
         </section>
 
-        <Show when={visibleTab() === "messages" && project()}>
+        <Show when={project()}>
           {(value) => (
             <aside class="cw-rail" aria-label="Channel status">
               <section class="cw-card">
