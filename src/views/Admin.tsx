@@ -137,7 +137,9 @@ export default function Admin() {
   const toggleArchiveCf = async (d: CfDefinition) => { try { await platformApi.archiveCfDefinition(d.id, !d.archived); reloadCfDefs(); } catch (e) { setError(String(e)); } };
 
   return <section class="admin-view">
-    <PageHeader icon="settings" title="Admin" subline="Roles, rights and the operator tools behind this workspace." chips={<Show when={seeded()}><Chip value={seeded()} label="rights seeded" /></Show>} />
+    {/* Settings owns the cog. Admin is the RIGHTS door, so it carries the key —
+        two surfaces with one mark is the ambiguity the marks exist to remove. */}
+    <PageHeader icon="key" title="Admin" subline="Roles, rights and the operator tools behind this workspace." chips={<Show when={seeded()}><Chip value={seeded()} label="rights seeded" /></Show>} />
     <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
     <div class="admin-grid">

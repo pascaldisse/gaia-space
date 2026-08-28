@@ -34,8 +34,11 @@ export default function Leads() {
   const count = () => leads()?.length ?? 0;
   const settled = () => !leads.loading && !leads.error;
   return <section class="leads-view">
+    {/* NOT the inbox glyph: nav.ts argues at length that Leads is not a second inbox —
+        it is the people who came in from the landing page. A mark that repeats a wrong
+        claim is worse than no mark. */}
     <PageHeader
-      icon="inbox"
+      icon="user"
       title="Leads"
       subline="Contact submissions from the landing page — administrators only."
       /* The label carries its own leading space: a chip is `<strong>1</strong>` +
