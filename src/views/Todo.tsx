@@ -8,6 +8,7 @@ import SourceLink from "../components/SourceLink";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
+import { todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
 
 const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
@@ -76,11 +77,12 @@ export default function Todo() {
     } catch(reason) { setError(humanError(reason)); }
   };
 
-  const today=()=>new Date().toISOString().slice(0,10);
-  const inDays=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  const today=todayISO;
   const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
-  const overdue=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<today());
-  const dueSoon=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>=today()&&todo.due_date<=inDays(7));
+  // Overdue / due-soon come from the shared urgency rule, not from a local date
+  // comparison — see `src/statusTone.ts`. "Due soon" here looks a week ahead.
+  const overdue=()=>openTodos().filter(todo=>urgencyOf(todo.due_date,today(),7)==="overdue");
+  const dueSoon=()=>openTodos().filter(todo=>["today","soon"].includes(urgencyOf(todo.due_date,today(),7)));
   const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
   const attention=()=>[...overdue(),...dueSoon()].sort((a,b)=>(a.due_date??"").localeCompare(b.due_date??"")).slice(0,5);
   // Today = due today or already overdue (an overdue task IS today's work); Later = a

@@ -4,11 +4,10 @@ import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
 import { linkProps } from "../router";
 import PageHeader from "../components/PageHeader";
+import { todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
 import "./Issues.css";
 import "./TeamTasks.css";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** Cross-project team surface: what EVERYONE is currently working on, everywhere the
  *  caller is a member. Deliberately NOT "my" tasks — the assignee filter defaults to
@@ -72,7 +71,9 @@ export default function TeamTasks() {
       <ul class="issue-list tt-list">
         <For each={group.items}>{task => <li>
           {/* Same three-part row as Issues: title line, muted meta line, one pill. */}
-          <div class="issue-row tt-row" classList={{ overdue: !task.done && !!task.due_date && task.due_date < todayISO() }}>
+          {/* The row is marked overdue by the shared urgency rule; the pill beside it
+              names the assignee and carries no colour, so the two never contradict. */}
+          <div class="issue-row tt-row" classList={{ overdue: !task.done && urgencyOf(task.due_date, todayISO()) === "overdue" }}>
             <span class="project-task-check" aria-hidden="true">{task.done ? "✓" : "○"}</span>
             <span class="row-main">
               <strong>{task.content}</strong>

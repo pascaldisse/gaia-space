@@ -9,21 +9,16 @@ import { linkProps, route, type Route } from "../router";
 import { humanError, profileId, projects, setProjectId } from "../session";
 import PageHeader from "../components/PageHeader";
 import { projectName } from "../orgScope";
+import { DEADLINE_SOON_DAYS, deadlineTone, urgencyOf } from "../statusTone";
 import "./Steering.css";
 import "./ProjectHome.css";
 type Work={id:string;title:string;kind:"Ticket"|"Task";due:string|null;unassigned?:boolean;number?:number};
 const date=()=>new Date().toISOString().slice(0,10);
 // A deadline is a date, never a timestamp: the tone and the human note are computed
-// from `YYYY-MM-DD` strings only, so no timezone can move the day.
-export const DEADLINE_SOON_DAYS = 7;
-export function deadlineTone(deadline: string, today = date(), soonDays = DEADLINE_SOON_DAYS) {
-  const days = Math.round((Date.parse(deadline + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86_400_000);
-  const tone: "overdue" | "soon" | "ok" = days < 0 ? "overdue" : days <= soonDays ? "soon" : "ok";
-  const note = days === 0 ? "due today"
-    : days < 0 ? `${-days} day${days === -1 ? "" : "s"} overdue`
-    : `in ${days} day${days === 1 ? "" : "s"}`;
-  return { tone, note, days };
-}
+// from `YYYY-MM-DD` strings only, so no timezone can move the day. Both now live in
+// `src/statusTone.ts` with every other urgency rule; re-exported here because this
+// module was their published home.
+export { DEADLINE_SOON_DAYS, deadlineTone };
 export default function Steering(){
  const project=()=>route().projectId??"";
  const [data]=createResource(()=>[project(),profileId()] as const,async ([id,profile])=>{if(!id||!profile)throw Error("Project context is unavailable.");const [issues,statuses,todos]=await Promise.all([planningApi.issues({project_id:id}),planningApi.statuses(id),personalApi.projectTodos(id,profile,true)]);const closed=new Set(statuses.filter(s=>s.resolved).map(s=>s.id));return [...issues.filter(i=>!i.archived&&!closed.has(i.status_id??"")).map(i=>({id:i.id,title:i.title,kind:"Ticket" as const,due:i.due_date,unassigned:!i.assignee_id,number:i.number})),...todos.filter(t=>!t.done).map(t=>({id:t.id,title:t.content,kind:"Task" as const,due:t.due_date}))]});
@@ -90,5 +85,5 @@ export default function Steering(){
     {stat("Packages",value().packages,{view:"Packages",projectId:project()})}
    </div>}
   </Show>
-  <Show when={data.loading}><p>Loading project work…</p></Show><Show when={data.error}>{e=><p class="error" role="alert">Could not load Steering: {String(e())}</p>}</Show><Show when={data()}><div class="steering-grid">{bucket("Overdue",work().filter(x=>!!x.due&&x.due<date()))}{bucket("Due soon",work().filter(x=>!!x.due&&x.due>=date()&&x.due<=new Date(Date.now()+6048e5).toISOString().slice(0,10)))}{bucket("Unassigned",work().filter(x=>"unassigned" in x&&x.unassigned))}</div><section><h2>Current work</h2>{rows(work())}</section></Show></section>;
+  <Show when={data.loading}><p>Loading project work…</p></Show><Show when={data.error}>{e=><p class="error" role="alert">Could not load Steering: {String(e())}</p>}</Show><Show when={data()}><div class="steering-grid">{bucket("Overdue",work().filter(x=>urgencyOf(x.due,date(),DEADLINE_SOON_DAYS)==="overdue"))}{bucket("Due soon",work().filter(x=>["today","soon"].includes(urgencyOf(x.due,date(),DEADLINE_SOON_DAYS))))}{bucket("Unassigned",work().filter(x=>"unassigned" in x&&x.unassigned))}</div><section><h2>Current work</h2>{rows(work())}</section></Show></section>;
 }

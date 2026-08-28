@@ -5,14 +5,13 @@ import { chatApi, type ChannelSummary, type MentionView } from "../api/chat";
 import { profileId } from "../session";
 import { linkProps, toSlug, type Route } from "../router";
 import { dateKey, itemsOnDay, meetingIdOf, monthCells, startOfLocalDay } from "../calendar";
+import { type Tone, urgencyLabel, urgencyOf, urgencyTone } from "../statusTone";
 import "./HomeCalendar.css";
 
 /** Home = one calm calendar. The month is the whole surface; the right column
  *  answers "what about today, what do I owe, who waits on me" — nothing else.
  *  Colour law: teal = action/open, amber = due soon/waiting, red = critical.
  *  No other colour carries meaning here. */
-
-type Tone = "" | "teal" | "amber" | "red";
 
 const LOCALE = "en-US";
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -32,27 +31,27 @@ const timeLabel = (seconds: number) => new Date(seconds * 1000).toLocaleTimeStri
 const dayHeadline = (day: Date) => `${WEEKDAY_NAMES[day.getDay()]}, ${day.toLocaleDateString(LOCALE, { month: "long" })} ${day.getDate()}`;
 const monthTitle = (day: Date) => day.toLocaleDateString(LOCALE, { month: "long", year: "numeric" });
 
-/** Days between two local calendar days — the sign is what the pill reads. */
-const daysUntil = (dueKey: string, today: Date) => {
-  const [y, m, d] = dueKey.split("-").map(Number);
-  return Math.round((new Date(y, m - 1, d).getTime() - startOfLocalDay(today).getTime()) / 86_400_000);
-};
+/** This surface thinks in `Date` objects; the shared urgency rules think in
+ *  `YYYY-MM-DD`. One conversion, here, rather than a second copy of the day maths. */
+const todayKey = (today: Date) => dateKey(startOfLocalDay(today));
 
-/** A todo's state, in the only three colours this app is allowed to mean anything with. */
+/** A todo's state. The pill states urgency and nothing else, so its words and its
+ *  colour always agree — see `src/statusTone.ts` for the law. */
 const todoState = (todo: Todo, today: Date): { label: string; tone: Tone } => {
   if (!todo.due_date) return { label: "Open", tone: "" };
-  const delta = daysUntil(todo.due_date, today);
-  if (delta < 0) return { label: "Overdue", tone: "red" };
-  if (delta === 0) return { label: "Open", tone: "teal" };
-  if (delta <= 2) return { label: "Due soon", tone: "amber" };
-  return { label: "Planned", tone: "" };
+  const urgency = urgencyOf(todo.due_date, todayKey(today), 2);
+  if (urgency === "later") return { label: "Planned", tone: "" };
+  return { label: urgencyLabel(urgency), tone: urgencyTone(urgency) };
 };
 
 const itemState = (item: CalendarItem, today: Date): { label: string; tone: Tone } => {
   if (item.kind === "meeting") return { label: "Meeting", tone: "teal" };
   if (item.kind === "deadline") {
     const key = item.date ?? dateKey(new Date(item.starts_at * 1000));
-    return daysUntil(key, today) < 0 ? { label: "Overdue", tone: "red" } : { label: "Deadline", tone: "amber" };
+    const urgency = urgencyOf(key, todayKey(today), 2);
+    return urgency === "overdue"
+      ? { label: "Overdue", tone: urgencyTone(urgency) }
+      : { label: "Deadline", tone: "amber" };
   }
   if (item.kind === "task") return { label: "Task", tone: "" };
   return { label: item.kind === "blog" ? "Blog" : "Date", tone: "" };
@@ -126,9 +125,9 @@ export default function HomeCalendar() {
   });
 
   const todosToday = createMemo(() => todos().filter(todo => todo.due_date === dateKey(today)));
-  const todosCritical = createMemo(() => todos().filter(todo => todo.due_date && daysUntil(todo.due_date, today) < 0));
+  const todosCritical = createMemo(() => todos().filter(todo => urgencyOf(todo.due_date, todayKey(today)) === "overdue"));
   const meetingsToday = createMemo(() => itemsOnDay(feed(), today).filter(item => item.kind === "meeting"));
-  const highlighted = createMemo(() => [...todosCritical(), ...todos().filter(todo => todo.due_date && daysUntil(todo.due_date, today) > 0)].slice(0, 2));
+  const highlighted = createMemo(() => [...todosCritical(), ...todos().filter(todo => ["soon", "later"].includes(urgencyOf(todo.due_date, todayKey(today))))].slice(0, 2));
 
   const shiftMonth = (amount: number) => { const next = new Date(cursor()); next.setDate(1); next.setMonth(next.getMonth() + amount); setCursor(startOfLocalDay(next)); };
 
