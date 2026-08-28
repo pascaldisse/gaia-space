@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import "./SpaceShell.css";
 // Light chat surface. Scoped under `.theme-space-light`, which only this shell sets:
 // loading it here (not lazily from the workspace) keeps the rules deterministic.
@@ -9,6 +9,7 @@ import { actingProfileId as chatActingProfileId, setActingProfileId } from "../c
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
+import { attentionCount, setAttentionProfile } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, route, type Route } from "../router";
 import { railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
@@ -117,15 +118,17 @@ export default function SpaceShell(props: {
   const [channels] = createResource(actingProfileId, (id) =>
     id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
   );
-  const [mentionCount] = createResource(actingProfileId, (id) =>
-    id ? chatApi.countUnreadMentions(id) : Promise.resolve(0),
-  );
   // projects() is lazy (auth must land first); ask once so group headers can resolve names.
   void reloadProjects().catch(() => undefined);
 
+  // Unread CONVERSATIONS for the Chats badge — channels only, still the chat surface's own
+  // number. "What needs me" is NOT this: that is attention.attentionCount(), the single
+  // definition every surface reads, and it is what the Activity badge shows now. Summing
+  // unread_count over all channels there is the defect that started this stage.
   const unreadTotal = () => (channels() ?? []).reduce((sum, channel) => sum + (channel.unread_count || 0), 0);
+  createEffect(() => setAttentionProfile(actingProfileId() ?? ""));
   const badgeOf = (kind?: "chat" | "mentions") =>
-    kind === "chat" ? unreadTotal() : kind === "mentions" ? (mentionCount() ?? 0) : 0;
+    kind === "chat" ? unreadTotal() : kind === "mentions" ? attentionCount() : 0;
 
   // The header names the real organization. Order of truth: the organization record,
   // then the connected workspace, and only then the product name as a last resort — a
