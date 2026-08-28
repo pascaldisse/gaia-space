@@ -1,6 +1,10 @@
 /* Self-scoped with local fallbacks like the other shared controls, so the button is
    the same red in the light chat-first shell and on the dark theme. */
-.delete-button {
+/* DOUBLED CLASS ON PURPOSE. `.theme-space-light button { color: var(--ink) }` is one
+   class + one element (0-1-1) and was winning over a single `.delete-button` (0-1-0):
+   the button had a red border and a red wash, and BLACK text. Repeating the class
+   raises this rule above the shell's own button colour without knowing the theme. */
+.delete-button.delete-button {
   --del-danger: var(--danger, #c2384a);
   --del-danger-dark: #a12b3b;
   min-height: 34px;
@@ -15,8 +19,8 @@
   font-weight: 650;
   cursor: pointer;
 }
-.delete-button:hover { background: var(--del-danger); color: #fff; border-color: var(--del-danger); }
-.delete-button:focus-visible { outline: 2px solid var(--del-danger); outline-offset: 2px; }
+.delete-button.delete-button:hover { background: var(--del-danger); color: #fff; border-color: var(--del-danger); }
+.delete-button.delete-button:focus-visible { outline: 2px solid var(--del-danger); outline-offset: 2px; }
 
 /* When the viewer does not own the thing, the button is absent and this says why —
    quietly, as a fact, never as a disabled control. */

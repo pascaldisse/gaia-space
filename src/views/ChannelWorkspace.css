@@ -60,20 +60,6 @@
 }
 .cw-pill strong { color: var(--ink); font-weight: 700; }
 
-/* Ending a conversation sits with the channel's own facts, quiet until wanted, and
-   red only on hover — the palette keeps red for the irreversible act. */
-.cw-delete {
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--paper);
-  color: var(--muted);
-  font: inherit;
-  font-weight: 650;
-  cursor: pointer;
-}
-.cw-delete:hover { color: var(--danger, #c2384a); border-color: color-mix(in srgb, var(--danger, #c2384a) 45%, transparent); }
 .cw-error { margin: 8px 0 0; color: var(--danger, #c2384a); font-size: 0.9rem; }
 
 .cw-tabs { display: flex; align-items: center; gap: 24px; overflow-x: auto; }

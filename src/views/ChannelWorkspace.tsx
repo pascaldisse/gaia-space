@@ -6,6 +6,7 @@ import { currentUser, humanError, profileId, profiles, projects, reloadProfiles,
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
 import ConfirmDialog from "../components/ConfirmDialog";
+import DeleteButton from "../components/DeleteButton";
 import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import "./ChannelWorkspace.css";
@@ -225,15 +226,10 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={nextMeeting()}>
               {(meeting) => <span class="cw-pill"><strong>{hhmm(meeting().starts_at)}</strong> Meeting</span>}
             </Show>
-            <button
-              type="button"
-              class="cw-delete"
-              title="Delete conversation"
-              aria-label="Delete conversation"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Delete
-            </button>
+            {/* The same red button every other surface uses — red at rest, so the act
+                is recognised before it is read. It was this view's own grey control,
+                which is exactly the inconsistency the shared button exists to end. */}
+            <DeleteButton label="Delete conversation" onRequest={() => setConfirmDelete(true)} />
           </div>
         </div>
 
