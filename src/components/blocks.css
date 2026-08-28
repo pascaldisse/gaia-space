@@ -1,0 +1,132 @@
+/* ── The composition layer ──────────────────────────────────────────────────
+   Companion sheet to blocks.tsx; read the law there.
+
+   UNSCOPED ON PURPOSE. Every value here is a token that BOTH themes define
+   (--surface*, --text*, --status-*-ink, --font-head), so one rule renders paper
+   in `.theme-space-light` and the dark chrome everywhere else. These class
+   names are new, so no pre-existing surface can shift under them. Geometry is
+   never scoped — that is what broke the dark layout in earlier lanes.
+
+   Colour law: teal = action/open, amber = due soon/waiting, red = critical.
+   Zero carries no tone; blocks.tsx enforces that before a class gets here. */
+
+/* ── metric tile ──────────────────────────────────────────────────────────── */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+/* A rail is narrow: two columns there, not four thin slivers. */
+.metric-grid.pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.metric-tile {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+a.metric-tile { cursor: pointer; transition: background .12s ease, border-color .12s ease; }
+a.metric-tile:hover { border-color: var(--surface-border-hover); background: var(--surface-hover); }
+a.metric-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.metric-tile-num {
+  font-family: var(--font-head);
+  font-size: 22px;
+  font-weight: 720;
+  line-height: 1.1;
+  letter-spacing: -.04em;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+/* A date or a name is not a count: same tile, type that fits the string. */
+.metric-tile-num.sm { font-size: 15px; letter-spacing: -.01em; }
+.metric-tile-lbl { color: var(--text-muted); font-size: 12.5px; line-height: 1.3; }
+
+/* TONE LIVES ON THE FIGURE, NOT ON THE FRAME. A coloured border around a tile
+   shouts before the reader has read the number; the number itself is the fact
+   that is or is not alarming. `metricTone` has already removed the tone from a
+   zero, so none of these three can ever be reached by `0`. */
+.metric-tile.teal .metric-tile-num { color: var(--status-info-ink); }
+.metric-tile.amber .metric-tile-num { color: var(--status-warning-ink); }
+.metric-tile.red .metric-tile-num { color: var(--status-danger-ink); }
+
+/* A tile ON the page canvas is paper; a tile INSIDE a card must invert, or it
+   is an invisible box on an identical background. */
+.paper-card .metric-tile,
+.rail-card .metric-tile,
+.cw-card .metric-tile { background: var(--surface-sunken); }
+
+/* ── disclosure ───────────────────────────────────────────────────────────── */
+.disclosure {
+  margin-top: 18px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-control, 12px);
+  background: var(--surface);
+}
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 15px;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-head);
+  font-size: 13.5px;
+  font-weight: 650;
+  /* SENTENCE CASE, everywhere. A disclosure is a sentence you may open, not a
+     section kicker; `MATRIX REPORT` was shouting a title nobody needed shouted. */
+  text-transform: none;
+  letter-spacing: -.01em;
+  color: var(--text-strong);
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::marker { content: ""; }
+.disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: inherit; }
+.disclosure-chevron { flex: none; width: 12px; height: 12px; color: var(--text-dim); transition: transform .12s ease; }
+.disclosure[open] > summary .disclosure-chevron { transform: rotate(90deg); }
+.disclosure-title { min-width: 0; }
+.disclosure-meta { color: var(--text-muted); font-family: var(--font-body); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
+.disclosure-body { padding: 0 15px 16px; }
+
+/* ── section heading ──────────────────────────────────────────────────────── */
+/* Not a page header: no kicker, no 27px title, no action EDGE. A section says
+   where you are inside a page you are already on. */
+.section-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 24px 0 12px;
+}
+.section-heading h2 {
+  margin: 0;
+  font-family: var(--font-head);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  line-height: 1.25;
+  color: var(--text-strong);
+}
+.section-heading-meta { color: var(--text-faint); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.section-heading-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* ── light-theme skin ─────────────────────────────────────────────────────
+   ONLY the values the paper language differs on: rounder corners and the card
+   shadow. Nothing structural, so the dark layouts are untouched. */
+.theme-space-light .metric-tile { border-radius: 16px; }
+.theme-space-light .disclosure {
+  border-radius: 20px;
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .disclosure > summary { color: var(--ink); }
+.theme-space-light .disclosure-meta { color: var(--muted); }
+.theme-space-light .section-heading h2 { font-size: 17px; letter-spacing: -.025em; color: var(--ink); }
+.theme-space-light .section-heading-meta { color: var(--quiet); }
