@@ -19,7 +19,21 @@ export type Route = {
   containerType?: string;  // document context: /documents/<containerType>/<containerId>/<id>
   containerId?: string;
   tab?: string;            // channel workspace tab: /channel/<channelId>/<tab>
+                           // activity filter:      /inbox/<filter>
 };
+
+/** Activity's worklist filters, as URL segments. A filter IS route state: it changes
+ *  what the page shows, the sidebar must highlight the active one, and a filtered
+ *  worklist is a thing you link somebody to. (Search terms are not: they are a
+ *  view's own scratch state, which is why the grammar strips `?`/`#` above.)
+ *  `all` is deliberately NOT a segment — the unfiltered list is the bare view, so it
+ *  has exactly one spelling; an unknown segment degrades to it, never to a blank page.
+ *  Mirrors ACTIVITY_FILTERS in attention.ts, which owns the filter -> kind meaning;
+ *  the two lists are bound by a test rather than by an import, so the router keeps
+ *  its zero-import independence. */
+export const activityFilters = ["mentions", "messages", "assigned", "reviews", "updates"] as const;
+const isActivityFilter = (value: string): value is typeof activityFilters[number] =>
+  activityFilters.includes(value as typeof activityFilters[number]);
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;
  *  the work tabs mount EXISTING views scoped to the channel's project (ChannelWorkspace),
@@ -138,6 +152,11 @@ if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks
       return norm({ view: "Projects", entityType: "project", entityId: projectId });
   }
 
+  // /inbox/<filter> — Activity's worklist, narrowed. Keyed off the registered slug,
+  // not a hardcoded word, so it follows the view's own routing key.
+  if (slugToView[head] === "Inbox" && rest.length === 1 && isActivityFilter(rest[0]))
+    return norm({ view: "Inbox", tab: rest[0] });
+
   // /channel/<channelId>/<tab> — the channel as a workspace, opening on its chat.
   if (head === "channel" && rest.length === 2 && isChannelTab(rest[1]))
     return norm({ view: "Chat", entityType: "channel", entityId: rest[0], tab: rest[1] });
@@ -173,6 +192,7 @@ export function buildPath(r: Route): string {
 if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
 if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
+  if (view === "Inbox" && isActivityFilter(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
     return `channel/${enc(r.entityId)}/${r.tab}`;
   if (desc && r.entityId) {

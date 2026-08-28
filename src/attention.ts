@@ -65,6 +65,63 @@ import type { Tone } from "./statusTone";
  *  never to re-derive the count, which is `needsYou().length` and nothing else. */
 export type AttentionKind = "mention" | "dm" | "channel" | "thread" | "todo" | "issue" | "review" | "notification";
 
+/** ── THE ACTIVITY FILTERS ───────────────────────────────────────────────────
+ *  Activity's sidebar entries are FILTERS over this one worklist, never links to
+ *  another mode. They are expressed as GROUPS OF `AttentionKind` — the kind an
+ *  item already carries — so no surface invents a second classification.
+ *
+ *  The groups PARTITION the kinds: every kind belongs to exactly one filter
+ *  (asserted in `activityFilter.test.ts`). A kind with no filter would be
+ *  reachable under "All" only, which is how a label with nothing behind it
+ *  (`provisional`) happened in the first place.
+ *
+ *  JUDGEMENT CALLS, stated once:
+ *    - `thread` sits under MENTIONS. The head comment's own test for the
+ *      worklist is ADDRESSING, and it already rules that a reply to my message
+ *      addresses me — the same fact as someone writing my name. It is not a
+ *      "message" I have merely not read.
+ *    - `dm` + `channel` get their own MESSAGES entry: they are unread
+ *      conversations, resolved by reading, not by doing work.
+ *    - `notification` gets UPDATES rather than being dropped: it is work
+ *      addressed to me (organisation news is already excluded upstream), so it
+ *      must be reachable under a filter, not only under All.
+ *  The filter id is also the URL segment (`/inbox/<filter>`); `all` is the bare
+ *  view, so the unfiltered list has exactly one spelling. */
+export type ActivityFilter = "all" | "mentions" | "messages" | "assigned" | "reviews" | "updates";
+
+export const ACTIVITY_FILTERS: { id: ActivityFilter; label: string; kinds: AttentionKind[] }[] = [
+  { id: "all", label: "All", kinds: [] }, // empty = no narrowing, not "no kinds"
+  { id: "mentions", label: "Mentions", kinds: ["mention", "thread"] },
+  { id: "messages", label: "Messages", kinds: ["dm", "channel"] },
+  { id: "assigned", label: "Assigned", kinds: ["todo", "issue"] },
+  { id: "reviews", label: "Reviews", kinds: ["review"] },
+  { id: "updates", label: "Updates", kinds: ["notification"] },
+];
+
+const FILTER_IDS = ACTIVITY_FILTERS.map((entry) => entry.id);
+export const isActivityFilter = (value: string): value is ActivityFilter =>
+  (FILTER_IDS as string[]).includes(value);
+
+/** Unknown filter degrades to All — never to a blank page. */
+export const asActivityFilter = (value: string | undefined): ActivityFilter =>
+  value && isActivityFilter(value) ? value : "all";
+
+export const kindsOfFilter = (filter: ActivityFilter): AttentionKind[] =>
+  ACTIVITY_FILTERS.find((entry) => entry.id === filter)?.kinds ?? [];
+
+/** Pure: narrow a worklist to a filter. THE one place the narrowing happens. */
+export const filterAttention = (items: AttentionItem[], filter: ActivityFilter): AttentionItem[] => {
+  if (filter === "all") return items;
+  const kinds = kindsOfFilter(filter);
+  return items.filter((item) => kinds.includes(item.kind));
+};
+
+/** The count of ONE filter, from the same source as the badge. The rail badge
+ *  keeps showing `attentionCount()` — a filter narrows the view, never the
+ *  number of things that need you. */
+export const attentionFilterCount = (filter: ActivityFilter): number =>
+  filter === "all" ? attentionCount() : filterAttention(needsYou(), filter).length;
+
 export type AttentionItem = {
   id: string;
   kind: AttentionKind;
