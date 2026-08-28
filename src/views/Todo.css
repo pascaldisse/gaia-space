@@ -250,3 +250,7 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 .theme-space-light .task-row-actions .ghost { border-color: transparent; }
 .theme-space-light .task-row-actions .ghost:hover { border-color: var(--line); background: var(--paper); }
 .theme-space-light .task-delete:hover { color: var(--red-ink); border-color: var(--red-soft); background: var(--red-soft); }
+
+/* The opened task's facts, and the one act that removes them all — beside them,
+   on its own line so it can never be hit while reaching for Save. */
+.task-danger-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 10px; }

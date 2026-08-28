@@ -148,6 +148,13 @@ decideMembershipEdit: (id: string, approver_id: string, approve: boolean) => cal
   updateProject(project: Project) {
     return submitProject("update", project);
   },
+  /** ── DELETING A PROJECT ──────────────────────────────────────────────────
+   *  Irreversible, and it takes the project's work with it, so it is OWNER-ONLY —
+   *  and the owner is decided by the SERVER. `actorId` is the identity that gate
+   *  runs against (desktop has no session to mint one from; on web the session
+   *  authorized the call before dispatch and client claims are ignored).
+   *  A refusal comes back as a rejection: the caller SHOWS it, never swallows it. */
+  deleteProject: (id: string, actor_id: string) => call<void>("delete_project", { id, actorId: actor_id }),
   /** Narrow deadline write: sends only the project id and the date, so a stale
    *  project object in a view can never overwrite unrelated fields (H6). */
   /** `actor` is desktop-only: with no HTTP session, the local profile is the

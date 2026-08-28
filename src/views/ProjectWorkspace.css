@@ -52,7 +52,9 @@
 .pw-lead { margin: 6px 0 0; font-size: 14px; }
 
 .pw-edge { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-.pw-header-actions { display: flex; gap: 8px; }
+.pw-header-actions { display: flex; align-items: center; gap: 8px; }
+/* A refused delete says so where the act was fired from, never in silence. */
+.pw-error { margin: 8px 0 0; color: var(--danger, #c2384a); font-size: 13px; }
 .pw-deadline {
   display: inline-flex;
   align-items: baseline;

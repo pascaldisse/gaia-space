@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onMount, type JSX } from "solid-js";
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { personalApi, type Todo } from "../api/personal";
+import { platformApi } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { pipelinesApi } from "../api/pipelines";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
@@ -9,6 +10,8 @@ import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHea
 import { SectionHeading } from "../components/blocks";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import ConfirmDialog from "../components/ConfirmDialog";
+import DeleteButton from "../components/DeleteButton";
 import { requestWorkIntent } from "./workIntent";
 import NotesLog from "../components/NotesLog";
 import { deadlineTone, metricTone } from "../statusTone";
@@ -146,8 +149,58 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
     identityLocked: true,
   }));
 
+  /* ── ENDING A PROJECT ─────────────────────────────────────────────────────
+     The project's facts live in this header, so the one act that removes them all
+     lives beside them — top right, the same place a conversation is deleted from
+     its own header (views/ChannelWorkspace.tsx).
+
+     THE OWNER RULE, and only the owner rule: `created_by` is the person who made
+     the project. Anyone else gets NO button — not a disabled one, because a red
+     control that refuses is a promise the surface cannot keep.
+
+     It never deletes on click: DeleteButton asks, ConfirmDialog answers. */
+  const isOwner = () => !!actingProfileId() && project()?.created_by === actingProfileId();
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+  /* Its own line, in the header the act was fired from. A refused delete (including
+     "the server does not know this command yet") MUST be readable; silence would
+     look exactly like success. */
+  const [deleteError, setDeleteError] = createSignal("");
+  const deleteProject = async () => {
+    const id = projectIdOf();
+    if (!id) return;
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      await platformApi.deleteProject(id, actingProfileId() ?? "");
+      setConfirmDelete(false);
+      await reloadProjects().catch(() => undefined);
+      // Nothing to stand on inside a project that no longer exists.
+      navigate({ view: "Projects" });
+    } catch (reason) {
+      setDeleteError(humanError(reason));
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div class="project-workspace">
+      <ConfirmDialog
+        open={confirmDelete()}
+        title="Delete project?"
+        body={
+          <>
+            <strong>{project()?.name ?? "This project"}</strong> is deleted for everyone, with its
+            tasks, tickets, calendar entries and knowledge. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete project"
+        busy={deleting()}
+        onConfirm={() => void deleteProject()}
+        onCancel={() => setConfirmDelete(false)}
+      />
       <header class="pw-header">
         <div class="pw-title-row">
           <div class="pw-title">
@@ -194,9 +247,16 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
                 permanent seat next to the project's name. */}
             <div class="pw-header-actions">
               <GhostPill {...linkProps({ view: "Project Settings", projectId: projectIdOf() })}>Settings</GhostPill>
+              {/* OWNER ONLY. Not a disabled button for everyone else — nothing at all. */}
+              <Show when={project() && isOwner()}>
+                <DeleteButton label="Delete project" onRequest={() => setConfirmDelete(true)} />
+              </Show>
             </div>
           </div>
         </div>
+        <Show when={deleteError()}>
+          <p class="pw-error" role="alert">{deleteError()}</p>
+        </Show>
 
         {/* THE ONE TAB ROW. It belongs to the project. */}
         <nav class="pw-tabs" aria-label="Project sections">

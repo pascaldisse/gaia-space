@@ -5,6 +5,9 @@ import "./Todo.css";
 import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import EmptyState from "../components/EmptyState";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
 import TaskDrawer from "../components/TaskDrawer";
 import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
@@ -53,6 +56,38 @@ export default function Todo() {
   const startEdit=(todo:TodoItem,field:"title"|"notes"="title")=>{ setEditIntent(field); setEditingId(todo.id); setError(""); };
   const closeEdit=(id:string)=>{ setEditingId(null); focusTaskRow(id); };
 
+  /* ── DELETING A TASK ────────────────────────────────────────────────────────
+     THE OWNER RULE, quoted from the server, not invented here: the CREATOR
+     (`profile_id`) may delete. A SHARED task — one bound to a project, or carried
+     by somebody else — may NOT be deleted by the person it was put on: this list
+     contains other people's tasks assigned to me, and removing one would delete
+     THEIR work to clear MY list. Those rows get no button, and a reason instead.
+
+     Two doors, one act and one question: the row's right-click menu (where people
+     point at a task) and the opened task's own facts (below). Both open the
+     ConfirmDialog; neither deletes on click. */
+  const ownsTask=(todo:TodoItem)=>!!profileId()&&todo.profile_id===profileId();
+  const [menu,setMenu]=createSignal<{x:number;y:number;items:ContextMenuItem[]}|null>(null);
+  const [pendingDelete,setPendingDelete]=createSignal<TodoItem|null>(null);
+  const [deleting,setDeleting]=createSignal(false);
+  const taskMenuItems=(todo:TodoItem):ContextMenuItem[]=>[
+    { label:"Open", onSelect:()=>startEdit(todo) },
+    ...(ownsTask(todo)?[{ label:"Delete task…", danger:true, onSelect:()=>setPendingDelete(todo) }]:[]),
+  ];
+  const openTaskMenu=(event:MouseEvent,todo:TodoItem)=>{ event.preventDefault(); event.stopPropagation(); setMenu({x:event.clientX,y:event.clientY,items:taskMenuItems(todo)}); };
+  const deleteTask=async()=>{
+    const todo=pendingDelete(); if(!todo) return;
+    setError(""); setDeleting(true);
+    try {
+      await personalApi.deleteTodo(todo.id,profileId());
+      setPendingDelete(null); if(editingId()===todo.id) setEditingId(null);
+      refetch();
+    } catch(reason) {
+      // This surface's one error line. A refusal is never swallowed.
+      setError(humanError(reason)); setPendingDelete(null);
+    } finally { setDeleting(false); }
+  };
+
   const today=todayISO;
   const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
   // Overdue / due-soon come from the shared urgency rule, not from a local date
@@ -84,9 +119,18 @@ export default function Todo() {
         onCancel={()=>closeEdit(todo.id)}
         onSaved={()=>{ closeEdit(todo.id); refetch(); }}
         onError={setError}/>
+      {/* THE OPENED TASK'S OWN FACTS carry the one act that removes them all —
+          beside them, at rest, in the same red it wears everywhere else. */}
+      <div class="task-danger-row">
+        <DeleteButton
+          label={`Delete ${todo.content}`}
+          canDelete={ownsTask(todo)}
+          deniedReason="Only the owner can delete this"
+          onRequest={()=>setPendingDelete(todo)}/>
+      </div>
     </div>
   </article>;
-  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
+  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}} onContextMenu={event=>openTaskMenu(event,todo)}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
     <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={event=>startEdit(todo,(event.target as HTMLElement).closest(".task-note-hint")?"notes":"title")}>
       <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
@@ -114,12 +158,22 @@ export default function Todo() {
           <button type="button" class="ghost small" title="Convert to ticket" aria-label={`Convert ${todo.content} to a ticket`} onClick={()=>convert(todo)}>→ Ticket</button>
         </Show>
       </Show>
-      <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>
+      {/* NO BARE ✕. Deleting asks first, and it asks from the two places a person
+          points at a task: this row's right-click menu, and the opened task. */}
     </div>
   </article>}>
     {editRow(todo)}
   </Show>;
   return <section class="personal-view todo-view">
+    <Show when={menu()}>{open=><ContextMenu x={open().x} y={open().y} items={open().items} onClose={()=>setMenu(null)}/>}</Show>
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete task?"
+      body={<><strong>{pendingDelete()?.content}</strong> is deleted, with its description, due date and assignees. This cannot be undone.</>}
+      confirmLabel="Delete task"
+      busy={deleting()}
+      onConfirm={()=>void deleteTask()}
+      onCancel={()=>setPendingDelete(null)}/>
     {/* L1: the shell owns identity. A disabled "Acting as" box in the corner of
         every load is still a second identity control (audit §3.1). */}
     {/* THREE TASK SURFACES, THREE SENTENCES (stage 12d). Each says WHOSE work and

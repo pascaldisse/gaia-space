@@ -34,3 +34,7 @@
 .theme-space-light .tt-group-head a:hover { color: var(--teal-dark); }
 .theme-space-light .tt-group-head small { color: var(--quiet); font-size: 12px; font-weight: 620; }
 
+
+/* Same line, same place as My tasks: the opened task's facts, then the act that
+   removes them — or the quiet reason it is not on offer here. */
+.task-danger-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 10px; }

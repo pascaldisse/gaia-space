@@ -1,9 +1,12 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
-import { profileId, profiles, projects, reloadProjects } from "../session";
+import { humanError, profileId, profiles, projects, reloadProjects } from "../session";
 import { linkProps } from "../router";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TaskDrawer from "../components/TaskDrawer";
@@ -87,8 +90,41 @@ export default function TeamTasks() {
      (TodoOwnerWrite); `set_todo_completion` is owner or assignee. On a surface whose
      whole point is OTHER people's work, most rows are therefore read-only — and say
      so, instead of offering a form the server would refuse. */
-  const owns = (task: Todo) => task.profile_id === profileId();
+  const owns = (task: Todo) => !!profileId() && task.profile_id === profileId();
   const mayComplete = (task: Todo) => owns(task) || task.assignee_ids.includes(profileId());
+  /* ── DELETING A TASK, ON A SURFACE MADE OF OTHER PEOPLE'S WORK ──────────────
+     Same rule as My tasks, and it bites hardest here: every row on this page is
+     PROJECT work, i.e. shared by definition. Only the CREATOR may delete it — being
+     assigned a task is not owning it, and clearing your name off somebody's project
+     by deleting their row is exactly what this refuses. Non-owners get no button and
+     the reason instead; the right-click menu simply has no Delete entry.
+
+     `deleteTodo` sends the acting profile as `actorId`: the SERVER decides, this
+     view only stops offering what would be refused. */
+  const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [pendingDelete, setPendingDelete] = createSignal<Todo | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  const taskMenuItems = (task: Todo): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => editTask(task) },
+    ...(owns(task) ? [{ label: "Delete task…", danger: true, onSelect: () => setPendingDelete(task) }] : []),
+  ];
+  const openTaskMenu = (event: MouseEvent, task: Todo) => {
+    event.preventDefault(); event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, items: taskMenuItems(task) });
+  };
+  const deleteTask = async () => {
+    const task = pendingDelete(); if (!task) return;
+    setRowError(""); setDeleting(true);
+    try {
+      await personalApi.deleteTodo(task.id, profileId());
+      setPendingDelete(null);
+      if (editingId() === task.id) setEditingId(null);
+      void reloadTasks();
+    } catch (reason) {
+      // The surface's existing error line. A refusal is shown, never swallowed.
+      setRowError(humanError(reason)); setPendingDelete(null);
+    } finally { setDeleting(false); }
+  };
   /** Grouped by project, project names ordered alphabetically so the list is stable. */
   const groups = () => {
     const by = new Map<string, Todo[]>();
@@ -103,6 +139,15 @@ export default function TeamTasks() {
   };
 
   return <section class="planning-view team-tasks-view">
+    <Show when={menu()}>{open => <ContextMenu x={open().x} y={open().y} items={open().items} onClose={() => setMenu(null)} />}</Show>
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete task?"
+      body={<><strong>{pendingDelete()?.content}</strong> is deleted for everyone in this project, with its description, due date and assignees. This cannot be undone.</>}
+      confirmLabel="Delete task"
+      busy={deleting()}
+      onConfirm={() => void deleteTask()}
+      onCancel={() => setPendingDelete(null)} />
     {/* Sibling sentences live in Todo.tsx and ProjectTasks.tsx: whose work, how wide. */}
     {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
         the same act, so only one of them is ever drawn: while the surface is empty
@@ -164,7 +209,7 @@ export default function TeamTasks() {
           return <li>
             {/* THE SAME GESTURE AS EVERYWHERE ELSE: the row opens itself, in place. */}
             <Show when={editingId() === task.id} fallback={
-            <div class="task-row tt-row" classList={{ done: task.done, overdue: urgency() === "overdue" }}>
+            <div class="task-row tt-row" classList={{ done: task.done, overdue: urgency() === "overdue" }} onContextMenu={event => openTaskMenu(event, task)}>
               <span class="task-row-marker" aria-hidden="true">{task.done ? "✓" : "○"}</span>
               <button type="button" class="task-row-main" data-task-row={task.id} aria-label={`Open ${task.content}`} onClick={() => editTask(task)}>
                 <strong class="task-row-title">{task.content}</strong>
@@ -181,6 +226,14 @@ export default function TeamTasks() {
                   onCancel={() => closeEdit(task.id)}
                   onSaved={() => { closeEdit(task.id); void reloadTasks(); }}
                   onError={setRowError} />
+                {/* The opened task's facts, and beside them the act that removes them. */}
+                <div class="task-danger-row">
+                  <DeleteButton
+                    label={`Delete ${task.content}`}
+                    canDelete={owns(task)}
+                    deniedReason="Only the owner can delete this"
+                    onRequest={() => setPendingDelete(task)} />
+                </div>
               </div>
             </Show>
           </li>;

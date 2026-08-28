@@ -35,7 +35,11 @@ export const personalApi = {
   addProjectMember:(project_id:string,member_id:string)=>call<string[]>("add_project_member",{projectId:project_id,memberId:member_id}),
   removeProjectMember:(project_id:string,member_id:string)=>call<string[]>("remove_project_member",{projectId:project_id,memberId:member_id}),
   calendar:(profile_id:string,range_start:number,range_end:number,range_start_date:string,range_end_date:string,target_profile_id?:string,target_location?:string)=>call<CalendarItem[]>("calendar_aggregate",{profileId:profile_id,rangeStart:range_start,rangeEnd:range_end,rangeStartDate:range_start_date,rangeEndDate:range_end_date,targetProfileId:target_profile_id??null,targetLocation:target_location??null}),
-  createTodo:(input:Omit<Todo,"id">&{id?:string})=>call<Todo>("create_todo",{input}), updateTodo:(todo:Todo)=>call<Todo>("update_todo",{todo}), setTodoCompletion:(id:string,done:boolean)=>call<Todo>("set_todo_completion",{id,done}), deleteTodo:(id:string)=>call<void>("delete_todo",{id}),
+  createTodo:(input:Omit<Todo,"id">&{id?:string})=>call<Todo>("create_todo",{input}), updateTodo:(todo:Todo)=>call<Todo>("update_todo",{todo}), setTodoCompletion:(id:string,done:boolean)=>call<Todo>("set_todo_completion",{id,done}),
+  /** Deleting a task is OWNER-ONLY, and the owner is decided by the SERVER: `actorId`
+   *  is the identity that gate runs against (desktop has no session to mint it from).
+   *  A refusal comes back as a rejection and must reach the screen — never swallowed. */
+  deleteTodo:(id:string,actor_id:string)=>call<void>("delete_todo",{id,actorId:actor_id}),
   postponeTodo:(id:string,days:number)=>call<Todo>("postpone_todo",{id,days}),
   convertTodoToIssue:(id:string,project_id:string,status_id?:string)=>call<{id:string;project_id:string;number:number;title:string}>("convert_todo_to_issue",{id,projectId:project_id,statusId:status_id??null}),
   absences:(profile_id?:string)=>call<Absence[]>("list_absences",{profileId:profile_id}), createAbsence:(input:Omit<Absence,"id">&{id?:string})=>call<Absence>("create_absence",{input}), updateAbsence:(absence:Absence)=>call<Absence>("update_absence",{absence}), deleteAbsence:(id:string)=>call<void>("delete_absence",{id}), currentAbsences:(date:string)=>call<Absence[]>("current_absences",{date}),

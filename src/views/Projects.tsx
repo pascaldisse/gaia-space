@@ -1,6 +1,8 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { GhostPill } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
@@ -199,7 +201,64 @@ export default function Projects() {
     }
   };
 
+  /* ── ACTS ON A PROJECT, WHERE THE PROJECT IS LISTED ────────────────────────
+     The workspace header carries the delete for the project you are IN. This list
+     is where people point AT a project, so the same act is on its right-click menu
+     — the identical gesture the channel list already answers (SpaceShell).
+
+     THE OWNER RULE: `created_by === actingProfileId`. A non-owner's menu simply has
+     no Delete entry; a disabled red word teases an act nobody can have. And the menu
+     never deletes — it opens the question. */
+  const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [pendingDelete, setPendingDelete] = createSignal<Project | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  const ownsProject = (project: Project) => !!actingProfileId() && project.created_by === actingProfileId();
+  const menuItems = (project: Project): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => { setProjectId(project.id); navigate(openRoute(project.id)); } },
+    ...(ownsProject(project)
+      ? [{ label: "Delete project…", danger: true, onSelect: () => setPendingDelete(project) }]
+      : []),
+  ];
+  const openMenu = (event: MouseEvent, project: Project) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, items: menuItems(project) });
+  };
+  const deleteProject = async () => {
+    const project = pendingDelete();
+    if (!project) return;
+    setError(""); setDeleting(true);
+    try {
+      await platformApi.deleteProject(project.id, actingProfileId() ?? "");
+      setPendingDelete(null);
+      await refetch();
+    } catch (reason) {
+      // The list's own error line, the same one every other refusal lands in.
+      setError(humanError(reason));
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return <section class="resource-view projects-view">
+    <Show when={menu()}>
+      {(open) => <ContextMenu x={open().x} y={open().y} items={open().items} onClose={() => setMenu(null)} />}
+    </Show>
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete project?"
+      body={
+        <>
+          <strong>{pendingDelete()?.name}</strong> is deleted for everyone, with its tasks, tickets,
+          calendar entries and knowledge. This cannot be undone.
+        </>
+      }
+      confirmLabel="Delete project"
+      busy={deleting()}
+      onConfirm={() => void deleteProject()}
+      onCancel={() => setPendingDelete(null)}
+    />
     <PageHeader
       title="Projects"
       subline="The projects that are running, and whether each one is healthy"
@@ -255,7 +314,7 @@ export default function Projects() {
     }>
     <ul class="project-cards"><For each={visibleProjects()}>{project => {
       const due = () => (project.deadline ? deadlineTone(project.deadline) : undefined);
-      return <li classList={{ "project-card": true, archived: project.archived }}>
+      return <li classList={{ "project-card": true, archived: project.archived }} onContextMenu={(event) => openMenu(event, project)}>
         {/* THE ROW IS THE LINK. One anchor over the identifying part of the card, so
             a single click opens the project and the keyboard reaches it by tabbing.
             The controls below (deadline, archive) sit OUTSIDE it: a control nested in
