@@ -3,7 +3,22 @@ import { createResource, createSignal, createEffect, For, Match, Show, Switch } 
 import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
+import EmptyState from "../components/EmptyState";
+import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import "./Packages.css";
+import "./operatorForm.css";
+
+/** A picker's resting value IS its label, so the label has to be a word rather
+ *  than the wire constant. `formMode` was rendering `HOSTING` in shouting caps
+ *  as the control's own resting text; `format` was rendering `pypi`. The stored
+ *  values are untouched — only what the operator reads. */
+const modeLabel = (mode: string): string =>
+  mode === "HOSTING" ? "Hosting" : mode === "PROXY" ? "Proxy" : mode === "COMPOSITE" ? "Composite" : mode;
+const FORMAT_NAMES: Record<string, string> = {
+  maven: "Maven", npm: "npm", nuget: "NuGet", pypi: "PyPI",
+  dart: "Dart", container: "Container", composer: "Composer", file: "File",
+};
+const formatLabel = (format: string): string => FORMAT_NAMES[format] ?? format;
 
 export default function Packages() {
   const [error, setError] = createSignal<string | null>(null);
@@ -167,24 +182,37 @@ async function togglePinned(v: PackageVersion) {
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>
       </Show>
 
-      <form class="new-repo-form" onSubmit={createRepo}>
-        <input placeholder="repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
-        <select value={formProjectId()} onChange={(e) => setFormProjectId(e.currentTarget.value)}>
+      {/* This band STAYS on the surface: Packages is an operator tool and
+         repositories are created in runs (L3 relaxed). L4 is not relaxed — the
+         two fields and three pickers now sit on one line at one height. */}
+      <form class="new-repo-form op-form" onSubmit={createRepo}>
+        <input class="op-input op-grow" aria-label="Repository name" placeholder="Repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
+        <PillSelect label="Project" value={formProjectId()} onChange={setFormProjectId}>
           <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
-        <select value={formFormat()} onChange={(e) => setFormFormat(e.currentTarget.value)}>
-          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{f}</option>}</For>
-        </select>
-        <select value={formMode()} onChange={(e) => setFormMode(e.currentTarget.value)}>
-          <For each={REPO_MODES}>{(m) => <option value={m}>{m}</option>}</For>
-        </select>
-        <input class="grow" placeholder="description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
+        </PillSelect>
+        <PillSelect label="Package format" value={formFormat()} onChange={setFormFormat}>
+          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{formatLabel(f)}</option>}</For>
+        </PillSelect>
+        <PillSelect label="Repository mode" value={formMode()} onChange={setFormMode}>
+          <For each={REPO_MODES}>{(m) => <option value={m}>{modeLabel(m)}</option>}</For>
+        </PillSelect>
+        <input class="op-input op-grow" aria-label="Description" placeholder="Description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
         <button class="primary">Create repository</button>
       </form>
 
       <div class="packages-body">
         <aside class="repos-list">
-          <Show when={repos()?.length} fallback={<p class="hint pad">No repositories yet — create one above.</p>}>
+          {/* The old line said "create one above" — an instruction about where on
+              the page to look, which is exactly what stops being true the moment
+              the layout moves. It is an action now, and the action puts the
+              cursor in the field instead of describing its position. */}
+          <Show when={repos()?.length} fallback={
+            <EmptyState
+              title="No package repositories yet"
+              hint="A repository holds published versions of one package format."
+              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.packages-view input[aria-label="Repository name"]')?.focus()}>Create a repository</button>}
+            />
+          }>
             <ul>
               <For each={repos()}>
                 {(r) => (
@@ -199,7 +227,9 @@ async function togglePinned(v: PackageVersion) {
           </Show>
         </aside>
 
-        <Show when={selected()} fallback={<p class="hint pad">Select or create a repository.</p>}>
+        {/* A missing SELECTION, not an empty store: the repositories are one
+            click to the left, so nothing is offered here. */}
+        <Show when={selected()} fallback={<EmptyState variant="no-match" title="No repository selected" hint="Pick a repository on the left to publish, browse and retain its versions." />}>
           {(repo) => (
             <section class="repo-detail">
               <header class="repo-detail-head">
@@ -207,15 +237,15 @@ async function togglePinned(v: PackageVersion) {
                 <span class="fmt">{repo().format}</span>
                 <span class="mode">{repo().mode}</span>
                 <div class="repo-actions">
-                  <button class="ghost small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</button>
-                  <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete</button>
+                  <GhostPill class="small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</GhostPill>
+                  <GhostPill class="small danger" onClick={() => deleteRepo(repo().id)}>Delete</GhostPill>
                 </div>
               </header>
               <p class="hint">{repo().description ?? "no description"} · {repo().access_level}</p>
               <div class="repo-actions">
-                <button class="ghost small" onClick={previewRetention}>Preview retention</button>
-                <button class="ghost small" onClick={applyRetention}>Apply retention</button>
-                <button class="ghost small" onClick={showRepoCves}>Repository CVEs</button>
+                <GhostPill class="small" onClick={previewRetention}>Preview retention</GhostPill>
+                <GhostPill class="small" onClick={applyRetention}>Apply retention</GhostPill>
+                <GhostPill class="small" onClick={showRepoCves}>Repository CVEs</GhostPill>
               </div>
               <Show when={candidates()}>
                 <div class="metadata-view">
@@ -254,7 +284,7 @@ async function togglePinned(v: PackageVersion) {
               <section class="versions-section">
                 <header class="versions-head">
                   <h3>Versions</h3>
-                  <input class="search" placeholder="search by package name…" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+                  <QuietSearch label="Search versions by package name" placeholder="Search by package name…" value={search()} onInput={setSearch} />
                 </header>
                 <Show when={versions()?.length} fallback={<p class="hint pad">No versions published yet.</p>}>
                   <table class="versions-table">
