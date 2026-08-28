@@ -16,6 +16,17 @@ import "./WorkItemDrawer.css";
  * shape, sharing WorkItemDrawer.css, carrying exactly the fields the removed
  * "NEW ISSUE" column carried — title, description, status, assignee, due date.
  */
+/** The wire values the server stores; the labels are what a person reads. `URGENT`
+ *  exists in the model and stays offered — dropping it here would make a ticket
+ *  created in the drawer unable to say the one thing that matters most. */
+const PRIORITIES = [
+  { value: "", label: "No priority" },
+  { value: "LOW", label: "Low" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "HIGH", label: "High" },
+  { value: "URGENT", label: "Urgent" },
+] as const;
+
 export default function IssueCreateDrawer(props: {
   projectId: string;
   statuses: Status[];
@@ -27,6 +38,10 @@ export default function IssueCreateDrawer(props: {
   const [statusId, setStatusId] = createSignal("");
   const [assigneeId, setAssigneeId] = createSignal("");
   const [dueDate, setDueDate] = createSignal("");
+  // The column this drawer replaced never offered priority, so every ticket was
+  // created without one even though `issues.priority` has always existed and the
+  // list already paints a pill for it. The field was there; the door was missing.
+  const [priority, setPriority] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let firstField!: HTMLInputElement;
@@ -49,7 +64,7 @@ export default function IssueCreateDrawer(props: {
       const issue = await planningApi.createIssue({
         project_id: props.projectId, title: heading, description: description().trim() || null,
         status_id: statusId() || null, assignee_id: assigneeId() || null, created_by: null,
-        due_date: dueDate() || null, priority: null, archived: false,
+        due_date: dueDate() || null, priority: priority() || null, archived: false,
       });
       props.onCreated(issue);
       props.onClose();
@@ -85,6 +100,11 @@ export default function IssueCreateDrawer(props: {
             in the picker's voice, next to five fields captioned in the form's voice.
             So the form supplies the caption and the control goes silent. */}
         <div class="wid-field"><span>Assignee</span><ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll /></div>
+        <label class="wid-field"><span>Priority</span>
+          <select class="wid-input" aria-label="Ticket priority" value={priority()} onChange={(event) => setPriority(event.currentTarget.value)}>
+            <For each={PRIORITIES}>{(option) => <option value={option.value}>{option.label}</option>}</For>
+          </select>
+        </label>
         <label class="wid-field"><span>Due date</span>
           <input class="wid-input" type="date" aria-label="Due date" value={dueDate()} onInput={(event) => setDueDate(event.currentTarget.value)} />
         </label>
