@@ -16,19 +16,33 @@
 .task-add-plus{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent-text);font-size:15px;line-height:1}
 
 /* ── task composer — one calm surface, not fragmented boxes ── */
-.task-composer{margin:0 0 26px;padding:18px 20px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:14px}
+.task-composer{margin:0 0 20px;padding:14px 16px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:10px}
+/* CAPTURE IS ONE LINE: the title takes the width, the primary sits on its end.
+   STRUCTURE, so it must not be scoped to a theme (an earlier lane broke the dark
+   layout three times doing that). */
+.composer-line{display:flex;align-items:center;gap:10px}
+.composer-line .composer-title{flex:1 1 auto;min-width:0}
 .composer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 -4px}
 .composer-head-label{font-family:var(--font-head);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#93a0bb}
 .composer-close{font-size:12px!important;color:#93a0bb!important}
 .composer-close:hover{color:var(--text-strong)!important}
-.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 12px!important;font-family:var(--font-head);font-size:21px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid var(--surface-border)!important;box-shadow:none!important}
+.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 9px!important;font-family:var(--font-head);font-size:19px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid var(--surface-border)!important;box-shadow:none!important}
 .composer-title::placeholder{color:#6d7c99;font-weight:500}
 .composer-title:focus{outline:none;border-bottom-color:var(--accent)!important;box-shadow:0 1px 0 0 var(--accent)!important}
 
 /* metadata row: three equal, generous, same-colour popover controls */
 .composer-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:stretch}
 .composer-actions{display:flex;justify-content:flex-end}
-.composer-submit{height:42px;padding:0 26px;border-radius:999px;font-size:13.5px}
+.composer-submit{height:38px;padding:0 22px;border-radius:999px;font-size:13.5px;white-space:nowrap}
+
+/* The fold: everything that is EDITING rather than capture. Closed at rest, so the
+   list is the first thing under the composer. */
+.composer-more{padding-top:2px}
+.composer-more summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
+.composer-more summary::-webkit-details-marker{display:none}
+.composer-more summary::before{content:"+ ";color:#6d7c99}
+.composer-more[open] summary::before{content:"\2212 "}
+.composer-more-body{display:grid;gap:10px;margin-top:10px}
 
 .composer-source{border-top:1px solid #223052;padding-top:12px;color:#aeb1b8}
 .composer-source summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
@@ -162,7 +176,9 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
   padding: 20px 22px;
 }
 .theme-space-light .composer-head-label,
+.theme-space-light .composer-more summary,
 .theme-space-light .composer-source summary { color: var(--muted); }
+.theme-space-light .composer-more summary::before { color: var(--quiet); }
 .theme-space-light .composer-close { color: var(--muted) !important; }
 .theme-space-light .composer-close:hover { color: var(--ink) !important; }
 .theme-space-light .composer-title { color: var(--ink); border-bottom-color: var(--line) !important; }

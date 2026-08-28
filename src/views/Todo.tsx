@@ -2,20 +2,24 @@ import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "../components/paper.css";
 import "./Todo.css";
-import { ProfilePicker } from "../components/Pickers";
 import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
 import EmptyState from "../components/EmptyState";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
-import { todayISO, urgencyOf } from "../statusTone";
+import { metricTone, todayISO, urgencyOf, type Tone } from "../statusTone";
 import { humanError } from "../session";
 
 const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
 type MemberLookup = { ids?: string[]; failed?: string };
+/* The rail's three coloured numbers used to be hard-coded classes. Tone comes from
+   the shared law now, and `metricTone` withholds it from a zero: "0 Overdue" in red
+   is a warning about nothing. */
+const METRIC_CLASS: Record<Tone, string> = { "": "", teal: "accent", amber: "warn", red: "critical", done: "" };
+const metricClass = (value: number, tone: Tone) => ("rail-metric " + METRIC_CLASS[metricTone(value, tone)]).trim();
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
@@ -150,13 +154,24 @@ export default function Todo() {
     {editRow(todo)}
   </Show>;
   return <section class="personal-view todo-view">
-    <PageHeader title="My tasks" actions={<ProfilePicker locked/>}/>
+    {/* L1: the shell owns identity. A disabled "Acting as" box in the corner of
+        every load is still a second identity control (audit §3.1). */}
+    <PageHeader title="My tasks" subline="Yours, and what people put on you"/>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
     <div class="view-cols todo-cols">
       <div class="view-main">
+        {/* THE ONE COMPOSER THAT STAYS ON ITS SURFACE (L3, decided deliberately).
+            Capture is the act this page exists for, and a capture box you must open
+            first is a capture box people stop using. What was wrong here was SIZE,
+            not existence: the list started ~700px down behind notes, a markdown
+            switch and two raw id fields. Those are EDITING, and every one of them is
+            still here — one fold away, and in the row editor a click away. The
+            resting composer is one line: say it, file it. */}
         <form class="task-composer" onSubmit={save}>
-          <div class="composer-head"><span class="composer-head-label">New task</span></div>
+          <div class="composer-line">
           <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
+          <button class="primary composer-submit" disabled={!form().content.trim()}>Add task</button>
+          </div>
           <div class="composer-meta tm-row">
             <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject}/>
             <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
@@ -167,10 +182,17 @@ export default function Todo() {
           <Show when={membersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
           <Show when={form().project_id&&!projectMembers.loading&&!membersFailed()&&!memberIds().length}><p class="hint">This project has no members available for assignment.</p></Show>
           <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
-          <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
-          <label class="fld-check"><input type="checkbox" checked={form().content_kind==="markdown"} onChange={e=>setForm({...form(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
-<details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
-          <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
+          {/* Everything a task can carry beyond its name, folded: notes, the markdown
+              switch, and the source bookmark's two identifier fields. Nothing was
+              taken away — it stopped being the first thing on the page. */}
+          <details class="composer-more">
+            <summary>More — notes, formatting, source</summary>
+            <div class="composer-more-body">
+              <label class="todo-field todo-field-notes"><textarea class="composer-notes" rows="3" aria-label="Notes" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
+              <label class="fld-check"><input type="checkbox" checked={form().content_kind==="markdown"} onChange={e=>setForm({...form(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
+              <div class="composer-source-fields"><input aria-label="Source entity type" placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input aria-label="Source entity ID" placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div>
+            </div>
+          </details>
         </form>
         <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
         {/* NOTHING YET, for the whole surface. The creation action is the composer
@@ -213,11 +235,12 @@ export default function Todo() {
         <div class="rail-card">
           <h3>At a glance</h3>
           <div class="rail-metrics">
-            <div class="rail-metric accent"><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
+            <div class={metricClass(openTodos().length,"teal")}><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
             {/* Colour law: overdue is critical (red), not merely waiting (amber), and
-                "due in 7 days" IS the amber case — they were the wrong way round. */}
-            <div class="rail-metric critical"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
-            <div class="rail-metric warn"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
+                "due in 7 days" IS the amber case — they were the wrong way round.
+                A count of 0 carries no tone at all. */}
+            <div class={metricClass(overdue().length,"red")}><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
+            <div class={metricClass(dueSoon().length,"amber")}><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
             <div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div>
           </div>
         </div>
