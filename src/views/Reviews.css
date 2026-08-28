@@ -127,3 +127,6 @@
 .theme-space-light .quick-filters button.active { background: var(--wash-2); border-color: var(--line-strong); color: var(--ink); }
 .theme-space-light .quick-filters button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .theme-space-light .review-list-controls { gap: 10px; }
+
+/* NOTHING YET is a page lead, not a card wedged into the 260px list column. */
+.reviews-lead { padding: 0 30px 60px; max-width: 560px; }

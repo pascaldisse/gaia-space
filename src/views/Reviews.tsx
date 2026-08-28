@@ -27,6 +27,10 @@ import { useDeepLink, linkProps, route } from "../router";
 import "../components/WorkItemDrawer.css";
 import "./Reviews.css";
 
+/** The quick filters name themselves in the product's voice: a control's label
+ *  is a word, not the wire value that happens to back it. */
+const QUICK_FILTER_LABELS = { all: "All", open: "Open", mine: "Needs me", waiting: "Waiting" } as const;
+
 export default function Reviews() {
   const [error, setError] = createSignal<string | null>(null);
 
@@ -551,11 +555,20 @@ async function removeExternalIssueLink(id: string) {
       {/* One header. The old `reviews-head` under it existed only to ask again
           who you are — the shell already says so. A metric chip carries no tone,
           so `0 open` is a number and not a colour. */}
+      {/* The title is the name the navigation uses — the rail says "Pull
+          requests", so the page cannot call itself something else. The view's
+          ROUTE id stays `Code Reviews`; that is a wire key, not a word on
+          screen.
+
+          ONE ACTION, ONE PLACE: while the list is empty its empty state carries
+          "Open merge request", so the header does not draw the same act twice. */}
       <PageHeader
-        title="Code Reviews"
+        title="Pull requests"
         subline="Merge requests on real repository branches"
         chips={<Chip value={openCount()} label="open" />}
-        actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>}
+        actions={<Show when={reviews()?.length}>
+          <button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>
+        </Show>}
       />
 
       <Show when={error()}>
@@ -581,12 +594,24 @@ async function removeExternalIssueLink(id: string) {
         />
       </Show>
 
+      {/* NOTHING YET is a page-wide lead, not a card squeezed into a 260px list
+          column beside an empty detail pane — and filters over an empty universe
+          are controls with nothing to control, so they are not drawn either. */}
+      <Show when={reviews.loading || reviews()?.length} fallback={
+        <div class="reviews-lead">
+          <EmptyState
+            title="No merge requests yet"
+            hint="A merge request reviews one branch against another, on a real repository."
+            actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>}
+          />
+        </div>
+      }>
       <div class="reviews-body">
         <aside class="reviews-list">
           <div class="review-list-controls">
             <div class="quick-filters" aria-label="Review quick filters">
               <For each={["all", "open", "mine", "waiting"] as const}>
-                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{filter === "mine" ? "Needs me" : filter}</button>}
+                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{QUICK_FILTER_LABELS[filter]}</button>}
               </For>
             </div>
             {/* The value is the label: "Newest" needs no word above it. */}
@@ -595,14 +620,11 @@ async function removeExternalIssueLink(id: string) {
               <option value="title">Title</option>
             </PillSelect>
           </div>
-          {/* Two different situations: a quick filter hides them (drop the
-              filter), or no merge request has ever been opened (open one). */}
+          {/* Inside the list only the FILTERS-MATCH-NOTHING case can happen now:
+              the empty universe is handled above, page-wide. */}
           <Show
             when={visibleReviews().length}
-            fallback={<Show
-              when={quickFilter() === "all"}
-              fallback={<EmptyState variant="no-match" title="No merge requests match this filter." actions={<GhostPill onClick={() => setQuickFilter("all")}>Show all</GhostPill>} />}
-            ><EmptyState title="No merge requests yet" hint="A merge request reviews one branch against another, on a real repository." actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>} /></Show>}
+            fallback={<EmptyState variant="no-match" title="No merge requests match this filter." actions={<GhostPill onClick={() => setQuickFilter("all")}>Show all</GhostPill>} />}
           >
             <ul>
               <For each={visibleReviews()}>
@@ -632,9 +654,14 @@ async function removeExternalIssueLink(id: string) {
           </Show>
         </aside>
 
+        {/* A "nothing selected" pane next to a list that HAS nothing in it says
+            the same absence twice; with no merge requests there is nothing to
+            pick, so the pane is not drawn at all. */}
         <Show
           when={selected()}
-          fallback={<EmptyState title="Nothing selected" hint="Pick a merge request on the left." />}
+          fallback={<Show when={visibleReviews().length}>
+            <EmptyState variant="no-match" title="Nothing selected" hint="Pick a merge request on the left." />
+          </Show>}
         >
           {(review) => (
             <section class="review-detail">
@@ -1130,6 +1157,7 @@ async function removeExternalIssueLink(id: string) {
           )}
         </Show>
       </div>
+      </Show>
     </section>
   );
 }
