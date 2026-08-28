@@ -4,8 +4,8 @@ import { planningApi, type Board, type BoardColumn, type BoardCardSettings, type
 import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
-import PageHeader from "../components/PageHeader";
-import { GhostPill } from "../components/controls";
+import PageHeader, { useEmbedded } from "../components/PageHeader";
+import { GhostPill, PillSelect } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { linkProps } from "../router";
 import { projectName } from "../orgScope";
@@ -20,7 +20,12 @@ const TEMPLATES: Record<string, { label: string; columns: string[] }> = {
 const STATUS_COLOR: Record<string, string> = { "To do": "#7f8da6", Backlog: "#6d7c99", "In progress": "#00c2a8", Review: "#c4a9e6", Done: "#8fd6a2" };
 
 export default function Boards() {
-  const projectId = sessionProject; const setProjectId = setSessionProject;
+  /* EMBEDDED (audit §3.5): mounted inside a project surface the scope is already
+     decided, so the host's project wins over the session one and the picker that
+     would ask for it again is not rendered. Standalone, nothing changes. */
+  const embedded = useEmbedded();
+  const projectId = () => embedded()?.projectId || sessionProject();
+  const setProjectId = setSessionProject;
   const [board, setBoard] = createSignal<Board>();
   const [sprintId, setSprintId] = createSignal<string>();
   const [error, setError] = createSignal("");
@@ -179,14 +184,20 @@ const addSprint = async () => {
 };
 const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All tickets";
 return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
-    <PageHeader kicker={projectName(projectId())} title="Ticket boards" subline="Columns map ticket statuses" actions={<ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
+    <PageHeader
+      kicker={projectName(projectId())}
+      title="Ticket boards"
+      subline={embedded() ? undefined : "Columns map ticket statuses"}
+      actions={embedded() ? undefined : <ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />}
+    />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
     {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
     <div class="board-bar">
       <div class="board-tabs" role="tablist" aria-label="Boards">
         <For each={boards()}>{b => <button role="tab" aria-selected={board()?.id === b.id} classList={{ active: board()?.id === b.id }} onClick={() => { setBoard(b); setSprintId(undefined); setOpenIssue(undefined); }}>{b.name}</button>}</For>
-        <Show when={!boards()?.length}><span class="bar-empty">No boards yet</span></Show>
+        {/* The full "no board in this project yet" lead with its primary is drawn
+            below; a second bare label in the tab strip only repeated it. */}
       </div>
       <div class="chip-wrap" onClick={event => event.stopPropagation()}>
         <button class="chip chip-primary" aria-expanded={panel() === "board"} aria-haspopup="dialog" disabled={!projectId()} onClick={() => togglePanel("board")}><span class="chip-plus">＋</span> New board</button>
@@ -208,12 +219,12 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
     <Show when={board()}>
       <div class="board-viewbar" role="toolbar" aria-label="Board view">
         <div class="chip-group">
-          <label class="chip chip-select" title={sprintName()}><span>Sprint</span>
-            <select aria-label="Sprint" value={sprintId() ?? ""} onChange={e => setSprintId(e.currentTarget.value || undefined)}>
-              <option value="">All tickets</option>
-              <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
-            </select>
-          </label>
+          {/* L4: the VALUE is the label — "All tickets", "No swimlane", "No grouping"
+              already read as the caption they used to carry above them. */}
+          <PillSelect class="chip chip-select" title={sprintName()} label="Sprint" value={sprintId() ?? ""} onChange={value => setSprintId(value || undefined)}>
+            <option value="">All tickets</option>
+            <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
+          </PillSelect>
           <div class="chip-wrap" onClick={event => event.stopPropagation()}>
             <button class="chip chip-icon" aria-label="New sprint" title="New sprint" aria-expanded={panel() === "sprint"} onClick={() => togglePanel("sprint")}>＋</button>
             <Show when={panel() === "sprint"}>
@@ -226,9 +237,9 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
         </div>
 
         <div class="chip-group">
-          <label class="chip chip-select"><span>Lane</span>
-            <select aria-label="Swimlane" value={activeSwimlane() ?? ""} onChange={e => setActiveSwimlane(e.currentTarget.value || undefined)}><option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For></select>
-          </label>
+          <PillSelect class="chip chip-select" label="Swimlane" value={activeSwimlane() ?? ""} onChange={value => setActiveSwimlane(value || undefined)}>
+            <option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For>
+          </PillSelect>
           <div class="chip-wrap" onClick={event => event.stopPropagation()}>
             <button class="chip chip-icon" aria-label="New swimlane" title="New swimlane" aria-expanded={panel() === "lane"} onClick={() => togglePanel("lane")}>＋</button>
             <Show when={panel() === "lane"}>
@@ -240,9 +251,9 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
           </div>
         </div>
 
-        <label class="chip chip-select"><span>Group</span>
-          <select aria-label="Swimlane grouping" value={swimlaneGroup()} onChange={e => setSwimlaneGroup(e.currentTarget.value as "none" | "assignee" | "creator" | "due_date")}><option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option></select>
-        </label>
+        <PillSelect class="chip chip-select" label="Swimlane grouping" value={swimlaneGroup()} onChange={value => setSwimlaneGroup(value as "none" | "assignee" | "creator" | "due_date")}>
+          <option value="none">No grouping</option><option value="assignee">Assignee</option><option value="creator">Created by</option><option value="due_date">Due date</option>
+        </PillSelect>
 
         <div class="chip-wrap" onClick={event => event.stopPropagation()}>
           <button class="chip" aria-expanded={panel() === "fields"} aria-haspopup="dialog" onClick={() => togglePanel("fields")}>Card fields <small>{cardSettings()?.fields?.length ?? 0}</small></button>
@@ -272,8 +283,8 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
       </>}
     />}>{b => <>
       <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected tickets"><strong>{selected().length} selected</strong>
-        <select aria-label="Move selected tickets to column" value={bulkColumnId()} onChange={e => setBulkColumnId(e.currentTarget.value)}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></select><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
-        <select aria-label="Assign selected tickets to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
+        <PillSelect label="Move selected tickets to column" value={bulkColumnId()} onChange={setBulkColumnId}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></PillSelect><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
+        <PillSelect label="Assign selected tickets to sprint" value={bulkSprintId()} onChange={setBulkSprintId}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></PillSelect><button onClick={() => void bulkSprint()}>Set sprint</button>
         <button class="danger" onClick={() => void bulkRemove()}>Remove from board</button><button class="ghost" onClick={clearSelection}>Clear</button>
       </div></Show>
       <div class="board-split" classList={{ "with-rail": showBacklog() || !!openIssue() }}>
@@ -430,7 +441,7 @@ const rowName = (issue: Issue) => axis() === "priority" ? (issue.priority ?? "No
 const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.localeCompare(b));
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
-<label class="chip chip-select"><span>Rows</span> <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
+<PillSelect class="chip chip-select" label="Rows" value={axis()} onChange={value => setAxis(value as "assignee" | "priority")}><option value="assignee">Rows: Assignee</option><option value="priority">Rows: Priority</option></PillSelect>
 <Show when={props.issues.length} fallback={<EmptyState variant="no-match" title="No board tickets to report on yet." />}>
 <table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
 </Show>
