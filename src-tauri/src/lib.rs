@@ -275,6 +275,13 @@ pub fn run() {
             platform::archive_cf_definition,
             platform::cf_set_value,
             platform::cf_get_values,
+            platform::get_profile,
+            platform::get_team,
+            platform::get_role,
+            platform::get_project,
+            platform::create_project,
+            platform::update_project,
+            platform::is_admin,
             issues::list_issues,
             // Desktop lost the issue detail pane: the command carries its
             // #[tauri::command] attribute and the web transport dispatches it,
@@ -340,6 +347,13 @@ pub fn run() {
             issues::list_issue_tracker_links,
             issues::add_issue_tracker_link,
             issues::remove_issue_tracker_link,
+            issues::update_sprint,
+            issues::archive_sprint,
+            issues::delete_planning_tag,
+            issues::delete_checklist,
+            issues::delete_checklist_item,
+            issues::delete_time_tracking_entry,
+            issues::remove_issue_link,
             chat::list_channels,
             chat::get_channel,
             chat::private_feed,
@@ -447,6 +461,7 @@ pub fn run() {
             review::list_safe_merge_runs,
             review::dry_run_merge,
             review::attempt_merge,
+            review::create_review,
             documents::list_documents,
             documents::get_document,
             documents::list_favorite_documents,
@@ -484,6 +499,7 @@ pub fn run() {
             meetings::create_meeting,
             meetings::update_meeting,
             meetings::archive_meeting,
+            meetings::delete_meeting,
             meetings::attach_meeting_channel,
             meetings::list_meeting_rooms,
             meetings::save_meeting_room,
@@ -493,6 +509,7 @@ pub fn run() {
             meetings::invite_meeting_participant,
             meetings::set_meeting_participant_status,
             meetings::expand_meeting_occurrences,
+            meetings::expand_meeting_occurrences_scoped,
             availability::list_busy_blocks,
             availability::check_meeting_conflicts,
             availability::suggest_meeting_slots,
@@ -552,6 +569,8 @@ pub fn run() {
             pipelines::repository_vulnerability_report,
             pipelines::set_package_version_pinned,
             pipelines::delete_package_version,
+            pipelines::list_jobs,
+            pipelines::list_job_runs,
             personal::list_todos,
             personal::list_project_todos,
             personal::list_team_todos,
@@ -678,4 +697,70 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod command_registration_tests {
+    /// Every `#[tauri::command]` must appear in the desktop `invoke_handler`.
+    ///
+    /// A command can carry its attribute, be dispatched by the web transport, and
+    /// still be absent here — and then it fails ONLY at runtime, ONLY on the
+    /// desktop, and ONLY when a person tries to use it. This repo shipped that bug
+    /// three times before anyone noticed: `get_issue_detail` (the ticket detail pane
+    /// never opened on desktop), `delete_meeting`, and — worst — `create_project`
+    /// and `update_project`, so the desktop app could not create a project at all.
+    ///
+    /// The list is read from the sources rather than from a hand-kept copy: a
+    /// hand-kept copy is the same mistake one level up.
+    #[test]
+    fn every_desktop_command_is_registered() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let lib = std::fs::read_to_string(dir.join("lib.rs")).expect("lib.rs");
+        let mut missing: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("src") {
+            let path = entry.expect("entry").path();
+            let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(stem) if path.extension().and_then(|e| e.to_str()) == Some("rs") => stem.to_string(),
+                _ => continue,
+            };
+            if stem == "lib" || stem == "main" {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("module source");
+            let mut lines = source.lines().peekable();
+            while let Some(line) = lines.next() {
+                if !line.trim_start().starts_with("#[cfg_attr(feature = \"desktop\", tauri::command)]") {
+                    continue;
+                }
+                // Skip doc comments and attributes between the marker and the fn.
+                let name = loop {
+                    match lines.next() {
+                        Some(next) => {
+                            let next = next.trim_start();
+                            if next.starts_with("///") || next.starts_with("#[") {
+                                continue;
+                            }
+                            break next.strip_prefix("pub fn ").map(|rest| {
+                                rest.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                                    .next()
+                                    .unwrap_or("")
+                                    .to_string()
+                            });
+                        }
+                        None => break None,
+                    }
+                };
+                if let Some(name) = name.filter(|n| !n.is_empty()) {
+                    if !lib.contains(&format!("{stem}::{name},")) {
+                        missing.push(format!("{stem}::{name}"));
+                    }
+                }
+            }
+        }
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "these commands exist but the desktop handler never lists them, so they fail only at runtime: {missing:#?}"
+        );
+    }
 }

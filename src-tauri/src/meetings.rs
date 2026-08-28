@@ -392,6 +392,13 @@ pub fn archive_meeting(id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 
+/// Registered for BOTH transports. The web dispatcher has always routed
+/// `delete_meeting`; the desktop handler never listed it, so deleting a meeting
+/// failed on the desktop with "Command delete_meeting not found" — the third
+/// instance of this exact class in this repo (`get_issue_detail` was the first).
+/// A command that carries its attribute but is absent from `lib.rs` fails only at
+/// runtime, only on one transport, and only when a person tries.
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_meeting(id: String) -> Result<()> {
     let mut c = db::conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
