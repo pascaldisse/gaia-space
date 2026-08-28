@@ -1,0 +1,122 @@
+/* Self-scoped like WorkItemDrawer.css: every prototype token is redeclared here
+   with a fallback, so the drawer looks the same mounted in the light chat-first
+   shell or on top of the old dark theme, and nothing leaks out to repaint either.
+   Specificity note: `.mtd-root .mtd-input` (0,2,0) outranks the view-wide
+   `.meetings-view input` (0,1,1), so the drawer keeps its own control shape even
+   though it renders inside that section. */
+.mtd-root {
+  --mtd-ink: var(--ink, #1f2328);
+  --mtd-muted: var(--muted, #68717d);
+  --mtd-paper: var(--paper, #ffffff);
+  --mtd-wash: var(--wash, #faf8f4);
+  --mtd-line: var(--line, #e5ddd3);
+  --mtd-teal: var(--teal, #00bfa6);
+  --mtd-teal-dark: var(--teal-dark, #008d7b);
+  --mtd-teal-soft: var(--teal-soft, #dcf7f2);
+  --mtd-red: var(--red, #bd3f3f);
+  --mtd-red-soft: var(--red-soft, #fbe3e0);
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  color: var(--mtd-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.mtd-root * { box-sizing: border-box; }
+
+.mtd-root .mtd-backdrop { position: absolute; inset: 0; background: rgba(25, 16, 30, 0.28); }
+
+.mtd-root .mtd-panel {
+  position: absolute;
+  top: 0; right: 0;
+  height: 100%;
+  width: 440px;
+  max-width: 92vw;
+  background: var(--mtd-paper);
+  box-shadow: -22px 0 60px rgba(31, 35, 40, 0.18);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  overflow: hidden;
+  animation: mtd-slide-in 180ms ease-out;
+}
+@keyframes mtd-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mtd-root .mtd-panel { animation: none; } }
+
+.mtd-root .mtd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mtd-root .mtd-head h2 { margin: 0; font-size: 22px; letter-spacing: -0.04em; font-weight: 720; color: var(--mtd-ink); }
+.mtd-root .mtd-head p { margin: 6px 0 0; color: var(--mtd-muted); font-size: 14px; line-height: 1.45; }
+.mtd-root .mtd-close {
+  border: 0; background: transparent; color: var(--mtd-muted);
+  font-size: 24px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 9px;
+}
+.mtd-root .mtd-close:hover { background: var(--mtd-wash); color: var(--mtd-ink); }
+
+.mtd-root .mtd-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
+.mtd-root .mtd-field { display: grid; gap: 6px; margin: 0; min-width: 0; }
+/* `:not(.mtd-hint)` — the caption of a field is uppercase; the sentence of help
+   underneath it is not. Without this the RRULE hint shouted in caps like a label. */
+.mtd-root .mtd-field > span:not(.mtd-hint) {
+  color: var(--mtd-muted); font-size: 12px; font-weight: 680;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.mtd-root span.mtd-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.mtd-root .mtd-input {
+  min-height: 40px; width: 100%;
+  border: 1px solid var(--mtd-line); border-radius: 11px;
+  padding: 10px 11px;
+  background: #fbfaf8; color: var(--mtd-ink);
+  font: inherit; font-size: 14px;
+}
+.mtd-root textarea.mtd-input { min-height: 92px; resize: vertical; }
+.mtd-root .mtd-input:focus-visible { outline: 2px solid var(--mtd-teal); outline-offset: 1px; }
+
+/* Two native datetime inputs have a wide intrinsic size; `auto-fit` with a floor
+   stacks them when the panel is narrow instead of pushing out of the drawer. */
+.mtd-root .mtd-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); gap: 10px; }
+
+.mtd-root .mtd-invite { display: flex; align-items: center; gap: 8px; }
+.mtd-root .mtd-invite .picker { flex: 1; min-width: 0; display: grid; gap: 4px; font-size: 12px; color: var(--mtd-muted); }
+.mtd-root .mtd-invite .picker select,
+.mtd-root .mtd-organizer .picker select {
+  min-height: 40px; width: 100%;
+  border: 1px solid var(--mtd-line); border-radius: 11px; padding: 9px 10px;
+  background: #fbfaf8; color: var(--mtd-ink); font: inherit; font-size: 14px;
+}
+.mtd-root .mtd-organizer .picker {
+  display: grid; gap: 6px;
+  font-size: 12px; font-weight: 680; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mtd-muted);
+}
+.mtd-root .mtd-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.mtd-root .mtd-person { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+.mtd-root .mtd-remove { border: 0; background: transparent; color: var(--mtd-muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+.mtd-root .mtd-remove:hover { color: var(--mtd-red); }
+.mtd-root .mtd-hint { margin: 0; color: var(--mtd-muted); font-size: 13px; line-height: 1.45; }
+
+/* One disclosure, closed by default: the surface asks five questions, not ten. */
+.mtd-root .mtd-more { border: 1px solid var(--mtd-line); border-radius: 11px; background: var(--mtd-wash); padding: 0 12px; }
+.mtd-root .mtd-more > summary {
+  cursor: pointer; padding: 11px 0; list-style: none;
+  font-size: 14px; font-weight: 640; color: var(--mtd-ink);
+}
+.mtd-root .mtd-more > summary::-webkit-details-marker { display: none; }
+.mtd-root .mtd-more > summary::before { content: "▸ "; color: var(--mtd-muted); }
+.mtd-root .mtd-more[open] > summary::before { content: "▾ "; }
+.mtd-root .mtd-more[open] { padding-bottom: 12px; }
+.mtd-root .mtd-more > .mtd-field { margin-top: 12px; }
+
+.mtd-root .mtd-error {
+  margin: 0; border: 1px solid var(--mtd-red); border-radius: 11px;
+  background: var(--mtd-red-soft); color: var(--mtd-red); padding: 9px 11px; font-size: 13px;
+}
+
+.mtd-root .mtd-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
+.mtd-root .mtd-btn {
+  min-height: 40px; border: 1px solid var(--mtd-line); border-radius: 11px;
+  padding: 0 15px; background: var(--mtd-paper); color: var(--mtd-ink);
+  font: inherit; font-size: 14px; font-weight: 640; cursor: pointer;
+}
+.mtd-root .mtd-btn:hover:not(:disabled) { background: var(--mtd-wash); }
+.mtd-root .mtd-primary { background: var(--mtd-teal); border-color: var(--mtd-teal-dark); color: #05302a; }
+.mtd-root .mtd-primary:hover:not(:disabled) { background: var(--mtd-teal-dark); color: var(--mtd-teal-soft); }
+.mtd-root .mtd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
