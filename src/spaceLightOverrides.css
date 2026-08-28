@@ -358,3 +358,8 @@
 
 /* ── views/work.css ── */
 .theme-space-light .wk-empty { color: var(--muted); }
+
+/* A due date is one token, not four. `.rail-item` is a grid whose column is as
+   narrow as the rail, and the sub line had no wrapping rule — so "Due 2026-09-04"
+   broke after every hyphen ("Due 2026- 09- 04"). Dates never hyphenate. */
+.theme-space-light .rail-item .rail-item-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
