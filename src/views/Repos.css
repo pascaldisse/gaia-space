@@ -1,0 +1,21 @@
+/* Repos is the one view in this lane that is a TOOL WINDOW, not a page: three
+ * panes, two resizers, its own sidebar. It has always taken its chrome from
+ * App.css and it still does. This file exists only to seat the shared control
+ * primitives inside those panes, so the sidebar's `+` and the empty state do
+ * not arrive at their default page-sized proportions.
+ *
+ * Structure unscoped, colour scoped to `.theme-space-light` — same rule as the
+ * rest of the lane.
+ */
+
+/* The sidebar is ~200px wide; a full-size EmptyState frame would be wider than
+   the pane that holds it. */
+.repos-empty { margin: 6px 0 10px; padding: 16px 12px; }
+.repos-empty .empty-lead-title { font-size: 13.5px; }
+.repos-empty .empty-lead-hint { font-size: 12px; }
+.repos-empty .primary { white-space: normal; }
+
+/* A row's forget-button is a hover affordance in a dense list, not a control
+   that should claim the rail's full control height. */
+.sidebar .repo-list .icon-button { min-height: 22px; width: 22px; padding: 0; }
+.sidebar .brand .icon-button { min-height: 26px; width: 26px; padding: 0; }

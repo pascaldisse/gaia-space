@@ -4,7 +4,18 @@ import { api, type Commit, type RepoRef } from "../api";
 import { Diff } from "../Diff";
 import { Resizer, paneWidth } from "../components/Resizer";
 import "../App.css";
+import "./Repos.css";
+import EmptyState from "../components/EmptyState";
+import { GhostPill, IconButton } from "../components/controls";
 import { UI_LOCALE } from "../calendar";
+
+/* NO PageHeader HERE, deliberately. Every other view in this lane got one,
+ * because every other view is a page: a title, a subline, a list. Repos is not
+ * a page — it is a three-pane git client that owns the whole window, with its
+ * own sidebar, two draggable resizers and a full-height diff. Putting a kicker
+ * and an h1 above that would push the panes down and leave the product with a
+ * title bar it never had. What Repos shares with the rest of the lane is the
+ * CONTROL language, not the page frame, and that is what changed below. */
 
 function when(ts: number) {
   const d = new Date(ts * 1000);
@@ -107,15 +118,22 @@ export default function App() {
       <aside class="sidebar">
         <header class="brand">
           <span>Repositories</span>
-          <button class="ghost" title="Open repository…" onClick={addRepo}>
-            +
-          </button>
+          <IconButton label="Open repository…" onClick={addRepo}>+</IconButton>
         </header>
 
         <div class="section-label">Repositories</div>
+        {/* The old line pointed at a glyph: "press “+”". An instruction to hunt
+            for a character on screen is not an action — this one IS the action. */}
         <Show
           when={repos()?.length}
-          fallback={<p class="hint">No repositories yet — press “+”.</p>}
+          fallback={
+            <EmptyState
+              class="repos-empty"
+              title="No repositories yet"
+              hint="Open a local git repository to browse its branches, commits and diffs."
+              actions={<button class="primary" type="button" onClick={addRepo}>Open a repository…</button>}
+            />
+          }
         >
           <ul class="repo-list">
             <For each={repos()}>
@@ -128,13 +146,13 @@ export default function App() {
                   }}
                 >
                   <span class="repo-name">{r.name}</span>
-                  <button
-                    class="ghost small"
-                    title="Forget repository"
-                    onClick={(e) => removeRepo(r.path, e)}
+                  <IconButton
+                    class="small"
+                    label={`Forget ${r.name}`}
+                    onClick={(e: MouseEvent) => removeRepo(r.path, e)}
                   >
                     ×
-                  </button>
+                  </IconButton>
                 </li>
               )}
             </For>
@@ -160,7 +178,7 @@ export default function App() {
 
       <section class="center">
         <header class="topbar">
-          <Show when={info()} fallback={<span class="hint">No repository</span>}>
+          <Show when={info()} fallback={<span class="hint">No repository open</span>}>
             <strong>{info()!.name}</strong>
             <span class="branch-chip">{info()!.head ?? "unborn"}</span>
             <span class="path">{info()!.path}</span>
@@ -232,7 +250,7 @@ export default function App() {
               onInput={(e) => setMessage(e.currentTarget.value)}
             />
             <div class="row-actions">
-              <button onClick={stageAll}>Stage all</button>
+              <GhostPill onClick={stageAll}>Stage all</GhostPill>
               <button class="primary" onClick={commit} disabled={!message().trim()}>
                 Commit
               </button>
@@ -240,9 +258,11 @@ export default function App() {
           </div>
         </Show>
 
+        {/* A missing SELECTION: the commits are one click to the left, so
+            nothing is offered. */}
         <Show
           when={selected()}
-          fallback={<p class="hint pad">Select a commit or the working tree.</p>}
+          fallback={<EmptyState variant="no-match" title="Nothing selected" hint="Pick a commit, or the working tree, to see its diff." />}
         >
           <Diff text={diff() ?? ""} loading={diff.loading} />
         </Show>
