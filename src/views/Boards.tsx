@@ -193,32 +193,67 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
       icon="columns"
       title="Ticket boards"
       subline={embedded() ? undefined : "Columns map ticket statuses"}
-      actions={embedded() ? undefined : <ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />}
     />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
-    {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
-    <div class="board-bar">
-      <div class="board-tabs" role="tablist" aria-label="Boards">
-        <For each={boards()}>{b => <button role="tab" aria-selected={board()?.id === b.id} classList={{ active: board()?.id === b.id }} onClick={() => { setBoard(b); setSprintId(undefined); setOpenIssue(undefined); }}>{b.name}</button>}</For>
-        {/* The full "no board in this project yet" lead with its primary is drawn
-            below; a second bare label in the tab strip only repeated it. */}
-      </div>
-      <div class="chip-wrap" onClick={event => event.stopPropagation()}>
-        <button class="chip chip-primary" aria-expanded={panel() === "board"} aria-haspopup="dialog" disabled={!projectId()} onClick={() => togglePanel("board")}><span class="chip-plus">＋</span> New board</button>
-        <Show when={panel() === "board"}>
-          <form class="popover" role="dialog" aria-label="New board" onSubmit={createBoard}>
-            <label class="pop-field"><span>Name</span><input autofocus placeholder="New board name" value={newBoard()} onInput={e => setNewBoard(e.currentTarget.value)} /></label>
-            <label class="pop-field"><span>Template</span>
-              <select value={template()} onChange={e => setTemplate(e.currentTarget.value)} aria-label="Board template">
-                <For each={Object.entries(TEMPLATES)}>{([key, value]) => <option value={key}>{value.label}</option>}</For>
-              </select>
-            </label>
-            <div class="pop-actions"><button class="primary" disabled={!projectId() || !newBoard().trim()}>Create board</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
-          </form>
+    {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). What MAKES something is on
+        the left — a board, a sprint, a swimlane, each opening its own popover — and
+        WHICH BOARD you are reading, plus which project, is at the right end. The old
+        `.board-bar` was the same row with a hairline of its own under the header's:
+        two separators for one introduction. */}
+    <nav class="page-actionbar" aria-label="Board actions" onClick={event => event.stopPropagation()}>
+      {/* ONE ACTION, ONE PLACE: with no board yet the lead below carries
+          "New board", so the row does not draw it twice. */}
+      <Show when={board()}>
+        <div class="chip-wrap">
+          <button class="chip chip-primary" aria-expanded={panel() === "board"} aria-haspopup="dialog" disabled={!projectId()} onClick={() => togglePanel("board")}><span class="chip-plus">＋</span> New board</button>
+          <Show when={panel() === "board"}>
+            <form class="popover" role="dialog" aria-label="New board" onSubmit={createBoard}>
+              <label class="pop-field"><span>Name</span><input autofocus placeholder="New board name" value={newBoard()} onInput={e => setNewBoard(e.currentTarget.value)} /></label>
+              <label class="pop-field"><span>Template</span>
+                <select value={template()} onChange={e => setTemplate(e.currentTarget.value)} aria-label="Board template">
+                  <For each={Object.entries(TEMPLATES)}>{([key, value]) => <option value={key}>{value.label}</option>}</For>
+                </select>
+              </label>
+              <div class="pop-actions"><button class="primary" disabled={!projectId() || !newBoard().trim()}>Create board</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+            </form>
+          </Show>
+        </div>
+        {/* A sprint and a swimlane are MADE, so they are acts and live here with the
+            board. Their pickers stayed below, on the view bar, where they belong:
+            those choose what you look at. */}
+        <div class="chip-wrap">
+          <button class="chip" aria-haspopup="dialog" aria-expanded={panel() === "sprint"} onClick={() => togglePanel("sprint")}><span class="chip-plus">＋</span> New sprint</button>
+          <Show when={panel() === "sprint"}>
+            <form class="popover" role="dialog" aria-label="New sprint" onSubmit={e => { e.preventDefault(); void addSprint(); }}>
+              <label class="pop-field"><span>Sprint name</span><input autofocus placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /></label>
+              <div class="pop-actions"><button class="primary" disabled={!newSprint().trim()}>Sprint</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+            </form>
+          </Show>
+        </div>
+        <div class="chip-wrap">
+          <button class="chip" aria-haspopup="dialog" aria-expanded={panel() === "lane"} onClick={() => togglePanel("lane")}><span class="chip-plus">＋</span> New swimlane</button>
+          <Show when={panel() === "lane"}>
+            <form class="popover" role="dialog" aria-label="New swimlane" onSubmit={e => { e.preventDefault(); void addSwimlane(); }}>
+              <label class="pop-field"><span>Lane name</span><input autofocus placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /></label>
+              <div class="pop-actions"><button class="primary" disabled={!newSwimlane().trim()}>Lane</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
+            </form>
+          </Show>
+        </div>
+      </Show>
+      <span class="actionbar-view-controls">
+        <Show when={boards()?.length}>
+          <div class="board-tabs" role="tablist" aria-label="Boards">
+            <For each={boards()}>{b => <button role="tab" aria-selected={board()?.id === b.id} classList={{ active: board()?.id === b.id }} onClick={() => { setBoard(b); setSprintId(undefined); setOpenIssue(undefined); }}>{b.name}</button>}</For>
+            {/* The full "no board in this project yet" lead with its primary is drawn
+                below; a second bare label in the tab strip only repeated it. */}
+          </div>
         </Show>
-      </div>
-    </div>
+        <Show when={!embedded()}>
+          <ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />
+        </Show>
+      </span>
+    </nav>
 
     {/* Tier 2 — how this board is read: filters and display, one chip each. */}
     <Show when={board()}>
@@ -230,30 +265,14 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
             <option value="">All tickets</option>
             <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
           </PillSelect>
-          <div class="chip-wrap" onClick={event => event.stopPropagation()}>
-            <button class="chip chip-icon" aria-label="New sprint" title="New sprint" aria-expanded={panel() === "sprint"} onClick={() => togglePanel("sprint")}>＋</button>
-            <Show when={panel() === "sprint"}>
-              <form class="popover" role="dialog" aria-label="New sprint" onSubmit={e => { e.preventDefault(); void addSprint(); }}>
-                <label class="pop-field"><span>Sprint name</span><input autofocus placeholder="New sprint" value={newSprint()} onInput={e => setNewSprint(e.currentTarget.value)} /></label>
-                <div class="pop-actions"><button class="primary" disabled={!newSprint().trim()}>Sprint</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
-              </form>
-            </Show>
-          </div>
         </div>
 
         <div class="chip-group">
+          {/* The two ＋ buttons that used to hang off these pickers are acts, so they
+              moved up to the action row. What is left here only chooses. */}
           <PillSelect class="chip chip-select" label="Swimlane" value={activeSwimlane() ?? ""} onChange={value => setActiveSwimlane(value || undefined)}>
             <option value="">No swimlane</option><For each={swimlanes()}>{lane => <option value={lane.id}>{lane.name}{lane.is_default ? " · default" : ""}</option>}</For>
           </PillSelect>
-          <div class="chip-wrap" onClick={event => event.stopPropagation()}>
-            <button class="chip chip-icon" aria-label="New swimlane" title="New swimlane" aria-expanded={panel() === "lane"} onClick={() => togglePanel("lane")}>＋</button>
-            <Show when={panel() === "lane"}>
-              <form class="popover" role="dialog" aria-label="New swimlane" onSubmit={e => { e.preventDefault(); void addSwimlane(); }}>
-                <label class="pop-field"><span>Lane name</span><input autofocus placeholder="New swimlane" value={newSwimlane()} onInput={e => setNewSwimlane(e.currentTarget.value)} /></label>
-                <div class="pop-actions"><button class="primary" disabled={!newSwimlane().trim()}>Lane</button><button type="button" class="ghost" onClick={() => setPanel(undefined)}>Cancel</button></div>
-              </form>
-            </Show>
-          </div>
         </div>
 
         {/* Four fixed words that will never grow — PillMenu, so the open list is

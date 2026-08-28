@@ -52,7 +52,14 @@ export function ResourceView(props: Props) {
   const detail = (item: Item) => props.details ? props.details(item) : <DefaultDetails item={item} />;
 
   return <section class="resource-view resource-browser">
-    <PageHeader icon={props.icon ?? "grid"} title={props.title} subline={props.description} actions={<button type="button" class="ghost" disabled={items.loading} onClick={() => void refetch()}>Refresh</button>} />
+    <PageHeader icon={props.icon ?? "grid"} title={props.title} subline={props.description} />
+    {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). Re-reading the records is an
+        act on the data, not a fact about it, so it leaves the header's top-right edge
+        — that edge is for chips and the page's own Delete. It is the only act this
+        browser has, so the row holds it alone. */}
+    <nav class="page-actionbar" aria-label={`${props.title} actions`}>
+      <button type="button" class="ghost" disabled={items.loading} onClick={() => void refetch()}>Refresh</button>
+    </nav>
     <Show when={items.error}><p class="error" role="alert">Could not load {props.title.toLowerCase()}: {String(items.error)}</p></Show>
     <Show when={items.loading}><p class="hint" role="status">Loading persisted data…</p></Show>
     <Show when={!items.loading && !(items()?.length)}><p class="empty-state">{props.empty ?? "No records yet."}</p></Show>

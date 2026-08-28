@@ -70,37 +70,46 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           under a PageHeader is a second header on one screen: the project picker
           and the three pool actions belong ON the page header's own action line,
           which is where every other view in the app puts them. */}
-      {/* The `chips` lane is for METRICS — a value and its word. A picker there
-         is a control in the readout's place, so the project picker moved to the
-         action line, where every other view keeps it. */}
+      {/* The `chips` lane is for METRICS — a value and its word — and the top-right
+         edge for those and the page's own Delete. This surface has neither, so the
+         header is title and sentence only: the picker and the three pool acts are on
+         the action row below, which is where every view keeps them now. */}
       <PageHeader
         icon="repo"
         title="Dev environments"
         subline="Cloud workspaces for this project: start one, let it hibernate, claim one from standby."
-        actions={<>
+      />
+
+      {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). The three pool acts DO
+          something to the environments (hibernate, claim, refill), so they lead on the
+          left; the project decides which environments you are looking at, so it is the
+          view control at the far end. Creating an environment needs a name, a timeout
+          and two toggles — that is the band below, and the row does not repeat it. */}
+      <nav class="page-actionbar" aria-label="Dev environment actions">
+        <GhostPill onClick={() => run(() => devenvApi.sweepIdle())}>Hibernate idle</GhostPill>
+        <GhostPill
+          onClick={() => {
+            const pid = projectId();
+            const me = actor();
+            if (pid && me) run(() => devenvApi.claimStandby(pid, me));
+          }}
+        >
+          Claim standby
+        </GhostPill>
+        <GhostPill
+          onClick={() => {
+            const pid = projectId();
+            if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
+          }}
+        >
+          Refill standby
+        </GhostPill>
+        <span class="actionbar-view-controls">
           <PillSelect label="Project" value={projectId()} onChange={setProjectId}>
             <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
           </PillSelect>
-          <GhostPill onClick={() => run(() => devenvApi.sweepIdle())}>Hibernate idle</GhostPill>
-          <GhostPill
-            onClick={() => {
-              const pid = projectId();
-              const me = actor();
-              if (pid && me) run(() => devenvApi.claimStandby(pid, me));
-            }}
-          >
-            Claim standby
-          </GhostPill>
-          <GhostPill
-            onClick={() => {
-              const pid = projectId();
-              if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
-            }}
-          >
-            Refill standby
-          </GhostPill>
-        </>}
-      />
+        </span>
+      </nav>
 
       <Show when={error()}>
         <p class="error">{error()}</p>

@@ -48,11 +48,14 @@ export default function Development(): JSX.Element {
 
   /* ORDERING (stage 9a): the pills used to render ABOVE the page header, so the
      page began with a switch and only then said what it was. The reading order is
-     header (kicker · title · chips · actions) → section pills → content. The two
-     ticket sections mount Issues, which owns the header, so the pills are handed
-     DOWN into its `sections` slot instead of being printed before it. */
+     header (kicker · title · chips) → action row → content. The two ticket sections
+     mount Issues, which owns the header AND the row, so the pills are handed DOWN
+     into its `sections` slot instead of being printed before it.
+     WHICH SECTION YOU ARE IN IS A VIEW CONTROL, so the pills live at the right end of
+     that one row — identical on both paths, and never a second strip of their own.
+     A <span role=group> and not a <nav>: it renders INSIDE the row's <nav>. */
   const tabs = () => (
-    <nav class="dev-tabs" aria-label="Development sections">
+    <span class="dev-tabs actionbar-sections" role="group" aria-label="Development sections">
       <For each={SECTIONS}>
         {(entry) => (
           <button
@@ -66,7 +69,7 @@ export default function Development(): JSX.Element {
           </button>
         )}
       </For>
-    </nav>
+    </span>
   );
 
   return (
@@ -82,7 +85,13 @@ export default function Development(): JSX.Element {
             supplies one — same shape, same order. */}
         <PageHeader kicker={projectName(projectId())} icon="target" title="Development"
           subline="Tickets, boards, pull requests and pipelines — the work that carries a status" />
-        {tabs()}
+        {/* Neither section MAKES anything from this page (a pull request is opened in a
+            repository, and nothing here records a release), so the row's left is empty
+            and it carries the section switch alone — the same row Issues draws on the
+            other two sections, so the line never moves as you switch. */}
+        <nav class="page-actionbar" aria-label="Development sections">
+          <span class="actionbar-view-controls">{tabs()}</span>
+        </nav>
       </Show>
 
       <Show when={section() === "pull-requests"}>

@@ -52,3 +52,30 @@
 .theme-space-light .dev-tab:not(.active) { background: var(--wash-2); color: var(--muted); border-color: transparent; }
 .theme-space-light .dev-tab:not(.active):hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
 .theme-space-light .dev-tab:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* ── THE SECTION PILLS RIDE ON THE ACTION ROW ────────────────────────────────
+   Which section you are in changes WHAT YOU SEE, so the pills belong at the right
+   end of the page's one action row (PageHeader.css `.page-actionbar`) instead of on
+   a strip of their own under it — a strip that, on the Issues-backed sections, put a
+   third band between the header and the list. Inside the row the group carries no
+   page inset and no rhythm of its own: the row owns both. Structure, unscoped. */
+.page-actionbar .dev-tabs.actionbar-sections {
+  display: inline-flex;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+
+/* ── THE PAGE INSET ON THE TWO SECTIONS THAT HAVE NO GUEST ───────────────────
+   `.dev-view` carries no padding of its own: each block pads itself, and on the
+   ticket sections the guest (`.planning-view`) brings the inset with it. On Pull
+   requests and Releases this lane draws the header and the action row directly, so
+   they were flush against the command bar and the last section pill was clipped by
+   the right edge. Same tokens as every sibling view; structure, unscoped. */
+.dev-view > .page-header:has(+ .page-actionbar) {
+  padding: var(--view-pad-y) var(--view-pad-x) var(--view-head-gap, 22px);
+}
+.dev-view > .page-actionbar {
+  padding-left: var(--view-pad-x);
+  padding-right: var(--view-pad-x);
+}

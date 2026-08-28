@@ -63,10 +63,19 @@ export default function Pipelines() {
       <PageHeader icon="pipeline" title="Pipelines" subline="Config-as-code automation, triggered manually" />
       {/* Automation | Deployments are SECTIONS of this page, not a second header.
           A <header> under a PageHeader is two headers on one screen; the same
-          switch is section pills in Development, so it is section pills here. */}
-      <nav class="dev-tabs pipelines-tabs" aria-label="Pipelines sections">
-        <button type="button" class="dev-tab" classList={{ active: tab() === "automation" }} aria-current={tab() === "automation" ? "page" : undefined} onClick={() => setTab("automation")}>Automation</button>
-        <button type="button" class="dev-tab" classList={{ active: tab() === "deployments" }} aria-current={tab() === "deployments" ? "page" : undefined} onClick={() => setTab("deployments")}>Deployments</button>
+          switch is section pills in Development, so it is section pills here — and a
+          section switch CHANGES WHAT YOU SEE, so it rides at the view-control end of
+          the page's one action row instead of on a strip of its own.
+          A script and a deploy target are each MADE from a band of fields inside the
+          section (`.new-script-form`, `.new-target-form`), so no create button is
+          drawn here: one act, one place. */}
+      <nav class="page-actionbar" aria-label="Pipeline actions">
+        <span class="actionbar-view-controls">
+          <span class="dev-tabs pipelines-tabs actionbar-sections" role="group" aria-label="Pipelines sections">
+            <button type="button" class="dev-tab" classList={{ active: tab() === "automation" }} aria-current={tab() === "automation" ? "page" : undefined} onClick={() => setTab("automation")}>Automation</button>
+            <button type="button" class="dev-tab" classList={{ active: tab() === "deployments" }} aria-current={tab() === "deployments" ? "page" : undefined} onClick={() => setTab("deployments")}>Deployments</button>
+          </span>
+        </span>
       </nav>
 
       <Show when={error()}>

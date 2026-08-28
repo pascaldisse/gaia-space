@@ -128,8 +128,17 @@ export default function App() {
         title="Repositories"
         subline="Local git checkouts registered on this machine"
         chips={<Show when={hasRepos()}><Chip value={repos()!.length} label="open" /></Show>}
-        actions={<Show when={hasRepos()}><button class="primary" type="button" onClick={addRepo}>Open a repository…</button></Show>}
       />
+
+      {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). Registering a checkout
+          MAKES something, so it belongs here and not in the header's top-right edge,
+          which now carries only the count. Nothing on this page changes the view, so
+          the row has no right-hand end. */}
+      <Show when={hasRepos()}>
+        <nav class="page-actionbar" aria-label="Repository actions">
+          <button class="primary" type="button" onClick={addRepo}>Open a repository…</button>
+        </nav>
+      </Show>
 
       <Show when={error()}>
         <div class="repos-error" role="alert" onClick={() => setError(null)}>{error()}</div>

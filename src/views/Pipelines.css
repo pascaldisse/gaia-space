@@ -97,3 +97,11 @@
 .deployments-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .deployments-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .transition-actions { margin-left: auto; display: flex; gap: 6px; }
+
+/* ── THE INTRODUCTION KEEPS ITS RHYTHM ───────────────────────────────────────
+   This view's root carries no padding of its own, so PageHeader.css gives the header
+   the page inset with a `padding: … 0` shorthand — and that shorthand also lands on
+   the bottom, overruling the rule that keeps a gap between the header and the action
+   row beneath it. The row then sat glued to the subline. Restated here, for this root
+   only, with the same token the shared rule uses. Structure, unscoped. */
+.pipelines-view > .page-header:has(+ .page-actionbar) { padding-bottom: var(--view-head-gap, 22px); }

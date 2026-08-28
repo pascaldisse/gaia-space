@@ -568,10 +568,31 @@ async function removeExternalIssueLink(id: string) {
         title="Pull requests"
         subline="Merge requests on real repository branches"
         chips={<Chip value={openCount()} label="open" />}
-        actions={<Show when={reviews()?.length}>
-          <button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>
-        </Show>}
       />
+
+      {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). Opening a merge request
+          MAKES something, so it leads on the left; the quick filters and the sort
+          only change what the list shows, so they sit at the view-control end — they
+          used to be a second control block wedged inside the 260px list column.
+          While nothing exists the empty lead below carries the act, and a filter over
+          an empty universe controls nothing, so the whole row is not drawn. */}
+      <Show when={reviews()?.length}>
+        <nav class="page-actionbar" aria-label="Merge request actions">
+          <button type="button" class="primary" onClick={() => setCreating(true)}>Open merge request</button>
+          <span class="actionbar-view-controls">
+            <div class="quick-filters" aria-label="Review quick filters">
+              <For each={["all", "open", "mine", "waiting"] as const}>
+                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{QUICK_FILTER_LABELS[filter]}</button>}
+              </For>
+            </div>
+            {/* The value is the label: "Newest" needs no word above it. */}
+            <PillSelect label="Sort" value={reviewSort()} onChange={(value) => setReviewSort(value as "number" | "title")}>
+              <option value="number">Newest</option>
+              <option value="title">Title</option>
+            </PillSelect>
+          </span>
+        </nav>
+      </Show>
 
       <Show when={error()}>
         <div class="reviews-error" onClick={() => setError(null)}>
@@ -610,18 +631,7 @@ async function removeExternalIssueLink(id: string) {
       }>
       <div class="reviews-body">
         <aside class="reviews-list">
-          <div class="review-list-controls">
-            <div class="quick-filters" aria-label="Review quick filters">
-              <For each={["all", "open", "mine", "waiting"] as const}>
-                {(filter) => <button type="button" classList={{ active: quickFilter() === filter }} onClick={() => setQuickFilter(filter)}>{QUICK_FILTER_LABELS[filter]}</button>}
-              </For>
-            </div>
-            {/* The value is the label: "Newest" needs no word above it. */}
-            <PillSelect label="Sort" value={reviewSort()} onChange={(value) => setReviewSort(value as "number" | "title")}>
-              <option value="number">Newest</option>
-              <option value="title">Title</option>
-            </PillSelect>
-          </div>
+          {/* The filters that used to stand here are on the page's one action row now. */}
           {/* Inside the list only the FILTERS-MATCH-NOTHING case can happen now:
               the empty universe is handled above, page-wide. */}
           <Show

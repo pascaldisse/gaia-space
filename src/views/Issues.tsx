@@ -28,7 +28,9 @@ import { dueTone, priorityTone, statusTone, todayISO } from "../statusTone";
  * `sections` is a slot, not a second header: Development owns the section pills but
  * this view owns the PageHeader, and the pills must render BELOW it (stage 9a
  * ordering fix). Passing them in is the only way to get header-then-pills without
- * forking the header out of here. */
+ * forking the header out of here. They are a VIEW control — which section of
+ * Development you are looking at — so the slot renders at the right end of the
+ * action row, with the project picker, and not as a strip of its own. */
 export default function Issues(props: { filterTagName?: string; sections?: JSX.Element; title?: string } = {}) {
   /* ICON + SUBLINE (design rollout). The glyph is the rail's own `target`, so the page
      wears the mark you clicked to get here. The subline is dropped when a host has
@@ -119,6 +121,9 @@ export default function Issues(props: { filterTagName?: string; sections?: JSX.E
   });
 
   const afterCreate = async (issue: Issue) => { await reloadIssues(); openInUrl(issue); };
+  /* The two states below that print an EmptyState carrying "New ticket". While either
+     is on screen the action row does not repeat the act. */
+  const emptyStateOffersCreate = () => pinnedTagMissing() || (!issues.loading && !issues()?.length && !filtered());
   // Colour law: one pill states one fact. The status pill reads the STATUS and
   // nothing else — folding urgency into it made two rows with the identical words
   // "No status" render red and teal. Urgency lives on the date, priority on its own
@@ -160,22 +165,30 @@ const createStatus = async () => {
       title={props.title ?? "Tickets"}
       subline={embedded() ? undefined : "Tracked work in this project — every bug, feature and chore with a status."}
       chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="tickets" /></Show>}
-      actions={<>
+    />
+    {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). What MAKES something is on
+        the left; what changes WHAT YOU SEE is at the right end. The header keeps the
+        ticket count and nothing else — it used to carry the picker and four acts, so
+        the same "New ticket" had two addresses on two pages. */}
+    <nav class="page-actionbar" aria-label="Ticket actions">
+      {/* ONE ACTION, ONE PLACE: while an empty state below is offering "New ticket",
+          the row does not draw it a second time. */}
+      <Show when={!emptyStateOffersCreate()}>
+        <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>
+      </Show>
+      {/* The creation column and the status editor column were removed from the body;
+          their acts stay reachable here, ranked below the primary. */}
+      <GhostPill onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</GhostPill>
+      <GhostPill disabled={!issues()?.length} onClick={exportCsv}>Export CSV</GhostPill>
+      <GhostPill {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</GhostPill>
+      <span class="actionbar-view-controls">
+        {/* Header first, THEN the section switch — and the switch is a view control. */}
+        {props.sections}
         {/* The picker's VALUE is its label now — the word "Project" above it was the
             old idiom and is gone from the screen, not from the accessibility tree. */}
         <ProjectPicker labelHidden />
-        {/* Header region is the PageHeader lane's; these three entries are only ADDED to
-            its actions slot, because the creation column and the status editor column
-            were removed from the body and their acts must stay reachable. They were
-            reading as bare text links; as GhostPills they read as pressable. */}
-        <GhostPill onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</GhostPill>
-        <GhostPill disabled={!issues()?.length} onClick={exportCsv}>Export CSV</GhostPill>
-        <GhostPill {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</GhostPill>
-        <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>
-      </>}
-    />
-    {/* Header first, THEN the section switch. */}
-    {props.sections}
+      </span>
+    </nav>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     {/* Statuses used to be a permanent column; it is the same editor, on demand. */}
     <Show when={statusEditorOpen()}>

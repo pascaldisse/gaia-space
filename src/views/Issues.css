@@ -197,3 +197,18 @@
 .theme-space-light .status-name.amber { background: var(--amber-soft); color: var(--amber-ink); border-color: transparent; }
 .theme-space-light .status-name.red { background: var(--red-soft); color: var(--red-ink); border-color: transparent; }
 .theme-space-light .status-name.done { background: var(--wash); color: var(--muted); }
+
+/* ── ONE LINE PER PAGE ───────────────────────────────────────────────────────
+   The page's single hairline belongs to `.page-actionbar` (PageHeader.css). The
+   ticket filters are SIX controls — search, status, tag, assignee, custom field,
+   custom value — far too wide for the right end of that row, so they stay where
+   they are, inside the list pane, directly above the rows they filter. What they
+   give up is their own rule: `controls.css` draws a border-bottom under a
+   `.issue-list-pane > .control-row`, and under the action row that read as a second
+   separator four rows down the page. Structure, unscoped — the count of lines on a
+   page is not a light-theme opinion. */
+.planning-view .issue-list-pane > .control-row.filter-row {
+  border-bottom: 0;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+}
