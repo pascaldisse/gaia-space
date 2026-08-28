@@ -43,6 +43,24 @@ export const channelTabs = ["messages", "overview", "tasks", "calendar", "files"
 const isChannelTab = (value: string): value is typeof channelTabs[number] =>
   channelTabs.includes(value as typeof channelTabs[number]);
 
+/** ── THE PROJECT WORKSPACE TABS ─────────────────────────────────────────────
+ *  THE TAB ROW BELONGS TO THE PROJECT. Five tabs, named by the product owner, and
+ *  no more. A channel is not a tab: it is an OBJECT selected inside `chats`, which
+ *  is why the only tab that takes a child segment is that one
+ *  (`projects/<id>/chats/<channelId>`).
+ *
+ *  The bare `projects/<id>` is deliberately NOT one of these: it is the project's
+ *  OVERVIEW — running tasks and running chats — reached by the project's own name,
+ *  the way a channel is reached by its name. A tab row where every entry is a
+ *  section and the landing is also an entry would name the same place twice.
+ *
+ *  The legacy spellings `overview`/`steering`/`settings` keep parsing (§parsePath)
+ *  so no shipped link dies; they are not tabs and do not appear here. */
+export const projectTabs = ["chats", "tasks", "calendar", "knowledge", "dev"] as const;
+export type ProjectTab = typeof projectTabs[number];
+const isProjectTab = (value: string): value is ProjectTab =>
+  projectTabs.includes(value as ProjectTab);
+
 export type ViewSpec = { name: string; slug?: string; aliases?: string[] };
 
 /** Entity URL grammar. `parent` marks entities that carry a project container. */
@@ -138,18 +156,32 @@ export function parsePath(path: string): Route {
   if (!segs.length) return { view: homeView() };
   const [head, ...rest] = segs;
 
-  // /projects/<projectId>[/issues/<issueId>|/tasks|/calendar]
+  // /projects/<projectId>[/<tab>|/chats/<channelId>|/issues/<issueId>|/steering|/settings]
   if (head === "projects" && rest.length) {
     const projectId = rest[0];
+    // A ticket is a child of the Dev tab, so its URL keeps its own shape but the
+    // workspace frame around it lights `dev` — see App.tsx.
     if (rest[1] === "issues" && rest[2])
       return norm({ view: "Issues", entityType: "issue", entityId: rest.slice(2).join("/"), projectId });
-    if (rest.length === 2 && rest[1] === "overview") return norm({ view: "Project Overview", projectId });
+    // A channel SELECTED INSIDE the Chats tab. The channel is an object of the tab,
+    // never a tab of its own, so it is a segment BELOW `chats`.
+    if (rest.length === 3 && rest[1] === "chats")
+      return norm({ view: "Project Workspace", projectId, tab: "chats", entityType: "channel", entityId: rest[2] });
+    if (rest.length === 2 && isProjectTab(rest[1]))
+      return norm({ view: "Project Workspace", projectId, tab: rest[1] });
+    // Steering and Settings are NOT tabs (the owner named five and meant five); they
+    // stay reachable as quiet actions in the project header and through More.
     if (rest.length === 2 && rest[1] === "steering") return norm({ view: "Project Steering", projectId });
-if (rest.length === 2 && rest[1] === "settings") return norm({ view: "Project Settings", projectId });
-if (rest.length === 2 && rest[1] === "tasks") return norm({ view: "Project Tasks", projectId });
-    if (rest.length === 2 && rest[1] === "calendar") return norm({ view: "Calendar", projectId });
-    if (rest.length === 1)
-      return norm({ view: "Projects", entityType: "project", entityId: projectId });
+    if (rest.length === 2 && rest[1] === "settings") return norm({ view: "Project Settings", projectId });
+    // LEGACY, kept alive on purpose: `/projects/<id>/overview` was the old Project
+    // Overview page. Its content IS the workspace landing now, so the old address
+    // lands there and resync() rewrites it to the canonical `/projects/<id>`.
+    if (rest.length === 2 && rest[1] === "overview") return norm({ view: "Project Workspace", projectId });
+    if (rest.length === 1) return norm({ view: "Project Workspace", projectId });
+    // Anything else under a project is NOT a route. Falling through to the generic
+    // entity grammar below turned `projects/p-1/nonsense` into a project whose id was
+    // literally `p-1/nonsense` — a 404 wearing the costume of a real project.
+    return { view: FALLBACK_VIEW };
   }
 
   // /inbox/<filter> — Activity's worklist, narrowed. Keyed off the registered slug,
@@ -187,11 +219,25 @@ export function buildPath(r: Route): string {
   const slug = viewToSlug[view] ?? toSlug(view);
   const desc = r.entityType ? entityRoutes[r.entityType] : undefined;
 
-  if (r.view === "Project Overview" && r.projectId) return `projects/${enc(r.projectId)}/overview`;
+  // ── THE PROJECT WORKSPACE ────────────────────────────────────────────────
+  // One frame, one tab row. The four surfaces that used to be separate pages now
+  // BUILD INTO the workspace, so every link already shipped across the app keeps
+  // working and simply arrives on the right tab instead of on a page of its own.
+  if (r.view === "Project Workspace" && r.projectId) {
+    if (r.tab === "chats" && r.entityType === "channel" && r.entityId)
+      return `projects/${enc(r.projectId)}/chats/${enc(r.entityId)}`;
+    return isProjectTab(r.tab ?? "") ? `projects/${enc(r.projectId)}/${r.tab}` : `projects/${enc(r.projectId)}`;
+  }
+  if (r.view === "Project Overview" && r.projectId) return `projects/${enc(r.projectId)}`;
   if (r.view === "Project Steering" && r.projectId) return `projects/${enc(r.projectId)}/steering`;
-if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
-if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
+  if (r.view === "Project Settings" && r.projectId) return `projects/${enc(r.projectId)}/settings`;
+  if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
+  if (r.view === "Documents" && r.projectId && !r.containerType) return `projects/${enc(r.projectId)}/knowledge`;
+  if (r.view === "Boards" && r.projectId) return `projects/${enc(r.projectId)}/dev`;
+  // A project's TICKET LIST is the Dev tab. Only the list: a single ticket keeps its
+  // own `/projects/<id>/issues/<issueId>` address, handled by the entity grammar below.
+  if (r.view === "Issues" && r.projectId && !r.entityId) return `projects/${enc(r.projectId)}/dev`;
   if (view === "Inbox" && isActivityFilter(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
     return `channel/${enc(r.entityId)}/${r.tab}`;

@@ -1,10 +1,10 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, channelTabs, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, channelTabs, projectTabs, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
+const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Workspace", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Boards", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -102,13 +102,68 @@ describe("grammar", () => {
     expect(parsePath(path)).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
-  test("project task and calendar routes retain their project context", () => {
-    expect(buildPath({ view: "Project Overview", projectId: "p-1" })).toBe("projects/p-1/overview");
-    expect(parsePath("projects/p-1/overview")).toMatchObject({ view: "Project Overview", projectId: "p-1" });
-    expect(buildPath({ view: "Project Tasks", projectId: "p-1" })).toBe("projects/p-1/tasks");
-    expect(parsePath("projects/p-1/tasks")).toMatchObject({ view: "Project Tasks", projectId: "p-1" });
-    expect(buildPath({ view: "Calendar", projectId: "p-1" })).toBe("projects/p-1/calendar");
-    expect(parsePath("projects/p-1/calendar")).toMatchObject({ view: "Calendar", projectId: "p-1" });
+  // ── THE PROJECT WORKSPACE ────────────────────────────────────────────
+  // One project, one tab row, five tabs. The tab is ROUTE STATE, so a deep link
+  // arrives on the right tab and the sidebar can highlight it.
+  test("the five project tabs round-trip through the one projectTabs grammar", () => {
+    expect([...projectTabs]).toEqual(["chats", "tasks", "calendar", "knowledge", "dev"]);
+    for (const tab of projectTabs) {
+      const path = `projects/p-1/${tab}`;
+      expect(parsePath(path)).toMatchObject({ view: "Project Workspace", projectId: "p-1", tab });
+      expect(buildPath({ view: "Project Workspace", projectId: "p-1", tab })).toBe(path);
+    }
+  });
+
+  test("the bare project URL is the workspace landing, and it is NOT a tab", () => {
+    // The project's own name is its home. A tab row whose landing is also one of its
+    // entries would name the same place twice, so the overview has no tab segment.
+    expect(parsePath("projects/p-1")).toMatchObject({ view: "Project Workspace", projectId: "p-1" });
+    expect(parsePath("projects/p-1").tab).toBeUndefined();
+    expect(buildPath({ view: "Project Workspace", projectId: "p-1" })).toBe("projects/p-1");
+    // An unknown tab is not a route: it degrades to the fallback, never to a blank tab.
+    expect(parsePath("projects/p-1/nonsense")).toMatchObject({ view: "Dashboard" });
+  });
+
+  test("a channel is an OBJECT INSIDE the Chats tab, never a tab of its own", () => {
+    const target = { view: "Project Workspace", projectId: "p-1", tab: "chats", entityType: "channel", entityId: "c-7" };
+    expect(buildPath(target)).toBe("projects/p-1/chats/c-7");
+    expect(parsePath("projects/p-1/chats/c-7")).toMatchObject(target);
+    // The tab with no channel selected is still a real, linkable address.
+    expect(buildPath({ view: "Project Workspace", projectId: "p-1", tab: "chats" })).toBe("projects/p-1/chats");
+  });
+
+  test("Steering and Settings stay reachable, and are NOT tabs", () => {
+    expect(buildPath({ view: "Project Steering", projectId: "p-1" })).toBe("projects/p-1/steering");
+    expect(parsePath("projects/p-1/steering")).toMatchObject({ view: "Project Steering", projectId: "p-1" });
+    expect(parsePath("projects/p-1/steering").tab).toBeUndefined();
+    expect(buildPath({ view: "Project Settings", projectId: "p-1" })).toBe("projects/p-1/settings");
+    expect(parsePath("projects/p-1/settings")).toMatchObject({ view: "Project Settings", projectId: "p-1" });
+  });
+
+  test("the surfaces that BECAME tabs keep their shipped addresses and land on the tab", () => {
+    // Every link already written across the app keeps working. It no longer opens a
+    // page of its own; it arrives on the tab where that surface now lives. The address
+    // is CANONICAL on both sides (build(parse(x)) === x), so resync never loops.
+    const landsOn = (from: Parameters<typeof buildPath>[0], path: string, tab?: string) => {
+      expect(buildPath(from)).toBe(path);
+      expect(parsePath(path)).toMatchObject({ view: "Project Workspace", projectId: "p-1", ...(tab ? { tab } : {}) });
+      expect(buildPath(parsePath(path))).toBe(path);
+    };
+    landsOn({ view: "Project Tasks", projectId: "p-1" }, "projects/p-1/tasks", "tasks");
+    landsOn({ view: "Calendar", projectId: "p-1" }, "projects/p-1/calendar", "calendar");
+    landsOn({ view: "Boards", projectId: "p-1" }, "projects/p-1/dev", "dev");
+    landsOn({ view: "Issues", projectId: "p-1" }, "projects/p-1/dev", "dev");
+    // The old Project Overview page: its content IS the landing now.
+    landsOn({ view: "Project Overview", projectId: "p-1" }, "projects/p-1");
+    // ...and the legacy `/overview` spelling still resolves rather than 404-ing.
+    expect(parsePath("projects/p-1/overview")).toMatchObject({ view: "Project Workspace", projectId: "p-1" });
+  });
+
+  test("a single ticket keeps its own address even though the list is the Dev tab", () => {
+    expect(buildPath({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" }))
+      .toBe("projects/p-1/issues/i-1");
+    expect(parsePath("projects/p-1/issues/i-1"))
+      .toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
   test("document routes carry a valid container type + id, incl. the null container", () => {
@@ -156,7 +211,10 @@ describe("grammar", () => {
     expect(parsePath("channels/c-1")).toMatchObject({ view: "Chat", entityType: "channel", entityId: "c-1" });
     expect(parsePath("meetings/m-1")).toMatchObject({ view: "Meetings", entityType: "meeting", entityId: "m-1" });
     expect(parsePath("profiles/pr-1")).toMatchObject({ view: "Members", entityType: "profile", entityId: "pr-1" });
-    expect(parsePath("projects/p-1")).toMatchObject({ view: "Projects", entityType: "project", entityId: "p-1" });
+    // A project link from Goto still resolves — to the workspace, which is where a
+    // project now opens. The entity grammar builds the same address either way.
+    expect(buildPath({ view: "Projects", entityType: "project", entityId: "p-1" })).toBe("projects/p-1");
+    expect(parsePath("projects/p-1")).toMatchObject({ view: "Project Workspace", projectId: "p-1" });
     expect(parsePath("reviews/r-1")).toMatchObject({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
     expect(entityView("channel")).toBe("Chat");
   });

@@ -11,7 +11,7 @@ const ALL_VIEWS = [
   "Issues", "Boards", "Chat", "Inbox", "Documents", "Blogs", "Calendar", "Meetings",
   "Dev Environments", "Packages", "Members", "Locations", "Admin", "Applications", "Users",
   "Development", "Team Tasks", "Project Tasks", "Project Overview", "Project Steering",
-  "Project Settings", "Settings",
+  "Project Settings", "Project Workspace", "Settings",
 ];
 
 registerViews(ALL_VIEWS);
@@ -62,11 +62,31 @@ describe("deep links arrive with the right mode", () => {
     expect(modeOfPath("channels/c-1")).toBe("chats");
   });
 
-  it("a ticket URL is Development", () => {
-    expect(modeOfPath("projects/p-1/issues/i-9")).toBe("development");
+  it("a ticket URL is Development — unless it is scoped to a project", () => {
     expect(modeOfPath("issues/i-9")).toBe("development");
     expect(modeOfPath("boards")).toBe("development");
     expect(modeOfPath("reviews/r-2")).toBe("development");
+    // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE (stage 19). A ticket opened at
+    // `/projects/<id>/issues/<id>` renders inside the project workspace, under the
+    // project's own tab row, so the sidebar must list projects — not repositories.
+    // Deriving the mode from the view name alone put this in the wrong sidebar.
+    expect(modeOfPath("projects/p-1/issues/i-9")).toBe("projects");
+  });
+
+  it("every project address resolves to the projects mode, whatever it renders", () => {
+    for (const path of [
+      "projects",
+      "projects/p-1",
+      "projects/p-1/chats",
+      "projects/p-1/chats/c-7",   // a channel INSIDE the project
+      "projects/p-1/tasks",
+      "projects/p-1/calendar",
+      "projects/p-1/knowledge",
+      "projects/p-1/dev",
+      "projects/p-1/steering",
+      "projects/p-1/settings",
+      "projects/p-1/issues/i-9",
+    ]) expect(modeOfPath(path)).toBe("projects");
   });
 
   it("a document URL is More", () => {
@@ -80,7 +100,10 @@ describe("deep links arrive with the right mode", () => {
     expect(modeOfPath("projects/p-1/tasks")).toBe("projects");
     expect(modeOfPath("team-tasks")).toBe("tasks");
     expect(modeOfPath("to-do")).toBe("tasks");
-    expect(modeOfPath("projects/p-1/calendar")).toBe("calendar");
+    // The project's calendar is the project's Calendar TAB, so it stays in the
+    // projects mode: leaving for the calendar sidebar would lose the project.
+    expect(modeOfPath("projects/p-1/calendar")).toBe("projects");
+    expect(modeOfPath("calendar")).toBe("calendar");
     expect(modeOfPath("meetings/m-1")).toBe("calendar");
   });
 

@@ -99,6 +99,10 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   // "Projects, Project Overview, Project Steering, Project Settings" — four entries
   // for one thing, in the drawer meant for what has no home.
   Projects: "projects",
+  // THE workspace: one project, one frame, one tab row. The four surfaces below it
+  // are still registered views (they are what its tabs mount, and what old links
+  // resolve to), so they keep their single home in this mode too.
+  "Project Workspace": "projects",
   "Project Overview": "projects",
   "Project Steering": "projects",
   "Project Settings": "projects",
@@ -123,8 +127,16 @@ export const railModeOfView = (view: string): RailMode => MODE_OF_VIEW[view] ?? 
 /** Route -> mode. The entity type wins where a view is SHARED: a channel URL renders
  *  the Chat view, and a channel is always a conversation. Everything else is decided
  *  by the view name, which is the routing key itself. */
-export const railModeOfRoute = (route: { view: string; entityType?: string }): RailMode =>
-  route.entityType === "channel" ? "chats" : railModeOfView(route.view);
+export const railModeOfRoute = (route: { view: string; entityType?: string; projectId?: string }): RailMode => {
+  // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE. This wins over the entity type and
+  // over the view name, because both lie about a project-scoped address: a channel
+  // opened inside the workspace (`/projects/<id>/chats/<cid>`) renders the Chat view
+  // and carries `entityType: "channel"`, yet you are standing in the project — and a
+  // ticket at `/projects/<id>/issues/<iid>` renders Issues, whose own home is
+  // Development. Deriving the mode from the view alone put both in the wrong sidebar.
+  if (route.projectId) return "projects";
+  return route.entityType === "channel" ? "chats" : railModeOfView(route.view);
+};
 
 /** Views that own a rail mode's landing surface — used to keep the More sidebar
  *  free of duplicates without hand-maintaining a second list. */
