@@ -1,0 +1,93 @@
+/* ── EmptyState ─────────────────────────────────────────────────────────────
+   Companion sheet to EmptyState.tsx. The visual language is HomeCalendar.css:
+   paper, hairline, muted copy, generous spacing.
+
+   HARD RULE, same as paper.css / controls.css: every COLOUR selector starts at
+   `.theme-space-light`, so the grouped/flat DARK layouts are untouched. The
+   unscoped block below carries STRUCTURE ONLY (stacking and spacing) — these
+   class names are new, nothing rendered them before this file existed, so an
+   unscoped rule on them cannot move one pixel of a pre-existing dark surface,
+   and without it the dark theme would render the actions as a bare run-on line.
+
+   That distinction is the lesson controls.css already paid for: the theme class
+   may own colour, fill and weight; it may NOT own whether a box has a layout. */
+
+/* ── structure (every theme) ─────────────────────────────────────────────── */
+.empty-lead {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.empty-lead-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.empty-lead-icon { display: inline-flex; line-height: 0; }
+
+/* ── light theme ─────────────────────────────────────────────────────────── */
+.theme-space-light .empty-lead {
+  margin: 0;
+  padding: 30px 24px 26px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  background: transparent;
+  color: var(--muted);
+}
+/* Filters excluded everything: the same frame, one notch quieter, so that the
+   two cases are never mistaken for each other at a glance. */
+.theme-space-light .empty-lead.no-match {
+  padding: 22px 20px 20px;
+  border-style: solid;
+  border-color: var(--line);
+  background: var(--wash);
+}
+
+.theme-space-light .empty-lead-icon { color: var(--quiet); }
+.theme-space-light .empty-lead-title {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-head, inherit);
+  font-size: 15px;
+  font-weight: 710;
+  letter-spacing: -.02em;
+  line-height: 1.3;
+}
+.theme-space-light .empty-lead.no-match .empty-lead-title { font-size: 13.5px; font-weight: 680; color: var(--muted); }
+.theme-space-light .empty-lead-hint {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--quiet);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The teal primary keeps its colour and joins the shared control silhouette so
+   the action row does not step up in height. Same treatment as .control-row. */
+.theme-space-light .empty-lead-actions :is(button.primary, a.primary) {
+  min-height: var(--pillctl-h, 36px);
+  border-radius: var(--pillctl-r, 999px);
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+/* On the bare dashed frame a no-fill GhostPill is still just a word — same
+   concession to placement that `.pgh-actions > .ghost-pill` already makes. */
+.theme-space-light .empty-lead-actions > .ghost-pill { border-color: var(--line); }
+.theme-space-light .empty-lead-actions > .ghost-pill:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--wash-2);
+}
+
+/* Inside a paper card the card already supplies the frame; a second dashed box
+   inside it is the "boxes inside boxes" the redesign is removing. */
+.theme-space-light :is(.paper-card, .ph-card, .cw-card) > .empty-lead {
+  border: 0;
+  padding: 20px 4px 16px;
+  background: transparent;
+}
