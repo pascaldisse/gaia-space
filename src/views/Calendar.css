@@ -91,7 +91,11 @@
 .cal-toolbar-gap{flex:1 1 auto;min-width:0}
 .cal-nav{display:inline-flex;align-items:center;gap:var(--cal-space-sm)}
 .cal-viewopts{position:relative;display:inline-flex}
-.cal-viewopts-menu{position:absolute;top:calc(100% + 8px);right:0;z-index:60;min-width:216px}
+/* A popover is one of the few new elements that needs a SURFACE in every theme
+   — without one it would print its text straight onto the page underneath. The
+   dark values come from App.css's own tokens, and the light block below
+   overrides them; neither theme is left with a transparent dialog. */
+.cal-viewopts-menu{position:absolute;top:calc(100% + 8px);right:0;z-index:60;min-width:216px;padding:var(--cal-space-3xl);border:var(--cal-hairline) solid var(--surface-border);border-radius:var(--radius-control);background:var(--surface-raised);color:var(--text);box-shadow:0 16px 40px rgba(0,0,0,.45)}
 .cal-viewopts-menu .calendar-options{display:grid;gap:var(--cal-space-sm)}
 .cal-viewopts-menu .calendar-legend{display:grid;gap:var(--cal-space-sm);margin:0}
 
