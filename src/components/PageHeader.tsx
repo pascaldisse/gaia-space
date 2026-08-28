@@ -2,6 +2,7 @@ import { Show, createContext, useContext, type Accessor, type JSX } from "solid-
 import { Dynamic } from "solid-js/web";
 import { orgName } from "../orgScope";
 import { metricTone, type Tone } from "../statusTone";
+import { Icon, type IconName } from "./Icon";
 import "./PageHeader.css";
 
 /**
@@ -59,6 +60,10 @@ export const useEmbedded = (): Accessor<EmbeddedScope | undefined> => useContext
  *  omit it; project-scoped views pass the project. */
 export default function PageHeader(props: {
   kicker?: string;
+  /** The surface's own mark, drawn as the tile Knowledge introduced. It is the SAME
+   *  glyph the rail uses for that area, so the page and the way into it agree — that
+   *  is the whole point of putting it here rather than inventing one per view. */
+  icon?: IconName;
   title: string;
   subline?: JSX.Element;
   chips?: JSX.Element;
@@ -97,12 +102,19 @@ export default function PageHeader(props: {
               </Show>
             }
           >
-            <div class="pgh-title">
-              <div class="kicker">{kicker()}</div>
-              <h1>{props.title}</h1>
-              <Show when={props.subline}>
-                <div class="subtitle">{props.subline}</div>
+            <div class="pgh-lead">
+              <Show when={props.icon}>
+                {(name) => (
+                  <span class="pgh-icon" aria-hidden="true"><Icon name={name()} size={22} /></span>
+                )}
               </Show>
+              <div class="pgh-title">
+                <div class="kicker">{kicker()}</div>
+                <h1>{props.title}</h1>
+                <Show when={props.subline}>
+                  <div class="subtitle">{props.subline}</div>
+                </Show>
+              </div>
             </div>
           </Show>
           <Show when={props.chips || props.actions}>

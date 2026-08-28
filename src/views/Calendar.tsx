@@ -200,7 +200,8 @@ return <section class="calendar-view">
 {/* FILTERS ARE THE HEADER LANE, not a card of their own. Each one's VALUE is
     its label ("Jannes", "All locations"), so no caption floats above a field
     and the row reads like Development's. Names live in `aria-label`. */}
-<PageHeader kicker={scopeName()} title={scopeProjectId() ? "Project calendar" : "Calendar"} actions={<>
+<PageHeader kicker={scopeName()} icon="calendar" title={scopeProjectId() ? "Project calendar" : "Calendar"}
+subline={scopeProjectId() ? "This project's meetings, deadlines and time off on one grid" : "Every meeting, deadline and absence on one grid"} actions={<>
 <ProfilePicker label="Member calendar" labelHidden value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/>
 <PillSelect label="Location calendar" value={targetLocation()} onChange={setTargetLocation}>
 <option value="">All locations</option>

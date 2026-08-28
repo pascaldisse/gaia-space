@@ -29,6 +29,22 @@
   padding: var(--view-pad-y) var(--view-pad-x) 0;
 }
 
+/* THE SURFACE'S MARK. Knowledge introduced the tile (a round-cornered square in the
+   accent wash) and it reads better than a bare title: the eye finds the area before it
+   reads the word. It lives HERE so every view gets the same one from the same rail
+   glyph, instead of each view inventing an ornament of its own. */
+.pgh-lead { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.pgh-icon {
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  margin-top: 14px;
+  border-radius: 13px;
+  border: 1px solid var(--surface-border, var(--line, #e5ddd3));
+  background: var(--accent-soft, var(--teal-soft, #dcf7f2));
+  color: var(--accent-text, var(--teal-ink, #0a7264));
+}
+
 .pgh-row {
   display: flex;
   justify-content: space-between;

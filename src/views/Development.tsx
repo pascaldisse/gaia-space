@@ -68,7 +68,6 @@ export default function Development(): JSX.Element {
       </For>
     </nav>
   );
-  const sectionLabel = () => SECTIONS.find((entry) => entry.key === section())!.label;
 
   return (
     <section class="dev-view">
@@ -81,7 +80,8 @@ export default function Development(): JSX.Element {
       <Show when={section() === "pull-requests" || section() === "releases"}>
         {/* These two have no view of their own to bring a header, so this lane
             supplies one — same shape, same order. */}
-        <PageHeader kicker={projectName(projectId())} title="Development" subline={sectionLabel()} />
+        <PageHeader kicker={projectName(projectId())} icon="target" title="Development"
+          subline="Tickets, boards, pull requests and pipelines — the work that carries a status" />
         {tabs()}
       </Show>
 

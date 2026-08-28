@@ -210,7 +210,9 @@ export default function Inbox() {
   return (
     <section class="inbox-view">
       <PageHeader
+        icon="inbox"
         title="Inbox"
+        subline="What is waiting for you, and what the organisation has been doing"
         chips={
           <Show when={attentionCount()}>
             <Chip value={attentionCount()} label="needs you" />
