@@ -6,6 +6,7 @@ import { currentUser, profileId, profiles, projects, reloadProfiles, reloadProje
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
 import Chat from "./Chat";
 import ProjectHome from "./ProjectHome";
 import ProjectTasks from "./ProjectTasks";
@@ -28,6 +29,10 @@ import { UI_LOCALE } from "../calendar";
  *    channel WITHOUT a project shows no tab row at all (hidden, never an empty tab).
  *  - The right rail's numbers are PROJECT numbers. The card is therefore labelled with
  *    the project name, so no figure can pretend to be about this channel alone.
+ *  - THE SCOPE IS DECIDED HERE (audit §3.5). This header writes the project and the
+ *    channel; every view mounted below is wrapped in `EmbeddedScopeProvider`, so no
+ *    guest repeats that title and none of them asks for a project, a container or an
+ *    identity that this surface has already fixed.
  */
 
 type TabKey = (typeof channelTabs)[number];
@@ -102,6 +107,16 @@ export default function ChannelWorkspace(): JSX.Element {
   const tabs = () => TABS.filter((entry) => !entry.needsProject || !!project());
   const visibleTab = (): TabKey => (tabs().some((entry) => entry.key === tab()) ? tab() : "messages");
 
+  /* What this host has already decided for its guests. `identityLocked` because the
+     shell owns "Acting as" alone — a channel is entered as one person. */
+  const embeddedScope = createMemo<EmbeddedScope>(() => ({
+    host: `# ${channel()?.name ?? "Channel"}`,
+    projectId: projectIdOf() || undefined,
+    container: "project",
+    containerId: projectIdOf() || undefined,
+    identityLocked: true,
+  }));
+
   return (
     <div class="channel-workspace">
       <header class="cw-header">
@@ -153,10 +168,13 @@ export default function ChannelWorkspace(): JSX.Element {
                 renders neither, instead of rendering them hidden. */}
             <Chat embedded />
           </Show>
-          <Show when={visibleTab() === "overview"}><ProjectHome project={project()} /></Show>
-          <Show when={visibleTab() === "tasks"}><ProjectTasks projectId={projectIdOf()} /></Show>
-          <Show when={visibleTab() === "calendar"}><Calendar projectId={projectIdOf()} /></Show>
-          <Show when={visibleTab() === "files"}><Documents container="project" containerId={projectIdOf()} /></Show>
+          {/* One installation covers every guest tab: they read the scope from context. */}
+          <EmbeddedScopeProvider scope={embeddedScope()}>
+            <Show when={visibleTab() === "overview"}><ProjectHome project={project()} /></Show>
+            <Show when={visibleTab() === "tasks"}><ProjectTasks projectId={projectIdOf()} /></Show>
+            <Show when={visibleTab() === "calendar"}><Calendar projectId={projectIdOf()} /></Show>
+            <Show when={visibleTab() === "files"}><Documents container="project" containerId={projectIdOf()} /></Show>
+          </EmbeddedScopeProvider>
           <Show when={visibleTab() === "notes"}>
             {/* Honest empty state: there is no notes/decisions store in the data model.
                 Documents is the file surface (tab "Files & Links"); minutes and
