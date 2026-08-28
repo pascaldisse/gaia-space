@@ -182,19 +182,15 @@ test("the folder tree is keyboard-operable and announces its expansion state", a
     expect(item.getAttribute("aria-selected")).toBe("true");
   });
 
-  // My Documents remains an anchor; Project Docs is its own combined picker (books
-  // included), so the selection happens in one place instead of two.
-  test("Project Docs is presented as the combined source picker", async () => {
+  // The source (My Documents / organization book / project library) is chosen in the
+  // shell's Knowledge sidebar, so this page shows no tabs and no picker.
+  test("the source picker belongs to the shell, not to the page", async () => {
     setProfileId("me");
     serve({ list_document_folders: { ok: true, value: [] }, list_documents: { ok: true, value: [] } });
     const host = await mount();
 
-    const tabs = [...host.querySelectorAll("a.container-tab")];
-    expect(tabs.map((a) => a.textContent)).toEqual(["My Documents"]);
-    // Project Docs is a real native select, retaining keyboard access and the
-    // platform picker while combining source and project selection.
-    expect(host.querySelector('select[aria-label="Project Docs"]')).not.toBeNull();
-    expect(tabs[0]?.getAttribute("href")).toMatch(/\/documents\/my-docs/);
+    expect(host.querySelectorAll("a.container-tab").length).toBe(0);
+    expect(host.querySelector('select[aria-label="Project Docs"]')).toBeNull();
   });
 
   // In KB the book row is itself the root of the tree, so an article filed directly in

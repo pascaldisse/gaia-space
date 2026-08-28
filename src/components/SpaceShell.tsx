@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./Icon";
 import NewChannelDialog from "./NewChannelDialog";
 import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
 import { chatApi, type ChannelSummary } from "../api/chat";
+import { documentsApi } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, type ActivityFilter } from "../attention";
@@ -91,6 +92,9 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Locations", view: "Locations", icon: "org" },
     { label: "Time off", view: "Absences", icon: "clock-nav" },
   ],
+  // Knowledge's objects are the LIBRARIES, and every one of them is DATA (the personal
+  // container, the organization's books, each project's library), so none of them can be
+  // written here: the mode's column is built below, from what exists.
   knowledge: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
@@ -171,6 +175,16 @@ export default function SpaceShell(props: {
   // then the connected workspace, and only then the product name as a last resort — a
   // failing/absent org read must not rename somebody's workspace.
   const [organization] = createResource(() => platformApi.organization().catch(() => undefined));
+
+  /** Knowledge's objects: the organization's books (kb container roots) and, beside them,
+   *  one library per project. Read once here so the sidebar can list them; the Documents
+   *  view keeps its own reads for the tree it draws. */
+  const [documentFolders] = createResource(() => documentsApi.listDocumentFolders().catch(() => []));
+  const orgLibraries = () =>
+    (documentFolders() ?? [])
+      .filter((folder) => folder.container_type === "kb" && folder.parent_id === null && !folder.archived)
+      .filter((folder) => matches(folder.name ?? ""))
+      .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   const workspaceName = () =>
     organization()?.name?.trim() ||
     workspaces().find((workspace) => workspace.id === workspaceId())?.name ||
@@ -191,7 +205,9 @@ export default function SpaceShell(props: {
   // stay in view even on the start page. Home still lists no DESTINATIONS — those
   // were the rail printed twice.
   const showsChannels = createMemo(() => mode() === "chats" || mode() === "home");
-  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels());
+  // Knowledge lists libraries, all of them data, so it keeps its column too — before
+  // this it was the one mode where the second bar disappeared mid-navigation.
+  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "knowledge");
 
   /** Named channels grouped by owning project; project-less channels land in a final section.
    *  DMs/threads carry no name and are not part of the project channel list. */
@@ -399,6 +415,58 @@ export default function SpaceShell(props: {
                   class="side-link"
                   classList={{ active: route().projectId === project.id }}
                   {...navLink(() => ({ view: "Project Overview", projectId: project.id }))}
+                >
+                  <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
+                  {project.name}
+                </a>
+              )}
+            </For>
+            <Show when={!projectList().length}>
+              <div class="side-empty">No projects yet.</div>
+            </Show>
+          </div>
+        </Show>
+
+        {/* One library per row, the organization's above the projects' — the same shape
+            Chats uses for channels. Choosing a source happens HERE now, so the Documents
+            page no longer carries a second picker of its own (one act, one place). */}
+        <Show when={mode() === "knowledge"}>
+          {/* The personal container is the anchor and carries its OWN container in the
+              link: arriving from a project library must actually switch the source. */}
+          <a
+            class="side-link strong"
+            classList={{ active: (route().containerType ?? "my-docs") === "my-docs" }}
+            {...navLink(() => ({ view: "Documents", containerType: "my-docs", containerId: actingProfileId() ?? undefined }))}
+          >
+            <span class="side-icon" aria-hidden="true"><Icon name="book-nav" size={15} /></span>
+            My Documents
+          </a>
+          <div class="section">
+            <div class="section-head"><span>Organization library</span></div>
+            <For each={orgLibraries()}>
+              {(book) => (
+                <a
+                  class="side-link"
+                  classList={{ active: route().containerType === "kb" && route().containerId === book.id }}
+                  {...navLink(() => ({ view: "Documents", containerType: "kb", containerId: book.id }))}
+                >
+                  <span class="side-icon" aria-hidden="true"><Icon name="book-nav" size={15} /></span>
+                  {book.name}
+                </a>
+              )}
+            </For>
+            <Show when={!orgLibraries().length}>
+              <div class="side-empty">No organization library yet.</div>
+            </Show>
+          </div>
+          <div class="section">
+            <div class="section-head"><span>Project libraries</span></div>
+            <For each={projectList()}>
+              {(project) => (
+                <a
+                  class="side-link"
+                  classList={{ active: route().containerType === "project" && route().containerId === project.id }}
+                  {...navLink(() => ({ view: "Documents", containerType: "project", containerId: project.id }))}
                 >
                   <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
                   {project.name}

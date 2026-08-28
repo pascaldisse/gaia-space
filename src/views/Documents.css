@@ -196,7 +196,11 @@
   border-radius: var(--dk-radius-sm);
 }
 .folder-row:hover { background: var(--dk-row-hover-bg); }
-.folder-row:hover .folder-actions { opacity: 1; }
+/* The row's actions used to be invisible AND still 160px wide, which left ~40px for the
+   name in a 260px column: a folder called "Test" read as "T…". They are laid out only
+   when the row is actually hovered or focused. */
+.folder-row:hover .folder-actions,
+.folder-row:focus-within .folder-actions { display: flex; opacity: 1; }
 
 .folder-toggle {
   cursor: pointer;
@@ -209,6 +213,8 @@
 .folder-name {
   cursor: pointer;
   flex: 1;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -227,7 +233,7 @@
 }
 
 .folder-actions {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 0.2em;
   opacity: 0;
@@ -438,6 +444,16 @@
 .documents-library-card-copy strong, .documents-library-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .documents-library-card-copy small { color: var(--text-muted); font-size: var(--dk-fs-xs); }
 .documents-library-open { margin-left: auto; color: var(--accent-text); }
+/* A folder card is a button, not a link (it moves you inside the same page), so it
+   must be told to stop looking like one. */
+button.documents-library-card { font: inherit; text-align: left; cursor: pointer; }
+.documents-library-up {
+  justify-self: start; display: inline-flex; align-items: center; gap: var(--dk-space-xs);
+  padding: 0.2rem 0.55rem; border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-md); background: var(--surface);
+  color: var(--text-muted); font: inherit; font-size: var(--dk-fs-sm); cursor: pointer;
+}
+.documents-library-up:hover { color: var(--accent-text); border-color: var(--accent); }
 .documents-library-link {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--dk-space-xs);
   margin: var(--dk-space-sm) auto 0; color: var(--accent-text); font-size: var(--dk-fs-sm); font-weight: 650;
