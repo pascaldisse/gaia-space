@@ -91,6 +91,19 @@ const MODE_TITLE: Record<RailMode, string> = {
   tasks: "Tasks", calendar: "Calendar", development: "Development", more: "More",
 };
 
+/** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
+ *  href at first render: the rail's links were still `/dashboard` (the fallback, from
+ *  before registerViews ran), and the Chats landing could never see channels that load
+ *  later. Getters make the spread re-read — Solid's spread runs in a computation — so the
+ *  href is always the CURRENT route, and copy/middle-click give a real URL. */
+const navLink = (target: () => Route) => {
+  const props = createMemo(() => linkProps(target()));
+  return {
+    get href() { return props().href; },
+    onClick: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => props().onClick(event),
+  };
+};
+
 const initials = (label: string) =>
   label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
 
@@ -218,7 +231,7 @@ export default function SpaceShell(props: {
       aria-label={entry.label}
       aria-current={mode() === entry.mode ? "true" : undefined}
       classList={{ active: mode() === entry.mode }}
-      {...linkProps(landingRoute(entry))}
+      {...navLink(() => landingRoute(entry))}
     >
       <span class="rail-icon" aria-hidden="true"><Icon name={entry.icon} size={18} /></span>
       <span class="rail-label">{entry.label}</span>
@@ -231,7 +244,7 @@ export default function SpaceShell(props: {
       class="side-link"
       aria-current={!entry.provisional && props.active === entry.view ? "page" : undefined}
       classList={{ active: !entry.provisional && props.active === entry.view }}
-      {...linkProps({ view: entry.view })}
+      {...navLink(() => ({ view: entry.view }))}
     >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
       {entry.strong ? <strong>{entry.label}</strong> : entry.label}
@@ -267,15 +280,16 @@ export default function SpaceShell(props: {
 
       <Show when={moreOpen()}>
         <div class="more-backdrop" onClick={() => setMoreOpen(false)} />
-        <nav class="more-panel" aria-label="All views">
+        {/* The panel closes on the container's click, not on each item: an item's own
+            onClick attribute would SHADOW the spread navigation handler. */}
+        <nav class="more-panel" aria-label="All views" onClick={() => setMoreOpen(false)}>
           <h2>All views</h2>
           <For each={moreViews()}>
             {(view) => (
               <a
                 class="more-item"
                 classList={{ active: props.active === view.name }}
-                {...linkProps({ view: view.name })}
-                onClick={() => setMoreOpen(false)}
+                {...navLink(() => ({ view: view.name }))}
               >
                 <span class="side-icon" aria-hidden="true"><Icon name={view.icon} size={16} /></span>
                 {viewLabel(view.name)}
@@ -319,7 +333,7 @@ export default function SpaceShell(props: {
                 <a
                   class="side-link"
                   classList={{ active: route().view === "Project Tasks" && route().projectId === project.id }}
-                  {...linkProps({ view: "Project Tasks", projectId: project.id })}
+                  {...navLink(() => ({ view: "Project Tasks", projectId: project.id }))}
                 >
                   <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
                   {project.name}
@@ -340,7 +354,7 @@ export default function SpaceShell(props: {
                 <a
                   class="side-link"
                   classList={{ active: props.active === view.name }}
-                  {...linkProps({ view: view.name })}
+                  {...navLink(() => ({ view: view.name }))}
                 >
                   <span class="side-icon" aria-hidden="true"><Icon name={view.icon} size={15} /></span>
                   {viewLabel(view.name)}
@@ -364,7 +378,7 @@ export default function SpaceShell(props: {
                   <a
                     class="channel"
                     classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
-                    {...linkProps({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" })}
+                    {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                   >
                     <span class="hash" aria-hidden="true">#</span>
                     {channel.name}
@@ -383,7 +397,7 @@ export default function SpaceShell(props: {
                 <a
                   class="channel"
                   classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
-                  {...linkProps({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" })}
+                  {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                 >
                   <span class="hash" aria-hidden="true">@</span>
                   {channel.name ?? "Direct message"}
