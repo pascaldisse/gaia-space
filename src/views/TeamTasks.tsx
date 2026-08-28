@@ -2,12 +2,16 @@ import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
-import { linkProps, navigate } from "../router";
-import { GhostPill, QuietSearch } from "../components/controls";
+import { linkProps } from "../router";
+import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import TaskDrawer from "../components/TaskDrawer";
+import TaskRowEdit from "../components/TaskRowEdit";
 import { todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
+import "../components/TaskList.css";
+import "../components/TaskRowEdit.css";
 import "./Issues.css";
 import "./TeamTasks.css";
 
@@ -22,6 +26,12 @@ export default function TeamTasks() {
   const [text, setText] = createSignal("");
   const [assigneeId, setAssigneeId] = createSignal(""); // "" = ALL people. The point of the view.
   const [includeDone, setIncludeDone] = createSignal(false);
+  const [filtersOpen, setFiltersOpen] = createSignal(false);
+  const [creating, setCreating] = createSignal(false);
+  // ONE ROW OPEN AT A TIME, and the focus goes back to the row that opened it.
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [rowError, setRowError] = createSignal("");
+  let openerEl: HTMLElement | undefined;
 
   const [tasks, { refetch: reloadTasks }] = createResource(
     () => [profileId(), includeDone()] as const,
@@ -62,6 +72,23 @@ export default function TeamTasks() {
      only ever ADDS rows, so it can never be the reason nothing is shown. */
   const filtered = () => !!text().trim() || !!assigneeId();
   const clearFilters = () => { setText(""); setAssigneeId(""); };
+  /* THE DEFAULT VIEW IS A LIST AND A BUTTON (stage 20). Search, the assignee filter
+     and "Show completed" rest behind one "Filter" pill; they are worth keeping on a
+     cross-project list that can grow long, but they are not what this page IS.
+     A filter that is ON forces the row back open — a short list must always be able
+     to explain why it is short. */
+  const toolsOpen = () => filtersOpen() || filtered() || includeDone();
+  const editTask = (task: Todo, event: { currentTarget: HTMLElement }) => { openerEl = event.currentTarget; setEditingId(task.id); setRowError(""); };
+  const closeEdit = () => {
+    const opener = openerEl; openerEl = undefined; setEditingId(null);
+    queueMicrotask(() => { if (opener?.isConnected) opener.focus(); });
+  };
+  /* The server's rule, quoted not invented: `update_todo` is owner-only
+     (TodoOwnerWrite); `set_todo_completion` is owner or assignee. On a surface whose
+     whole point is OTHER people's work, most rows are therefore read-only — and say
+     so, instead of offering a form the server would refuse. */
+  const owns = (task: Todo) => task.profile_id === profileId();
+  const mayComplete = (task: Todo) => owns(task) || task.assignee_ids.includes(profileId());
   /** Grouped by project, project names ordered alphabetically so the list is stable. */
   const groups = () => {
     const by = new Map<string, Todo[]>();
@@ -77,15 +104,29 @@ export default function TeamTasks() {
 
   return <section class="planning-view team-tasks-view">
     {/* Sibling sentences live in Todo.tsx and ProjectTasks.tsx: whose work, how wide. */}
-    <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." />
+    <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." actions={
+      <div class="planning-actions">
+        <button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>
+      </div>
+    } />
     <Show when={loadError()}>{error => <p class="planning-error" role="alert">Could not load team tasks: {String(error())}</p>}</Show>
-    <div class="filter-row" aria-label="Team task filters">
+    <Show when={rowError()}><p class="planning-error" role="alert">{rowError()}</p></Show>
+    {/* A FAILED READ HAS NOTHING TO COUNT AND NOTHING TO FILTER. `visible()` reads
+        the resource, and reading an errored resource re-throws — so the whole tools
+        block is guarded by the same condition that draws the alert. */}
+    <Show when={!loadError()}>
+    <div class="task-tools">
+      <h2>Running tasks <small>{visible().length}</small></h2>
+      <GhostPill aria-expanded={toolsOpen()} onClick={() => setFiltersOpen(!toolsOpen())}>Filter</GhostPill>
+    </div>
+    <ControlRow label="Team task filters" class="filter-row" hidden={!toolsOpen()}>
       {/* One control language: a quiet search and a pill whose resting value
           ("All profiles") is its own label — no caption above either. */}
       <QuietSearch label="Search team tasks" placeholder="Search tasks" value={text()} onInput={setText} />
       <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
       <label class="tt-toggle"><input type="checkbox" aria-label="Show completed" checked={includeDone()} onChange={event => setIncludeDone(event.currentTarget.checked)} /> Show completed</label>
-    </div>
+    </ControlRow>
+    </Show>
     <Show when={!loadError() && !profileId()}><p class="hint">Your account profile is still loading; team tasks will appear when it is ready.</p></Show>
     <Show when={!loadError() && (tasks.loading || projectsLoading())}><p class="hint">Loading team tasks…</p></Show>
     {/* FILTERS MATCH NOTHING: the store has work, this filter simply hides it,
@@ -94,36 +135,52 @@ export default function TeamTasks() {
     <Show when={!loadError() && !tasks.loading && !projectsLoading() && !groups().length && filtered()}>
       <EmptyState variant="no-match" title="No team tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
     </Show>
-    {/* NOTHING YET across every project the caller is a member of. This surface
-        has no composer of its own; creation lives in My tasks, so that is where
-        the primary goes — named for what it does, not for where it lands. */}
+    {/* NOTHING YET across every project the caller is a member of. Creation used to
+        be a navigation to My tasks; it is the same drawer as everywhere else now, so
+        the primary does the thing instead of sending the reader somewhere to do it. */}
     <Show when={!loadError() && !tasks.loading && !projectsLoading() && !groups().length && !filtered() && !!profileId()}>
       <EmptyState
         title="Nobody has a running task yet"
         hint="This is everyone's work across your projects — it fills up as people add tasks."
-        actions={<button type="button" class="primary" onClick={() => navigate({ view: "To-Do" })}>Add the first task</button>}
+        actions={<button type="button" class="primary" onClick={() => setCreating(true)}>Add the first task</button>}
       />
     </Show>
     <Show when={!loadError() && !projectsLoading()}><For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
       <h2 class="tt-group-head"><a {...linkProps({ view: "Project Tasks", projectId: group.project_id })}>{group.name}</a> <small>{group.items.length}</small></h2>
-      <ul class="issue-list tt-list">
-        <For each={group.items}>{task => <li>
-          {/* Same three-part row as Issues: title line, muted meta line, one pill. */}
-          {/* The row is marked overdue by the shared urgency rule; the pill beside it
-              names the assignee and carries no colour, so the two never contradict. */}
-          <div class="issue-row tt-row" classList={{ overdue: !task.done && urgencyOf(task.due_date, todayISO()) === "overdue" }}>
-            <span class="project-task-check" aria-hidden="true">{task.done ? "✓" : "○"}</span>
-            <span class="row-main">
-              <strong>{task.content}</strong>
-              <span class="row-meta">
-                <span class="tt-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
-                <Show when={task.due_date}>{date => <time>{date()}</time>}</Show>
-              </span>
-            </span>
-            <span class="status-name">{nameOf(task.profile_id)}</span>
-          </div>
-        </li>}</For>
+      <ul class="task-list-plain tt-list">
+        <For each={group.items}>{task => {
+          /* THE TASK ROW, not the ticket row (stage 20): a done marker, the title,
+             and ONE quiet meta line. Urgency is painted on the DATE alone, by the
+             shared rule in statusTone.ts — never on the title. */
+          const urgency = () => task.done ? "none" : urgencyOf(task.due_date, todayISO());
+          return <li>
+            {/* THE SAME GESTURE AS EVERYWHERE ELSE: the row opens itself, in place. */}
+            <Show when={editingId() === task.id} fallback={
+            <div class="task-row tt-row" classList={{ done: task.done, overdue: urgency() === "overdue" }}>
+              <span class="task-row-marker" aria-hidden="true">{task.done ? "✓" : "○"}</span>
+              <button type="button" class="task-row-main" aria-label={`Open ${task.content}`} onClick={event => editTask(task, event)}>
+                <strong class="task-row-title">{task.content}</strong>
+                <span class="task-row-meta">
+                  <span class="tt-author">{nameOf(task.profile_id)}</span>
+                  <span class="tt-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
+                  <Show when={task.due_date}>{date => <time classList={{ [urgency()]: urgency() !== "none" }}>{date()}</time>}</Show>
+                </span>
+              </button>
+            </div>}>
+              <div class="task-row-editing">
+                <TaskRowEdit task={task} canEdit={owns(task)} canComplete={mayComplete(task)}
+                  ownerName={nameOf(task.profile_id)}
+                  onCancel={closeEdit}
+                  onSaved={() => { closeEdit(); void reloadTasks(); }}
+                  onError={setRowError} />
+              </div>
+            </Show>
+          </li>;
+        }}</For>
       </ul>
     </section>}</For></Show>
+    {/* One creation act, one shape, on every task surface. Cross-project, so the
+        drawer draws its project chooser and reads that project's members. */}
+    <Show when={creating()}><TaskDrawer authorId={profileId()} onClose={() => setCreating(false)} onSaved={() => void reloadTasks()} /></Show>
   </section>;
 }

@@ -6,17 +6,17 @@
 .tt-group-head a { color: var(--text-strong); text-decoration: none; }
 .tt-group-head a:hover { color: var(--accent-text, var(--accent)); }
 .tt-group-head small { color: var(--text-dim); font-size: 11px; font-weight: 500; }
-.tt-row { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; }
-.tt-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tt-assignees { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
-.tt-row.overdue time { color: var(--status-danger-ink); font-weight: 600; }
-.tt-row.overdue { border-left: 3px solid var(--status-risk-overdue); }
+/* STAGE 20: the row itself is `.task-row` (components/TaskList.css) — shared with the
+   project Tasks tab, and modelled on My tasks' card. Only what is TEAM about the row
+   stays here. The overdue border stub is gone: overdue is red ink on the date, which
+   is where statusTone.ts puts it. */
+.tt-assignees { white-space: nowrap; }
 
 /* ══ Space-light restyle ═══════════════════════════════════════════════════
    Team tasks draws in the `.planning-view` shell, so the row, filter bar and
    empty state all come from Issues.css's space-light section. Only the group
    chrome and the overdue tone are local. */
-.theme-space-light .team-tasks-view .tt-list { border: 1px solid var(--line); border-radius: 20px; background: var(--paper); padding: 6px 8px; box-shadow: 0 16px 36px rgba(31, 35, 40, .06); }
+
 /* `.filter-row > label` is the CAPTION idiom (uppercase kicker over a field).
    This label is not a caption: its text IS the checkbox's name, so it keeps the
    body voice instead of shouting SHOW COMPLETED across the filter line. */
@@ -33,9 +33,4 @@
 .theme-space-light .tt-group-head a { font-size: 12px; font-weight: 680; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
 .theme-space-light .tt-group-head a:hover { color: var(--teal-dark); }
 .theme-space-light .tt-group-head small { color: var(--quiet); font-size: 12px; font-weight: 620; }
-.theme-space-light .tt-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; }
-.theme-space-light .tt-row .project-task-check { color: var(--quiet); }
-/* Overdue is critical, and critical is red ink on the date — not a border stub
-   hanging off the side of the row. */
-.theme-space-light .tt-row.overdue { border-left: 0; }
-.theme-space-light .tt-row.overdue .row-meta time { color: var(--red-ink); font-weight: 700; }
+
