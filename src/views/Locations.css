@@ -133,3 +133,37 @@
 .locations-desk-form > .op-field { min-width: 0; display: flex; flex-direction: column; justify-content: flex-start; }
 .locations-desk-form { align-items: start; }
 .locations-desk-form .op-hint { grid-column: 1 / -1; margin-top: 0; }
+
+/* ── THE LOCATION CARD ────────────────────────────────────────────────────────
+   Same card the Knowledge library uses (`.documents-library-card`, Documents.css):
+   icon tile left, name bold, ONE quiet meta line, arrow right. Only the measures
+   are repeated here — the tokens are the same ones, so there is no second raster.
+   UNSCOPED: this is structure, and both themes get it. */
+.locations-view .locations-card {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface);
+}
+.locations-view .locations-card + .locations-card { margin-top: var(--dk-space-sm); }
+.locations-view .locations-card:hover {
+  border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.locations-card-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.locations-card-copy { display: grid; min-width: 0; gap: 0.15rem; }
+.locations-card-copy .paper-row-title,
+.locations-card-copy .paper-row-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.locations-card-copy .paper-row-meta { color: var(--text-muted); font-size: var(--dk-fs-xs); }
+.locations-card-open { margin-left: auto; color: var(--accent-text); }
+.locations-view .locations-card .paper-pill { margin-left: auto; }
+.locations-view .locations-card .paper-pill + .locations-card-open { margin-left: var(--dk-space-md); }
+
+/* Light theme only re-inks; the hairline and the meta line follow the light tokens. */
+.theme-space-light .locations-view .locations-card { border-color: var(--line); background: var(--paper); }
+.theme-space-light .locations-card-copy .paper-row-meta { color: var(--muted); }
+/* The card's type is the Knowledge card's type: title at body size, bold; ONE
+   meta line at the small step. `.paper-row-title` carries the paper kit's own
+   15px/710, which is a different card's scale. */
+.locations-card-copy .paper-row-title { font-size: 1rem; font-weight: 700; }

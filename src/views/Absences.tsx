@@ -158,7 +158,9 @@ export default function Absences() {
   return (
     <section class="timeoff-view">
       <PageHeader
+        icon="clock"
         title="Time off"
+        subline="Who is away, when, and what is still waiting for approval."
         actions={
           <>
             {/* A filter, not an identity: it stays, but as a pill whose value

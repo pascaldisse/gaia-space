@@ -15,8 +15,26 @@
 .blogs-list, .blog-detail { min-width: 0; }
 .blogs-filter { display: grid; gap: 8px; margin-bottom: 12px; }
 
-.blog-row { display: grid; gap: 3px; padding: 10px 8px; border-radius: 8px; color: inherit; text-decoration: none; }
-.blog-row span, .blog-meta, .blog-kicker, .blog-detail footer { font-size: 12px; }
+/* THE KNOWLEDGE CARD, not a bare row. Same measures/radii/tokens as
+   `.documents-library-card` in Documents.css — icon tile left, title bold, ONE
+   quiet meta line, arrow right. Structure is unscoped: both themes get it. */
+.blog-row {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface); color: inherit; text-decoration: none;
+}
+.blog-row + .blog-row { margin-top: var(--dk-space-sm); }
+.blog-row-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.blog-row-copy { display: grid; min-width: 0; gap: 0.15rem; }
+.blog-row-copy strong, .blog-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Same type as the Knowledge card: title at body size and bold, meta one step down. */
+.blog-row-copy strong { font-size: 1rem; font-weight: 700; }
+.blog-row-copy small { color: var(--text-muted); font-size: var(--dk-fs-xs); }
+.blog-row-open { margin-left: auto; color: var(--accent-text); }
+.blog-meta, .blog-kicker, .blog-detail footer { font-size: 12px; }
 .blog-detail { overflow: auto; }
 .blog-detail h1 { margin: 4px 0 8px; font-size: 26px; }
 .blog-kicker { text-transform: uppercase; letter-spacing: .08em; margin: 0; }
@@ -26,8 +44,9 @@
 
 /* ── dark (grouped / flat) ─────────────────────────────────────────────────── */
 .blogs-list, .blog-detail { color: var(--text, #ecf0f7); }
-.blog-row:hover, .blog-row.active { background: var(--surface-hover, #263653); }
-.blog-row span, .blog-meta, .blog-kicker, .blog-detail footer { color: var(--text-muted, #a5afc2); }
+.blog-row:hover { border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent); }
+.blog-row.active { border-color: var(--accent); background: var(--surface-hover, #263653); }
+.blog-meta, .blog-kicker, .blog-detail footer { color: var(--text-muted, #a5afc2); }
 .blogs-error { color: #ffd1d8; background: #572331; }
 
 /* ── space-light: two paper panes on the wash ──────────────────────────────── */
@@ -40,7 +59,7 @@
 .theme-space-light .blog-row:hover { background: var(--wash); }
 .theme-space-light .blog-row.active { background: var(--teal-soft); }
 .theme-space-light .blog-row strong { color: var(--ink); font-weight: 650; }
-.theme-space-light .blog-row span,
+.theme-space-light .blog-row-copy small,
 .theme-space-light .blog-meta,
 .theme-space-light .blog-kicker,
 .theme-space-light .blog-detail footer { color: var(--muted); }

@@ -119,7 +119,7 @@ export default function Users() {
 
   return (
     <section class="admin-view">
-      <PageHeader title="Users" subline="Login accounts, not profiles" />
+      <PageHeader icon="users" title="Users" subline="Login accounts, not profiles" />
       <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
       <div class="admin-grid">

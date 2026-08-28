@@ -52,3 +52,31 @@
 .call-chat{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}.call-chat-heading,.call-chat-compose{display:flex;align-items:center;gap:8px}.call-chat-heading{justify-content:space-between;font-size:.84rem}.call-chat-heading span{color:var(--text-faint);font-size:.76rem}.call-chat-messages{display:grid;gap:6px;max-height:10rem;overflow:auto}.call-chat-messages p{display:grid;gap:2px;margin:0;padding:7px 8px;border-radius:6px;background:var(--surface);font-size:.83rem}.call-chat-messages p>strong{font-size:.76rem;color:var(--accent-text)}.call-chat-messages p>span{overflow-wrap:anywhere}.call-chat-messages>p{color:var(--text-faint)}.call-chat-compose input{min-width:0;flex:1}.call-chat-compose button{flex:none}
 
 .call-transcript{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}
+
+/* ── THE MEETING CARD ─────────────────────────────────────────────────────────
+   Same card as the Knowledge library (`.documents-library-card`, Documents.css):
+   icon tile left, title bold, ONE quiet meta line (when · where · recurrence),
+   arrow right. Repeated measures, identical tokens — no second raster.
+   UNSCOPED: structure belongs to both themes. */
+.meetings-view .meeting-row {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface); text-align: left;
+}
+.meetings-view .meeting-row:hover {
+  border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.meeting-row-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.meetings-view .meeting-row-copy { display: grid; min-width: 0; gap: 0.15rem; font-size: 1rem; }
+.meeting-row-copy strong, .meeting-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The legacy `.meeting-row time, .meeting-row span` rule shrank the whole card to
+   .77rem. The card's own type is stated here, in the Knowledge card's measures:
+   title at body size and bold, ONE meta line at the small step. */
+.meetings-view .meeting-row-copy strong { font-size: 1rem; font-weight: 700; color: var(--text-strong); }
+.meetings-view .meeting-row-copy small,
+.meetings-view .meeting-row-copy small time { color: var(--text-muted); font-size: var(--dk-fs-xs); font-weight: 400; }
+.meeting-row-open { margin-left: auto; color: var(--accent-text); }
+.meetings-view .meeting-row.active { border-color: var(--accent); background: var(--accent-soft); }

@@ -4,6 +4,7 @@ import EmptyState from "../components/EmptyState";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { GhostPill } from "../components/controls";
+import { Icon } from "../components/Icon";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { personalApi } from "../api/personal";
@@ -260,6 +261,7 @@ export default function Projects() {
       onCancel={() => setPendingDelete(null)}
     />
     <PageHeader
+      icon="layers"
       title="Projects"
       subline="The projects that are running, and whether each one is healthy"
       chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>}
@@ -328,6 +330,9 @@ export default function Projects() {
           }}
         >
           <div class="project-card-head">
+            {/* The same tile the Knowledge card carries, with the same glyph the rail
+                uses for Projects — the card and the way here wear one mark. */}
+            <span class="project-card-icon" aria-hidden="true"><Icon name="layers" size={20} /></span>
             <strong>{project.name}</strong>
             <code>{project.key}</code>
             {/* LAW: lead is PURELY INFORMATIONAL — a name on a row, read-only here,

@@ -3,6 +3,7 @@ import { platformApi, type DeskAssignment, type Location } from "../api/platform
 import PageHeader, { Chip } from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
 import { Disclosure, SectionHeading } from "../components/blocks";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import { humanError } from "../session";
 import "../components/paper.css";
@@ -267,6 +268,7 @@ export default function Locations() {
   return (
     <section class="settings-view locations-view">
       <PageHeader
+        icon="org"
         title="Locations"
         subline="Offices, floors and rooms — and which desk each person sits at."
         chips={
@@ -537,16 +539,16 @@ export default function Locations() {
           <For each={filtered()}>
             {(location) => (
               <button
-                class="paper-row"
+                class="paper-row locations-card"
                 type="button"
                 onClick={() => openEditor({ ...location, equipment: [...location.equipment] })}
               >
-                <span>
+                <span class="locations-card-icon" aria-hidden="true"><Icon name="org" size={20} /></span>
+                <span class="locations-card-copy">
                   <span class="paper-row-title">{location.name}</span>
+                  {/* ONE quiet meta line: what it is, where it is, what is in it. */}
                   <span class="paper-row-meta">
-                    <span>{location.location_type}</span>
-                    <span>{location.timezone}</span>
-                    <span>{location.equipment.join(", ") || "No equipment"}</span>
+                    {[location.location_type, location.timezone, location.equipment.join(", ") || "No equipment"].join(" · ")}
                   </span>
                 </span>
                 <Show when={location.channel_id}>
@@ -554,6 +556,7 @@ export default function Locations() {
                       channel that exists is neither. */}
                   <span class="paper-pill">Chat linked</span>
                 </Show>
+                <span class="locations-card-open" aria-hidden="true">→</span>
               </button>
             )}
           </For>

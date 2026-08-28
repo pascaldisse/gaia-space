@@ -79,7 +79,7 @@ export default function Steering(){
  const workActions=()=>{const target={view:"Project Workspace",projectId:project(),tab:"tasks"} as Route;const props=linkProps(target);
   return <><a class="primary" href={props.href} onClick={event=>{props.onClick(event);setProjectId(project());}}>Open project work</a>
   <GhostPill {...linkProps({view:"Project Workspace",projectId:project(),tab:"dev"})}>Open board</GhostPill></>;};
- return <section class="resource-view"><PageHeader kicker={projectName(project())} title="Steering" subline="Work requiring attention" />
+ return <section class="resource-view"><PageHeader icon="layers" kicker={projectName(project())} title="Steering" subline="What in this project needs a decision, and what is already late." />
   <Show when={deadline()}>{info=>
    <a class="st-deadline" classList={{[info().tone]:true}} {...linkProps({view:"Project Workspace",projectId:project(),tab:"calendar"})}>
     <span class="st-deadline-dot"/><span class="st-deadline-label">Project deadline</span><time>{info().date}</time><em>{info().note}</em>

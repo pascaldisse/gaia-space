@@ -3,6 +3,7 @@ import { blogsApi, type BlogPost } from "../api/blogs";
 import { documentsApi, newId, type Document } from "../api/documents";
 import { platformApi } from "../api/platform";
 import PageHeader from "../components/PageHeader";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { humanError, profileId } from "../session";
@@ -38,7 +39,7 @@ export default function Blogs() {
   const blogFiltered=()=>!!term().trim()||!!author();
   const clearBlogFilters=()=>{setTerm("");setAuthor("");};
   return <section class="blogs-view">
-    <PageHeader title="Blogs" subline="Organization articles, published from drafts"
+    <PageHeader icon="book" title="Blogs" subline="Organization articles, published from drafts"
       actions={<button type="button" class="primary" onClick={()=>setComposing(true)}>Write article</button>} />
     <Show when={error()}><p class="blogs-error" role="alert">{error()}</p></Show>
     <div class="blogs-layout">
@@ -49,7 +50,7 @@ export default function Blogs() {
             published (write one — the primary opens the publishing drawer, which
             is the only place the fields live). */}
         <Show when={!posts.loading&&!result().length&&blogFiltered()}><EmptyState variant="no-match" title="No articles match these filters." actions={<GhostPill onClick={clearBlogFilters}>Clear filters</GhostPill>}/></Show>
-        <Show when={!posts.loading&&!result().length&&!blogFiltered()}><EmptyState title="No articles published yet" hint="Announcements and write-ups for the whole organization live here." actions={<button type="button" class="primary" onClick={()=>setComposing(true)}>Write the first article</button>}/></Show><For each={result()}>{post=><a classList={{"blog-row":true,active:selectedPost()?.id===post.id}} {...linkProps({view:"Blogs",entityType:"blog",entityId:post.id})} onClick={event=>{linkProps({view:"Blogs",entityType:"blog",entityId:post.id}).onClick(event);setSelected(post.id)}}><strong>{post.title}</strong><span>{date(post.published_at)} · {post.project_id ? "Project article" : post.team_id ? "Team article" : "Organization"}</span></a>}</For>
+        <Show when={!posts.loading&&!result().length&&!blogFiltered()}><EmptyState title="No articles published yet" hint="Announcements and write-ups for the whole organization live here." actions={<button type="button" class="primary" onClick={()=>setComposing(true)}>Write the first article</button>}/></Show><For each={result()}>{post=><a classList={{"blog-row":true,active:selectedPost()?.id===post.id}} {...linkProps({view:"Blogs",entityType:"blog",entityId:post.id})} onClick={event=>{linkProps({view:"Blogs",entityType:"blog",entityId:post.id}).onClick(event);setSelected(post.id)}}><span class="blog-row-icon" aria-hidden="true"><Icon name="book" size={18}/></span><span class="blog-row-copy"><strong>{post.title}</strong><small>{date(post.published_at)} · {post.project_id ? "Project article" : post.team_id ? "Team article" : "Organization"}</small></span><span class="blog-row-open" aria-hidden="true">→</span></a>}</For>
       </section>
       <article class="blog-detail"><Show when={selectedPost()} fallback={<EmptyState title="Nothing selected" hint="Pick an article on the left."/>}>{post=><BlogDetail post={post()}/>}</Show></article>
     </div>

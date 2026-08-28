@@ -89,7 +89,7 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
       {/* Superseded by Home and kept for continuity (reachable under "More"), so this
          view gets the sweep and nothing more: no second identity control (L1), no
          teal lozenge with a geometric character in it (L4). */}
-      <PageHeader title="Overview" />
+      <PageHeader icon="home" title="Overview" subline="Today at a glance — what is due, what is waiting and what changed." />
       <Show when={actionError()}>
         <p class="dashboard-error" role="alert">{actionError()}</p>
       </Show>

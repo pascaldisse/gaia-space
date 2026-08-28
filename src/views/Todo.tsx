@@ -187,7 +187,7 @@ export default function Todo() {
         owner asked for it to be obvious), and the moment there is content the header
         takes it back. Two identical buttons on one screen is the defect this rule
         exists to prevent. */}
-    <PageHeader title="My tasks" subline="Only your tasks — yours and what people put on you, across every project." actions={
+    <PageHeader icon="check" title="My tasks" subline="Only your tasks — yours and what people put on you, across every project." actions={
       <Show when={!showsEmptyPrimary()}>
         <button type="button" class="primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
       </Show>

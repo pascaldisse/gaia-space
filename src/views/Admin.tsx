@@ -137,7 +137,7 @@ export default function Admin() {
   const toggleArchiveCf = async (d: CfDefinition) => { try { await platformApi.archiveCfDefinition(d.id, !d.archived); reloadCfDefs(); } catch (e) { setError(String(e)); } };
 
   return <section class="admin-view">
-    <PageHeader title="Admin" chips={<Show when={seeded()}><Chip value={seeded()} label="rights seeded" /></Show>} />
+    <PageHeader icon="settings" title="Admin" subline="Roles, rights and the operator tools behind this workspace." chips={<Show when={seeded()}><Chip value={seeded()} label="rights seeded" /></Show>} />
     <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
     <div class="admin-grid">

@@ -102,7 +102,7 @@ return <Show when={organization() && settings()}><section class="settings-card">
 export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
   return <section class="personal-view settings-view">
-    <PageHeader title="Settings" subline="Preferences for your account" />
+    <PageHeader icon="settings" title="Settings" subline="Preferences for your account" />
 
     <div class="settings-card">
       <h2>Navigation layout</h2>

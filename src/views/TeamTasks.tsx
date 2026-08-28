@@ -155,7 +155,7 @@ export default function TeamTasks() {
         owner asked for it to be obvious), and the moment there is content the header
         takes it back. Two identical buttons on one screen is the defect this rule
         exists to prevent. */}
-    <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." actions={
+    <PageHeader icon="users" title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." actions={
       <Show when={!showsEmptyPrimary()}>
         <div class="planning-actions">
           <button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>

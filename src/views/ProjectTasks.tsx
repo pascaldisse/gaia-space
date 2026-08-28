@@ -168,7 +168,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         owner asked for it to be obvious), and the moment there is content the header
         takes it back. Two identical buttons on one screen is the defect this rule
         exists to prevent. */}
-    <PageHeader kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." actions={
+    <PageHeader icon="layers" kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." actions={
       <Show when={!showsEmptyPrimary()}>
         <div class="planning-actions">
           <button type="button" class="primary" onClick={newTask}>New task</button>

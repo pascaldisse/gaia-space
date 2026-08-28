@@ -5,6 +5,7 @@ import { ProfilePicker } from "../components/Pickers";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { SectionHeading } from "../components/blocks";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { humanError, isWeb, profileId } from "../session";
@@ -257,6 +258,7 @@ export default function Meetings() {
 
   return <section class="meetings-view">
     <PageHeader
+      icon="calendar"
       title="Meetings"
       subline="Attendance, rooms and recurring series — Calendar owns the day view."
       chips={<>
@@ -318,7 +320,9 @@ export default function Meetings() {
             />
           </Show>
         </Show>
-        <div class="meeting-rows"><For each={visibleMeetings()}>{(meeting) => <button type="button" classList={{ "meeting-row": true, active: selected()?.id === meeting.id }} onClick={() => selectMeeting(meeting)}><strong>{meeting.title}</strong><time datetime={new Date(meeting.starts_at * 1000).toISOString()}>{displayDate(meeting.starts_at)}</time><span>{meeting.location || "No location"} · {recurrenceLabel(meeting.rrule)}</span></button>}</For></div>
+        {/* The Knowledge card, not a bare row: tile · title · ONE meta line · arrow.
+            The date and the place used to be two stacked muted lines; they are one. */}
+        <div class="meeting-rows"><For each={visibleMeetings()}>{(meeting) => <button type="button" classList={{ "meeting-row": true, active: selected()?.id === meeting.id }} onClick={() => selectMeeting(meeting)}><span class="meeting-row-icon" aria-hidden="true"><Icon name="calendar" size={20} /></span><span class="meeting-row-copy"><strong>{meeting.title}</strong><small><time datetime={new Date(meeting.starts_at * 1000).toISOString()}>{displayDate(meeting.starts_at)}</time> · {meeting.location || "No location"} · {recurrenceLabel(meeting.rrule)}</small></span><span class="meeting-row-open" aria-hidden="true">→</span></button>}</For></div>
       </main>
 
       <aside class="meeting-detail" aria-label="Meeting details">

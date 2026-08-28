@@ -35,6 +35,7 @@ export default function Leads() {
   const settled = () => !leads.loading && !leads.error;
   return <section class="leads-view">
     <PageHeader
+      icon="inbox"
       title="Leads"
       subline="Contact submissions from the landing page — administrators only."
       /* The label carries its own leading space: a chip is `<strong>1</strong>` +

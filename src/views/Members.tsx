@@ -311,8 +311,9 @@ export default function Members() {
   return (
     <section class="org-view">
       <PageHeader
+        icon="org"
         title="Organization"
-        subline="People, teams and roles"
+        subline="Everyone in this organization, the teams they are in and the roles they hold."
         actions={
           <Show when={hasArchived()}>
             <label class="org-archived-toggle">

@@ -5,7 +5,13 @@
 .project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .project-card.active { border-color: var(--accent); border-left-color: var(--accent); background: var(--surface-hover); }
 .project-card.archived { opacity: .55; }
-.project-card-head { display: flex; align-items: baseline; gap: 9px; }
+.project-card-head { display: flex; align-items: center; gap: 9px; }
+/* The Knowledge tile, same measures and tokens as `.documents-library-type`
+   (Documents.css). Structure, so both themes get it. */
+.project-card-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
 .project-card-head strong { font-family: var(--font-head); font-size: 15.5px; color: var(--text-strong); }
 .project-card-head code { color: var(--text-faint); font-size: 11.5px; }
 /* Informational only: lead chip is a name, not a permission indicator. */
