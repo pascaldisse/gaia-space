@@ -24,7 +24,8 @@
 .packages-view > .page-header,
 .pipelines-view > .page-header,
 .reviews-view > .page-header,
-.repos-view > .page-header {
+.repos-view > .page-header,
+.locations-view > .page-header {
   padding: var(--view-pad-y) var(--view-pad-x) 0;
 }
 
