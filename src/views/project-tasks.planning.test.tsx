@@ -86,9 +86,14 @@ test("project tasks shows this project's tasks and links out to the tickets that
      fact it protected (this page is scoped to p1, and says so) is asserted instead
      against the read on the wire, above, and against the header kicker below. Nothing
      may put a project chooser back into the actions area unnoticed. */
-  expect(host.querySelector('.planning-actions .pill-select select')).toBeNull();
-  expect(host.querySelector('.planning-actions select')).toBeNull();
-  expect([...host.querySelectorAll('.planning-actions button')].map(button => button.textContent)).toEqual(["New task"]);
+  /* ADDRESS ONLY (task-card pass): the primary moved out of the header's actions area
+     into the surface's ONE action row (`.task-actionbar`, as on My tasks). The fact
+     protected here is unchanged — no project chooser may reappear beside the primary
+     — and it is asserted against the row that now holds it. "Show done" and "Filter"
+     are this surface's own switches, not a second creation act. */
+  expect(host.querySelector('.task-actionbar .pill-select select')).toBeNull();
+  expect(host.querySelector('.task-actionbar select')).toBeNull();
+  expect([...host.querySelectorAll('.task-actionbar button')].map(button => button.textContent)).toEqual(["New task", "Show done", "Filter"]);
 
   /* MOVED (stage 12d): the ticket title, the tag-filter options and the board link
      were asserted here while this page rendered tickets. Tickets went back to the
@@ -220,12 +225,16 @@ test("clicking a project task opens it in its own row, and Enter on the title sa
   await until(() => !!host.querySelector(".project-task-row"));
 
   // The row is a real <button>, so it is keyboard-reachable and openable for free.
-  const row = host.querySelector('.project-task-row .task-row-main') as HTMLButtonElement;
+  /* ADDRESS ONLY (task-card pass): the row is the shared task TILE now, so its body
+     button is `.task-tile-body` (views/taskCards.css). It is still a real <button>,
+     which is the fact under test. */
+  const row = host.querySelector('.project-task-row .task-tile-body') as HTMLButtonElement;
   expect(row.tagName).toBe("BUTTON");
   row.click();
   await until(() => !!host.querySelector(".task-row-editing"));
-  // It opened IN PLACE: the editor sits in the same list item the row occupied.
-  expect(host.querySelector("li > .task-row-editing")).not.toBeNull();
+  // It opened IN PLACE: the editor sits in the grid cell the tile occupied, and takes
+  // the whole row (`.task-grid > .task-open`).
+  expect(host.querySelector(".task-grid > .task-open > .task-row-editing")).not.toBeNull();
   const title = host.querySelector(".task-row-editing input.composer-title") as HTMLInputElement;
   expect(title.value).toBe("Review the plan");
 
@@ -256,7 +265,7 @@ test("Escape closes the row editor without writing", async () => {
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <ProjectTasks />, host);
   await until(() => !!host.querySelector(".project-task-row"));
-  (host.querySelector('.project-task-row .task-row-main') as HTMLButtonElement).click();
+  (host.querySelector('.project-task-row .task-tile-body') as HTMLButtonElement).click();
   await until(() => !!host.querySelector(".task-row-editing"));
 
   const title = host.querySelector(".task-row-editing input.composer-title") as HTMLInputElement;
@@ -287,7 +296,7 @@ test("focus goes into the editor on open and back to the row on close", async ()
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <ProjectTasks />, host);
   await until(() => !!host.querySelector(".project-task-row"));
-  const row = host.querySelector('.task-row-main[data-task-row="t1"]') as HTMLButtonElement;
+  const row = host.querySelector('.task-tile-body[data-task-row="t1"]') as HTMLButtonElement;
   expect(row).not.toBeNull();
   row.click();
   await until(() => !!host.querySelector(".task-row-editing"));
@@ -295,7 +304,7 @@ test("focus goes into the editor on open and back to the row on close", async ()
 
   (host.querySelector(".task-row-editing input.composer-title") as HTMLInputElement)
     .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-  await until(() => document.activeElement === host.querySelector('.task-row-main[data-task-row="t1"]'));
+  await until(() => document.activeElement === host.querySelector('.task-tile-body[data-task-row="t1"]'));
   expect((document.activeElement as HTMLElement).getAttribute("data-task-row")).toBe("t1");
 });
 
@@ -329,10 +338,12 @@ test("a project task deletes for its creator only, and always asks first", async
   await until(() => !!document.querySelector('[role="menu"]'));
   const menu = document.querySelector('[role="menu"]') as HTMLElement;
   expect([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(["Open"]);
+  // Postponing and converting are owner-gated writes too (TodoOwnerWrite), so this
+  // row — assigned, not owned — offers none of them.
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
   // Opened, it says why instead of showing a button that would be refused.
-  (host.querySelector(".project-task-row .task-row-main") as HTMLButtonElement).click();
+  (host.querySelector(".project-task-row .task-tile-body") as HTMLButtonElement).click();
   await until(() => !!host.querySelector(".task-row-editing"));
   expect(host.querySelector("button.delete-button")).toBeNull();
   expect(host.textContent).toContain("Only the owner can delete this");
@@ -357,7 +368,7 @@ test("the creator's own project task deletes through the question, never on clic
   dispose = render(() => <ProjectTasks />, host);
   await until(() => !!host.querySelector(".project-task-row"));
 
-  (host.querySelector(".project-task-row .task-row-main") as HTMLButtonElement).click();
+  (host.querySelector(".project-task-row .task-tile-body") as HTMLButtonElement).click();
   await until(() => !!host.querySelector(".task-row-editing"));
   const button = host.querySelector("button.delete-button") as HTMLButtonElement;
   expect(button).not.toBeNull();

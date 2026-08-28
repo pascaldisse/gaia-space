@@ -171,9 +171,12 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
 });
 
 describe("Team tasks: other people's work is not yours to delete", () => {
+  /* ADDRESS ONLY (task-card pass): Team tasks draws the shared task TILE now
+     (`.task-tile` / `.task-tile-body`, views/taskCards.css) instead of the plain list
+     row. The delete RULE under test is untouched. */
   const openRow = async (host: HTMLElement, title: string) => {
-    const row = rowOf(host, ".tt-row", title);
-    row.querySelector<HTMLButtonElement>(".task-row-main")!.click();
+    const row = rowOf(host, ".task-tile", title);
+    row.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
     await settle();
   };
 
@@ -189,16 +192,20 @@ describe("Team tasks: other people's work is not yours to delete", () => {
 
   test("right-click on a row I do not own has no Delete entry", async () => {
     const host = await mount(() => <TeamTasks /> as any);
-    rightClick(rowOf(host, ".tt-row", "Theirs on me"));
+    rightClick(rowOf(host, ".task-tile", "Theirs on me"));
     await settle();
+    // Postponing and converting are owner-gated writes too (TodoOwnerWrite), so a row
+    // that is merely assigned to me offers nothing but Open.
     expect(menuEntries()).toEqual(["Open"]);
   });
 
   test("confirming from the row menu sends one delete_todo with the actor", async () => {
     const host = await mount(() => <TeamTasks /> as any);
-    rightClick(rowOf(host, ".tt-row", "Mine alone"));
+    rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Delete task…"]);
+    /* The row's acts are WORDS in this menu now, as on My tasks: postponing and
+       converting a task I OWN, and the owner-gated delete this test is about. */
+    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Convert to ticket", "Delete task…"]);
     menuEntry("Delete task…")!.click();
     await settle();
     expect(deleteCalls()).toHaveLength(0);
@@ -211,7 +218,7 @@ describe("Team tasks: other people's work is not yours to delete", () => {
   test("cancelling deletes nothing, and a refusal is said out loud", async () => {
     deleteFails = "delete_todo refused";
     const host = await mount(() => <TeamTasks /> as any);
-    rightClick(rowOf(host, ".tt-row", "Mine alone"));
+    rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
     menuEntry("Delete task…")!.click();
     await settle();
@@ -219,7 +226,7 @@ describe("Team tasks: other people's work is not yours to delete", () => {
     await settle();
     expect(deleteCalls()).toHaveLength(0);
 
-    rightClick(rowOf(host, ".tt-row", "Mine alone"));
+    rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
     menuEntry("Delete task…")!.click();
     await settle();

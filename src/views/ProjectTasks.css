@@ -10,6 +10,15 @@
 .pt-tickets-link:hover { color: var(--accent-hover, var(--accent-text, var(--accent))); text-decoration: underline; }
 .pt-tickets-hint { color: var(--text-dim); font-size: 11px; }
 
+/* The list itself is Knowledge's card in the vocabulary of work (views/taskCards.css),
+   shared with My tasks and Team tasks. Only what is PROJECT about it lives here.
+   Structure, so it must not be scoped to a theme. */
+.project-work-group { display: grid; gap: var(--dk-space-sm); }
+/* The action row separates the header from the board without a rule between them. */
+.project-tasks-view .task-actionbar { margin: 0 0 var(--dk-space-xs); }
+/* Names of people never wrap mid-list: the meta line is one line of facts. */
+.ptask-assignees { white-space: nowrap; }
+
 /* ══ Space-light restyle ═══════════════════════════════════════════════════ */
 .theme-space-light .project-tasks-view .pt-tickets-line { margin-bottom: 18px; gap: 12px; }
 .theme-space-light .project-tasks-view .pt-tickets-link { color: var(--teal-dark); font-size: 13px; font-weight: 660; }

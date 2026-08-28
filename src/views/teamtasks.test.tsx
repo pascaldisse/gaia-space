@@ -63,7 +63,10 @@ describe("team tasks", () => {
     const host = await mount(() => <TeamTasks /> as any);
     const groups = Array.from(host.querySelectorAll(".tt-group")).map(group => group.getAttribute("aria-label"));
     expect(groups).toEqual(["Atlas", "Borealis"]);
-    const rows = Array.from(host.querySelectorAll(".tt-row strong")).map(node => node.textContent);
+    /* ADDRESS ONLY (task-card pass): the team row is the shared task TILE now
+       (`.task-tile`, views/taskCards.css), so its title is `.task-tile-title` instead
+       of a bare <strong>. Same three rows, same order, same grouping. */
+    const rows = Array.from(host.querySelectorAll(".task-tile .task-tile-title")).map(node => node.textContent);
     expect(rows).toEqual(["Atlas mine", "Atlas theirs", "Borealis theirs"]);
     // Creator and assignee of somebody else's task are both visible.
     expect(host.textContent).toContain("Other Person");
@@ -82,9 +85,13 @@ describe("team tasks", () => {
     // same native <select>, named by aria-label instead of a caption beside it.
     const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Assignee"]')!;
     expect(picker.value).toBe("");
-    const done = host.querySelector<HTMLInputElement>('input[aria-label="Show completed"]')!;
-    expect(done.checked).toBe(false);
-    expect(host.querySelectorAll(".tt-row").length).toBe(3);
+    /* ADDRESS ONLY (task-card pass): "Show completed" is a toggle BUTTON in the one
+       action row now, beside "New task" — it only ever ADDS rows, so it never belonged
+       behind the "Filter" disclosure. Off is still the default, which is the fact
+       under test. */
+    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show completed")!;
+    expect(done.getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelectorAll(".task-tile").length).toBe(3);
   });
 
   // ── master's load-failure requirements (5680579), adapted to our empty-state copy ──
@@ -111,8 +118,10 @@ describe("team tasks", () => {
 
   test("show completed re-reads with include_done", async () => {
     const host = await mount(() => <TeamTasks /> as any);
-    const done = host.querySelector<HTMLInputElement>('input[aria-label="Show completed"]')!;
-    done.checked = true; done.dispatchEvent(new Event("change", { bubbles: true }));
+    // ADDRESS ONLY: the toggle is a button in the action row (see above); the write it
+    // triggers — a re-read with include_done — is unchanged.
+    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show completed")!;
+    done.click();
     await settle();
     expect(calls.filter(entry => entry.cmd === "list_team_todos").some(entry => entry.args.includeDone === true)).toBe(true);
   });
@@ -122,15 +131,21 @@ describe("informational-lead law", () => {
   // p1's lead is "other". Acting as "me" (a plain member, NOT the lead) must change nothing.
   test("a non-lead member sees every task and can still create tasks for other people", async () => {
     const host = await mount(() => { navigate({ view: "Project Tasks", projectId: "p1" }); return <ProjectTasks /> as any; });
-    const rows = Array.from(host.querySelectorAll(".project-task-row strong")).map(node => node.textContent);
-    expect(rows).toEqual(["Atlas mine", "Atlas theirs"]);
+    const rows = Array.from(host.querySelectorAll(".project-task-row .task-tile-title")).map(node => node.textContent);
+    /* ORDER, not membership (task-card pass): the project list is grouped Today /
+       Later / No date, the same three groups My tasks uses. "Atlas theirs" is due
+       2020-01-01 (overdue = today's work), "Atlas mine" has no date. Both are still
+       there, which is the law under test. */
+    expect(rows).toEqual(["Atlas theirs", "Atlas mine"]);
     /* MOVED (stage 20): the assignee checkboxes used to live in the detail pane's
        inline form (`.project-work-people`). That form is gone — creation is the shared
        TaskDrawer now — so the SAME fact is asserted one address further on, against
        the drawer's people list (`.wid-people`). The law under test is untouched: a
        plain member opens creation and may tick every member of the project, the lead
        included. */
-    host.querySelectorAll<HTMLButtonElement>(".planning-actions button")[0].click();
+    /* ADDRESS ONLY (task-card pass): the header's actions area is gone — the primary
+       lives in the surface's ONE action row (`.task-actionbar`), as on My tasks. */
+    host.querySelector<HTMLButtonElement>(".task-actionbar .doc-action-primary")!.click();
     await settle();
     const others = Array.from(host.querySelectorAll<HTMLInputElement>(".wid-people input[type=checkbox]"));
     expect(others.length).toBe(2);

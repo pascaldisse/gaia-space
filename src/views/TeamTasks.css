@@ -1,39 +1,21 @@
-/* Team Tasks reuses the planning/issue shell from Issues.css; only the grouping
-   chrome and the overdue tone are local. */
-.team-tasks-view .tt-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
-.tt-group { margin: 0 0 18px; }
-.tt-group-head { margin: 0 0 6px; font-size: 14px; display: flex; align-items: baseline; gap: 8px; }
-.tt-group-head a { color: var(--text-strong); text-decoration: none; }
-.tt-group-head a:hover { color: var(--accent-text, var(--accent)); }
-.tt-group-head small { color: var(--text-dim); font-size: 11px; font-weight: 500; }
-/* STAGE 20: the row itself is `.task-row` (components/TaskList.css) — shared with the
-   project Tasks tab, and modelled on My tasks' card. Only what is TEAM about the row
-   stays here. The overdue border stub is gone: overdue is red ink on the date, which
-   is where statusTone.ts puts it. */
+/* Team tasks draws Knowledge's card in the vocabulary of work: the board, the group
+   headings, the tiles and their marks all come from views/taskCards.css, shared with
+   My tasks and the project task list. What is left here is only what is TEAM about
+   this surface — the group is a PROJECT, so its heading is a way into that project.
+
+   STRUCTURE IS UNSCOPED (it must exist in every theme); nothing here is scoped to
+   `.theme-space-light`. */
+
+.tt-group { margin: 0; display: grid; gap: var(--dk-space-sm); }
+
+/* The heading is `.task-group-heading` (taskCards.css) — word, then count. Only the
+   link inside it is local: it keeps the heading's own voice instead of shouting in a
+   second colour, and answers on hover. */
+.tt-group-head a { color: inherit; text-decoration: none; }
+.tt-group-head a:hover { color: var(--accent-text, var(--accent)); text-decoration: underline; }
+
+/* Names of people never wrap mid-list: the meta line is one line of facts. */
 .tt-assignees { white-space: nowrap; }
-
-/* ══ Space-light restyle ═══════════════════════════════════════════════════
-   Team tasks draws in the `.planning-view` shell, so the row, filter bar and
-   empty state all come from Issues.css's space-light section. Only the group
-   chrome and the overdue tone are local. */
-
-/* `.filter-row > label` is the CAPTION idiom (uppercase kicker over a field).
-   This label is not a caption: its text IS the checkbox's name, so it keeps the
-   body voice instead of shouting SHOW COMPLETED across the filter line. */
-.theme-space-light .team-tasks-view .tt-toggle {
-  font-family: inherit;
-  font-size: var(--ctl-font-size);
-  font-weight: var(--ctl-font-weight);
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--muted);
-}
-.theme-space-light .tt-group { margin-bottom: 22px; }
-.theme-space-light .tt-group-head { margin-bottom: 8px; gap: 9px; }
-.theme-space-light .tt-group-head a { font-size: 12px; font-weight: 680; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
-.theme-space-light .tt-group-head a:hover { color: var(--teal-dark); }
-.theme-space-light .tt-group-head small { color: var(--quiet); font-size: 12px; font-weight: 620; }
-
 
 /* Same line, same place as My tasks: the opened task's facts, then the act that
    removes them — or the quiet reason it is not on offer here. */

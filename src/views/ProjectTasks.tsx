@@ -1,5 +1,5 @@
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import PageHeader from "../components/PageHeader";
+import PageHeader, { Chip } from "../components/PageHeader";
 import { personalApi, type Todo } from "../api/personal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -11,11 +11,13 @@ import TaskDrawer from "../components/TaskDrawer";
 import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
-import { todayISO, urgencyOf } from "../statusTone";
+import { Icon } from "../components/Icon";
+import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { takeWorkIntent } from "./workIntent";
 import "./Issues.css";
 import "../components/TaskList.css";
 import "../components/TaskRowEdit.css";
+import "./taskCards.css";
 import "./ProjectTasks.css";
 
 /* Two acts, two places: the drawer CREATES a task that does not exist yet, the row
@@ -48,12 +50,16 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   const [text, setText] = createSignal("");
   const [assigneeId, setAssigneeId] = createSignal("");
   const [filtersOpen, setFiltersOpen] = createSignal(false);
+  /** Done is folded away by default — it is the part of the project's list everybody
+   *  is finished with, and it only ever grows. The read is unchanged (`include_done`
+   *  stays true), so nothing is lost: the toggle carries the count. */
+  const [showDone, setShowDone] = createSignal(false);
   const [creating, setCreating] = createSignal(false);
   // ONE ROW OPEN AT A TIME, and the element that opened it is remembered so the
   // focus can go back where the person left it.
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [error, setError] = createSignal("");
-  createEffect(() => { selectedProject(); setCreating(false); setEditingId(null); setError(""); });
+  createEffect(() => { selectedProject(); setCreating(false); setEditingId(null); setError(""); setShowDone(false); });
 
   // Project to-dos are a persisted store of their own: this is EVERY member's
   // running project task, not the caller's slice of them.
@@ -120,10 +126,32 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [pendingDelete, setPendingDelete] = createSignal<Todo | null>(null);
   const [deleting, setDeleting] = createSignal(false);
+  /* Postponing and converting are WORDS in this menu, as on My tasks — not glyph
+     buttons on every tile. Both are `update_todo`-class writes, so they are offered
+     on the caller's OWN rows only: this list is everybody's, and the server would
+     refuse the rest (TodoOwnerWrite). */
   const taskMenuItems = (task: Todo): ContextMenuItem[] => [
     { label: "Open", onSelect: () => editTask(task) },
+    ...(owns(task) && !task.done ? [
+      { label: "Postpone by a day", onSelect: () => void postpone(task, 1) },
+      { label: "Postpone by a week", onSelect: () => void postpone(task, 7) },
+    ] : []),
+    ...(owns(task) && !task.done && task.project_id && task.source_entity_type !== "issue"
+      ? [{ label: "Convert to ticket", onSelect: () => void convert(task) }]
+      : []),
     ...(owns(task) ? [{ label: "Delete task…", danger: true, onSelect: () => setPendingDelete(task) }] : []),
   ];
+  const postpone = async (task: Todo, days: number) => {
+    try { await personalApi.postponeTodo(task.id, days); await reloadTasks(); }
+    catch (reason) { setError(humanError(reason)); }
+  };
+  const convert = async (task: Todo) => {
+    try {
+      if (!task.project_id) throw new Error("Give the task a project before converting it into a ticket.");
+      await personalApi.convertTodoToIssue(task.id, task.project_id);
+      await reloadTasks(); void reloadDashboard();
+    } catch (reason) { setError(humanError(reason)); }
+  };
   const openTaskMenu = (event: MouseEvent, task: Todo) => {
     event.preventDefault();
     event.stopPropagation();
@@ -156,10 +184,91 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   /* A filter that is ON may never hide behind a closed disclosure — that is how a
      short list stops being able to explain why it is short. */
   const toolsOpen = () => filtersOpen() || taskFilters();
-  /** True while the empty state below is drawing its own "New task": the header must
+  /* Today = due today or already overdue (an overdue task IS today's work); Later = a
+     future due date; No date = never scheduled. Every open task lands in exactly one
+     — the same three groups My tasks uses, so the two surfaces read alike. */
+  const openTasks = () => visibleTasks().filter(task => !task.done);
+  const doneList = () => visibleTasks().filter(task => task.done);
+  const todayList = () => openTasks().filter(task => task.due_date && task.due_date <= todayISO());
+  const laterList = () => openTasks().filter(task => task.due_date && task.due_date > todayISO());
+  const somedayList = () => openTasks().filter(task => !task.due_date);
+  const overdueCount = () => openTasks().filter(task => urgencyOf(task.due_date, todayISO(), 7) === "overdue").length;
+  const dueSoonCount = () => openTasks().filter(task => ["today", "soon"].includes(urgencyOf(task.due_date, todayISO(), 7))).length;
+  /* Three different facts about "there is nothing to read": the project has no tasks,
+     a filter is hiding them, or everything is finished. Each gets its own answer. */
+  const emptyStore = () => !tasks.loading && !!profileId() && !visibleTasks().length && !taskFilters();
+  const noMatch = () => !tasks.loading && !visibleTasks().length && taskFilters();
+  const nothingOpen = () => !tasks.loading && !!profileId() && !!visibleTasks().length && !openTasks().length;
+  /** True while an empty state below is drawing its own "New task": the header row must
    *  not draw a second one. The no-match state offers "Clear filters", not creation,
-   *  so it does NOT suppress the header primary. */
-  const showsEmptyPrimary = () => !tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId();
+   *  so it does NOT suppress the action row's primary. */
+  const showsEmptyPrimary = () => emptyStore() || nothingOpen();
+  /** THE TASK TILE — Knowledge's card in the vocabulary of work, the same one My tasks
+   *  and Team tasks draw. The mark carries how much room is left, the name is bold, and
+   *  the ONE meta line names WHOSE work this is: creator first, then whoever carries it.
+   *  Dragging it onto a project in the sidebar files it there. */
+  const taskTile = (task: Todo) => {
+    const urgency = () => task.done ? "none" : urgencyOf(task.due_date, todayISO(), 7);
+    return <Show when={editingId() === task.id} fallback={
+      <article
+        class="task-tile project-task-row"
+        classList={{ done: task.done }}
+        draggable={!task.done}
+        onDragStart={event => event.dataTransfer?.setData("application/x-gaia-task", JSON.stringify({ id: task.id, title: task.content }))}
+        onContextMenu={event => openTaskMenu(event, task)}
+      >
+        {/* THE MARK SAYS THE STATE, NOT THE ACT: open work carries "!", only a finished
+            task wears the tick. Completing is owner-or-assignee (the server's
+            TodoCompletionWrite), so it is disabled — never refused after the click —
+            for everybody else. */}
+        <button
+          type="button"
+          class="task-tile-check"
+          classList={{ [task.done ? "" : bandTone(deadlineBand(task.due_date, todayISO()))]: !task.done }}
+          aria-label={`Mark ${task.content} ${task.done ? "not done" : "done"}`}
+          aria-pressed={task.done}
+          disabled={!mayComplete(task)}
+          title={mayComplete(task) ? undefined : "Only the owner or an assignee can complete this"}
+          onClick={() => void complete(task, !task.done)}
+        >
+          <Icon name={task.done ? "check" : "alert"} size={15} />
+        </button>
+        <button type="button" class="task-tile-body" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => editTask(task)}>
+          <span class="task-tile-title">{task.content}</span>
+          <span class="task-tile-meta">
+            <span class="ptask-author">{nameOf(task.profile_id)}</span>
+            <span class="sep">·</span>
+            <span class="ptask-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
+          </span>
+        </button>
+        <span class="task-tile-edge">
+          <Show when={task.due_date}>{date => <span class="task-due" classList={{ [urgency()]: urgency() !== "none" }}>{date()}</span>}</Show>
+        </span>
+        <button class="task-tile-menu" aria-label={`Actions for ${task.content}`} title="Actions" onClick={event => openTaskMenu(event, task)}>⋯</button>
+      </article>
+    }>
+      {/* THE ROW IS ITS OWN EDITOR. It opens IN PLACE, in the grid cell it occupied,
+          and takes the whole row so the fields have the width they need. */}
+      <div class="task-open">
+        <div class="task-row-editing">
+          <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
+            ownerName={nameOf(task.profile_id)}
+            onCancel={() => closeEdit(task.id)}
+            onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
+            onError={setError} />
+          {/* The opened task's own facts carry the one act that removes them all —
+              at rest, in the same red it wears everywhere else. */}
+          <div class="task-danger-row">
+            <DeleteButton
+              label={`Delete ${task.content}`}
+              canDelete={owns(task)}
+              deniedReason="Only the owner can delete this"
+              onRequest={() => setPendingDelete(task)} />
+          </div>
+        </div>
+      </div>
+    </Show>;
+  };
 
   return <section class="planning-view project-tasks-view">
     {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
@@ -168,11 +277,14 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         owner asked for it to be obvious), and the moment there is content the header
         takes it back. Two identical buttons on one screen is the defect this rule
         exists to prevent. */}
-    <PageHeader icon="layers" kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." actions={
-      <Show when={!showsEmptyPrimary()}>
-        <div class="planning-actions">
-          <button type="button" class="primary" onClick={newTask}>New task</button>
-        </div>
+    {/* THE KNOWLEDGE SHAPE, in the vocabulary of work (same as My tasks): header ·
+        ONE action row · a head that says what you are looking at · groups of cards.
+        The figures are chips in the header; there is no rail beside the list. */}
+    <PageHeader icon="layers" kicker={project()?.name} title="Tasks" subline="Every member's tasks in THIS project — one project, everybody's work." chips={
+      <Show when={!tasks.loading && !tasks.error && !!visibleTasks().length}>
+        <Chip value={openTasks().length} label="open" />
+        <Show when={overdueCount()}><Chip value={overdueCount()} label="overdue" tone="red" /></Show>
+        <Show when={dueSoonCount()}><Chip value={dueSoonCount()} label="due in 7 days" tone="amber" /></Show>
       </Show>
     } />
     {/* The connection to tracked work stays visible without moving it back in:
@@ -183,73 +295,73 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     </p>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>
-    <section class="project-work-group" aria-labelledby="project-task-heading">
-      <div class="task-tools">
-        <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
-        <GhostPill aria-expanded={toolsOpen()} onClick={() => setFiltersOpen(!toolsOpen())}>Filter</GhostPill>
-      </div>
+    <section class="project-work-group" aria-label="Tasks">
+      {/* ONE ACTION ROW: the act first, then this surface's own switches. */}
+      <Show when={!showsEmptyPrimary()}>
+        <nav class="documents-actionbar task-actionbar">
+          <button type="button" class="primary doc-action-primary" onClick={newTask}>New task</button>
+          <button type="button" class="doc-action-secondary" aria-pressed={showDone()} onClick={() => setShowDone(open => !open)}>
+            {showDone() ? "Hide done" : `Show done${doneList().length ? ` (${doneList().length})` : ""}`}
+          </button>
+          <GhostPill aria-expanded={toolsOpen()} onClick={() => setFiltersOpen(!toolsOpen())}>Filter</GhostPill>
+        </nav>
+      </Show>
       <ControlRow label="Task filters" class="filter-row" hidden={!toolsOpen()}>
         <QuietSearch label="Search tasks" placeholder="Search tasks" value={text()} onInput={setText} />
         <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
       </ControlRow>
       <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
       <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
-      <Show when={!tasks.loading && !visibleTasks().length && taskFilters()}>
+      <Show when={noMatch()}>
         <EmptyState variant="no-match" title="No tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
       </Show>
-      <Show when={!tasks.loading && !visibleTasks().length && !taskFilters() && !!profileId()}>
+      <Show when={emptyStore()}>
         <EmptyState
           title={project() ? `No tasks in ${project()!.name} yet` : "No tasks in this project yet"}
           hint="Tasks are the shared to-dos of this project — everybody's, not only yours."
           actions={<button type="button" class="primary" onClick={newTask}>New task</button>}
         />
       </Show>
-      <Show when={visibleTasks().length}>
-        <ul class="task-list-plain project-task-list">
-          <For each={visibleTasks()}>{task => {
-            const urgency = () => task.done ? "none" : urgencyOf(task.due_date, todayISO());
-            return <li>
-              {/* THE ROW IS ITS OWN EDITOR. It opens in place, inside this same <li>,
-                  so the list neither reorders nor loses the reader's place. */}
-              <Show when={editingId() === task.id} fallback={
-              <div class="task-row project-task-row" classList={{ done: task.done }} onContextMenu={event => openTaskMenu(event, task)}>
-                <input type="checkbox" class="task-row-check" aria-label={`Mark ${task.content} done`}
-                  disabled={!mayComplete(task)}
-                  checked={task.done} onChange={event => complete(task, event.currentTarget.checked)} />
-                <button type="button" class="task-row-main" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => editTask(task)}>
-                  <strong class="task-row-title">{task.content}</strong>
-                  {/* ONE quiet meta line: who made it, who carries it, when it is due.
-                      Tone sits on the DATE alone — statusTone.ts decides, never this file. */}
-                  <span class="task-row-meta">
-                    <span class="ptask-author">{nameOf(task.profile_id)}</span>
-                    <Show when={task.assignee_ids.length}>
-                      <span class="ptask-assignees">{task.assignee_ids.map(nameOf).join(", ")}</span>
-                    </Show>
-                    <Show when={task.due_date}>{date => <time classList={{ [urgency()]: urgency() !== "none" }}>{date()}</time>}</Show>
-                  </span>
-                </button>
-              </div>}>
-                <div class="task-row-editing">
-                  <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
-                    ownerName={nameOf(task.profile_id)}
-                    onCancel={() => closeEdit(task.id)}
-                    onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
-                    onError={setError} />
-                  {/* The opened task's own facts carry the one act that removes them
-                      all — at rest, in the same red it wears everywhere else. */}
-                  <div class="task-danger-row">
-                    <DeleteButton
-                      label={`Delete ${task.content}`}
-                      canDelete={owns(task)}
-                      deniedReason="Only the owner can delete this"
-                      onRequest={() => setPendingDelete(task)} />
-                  </div>
-                </div>
-              </Show>
-            </li>;
-          }}</For>
-        </ul>
+      {/* Everything in the project is finished: not 'nothing exists' and not 'a filter
+          matched nothing'. The done work is still one click away, on the toggle. */}
+      <Show when={nothingOpen()}>
+        <EmptyState
+          title="Nothing open"
+          hint={`Every task in this project is done — ${doneList().length} completed.`}
+          actions={<button type="button" class="primary" onClick={newTask}>New task</button>}
+        />
       </Show>
+      <div class="task-board">
+        <Show when={openTasks().length}>
+          <div class="task-board-head">
+            <span class="task-board-icon" aria-hidden="true"><Icon name="alert" size={24} /></span>
+            <div class="task-board-headtext">
+              <h2>Open work in this project</h2>
+              <p>Open a task to edit it, or drag it onto a project in the sidebar to move it there.</p>
+            </div>
+          </div>
+        </Show>
+        <For each={[
+          { key: "today", label: "Today", rows: todayList() },
+          { key: "later", label: "Later", rows: laterList() },
+          { key: "someday", label: "No date", rows: somedayList() },
+        ]}>
+          {group => (
+            <Show when={group.rows.length}>
+              <p class="task-group-heading">{group.label}<span class="count">{group.rows.length}</span></p>
+              <div class="task-grid project-task-list" aria-label={`${group.label} tasks`}>
+                <For each={group.rows}>{taskTile}</For>
+              </div>
+            </Show>
+          )}
+        </For>
+        <Show when={showDone() && doneList().length}>
+          <p class="task-group-heading">Done<span class="count">{doneList().length}</span></p>
+          <div class="task-grid project-task-list" aria-label="Completed tasks">
+            <For each={doneList()}>{taskTile}</For>
+          </div>
+        </Show>
+      </div>
     </section>
     <Show when={menu()}>
       {value => <ContextMenu x={value().x} y={value().y} items={value().items} onClose={() => setMenu(null)} />}
