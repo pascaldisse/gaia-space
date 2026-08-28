@@ -26,7 +26,9 @@ import "./Development.css";
 const SECTIONS = [
   { key: "tickets", label: "Tickets" },
   { key: "bugs", label: "Bugs" },
-  { key: "pull-requests", label: "Pull Requests" },
+  /* Sentence case, and the same word the rail uses for the surface these live
+     on: "Pull Requests" was the only title-cased label on the screen. */
+  { key: "pull-requests", label: "Pull requests" },
   { key: "releases", label: "Releases" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
@@ -70,13 +72,16 @@ export default function Development(): JSX.Element {
 
   return (
     <section class="dev-view">
-      <Show when={section() === "tickets"}><Issues sections={tabs()} /></Show>
-      <Show when={section() === "bugs"}><Issues filterTagName="bug" sections={tabs()} /></Show>
+      {/* The guest keeps its whole self but not its name: this page is
+          Development (the rail entry that opens it is Development's Overview),
+          and the pills say which section. */}
+      <Show when={section() === "tickets"}><Issues title="Development" sections={tabs()} /></Show>
+      <Show when={section() === "bugs"}><Issues title="Development" filterTagName="bug" sections={tabs()} /></Show>
 
       <Show when={section() === "pull-requests" || section() === "releases"}>
         {/* These two have no view of their own to bring a header, so this lane
             supplies one — same shape, same order. */}
-        <PageHeader kicker={projectName(projectId())} title={sectionLabel()} />
+        <PageHeader kicker={projectName(projectId())} title="Development" subline={sectionLabel()} />
         {tabs()}
       </Show>
 

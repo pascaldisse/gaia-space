@@ -29,7 +29,7 @@ import { dueTone, priorityTone, statusTone, todayISO } from "../statusTone";
  * this view owns the PageHeader, and the pills must render BELOW it (stage 9a
  * ordering fix). Passing them in is the only way to get header-then-pills without
  * forking the header out of here. */
-export default function Issues(props: { filterTagName?: string; sections?: JSX.Element } = {}) {
+export default function Issues(props: { filterTagName?: string; sections?: JSX.Element; title?: string } = {}) {
   const projectId = sessionProject;
   const [query, setQuery] = createSignal("");
   const [statusFilter, setStatusFilter] = createSignal("");
@@ -144,9 +144,14 @@ const createStatus = async () => {
   };
 
   return <section class="planning-view">
+    {/* On its own route this page IS Tickets. Mounted as a SECTION of
+        Development it is not: the rail entry that opened it says "Overview",
+        the pills below say which section you are in, and a second surface
+        calling itself "Tickets" made two rail entries look like one page.
+        The host passes its own name. */}
     <PageHeader
       kicker={projectName(projectId())}
-      title="Tickets"
+      title={props.title ?? "Tickets"}
       chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="tickets" /></Show>}
       actions={<>
         {/* The picker's VALUE is its label now — the word "Project" above it was the
