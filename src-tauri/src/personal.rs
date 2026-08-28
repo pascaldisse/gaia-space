@@ -312,7 +312,71 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
-    todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
+    let todo = todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".to_string())?;
+    // After the row is durable, never inside the transaction: a feed problem must
+    // not undo a person's task (same law as issues::issue_event).
+    if let Err(error) = emit_todo_activity_on(c, &todo, crate::events::TODO_CREATED) {
+        eprintln!("todo.created fan-out failed: {error}");
+    }
+    Ok(todo)
+}
+
+/// Display name of a profile, for the organisation feed's actor line. A missing
+/// profile yields no name rather than an id masquerading as one.
+fn display_name_on(c: &Connection, profile_id: &str) -> Result<Option<String>> {
+    err(c
+        .query_row(
+            "SELECT display_name FROM profiles WHERE id=?1",
+            [profile_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional())
+}
+
+/// ORGANISATION NEWS, not work: "somebody created/completed a task". It goes to
+/// the people who share the task — its project members and its assignees — and
+/// never to the person who acted. A private, unassigned to-do has no audience
+/// and therefore emits nothing at all.
+fn emit_todo_activity_on(c: &Connection, todo: &Todo, event_type: &str) -> Result<()> {
+    let mut recipients: Vec<String> = Vec::new();
+    if let Some(project_id) = todo.project_id.as_deref() {
+        let mut statement = err(c.prepare("SELECT created_by FROM projects WHERE id=?1 AND created_by IS NOT NULL UNION SELECT profile_id FROM project_members WHERE project_id=?1"))?;
+        let rows = err(statement.query_map([project_id], |row| row.get::<_, String>(0)))?;
+        recipients = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+    }
+    recipients.extend(todo.assignee_ids.iter().cloned());
+    recipients.retain(|id| id != &todo.profile_id);
+    recipients.sort();
+    recipients.dedup();
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    let actor = display_name_on(c, &todo.profile_id)?;
+    let context = match todo.project_id.as_deref() {
+        Some(project_id) => err(c
+            .query_row("SELECT name FROM projects WHERE id=?1", [project_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional())?,
+        None => None,
+    };
+    let body = actor.map(|name| crate::events::actor_body(&name, context.as_deref()));
+    fan_out_notification_on(
+        c,
+        NotificationFanout {
+            recipients,
+            event_type,
+            title: todo.content.trim(),
+            body: body.as_deref(),
+            entity_type: "todo",
+            entity_id: &todo.id,
+            target_type: todo.project_id.as_deref().map(|_| "project"),
+            target_id: todo.project_id.as_deref(),
+        },
+    )?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_todo(todo: Todo) -> Result<Todo> {
@@ -427,6 +491,14 @@ fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
     let mut c = db::conn()?;
+    set_todo_completion_on(&mut c, &id, done)
+}
+fn set_todo_completion_on(c: &mut Connection, id: &str, done: bool) -> Result<Todo> {
+    // The 0 → 1 EDGE is the news, not the state: ticking a task that is already
+    // done must not announce it a second time.
+    let was_done: Option<bool> = err(c
+        .query_row("SELECT done FROM todos WHERE id=?1", [id], |row| row.get(0))
+        .optional())?;
     let tx = err(c.transaction())?;
     if err(tx.execute(
         "UPDATE todos SET done=?2,updated_at=unixepoch() WHERE id=?1",
@@ -436,7 +508,13 @@ pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
         return Err("Todo not found".into());
     }
     err(tx.commit())?;
-    todo_on(&c, &id)?.ok_or_else(|| "Todo not found".into())
+    let todo = todo_on(c, id)?.ok_or_else(|| "Todo not found".to_string())?;
+    if done && was_done == Some(false) {
+        if let Err(error) = emit_todo_activity_on(c, &todo, crate::events::TODO_COMPLETED) {
+            eprintln!("todo.completed fan-out failed: {error}");
+        }
+    }
+    Ok(todo)
 }
 
 /// Move a to-do's due date forward. An overdue task rolls over to today first, so
@@ -2203,6 +2281,91 @@ mod tests {
             .contains("assignment requires a project todo"));
         assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
+    /// ORGANISATION NEWS, not work. The feed was half-blind without these two
+    /// events: a task appearing and a task finishing are the commonest facts in
+    /// a workspace and nothing emitted them.
+    #[test]
+    fn todo_lifecycle_announces_itself_to_the_people_who_share_the_task() {
+        let mut c = conn();
+        let todo = create_todo_on(
+            &mut c,
+            TodoInput {
+                id: Some("t-shared".into()),
+                profile_id: "p".into(),
+                content: "Ship the feed".into(),
+                due_date: None,
+                project_id: Some("project".into()),
+                done: false,
+                source_entity_type: None,
+                source_entity_id: None,
+                notes: None,
+                assignee_ids: vec!["q".into()],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+        fn recipients(c: &Connection, event: &str) -> Vec<String> {
+            let mut statement = c
+                .prepare("SELECT recipient_id FROM notifications WHERE event_type=?1 ORDER BY recipient_id")
+                .unwrap();
+            let rows = statement
+                .query_map([event], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        }
+        // The project's people hear it; the person who acted never notifies herself.
+        assert_eq!(recipients(&c, "todo.created"), vec!["q".to_string(), "r".to_string()]);
+        // The actor is stated, by the documented convention, never guessed.
+        let body: Option<String> = c
+            .query_row(
+                "SELECT body FROM notifications WHERE event_type='todo.created' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body.as_deref(), Some("by Person · Project"));
+
+        // Completion is the 0 → 1 EDGE: announced once, not on every re-tick.
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        assert_eq!(recipients(&c, "todo.completed"), vec!["q".to_string(), "r".to_string()]);
+    }
+
+    /// A private to-do has no audience, so it makes no noise: news needs someone
+    /// for whom it is news.
+    #[test]
+    fn a_private_todo_announces_nothing() {
+        let mut c = conn();
+        let todo = create_todo_on(
+            &mut c,
+            TodoInput {
+                id: Some("t-private".into()),
+                profile_id: "p".into(),
+                content: "Think".into(),
+                due_date: None,
+                project_id: None,
+                done: false,
+                source_entity_type: None,
+                source_entity_id: None,
+                notes: None,
+                assignee_ids: vec![],
+                content_kind: "text".into(),
+            },
+        )
+        .unwrap();
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        let count: i64 = c
+            .query_row(
+                "SELECT count(*) FROM notifications WHERE event_type LIKE 'todo.%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
     #[test]
     fn todo_anchor_roundtrips() {
         let c = conn();

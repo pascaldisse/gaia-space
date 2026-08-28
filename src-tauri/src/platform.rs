@@ -1487,7 +1487,51 @@ pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
         created_by: Some(owner),
         ..project
     };
-    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id)]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.clone().filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id.clone())]).map_err(|e|e.to_string())?;
+    // After the row is durable. A new project is ORGANISATION NEWS: it is
+    // announced to the workspace, it is nobody's task, and it is never counted.
+    if let Err(error) = emit_project_created_on(c, &project) {
+        eprintln!("project.created fan-out failed: {error}");
+    }
+    Ok(())
+}
+
+/// Announces a new project to every active colleague except its creator.
+/// Modelled on `personal::emit_absence_lifecycle_on`: the domain supplies the
+/// recipients, subscriptions decide delivery.
+fn emit_project_created_on(c: &Connection, project: &Project) -> Result<()> {
+    let owner = match project.created_by.as_deref() {
+        Some(owner) => owner,
+        None => return Ok(()),
+    };
+    let mut statement = err(c.prepare("SELECT id FROM profiles WHERE archived=0 AND id<>?1"))?;
+    let recipients = err(statement.query_map([owner], |row| row.get::<_, String>(0)))?
+        .collect::<std::result::Result<Vec<String>, _>>()
+        .map_err(|error| error.to_string())?;
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    let actor = err(c
+        .query_row(
+            "SELECT display_name FROM profiles WHERE id=?1",
+            [owner],
+            |row| row.get::<_, String>(0),
+        )
+        .optional())?;
+    let body = actor.map(|name| crate::events::actor_body(&name, Some(&project.key)));
+    crate::personal::fan_out_notification_on(
+        c,
+        crate::personal::NotificationFanout {
+            recipients,
+            event_type: crate::events::PROJECT_CREATED,
+            title: &project.name,
+            body: body.as_deref(),
+            entity_type: "project",
+            entity_id: &project.id,
+            target_type: Some("project"),
+            target_id: Some(&project.id),
+        },
+    )?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2967,7 +3011,7 @@ mod tests {
     #[test]
     fn desktop_project_creation_is_never_ownerless() {
         let c = conn();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1)", []).unwrap();
         let project = |owner: Option<&str>| Project {
             id: "pr".into(),
             name: "Project".into(),
@@ -2997,6 +3041,31 @@ mod tests {
             })
             .unwrap();
         assert_eq!(stored.as_deref(), Some("p"));
+
+        // ORGANISATION NEWS: the workspace hears about a new project, its creator
+        // does not hear about herself, and the actor is named by the convention
+        // `events::actor_body` — never guessed by the reader.
+        let mut statement = c
+            .prepare("SELECT recipient_id,body FROM notifications WHERE event_type='project.created' ORDER BY recipient_id")
+            .unwrap();
+        let announced = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            announced.iter().all(|(recipient, _)| recipient != "p"),
+            "the creator is not an audience for her own act"
+        );
+        assert!(!announced.is_empty(), "a new project is announced");
+        assert!(
+            announced
+                .iter()
+                .all(|(_, body)| body.as_deref() == Some("by Person · PR")),
+            "{announced:?}"
+        );
     }
 
     /// "Admin" had two parallel meanings that never met: the web session gate reads

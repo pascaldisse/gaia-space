@@ -38,6 +38,25 @@ pub const REVIEW_SUGGESTION_UPDATED: &str = "review.suggestion_updated";
 
 /// Deployment status changed (`pipelines::transition_deployment`).
 pub const DEPLOYMENT_STATUS_CHANGED: &str = "deployment.status_changed";
+
+/// To-do created with an audience beyond its author (`personal::create_todo_on`).
+pub const TODO_CREATED: &str = "todo.created";
+/// To-do completed (`personal::set_todo_completion`, on the 0 → 1 edge).
+pub const TODO_COMPLETED: &str = "todo.completed";
+/// Project created (`platform::create_project_on`).
+pub const PROJECT_CREATED: &str = "project.created";
+
+/// ACTOR CONVENTION for organisation-feed events: the notification store has no
+/// actor column, so an emitter that knows who acted writes the body as
+/// `by <display name>` (optionally `by <display name> · <context>`). The
+/// activity feed in `src/attention.ts` reads exactly that prefix and otherwise
+/// says "Someone" — it never guesses a name out of free text.
+pub fn actor_body(actor_name: &str, context: Option<&str>) -> String {
+    match context.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(context) => format!("by {actor_name} · {context}"),
+        None => format!("by {actor_name}"),
+    }
+}
 /// Legacy document event name kept for subscriptions stored before the taxonomy
 /// existed. Emitted alongside [`DOCUMENT_UPDATED`] so those rows keep firing.
 pub const LEGACY_DOCUMENT_EVENT: &str = "DocumentWebhookEvent";
@@ -57,6 +76,9 @@ pub const EVENT_TAXONOMY: &[&str] = &[
     REVIEW_DISCUSSION_UPDATED,
     REVIEW_SUGGESTION_UPDATED,
     DEPLOYMENT_STATUS_CHANGED,
+    TODO_CREATED,
+    TODO_COMPLETED,
+    PROJECT_CREATED,
 ];
 
 /// `true` when `name` is part of the taxonomy. The legacy alias is deliberately
@@ -83,6 +105,20 @@ mod tests {
             let (domain, action) = name.split_once('.').expect("domain.action");
             assert!(!domain.is_empty() && !action.is_empty(), "malformed {name}");
             assert_eq!(*name, name.to_lowercase(), "event names are lowercase");
+        }
+    }
+
+    #[test]
+    fn actor_body_states_who_acted_and_never_invents_context() {
+        assert_eq!(actor_body("Ada Lovelace", None), "by Ada Lovelace");
+        assert_eq!(actor_body("Ada", Some("  ")), "by Ada");
+        assert_eq!(actor_body("Ada", Some("Orbital")), "by Ada · Orbital");
+    }
+
+    #[test]
+    fn organisation_events_are_part_of_the_taxonomy() {
+        for name in [TODO_CREATED, TODO_COMPLETED, PROJECT_CREATED] {
+            assert!(is_known_event(name), "{name} must be advertised");
         }
     }
 
