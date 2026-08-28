@@ -1,8 +1,9 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { platformApi, type DeskAssignment, type Location } from "../api/platform";
 import PageHeader, { Chip } from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
-import { GhostPill, PillSelect } from "../components/controls";
+import { Disclosure, SectionHeading } from "../components/blocks";
+import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import { humanError } from "../session";
 import "../components/paper.css";
 import "./operatorForm.css";
@@ -11,28 +12,108 @@ import "./Locations.css";
 /**
  * Locations (`/locations`) — offices, floors and who sits where.
  *
- * WHAT THIS FILE LOOKED LIKE BEFORE, and why that mattered: the whole view was
- * ONE 3600-character JSX line. Not a formatting complaint — it is why the view
- * was the least-migrated surface in the app. Nobody could see, inside that line,
- * that it contained thirteen captions floating to the LEFT of their fields, a
- * `<label>` nested inside another `<label>`, a raw JSON textarea with no
- * explanation, two unexplained 0–1 coordinates, and no empty state at all.
- * The reformat is therefore the first half of the fix, not cosmetics.
- *
  * THE PRODUCT DECISION THIS VIEW IS BUILT ON: these are OPERATOR TOOLS. The
  * person here is an administrator laying out an office, doing the same action
  * many times in a row. So the two creation forms deliberately STAY ON THE
  * SURFACE (law L3 relaxed) — a drawer would cost a click per repetition. What
- * is not relaxed is law L4: the forms must speak the same control language as
- * every filter row in the app, which is what `operatorForm.css` and `PillSelect`
- * are doing here.
+ * is not relaxed is L4: the forms speak the same control language as every
+ * filter row in the app (`operatorForm.css`, `PillSelect`, `blocks.tsx`).
  *
- * WHAT IS DELIBERATELY *NOT* FIXED: `work_schedule_json` is still a raw JSON
- * textarea, and map_x/map_y are still two numbers. Inventing a schedule editor
- * or a floor-plan picker is a feature, not a sweep. What they get instead is an
- * honest name and one line saying what the field actually expects — which is
- * the difference between an expert field and a trap.
+ * ── WHY THERE IS NO WEEKDAY EDITOR, decided by reading the consumer ──────────
+ * `work_schedule_json` has exactly ONE consumer in the whole repository:
+ *
+ *     platform.rs:603  let _: serde_json::Value = serde_json::from_str(..)
+ *                          .map_err(|_| "Location work schedule must be JSON")?;
+ *
+ * It is parsed to prove it is JSON, the result is DISCARDED, and the text is
+ * stored verbatim. No Rust and no TypeScript anywhere reads `workdays` — the
+ * key appears only in the column DEFAULT (db.rs:1207) and in `blank()` below.
+ *
+ * So a weekday-row editor would not be "a small contained addition that writes
+ * the same JSON". It would be the first code in the product to CLAIM a schema
+ * for this column, on a surface with no reader to hold it honest, and every
+ * location whose JSON says something else (the column takes any JSON at all)
+ * would be silently rewritten into that invented shape the first time an
+ * operator opened it and saved. That is a feature with a migration in it, not a
+ * legibility sweep. It is NOT started here.
+ *
+ * What ships instead is the honest version, and it removes the actual trap:
+ *   - a real label plus one line saying what the field is and what reads it,
+ *   - a PERSISTENT example (a hint under the box, not a placeholder that dies
+ *     on the first keystroke),
+ *   - validation that names the syntax error, mirroring the Rust rule exactly —
+ *     valid JSON, nothing more; `42` and `[]` pass here because they pass there,
+ *   - a live "Reads as" line that spells out `workdays` in weekday names when
+ *     the value happens to follow the shipped convention. Reading a convention
+ *     back to the operator costs no schema; writing one would have invented it.
+ *
+ * ── AND WHY MAP X/Y ARE BEHIND A DISCLOSURE ─────────────────────────────────
+ * Same method, same answer. `map_x`/`map_y` are consumed by a range check
+ * (platform.rs:513, 0..=1) and echoed back on the row below. There is no floor
+ * plan anywhere in this repository — the previous hint here described placing a
+ * desk "on the floor plan", which was a confident sentence about a screen that
+ * does not exist. Two required numbers no one can act on are the definition of
+ * cryptic, so they move into a disclosure, default to the centre, and say what
+ * is actually true: stored for a floor-plan view that has not been built.
  */
+
+const WEEKDAY_NAMES = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+/** The value the database column itself defaults to (db.rs:1207). Offered as an
+ *  example precisely BECAUSE it is the shipped default — not invented here. */
+const SCHEDULE_EXAMPLE = '{"workdays":[1,2,3,4,5]}';
+
+/**
+ * The client-side mirror of `platform.rs:603`. It must not be stricter: the Rust
+ * side accepts ANY valid JSON document, so a bare number or an empty array is a
+ * legal value and this must say so too. All this buys is that the operator is
+ * told WHERE the syntax broke before a round trip, instead of receiving
+ * "Location work schedule must be JSON" after the save fails.
+ */
+export const scheduleProblem = (raw: string): string => {
+  if (!raw.trim()) {
+    return "Work schedule is empty. The column stores JSON text, and an empty box is not valid JSON — use " + SCHEDULE_EXAMPLE + " if there is nothing special to record.";
+  }
+  try {
+    JSON.parse(raw);
+    return "";
+  } catch (error) {
+    return `Not valid JSON yet — ${(error as Error).message}`;
+  }
+};
+
+/**
+ * Reads `workdays` back in words IF the value follows the convention the column
+ * default ships. Returns "" for anything else — including valid JSON of another
+ * shape — because this line may only ever describe the value, never imply that
+ * a different shape is wrong. Nothing in the product reads this key, so a value
+ * without it is perfectly legal and gets no warning.
+ */
+export const scheduleReading = (raw: string): string => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "";
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+  const days = (parsed as { workdays?: unknown }).workdays;
+  if (!Array.isArray(days)) return "";
+  const named = days.filter(
+    (day): day is number => typeof day === "number" && Number.isInteger(day) && day >= 1 && day <= 7,
+  );
+  if (named.length !== days.length) return "";
+  if (!named.length) return "no working days";
+  return named.map((day) => WEEKDAY_NAMES[day - 1]).join(", ");
+};
 
 const blank = (): Location => ({
   id: "",
@@ -40,7 +121,7 @@ const blank = (): Location => ({
   location_type: "Office",
   parent_id: null,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  work_schedule_json: '{"workdays":[1,2,3,4,5]}',
+  work_schedule_json: SCHEDULE_EXAMPLE,
   channel_id: null,
   archived: false,
   equipment: [],
@@ -56,6 +137,36 @@ const blankDesk = (): DeskAssignment => ({
   till_date: null,
 });
 
+/**
+ * One labelled control with its explanation. The hint is a SIBLING of the
+ * `<label>`, not a child: nested it would be swallowed into the field's
+ * accessible name, so a screen reader would announce the whole sentence every
+ * time focus landed. It is wired with `aria-describedby` instead, which is what
+ * that relationship is for — hence the render-prop, which hands the caller the
+ * id it must put on the actual input.
+ */
+function Field(props: {
+  id: string;
+  label: string;
+  hint?: JSX.Element;
+  grow?: boolean;
+  wide?: boolean;
+  children: (describedBy: string | undefined) => JSX.Element;
+}): JSX.Element {
+  const hintId = () => `${props.id}-hint`;
+  return (
+    <div class="locations-field" classList={{ grow: !!props.grow, wide: !!props.wide }}>
+      <label class="op-field">
+        <span>{props.label}</span>
+        {props.children(props.hint ? hintId() : undefined)}
+      </label>
+      <Show when={props.hint}>
+        <p class="op-hint" id={hintId()}>{props.hint}</p>
+      </Show>
+    </div>
+  );
+}
+
 export default function Locations() {
   const [locations, { refetch }] = createResource(() => platformApi.locations());
   const [profiles] = createResource(() => platformApi.profiles());
@@ -64,10 +175,37 @@ export default function Locations() {
   const [draft, setDraft] = createSignal<Location>(blank());
   const [desk, setDesk] = createSignal<DeskAssignment>(blankDesk());
   const [error, setError] = createSignal("");
+  const [query, setQuery] = createSignal("");
+
+  /* The list gained a search, which is what makes the SECOND empty-state case
+     real: before this, "filters match nothing" could not happen here, so the
+     view only ever needed one. Filtering is client-side over the same resource —
+     no new call, no change to what the backend returns. */
+  const filtered = createMemo(() => {
+    const needle = query().trim().toLowerCase();
+    const all = locations() ?? [];
+    if (!needle) return all;
+    return all.filter((location) =>
+      [location.name, location.location_type, location.timezone, ...location.equipment]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  });
+
+  const problem = () => scheduleProblem(draft().work_schedule_json);
+  const reading = () => scheduleReading(draft().work_schedule_json);
 
   const save = async (event: SubmitEvent) => {
     event.preventDefault();
+    /* Not a new rule: platform.rs rejects the same value. Saying it here means
+       the operator reads WHICH character is wrong instead of a generic failure. */
+    if (problem()) {
+      setError(problem());
+      return;
+    }
     try {
+      setError("");
       await platformApi.saveLocation({ ...draft(), equipment: draft().equipment.filter(Boolean) });
       setDraft(blank());
       await refetch();
@@ -113,14 +251,26 @@ export default function Locations() {
   const locationName = (id: string) =>
     locations()?.find((location) => location.id === id)?.name ?? id;
 
+  const focusName = () => {
+    document
+      .querySelector<HTMLInputElement>('.locations-view input[aria-label="Location name"]')
+      ?.focus();
+  };
+
   return (
     <section class="settings-view locations-view">
       <PageHeader
         title="Locations"
+        subline="Offices, floors and rooms — and which desk each person sits at."
         chips={
-          <Show when={(locations() ?? []).length}>
-            <Chip value={(locations() ?? []).length} label="locations" />
-          </Show>
+          <>
+            <Show when={(locations() ?? []).length}>
+              <Chip value={(locations() ?? []).length} label="locations" />
+            </Show>
+            <Show when={(desks() ?? []).length}>
+              <Chip value={(desks() ?? []).length} label="desks assigned" />
+            </Show>
+          </>
         }
       />
 
@@ -133,62 +283,188 @@ export default function Locations() {
         <form class="settings-card paper-card" onSubmit={save}>
           <h2 class="paper-section-label">{draft().id ? "Edit location" : "New location"}</h2>
 
-          <div class="op-form">
-            {/* Name / Type / Timezone are self-evident once the placeholder says
-                the word, so they carry no caption — the caption was the noise. */}
-            <input
-              class="op-input op-grow"
-              aria-label="Location name"
-              placeholder="Location name"
-              required
-              value={draft().name}
-              onInput={(event) => setDraft({ ...draft(), name: event.currentTarget.value })}
-            />
-            <input
-              class="op-input"
-              aria-label="Location type"
-              placeholder="Office, Floor, Room…"
-              value={draft().location_type}
-              onInput={(event) => setDraft({ ...draft(), location_type: event.currentTarget.value })}
-            />
-            <input
-              class="op-input"
-              aria-label="Timezone"
-              placeholder="Europe/Berlin"
-              required
-              value={draft().timezone}
-              onInput={(event) => setDraft({ ...draft(), timezone: event.currentTarget.value })}
-            />
-            <input
-              class="op-input op-grow"
-              aria-label="Equipment"
-              placeholder="Equipment, comma-separated"
-              value={draft().equipment.join(", ")}
-              onInput={(event) =>
-                setDraft({
-                  ...draft(),
-                  equipment: event.currentTarget.value.split(",").map((x) => x.trim()).filter(Boolean),
-                })
-              }
-            />
+          {/* THIRTEEN EQUAL CAPTIONS WERE THE PROBLEM, not any one of them. The
+              sections below are the reader's map: what it is called, where it
+              is, when it is open, what is in it, where its chat lives. */}
+          <SectionHeading class="locations-section" title="Identity" />
+          <div class="op-form locations-row">
+            <Field id="loc-name" label="Name" grow>
+              {() => (
+                <input
+                  class="op-input"
+                  aria-label="Location name"
+                  placeholder="Berlin office"
+                  required
+                  value={draft().name}
+                  onInput={(event) => setDraft({ ...draft(), name: event.currentTarget.value })}
+                />
+              )}
+            </Field>
+
+            {/* `location_type` is free text in the schema (db.rs:1205, default
+                'Office') and is only trimmed and stored. The datalist offers the
+                usual words WITHOUT taking away the ability to type another —
+                turning this into a picker would have removed a capability. */}
+            <Field
+              id="loc-type"
+              label="Type"
+              hint="Your own word for what this is. Shown on the row; nothing in the app branches on it."
+            >
+              {(describedBy) => (
+                <>
+                  <input
+                    class="op-input"
+                    aria-label="Location type"
+                    list="loc-type-options"
+                    aria-describedby={describedBy}
+                    placeholder="Office"
+                    value={draft().location_type}
+                    onInput={(event) =>
+                      setDraft({ ...draft(), location_type: event.currentTarget.value })
+                    }
+                  />
+                  <datalist id="loc-type-options">
+                    <option value="Office" />
+                    <option value="Floor" />
+                    <option value="Room" />
+                    <option value="Warehouse" />
+                    <option value="Remote" />
+                  </datalist>
+                </>
+              )}
+            </Field>
           </div>
 
-          {/* THE ONE FIELD THAT KEEPS ITS CAPTION. A text input's placeholder can
-              be its name only when the answer is obvious; here the answer is a
-              JSON object with a specific shape, so it gets a real label and one
-              line of truth about what it expects. No schedule editor is being
-              invented — that is a feature, and out of this lane's scope. */}
-          <label class="op-field locations-schedule">
-            <span>Work schedule</span>
-            <textarea
-              class="op-input"
-              value={draft().work_schedule_json}
-              onInput={(event) => setDraft({ ...draft(), work_schedule_json: event.currentTarget.value })}
-            />
-          </label>
+          <SectionHeading class="locations-section" title="Time zone" />
+          <div class="op-form locations-row">
+            <Field
+              id="loc-tz"
+              label="Time zone"
+              grow
+              hint={
+                <>
+                  An IANA name such as <code>Europe/Berlin</code> or <code>America/New_York</code>.
+                  Required, and shown on the row — the app does not yet convert any times by it.
+                </>
+              }
+            >
+              {(describedBy) => (
+                <input
+                  class="op-input"
+                  aria-label="Timezone"
+                  aria-describedby={describedBy}
+                  placeholder="Europe/Berlin"
+                  required
+                  value={draft().timezone}
+                  onInput={(event) => setDraft({ ...draft(), timezone: event.currentTarget.value })}
+                />
+              )}
+            </Field>
+          </div>
+
+          {/* ── the field the whole complaint was about ──────────────────── */}
+          <SectionHeading class="locations-section" title="Work schedule" />
+          <div class="op-form locations-row">
+            <Field
+              id="loc-schedule"
+              label="Work schedule (JSON)"
+              wide
+              hint={
+                <>
+                  Free-form JSON kept with the location as a note for future automation. It is
+                  stored exactly as typed and validated only for being valid JSON — nothing in the
+                  app reads it yet, so no shape is required.
+                </>
+              }
+            >
+              {(describedBy) => (
+                <textarea
+                  class="op-input"
+                  aria-label="Work schedule JSON"
+                  aria-describedby={describedBy}
+                  aria-invalid={problem() ? "true" : undefined}
+                  rows="3"
+                  value={draft().work_schedule_json}
+                  onInput={(event) =>
+                    setDraft({ ...draft(), work_schedule_json: event.currentTarget.value })
+                  }
+                />
+              )}
+            </Field>
+          </div>
+
+          {/* A PERSISTENT example. A placeholder would have vanished at the first
+              keystroke — exactly when the operator starts needing it. */}
+          <p class="op-hint locations-example">
+            Example — the value new locations start with:{" "}
+            <code>{SCHEDULE_EXAMPLE}</code> (ISO weekday numbers, 1 = Monday … 7 = Sunday).
+            <Show when={draft().work_schedule_json.trim() !== SCHEDULE_EXAMPLE}>
+              {" "}
+              <GhostPill
+                onClick={() => setDraft({ ...draft(), work_schedule_json: SCHEDULE_EXAMPLE })}
+              >
+                Use this example
+              </GhostPill>
+            </Show>
+          </p>
+
+          {/* One of these two shows at a time: the syntax error, or — when the
+              value happens to use the shipped convention — that value in words. */}
+          <Show when={problem()}>
+            <p class="locations-problem" role="alert">{problem()}</p>
+          </Show>
+          <Show when={!problem() && reading()}>
+            <p class="op-hint locations-reading">Reads as working days: {reading()}.</p>
+          </Show>
+
+          <SectionHeading class="locations-section" title="Equipment" />
+          <div class="op-form locations-row">
+            <Field
+              id="loc-equipment"
+              label="Equipment"
+              grow
+              hint="Comma-separated, stored per location and shown on its row. Meetings filters bookable rooms by a separate equipment list held on the meeting room itself."
+            >
+              {(describedBy) => (
+                <input
+                  class="op-input"
+                  aria-label="Equipment"
+                  aria-describedby={describedBy}
+                  placeholder="Projector, Whiteboard"
+                  value={draft().equipment.join(", ")}
+                  onInput={(event) =>
+                    setDraft({
+                      ...draft(),
+                      equipment: event.currentTarget.value
+                        .split(",")
+                        .map((x) => x.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              )}
+            </Field>
+          </div>
+
+          {/* Not a field — an explanation of something that happens without the
+              operator asking, which is otherwise only visible as a mystery
+              "Chat linked" pill on the row. save_location() creates the channel
+              named "<name> chat" (platform.rs:607). */}
+          <SectionHeading class="locations-section" title="Chat channel" />
           <p class="op-hint">
-            Raw JSON, stored as written. <code>{'{"workdays":[1,2,3,4,5]}'}</code> means Monday to
-            Friday — 1 is Monday, 7 is Sunday.
+            <Show
+              when={draft().channel_id}
+              fallback={
+                <Show
+                  when={draft().name.trim()}
+                  fallback={<>Saving this location also opens a chat channel named after it. Nothing to fill in here.</>}
+                >
+                  Saving this location also opens a chat channel for it, named “{draft().name.trim()} chat”. Nothing to fill in here.
+                </Show>
+              }
+            >
+              This location has its own chat channel, created when it was first saved.
+            </Show>
           </p>
 
           <div class="locations-actions">
@@ -205,32 +481,43 @@ export default function Locations() {
         <div class="settings-card paper-card">
           <h2 class="paper-section-label">Locations</h2>
 
-          {/* NOTHING EXISTS YET is the only case here — this list has no filter,
-              so it can never be "filtered to nothing". The form that creates the
-              first one is already on screen, so the action focuses it rather
-              than describing where it is. Naming page geography ("create one
-              above") is what the old surfaces did and it is what breaks the
-              moment the layout changes. */}
+          <Show when={(locations() ?? []).length}>
+            <div class="op-form locations-filter">
+              <QuietSearch
+                label="Search locations"
+                placeholder="Search name, type, time zone or equipment"
+                value={query()}
+                onInput={setQuery}
+              />
+            </div>
+          </Show>
+
+          {/* THE TWO CASES, kept apart. Nothing yet → offer the creation that is
+              already on screen (focus it; naming page geography breaks the
+              moment the layout changes). Search excluded everything → offer to
+              clear it, because what they want almost certainly exists. */}
           <Show when={!locations.loading && !(locations() ?? []).length}>
             <EmptyState
               title="No locations yet"
               hint="A location is an office, a floor or a room. People and desks are assigned to one."
               actions={
-                <button
-                  class="primary"
-                  type="button"
-                  onClick={() => {
-                    setDraft(blank());
-                    document.querySelector<HTMLInputElement>('.locations-view input[aria-label="Location name"]')?.focus();
-                  }}
-                >
+                <button class="primary" type="button" onClick={() => { setDraft(blank()); focusName(); }}>
                   Add the first location
                 </button>
               }
             />
           </Show>
 
-          <For each={locations()}>
+          <Show when={!locations.loading && (locations() ?? []).length > 0 && !filtered().length}>
+            <EmptyState
+              variant="no-match"
+              title={`No location matches “${query().trim()}”`}
+              hint="The search covers name, type, time zone and equipment."
+              actions={<GhostPill onClick={() => setQuery("")}>Clear search</GhostPill>}
+            />
+          </Show>
+
+          <For each={filtered()}>
             {(location) => (
               <button
                 class="paper-row"
@@ -256,11 +543,15 @@ export default function Locations() {
         {/* ── desks ───────────────────────────────────────────────────────── */}
         <div class="settings-card paper-card">
           <h2 class="paper-section-label">Desk assignments</h2>
+          <p class="op-hint locations-lede">
+            Records who sits where, and from when. A person can have several over time — this is
+            history, not a field on their profile.
+          </p>
 
           <form class="op-form locations-desk-form" onSubmit={saveDesk}>
-            {/* Both pickers carry their own value as their label, so the words
-                "Member" and "Location" that used to float above them are gone —
-                the resting option says it instead. */}
+            {/* Both pickers carry their value as their label, so the captions
+                that used to float above them are gone — the resting option says
+                it instead. */}
             <PillSelect
               label="Member"
               value={desk().profile_id}
@@ -283,74 +574,110 @@ export default function Locations() {
               </For>
             </PillSelect>
 
-            {/* The old markup nested a <label> inside a <label> here, which gives
-                the field two names and no reliable one. One control, one name. */}
-            <input
-              class="op-input"
-              aria-label="Seat label"
-              placeholder="Desk label"
-              value={desk().seat_label ?? ""}
-              onInput={(event) => setDesk({ ...desk(), seat_label: event.currentTarget.value || null })}
-            />
+            <Field
+              id="desk-seat"
+              label="Desk label"
+              hint="Whatever is written on the desk — “4.12”, “Window south”. Optional."
+            >
+              {(describedBy) => (
+                <input
+                  class="op-input"
+                  aria-label="Seat label"
+                  aria-describedby={describedBy}
+                  placeholder="4.12"
+                  value={desk().seat_label ?? ""}
+                  onInput={(event) =>
+                    setDesk({ ...desk(), seat_label: event.currentTarget.value || null })
+                  }
+                />
+              )}
+            </Field>
 
-            {/* These two ARE unguessable — a bare number box called "X" says
-                nothing — so they keep captions, share one hint, and are sized to
-                what they hold instead of taking a text field's runway. */}
-            <label class="op-field">
-              <span>Map x</span>
-              <input
-                class="op-input op-narrow"
-                required
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={desk().map_x}
-                onInput={(event) => setDesk({ ...desk(), map_x: Number(event.currentTarget.value) })}
-              />
-            </label>
-            <label class="op-field">
-              <span>Map y</span>
-              <input
-                class="op-input op-narrow"
-                required
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={desk().map_y}
-                onInput={(event) => setDesk({ ...desk(), map_y: Number(event.currentTarget.value) })}
-              />
-            </label>
+            <Field id="desk-from" label="From">
+              {() => (
+                <input
+                  class="op-input op-date"
+                  aria-label="Assigned from"
+                  required
+                  type="date"
+                  value={desk().since_date}
+                  onInput={(event) => setDesk({ ...desk(), since_date: event.currentTarget.value })}
+                />
+              )}
+            </Field>
 
-            {/* A date input at rest shows a format, not a meaning — "from" and
-                "until" cannot be read off the control, so they keep captions. */}
-            <label class="op-field">
-              <span>From</span>
-              <input
-                class="op-input op-date"
-                required
-                type="date"
-                value={desk().since_date}
-                onInput={(event) => setDesk({ ...desk(), since_date: event.currentTarget.value })}
-              />
-            </label>
-            <label class="op-field">
-              <span>Until</span>
-              <input
-                class="op-input op-date"
-                type="date"
-                value={desk().till_date ?? ""}
-                onInput={(event) => setDesk({ ...desk(), till_date: event.currentTarget.value || null })}
-              />
-            </label>
+            <Field id="desk-until" label="Until" hint="Leave empty while the desk is still theirs.">
+              {(describedBy) => (
+                <input
+                  class="op-input op-date"
+                  aria-label="Assigned until"
+                  aria-describedby={describedBy}
+                  type="date"
+                  value={desk().till_date ?? ""}
+                  onInput={(event) =>
+                    setDesk({ ...desk(), till_date: event.currentTarget.value || null })
+                  }
+                />
+              )}
+            </Field>
 
-            <button class="primary" type="submit" disabled={!deskReady()}>Assign desk</button>
+            {/* The two coordinates are REQUIRED by the backend and meaningless
+                without a floor plan that does not exist, so they keep working
+                from their centred default and stop occupying the operator's
+                attention. Folded, not removed: the value is still editable. */}
+            <Disclosure
+              class="locations-map"
+              title="Floor-plan position"
+              meta={`${desk().map_x} · ${desk().map_y}`}
+            >
+              <p class="op-hint">
+                Where the desk would sit on a floor-plan image, as a fraction of its width and
+                height — <code>0, 0</code> top-left, <code>1, 1</code> bottom-right. There is no
+                floor-plan view in the app yet, so these are stored for later; the centred
+                default is fine.
+              </p>
+              <div class="op-form">
+                <Field id="desk-x" label="Across (0–1)">
+                  {() => (
+                    <input
+                      class="op-input op-narrow"
+                      aria-label="Map x"
+                      required
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={desk().map_x}
+                      onInput={(event) =>
+                        setDesk({ ...desk(), map_x: Number(event.currentTarget.value) })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field id="desk-y" label="Down (0–1)">
+                  {() => (
+                    <input
+                      class="op-input op-narrow"
+                      aria-label="Map y"
+                      required
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={desk().map_y}
+                      onInput={(event) =>
+                        setDesk({ ...desk(), map_y: Number(event.currentTarget.value) })
+                      }
+                    />
+                  )}
+                </Field>
+              </div>
+            </Disclosure>
+
+            <button class="primary" type="submit" disabled={!deskReady()}>
+              Assign desk
+            </button>
           </form>
-          <p class="op-hint">
-            Map x and y place the desk on the floor plan as a fraction of its width and
-            height: <code>0, 0</code> is the top-left corner, <code>1, 1</code> the bottom-right.
-          </p>
 
           <Show when={!desks.loading && !(desks() ?? []).length}>
             <EmptyState
@@ -367,15 +694,20 @@ export default function Locations() {
                     {personName(assignment.profile_id)} · {locationName(assignment.location_id)}
                   </span>
                   <span class="paper-row-meta">
-                    <span>{assignment.seat_label ?? "Map point"}</span>
-                    <span>{assignment.map_x}, {assignment.map_y}</span>
+                    <span>{assignment.seat_label ?? "No desk label"}</span>
+                    {/* Still shown — the numbers are data an operator entered,
+                        and hiding stored values is not the same as explaining
+                        them. It is only named now, instead of a bare "0.5, 0.5". */}
+                    <span>Map {assignment.map_x}, {assignment.map_y}</span>
                     <span>
                       {assignment.since_date}
-                      {assignment.till_date ? ` → ${assignment.till_date}` : ""}
+                      {assignment.till_date ? ` → ${assignment.till_date}` : " → open ended"}
                     </span>
                   </span>
                 </span>
-                <GhostPill onClick={() => assignment.id && removeDesk(assignment.id)}>Remove</GhostPill>
+                <GhostPill onClick={() => assignment.id && removeDesk(assignment.id)}>
+                  Remove
+                </GhostPill>
               </div>
             )}
           </For>
