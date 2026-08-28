@@ -6,6 +6,7 @@ import { currentUser, profileId, profiles, projects, reloadProfiles, reloadProje
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import NotesLog from "../components/NotesLog";
 import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
 import Chat from "./Chat";
 import ProjectHome from "./ProjectHome";
@@ -182,20 +183,27 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={visibleTab() === "files"}><Documents container="project" containerId={projectIdOf()} /></Show>
           </EmbeddedScopeProvider>
           <Show when={visibleTab() === "notes"}>
-            {/* Honest empty state: there is no notes/decisions store in the data model.
-                Documents is the file surface (tab "Files & Links"); minutes and
-                decisions are not documents and are not silently faked as such.
-                So the actions here lead to the two places where a decision can
-                actually be written today — both already scoped to this channel.
-                A "New note" button would be a dead button, so it is not drawn. */}
-            <EmptyState
-              title="No notes or decisions store yet"
-              hint="Decisions live in the conversation and in this project's documents today."
-              actions={<>
-                <button type="button" class="primary" onClick={() => goTab("files")}>Open documents</button>
-                <GhostPill onClick={() => goTab("messages")}>Back to messages</GhostPill>
-              </>}
-            />
+            {/* The store now exists (`channel_notes`), so the honest empty state that
+                stood here has been replaced by the thing it was honest about missing.
+                A LOG, not a document: entries are appended and an edit is stamped, so
+                "where do we stand" is answered by history rather than by a paragraph
+                somebody last rewrote. It inherits the channel's project and the acting
+                profile — this surface asks for neither. Files still belong to the
+                "Files & Links" tab; a note LINKS a document, it never stores bytes. */}
+            <Show
+              when={projectIdOf()}
+              fallback={
+                <EmptyState
+                  title="This channel has no project"
+                  hint="Notes and decisions are project-scoped, so there is nothing to log here."
+                  actions={<GhostPill onClick={() => goTab("messages")}>Back to messages</GhostPill>}
+                />
+              }
+            >
+              {(projectId) => (
+                <NotesLog channelId={channelId()} projectId={projectId()} authorId={actingProfileId()} />
+              )}
+            </Show>
           </Show>
         </section>
 
