@@ -63,6 +63,9 @@ export default function Todo() {
   const todayList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<=today());
   const laterList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>today());
   const somedayList=()=>openTodos().filter(todo=>!todo.due_date);
+  /** Open work of any kind. Zero of it, with tasks on the list, is its own state:
+   *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
+  const openCount=()=>openTodos().length;
   const doneList=()=>todos()?.filter(todo=>todo.done)??[];
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
@@ -136,18 +139,29 @@ export default function Todo() {
             actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
           />
         </Show>
-        {/* Per-section lines stay QUIET: with tasks in other sections and the primary
-            in the header, a call to action here would fire on every filter of
-            the calendar the person is already reading. */}
-        <Show when={!!(todos() ?? []).length}>
-        <section class="task-list">
-          <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
-          <Show when={todayList().length} fallback={<p class="personal-empty">Nothing due today.</p>}><For each={todayList()}>{todoRow}</For></Show>
-        </section>
-        <section class="task-list">
-          <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
-          <Show when={laterList().length} fallback={<p class="personal-empty">Nothing scheduled ahead.</p>}><For each={laterList()}>{todoRow}</For></Show>
-        </section>
+        {/* A SECTION WITH NOTHING IN IT IS NOT DRAWN. It used to render its heading and
+            a large dashed panel saying "Nothing due today." — so a person whose only
+            tasks were done met two empty boxes describing absence and offering nothing.
+            An empty section carries no information the count in the heading does not
+            already carry, and two of them carry it twice. */}
+        <Show when={!openCount() && !!(todos() ?? []).length}>
+          <EmptyState
+            title="Nothing open"
+            hint={doneList().length ? `Everything on your list is done — ${doneList().length} completed.` : undefined}
+            actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
+          />
+        </Show>
+        <Show when={todayList().length}>
+          <section class="task-list">
+            <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
+            <For each={todayList()}>{todoRow}</For>
+          </section>
+        </Show>
+        <Show when={laterList().length}>
+          <section class="task-list">
+            <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
+            <For each={laterList()}>{todoRow}</For>
+          </section>
         </Show>
         <Show when={somedayList().length}>
           <section class="task-list">
