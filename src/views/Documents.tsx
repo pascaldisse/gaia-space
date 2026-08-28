@@ -240,6 +240,21 @@ const [showArchived, setShowArchived] = createSignal(false);
     return projects()?.find((p) => p.id === selectedProjectId())?.name ?? "Project library";
   };
   const libraryTitle = () => levelFolder()?.name ?? containerName();
+  /** The whole way down, so a deep shelf can be left in one click at any level —
+   *  "Back" only ever answered one step and, sitting in the canvas, it answered it
+   *  from the middle of the page. */
+  const folderPath = () => {
+    const chain: DocumentFolder[] = [];
+    let current = levelFolder();
+    const guard = new Set<string>();
+    while (current && !guard.has(current.id)) {
+      guard.add(current.id);
+      chain.unshift(current);
+      const parentId = current.parent_id;
+      current = parentId && parentId !== rootParentId() ? safeFolders().find((f) => f.id === parentId) ?? null : null;
+    }
+    return chain;
+  };
 
   /** ── THE SHELF ─────────────────────────────────────────────────────────────
    *
@@ -1283,6 +1298,63 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         </label>
       </nav>
 
+      {/* WHERE YOU ARE LIVES AT THE TOP, NOT IN THE MIDDLE. The path is the way out of
+          a shelf — one click to any level above — and each crumb takes a drop, so
+          moving something out is the same gesture as moving it in. */}
+      <Show when={folderPath().length > 0}>
+        <nav class="documents-breadcrumb" aria-label="Library path">
+          <button
+            class="documents-crumb documents-library-up"
+            classList={{ "drop-into": dropTargetId() === "__root" }}
+            title={`Back to ${containerName()} — or drop here to move an item out`}
+            onClick={() => setSelectedFolderId(null)}
+            onDragOver={(event) => {
+              if (!isInternalDrag(event)) return;
+              event.preventDefault();
+              setDropTargetId("__root");
+            }}
+            onDragLeave={() => setDropTargetId((current) => (current === "__root" ? null : current))}
+            onDrop={(event) => {
+              const payload = event.dataTransfer?.getData("text/plain") ?? "";
+              setDropTargetId(null);
+              if (!payload) return;
+              event.preventDefault();
+              void fileInto(payload, null);
+            }}
+          >
+            <span aria-hidden="true">←</span> {containerName()}
+          </button>
+          <For each={folderPath()}>
+            {(folder, index) => (
+              <>
+                <span class="documents-crumb-sep" aria-hidden="true">/</span>
+                <button
+                  class="documents-crumb"
+                  classList={{ current: index() === folderPath().length - 1, "drop-into": dropTargetId() === `__crumb:${folder.id}` }}
+                  aria-current={index() === folderPath().length - 1 ? "true" : undefined}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                  onDragOver={(event) => {
+                    if (!isInternalDrag(event)) return;
+                    event.preventDefault();
+                    setDropTargetId(`__crumb:${folder.id}`);
+                  }}
+                  onDragLeave={() => setDropTargetId((current) => (current === `__crumb:${folder.id}` ? null : current))}
+                  onDrop={(event) => {
+                    const payload = event.dataTransfer?.getData("text/plain") ?? "";
+                    setDropTargetId(null);
+                    if (!payload) return;
+                    event.preventDefault();
+                    void fileInto(payload, folder.id);
+                  }}
+                >
+                  {folder.name}
+                </button>
+              </>
+            )}
+          </For>
+        </nav>
+      </Show>
+
       <div class="documents-body">
         <section
           class="documents-editor"
@@ -1317,31 +1389,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   when={containerId()}
                   fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
                 >
-                <Show when={levelFolder()}>
-                  {(folder) => (
-                    <button
-                      class="documents-library-up"
-                      classList={{ "drop-into": dropTargetId() === "__up" }}
-                      title="Back — or drop here to move an item out of this shelf"
-                      onClick={() => setSelectedFolderId(folder().parent_id === rootParentId() ? null : folder().parent_id)}
-                      onDragOver={(event) => {
-                        if (!isInternalDrag(event)) return;
-                        event.preventDefault();
-                        setDropTargetId("__up");
-                      }}
-                      onDragLeave={() => setDropTargetId((current) => (current === "__up" ? null : current))}
-                      onDrop={(event) => {
-                        const payload = event.dataTransfer?.getData("text/plain") ?? "";
-                        setDropTargetId(null);
-                        if (!payload) return;
-                        event.preventDefault();
-                        void fileInto(payload, folder().parent_id === rootParentId() ? null : folder().parent_id);
-                      }}
-                    >
-                      <span aria-hidden="true">←</span> Back
-                    </button>
-                  )}
-                </Show>
                 {/* The library states itself once, at its own top-left, the way every
                     other page in the product does. Only a genuinely EMPTY library keeps
                     the centred card — there it is the whole content, not a header. */}

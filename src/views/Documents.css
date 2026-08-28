@@ -508,8 +508,7 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
 .documents-shelf:hover { border-color: var(--accent); }
 .documents-shelf.archived { opacity: 0.6; }
 /* The one state a drop target must have: it says YES before you let go. */
-.documents-shelf.drop-into,
-.documents-library-up.drop-into {
+.documents-shelf.drop-into {
   border-color: var(--brand-teal); border-style: dashed;
   background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
 }
@@ -534,13 +533,28 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
 .documents-shelf .folder-rename-input { margin: var(--dk-space-md); }
 /* A document card is draggable: it must say so before the drag starts. */
 a.documents-library-card { cursor: grab; }
-.documents-library-up {
-  justify-self: start; display: inline-flex; align-items: center; gap: var(--dk-space-xs);
-  padding: 0.2rem 0.55rem; border: var(--dk-hairline) solid var(--surface-border);
-  border-radius: var(--dk-radius-md); background: var(--surface);
+/* ── THE PATH ─────────────────────────────────────────────────────────────────
+   Where you are belongs at the top of the page, on the same margin as everything
+   else — not as a "Back" button floating in the middle of the canvas. Every crumb
+   is also a drop target, so moving something out is the same gesture as moving it
+   in. */
+.documents-breadcrumb {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem;
+  padding: var(--dk-space-md) var(--dk-space-6xl) 0;
+}
+.documents-crumb {
+  display: inline-flex; align-items: center; gap: var(--dk-space-xs);
+  padding: 0.2rem 0.5rem; border: var(--dk-hairline) solid transparent;
+  border-radius: var(--dk-radius-md); background: none;
   color: var(--text-muted); font: inherit; font-size: var(--dk-fs-sm); cursor: pointer;
 }
-.documents-library-up:hover { color: var(--accent-text); border-color: var(--accent); }
+.documents-crumb:hover { color: var(--accent-text); border-color: var(--surface-border); background: var(--surface); }
+.documents-crumb.current { color: var(--text-strong); font-weight: 650; cursor: default; }
+.documents-crumb.drop-into {
+  border-color: var(--brand-teal); border-style: dashed;
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+.documents-crumb-sep { color: var(--text-muted); opacity: 0.5; }
 .documents-library-link {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--dk-space-xs);
   margin: var(--dk-space-sm) auto 0; color: var(--accent-text); font-size: var(--dk-fs-sm); font-weight: 650;

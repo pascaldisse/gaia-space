@@ -175,8 +175,13 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     expect(host.querySelector("h2")?.textContent).toBe("Mine");
     expect(host.textContent).toContain("Inside");
 
-    const back = host.querySelector("button.documents-library-up") as HTMLButtonElement;
-    expect(back).not.toBeNull();
+    // The way out is the PATH at the top of the page, never a button in the middle of
+    // the canvas: it names the level above and lives outside the library surface.
+    const crumbs = host.querySelector("nav.documents-breadcrumb") as HTMLElement;
+    expect(crumbs).not.toBeNull();
+    expect(crumbs.closest(".documents-empty-canvas")).toBeNull();
+    expect([...crumbs.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["← My Documents", "Mine"]);
+    const back = crumbs.querySelector("button.documents-library-up") as HTMLButtonElement;
     back.click();
     await settle();
 
