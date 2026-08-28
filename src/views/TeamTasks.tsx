@@ -63,7 +63,8 @@ export default function TeamTasks() {
   };
 
   return <section class="planning-view team-tasks-view">
-    <PageHeader title="Team tasks" subline="Everybody's running work, not just yours" />
+    {/* Sibling sentences live in Todo.tsx and ProjectTasks.tsx: whose work, how wide. */}
+    <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." />
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load team tasks: {String(tasks.error)}</p></Show>
     <div class="filter-row" aria-label="Team task filters">
       {/* One control language: a quiet search and a pill whose resting value

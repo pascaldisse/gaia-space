@@ -155,7 +155,12 @@ export default function Todo() {
   return <section class="personal-view todo-view">
     {/* L1: the shell owns identity. A disabled "Acting as" box in the corner of
         every load is still a second identity control (audit §3.1). */}
-    <PageHeader title="My tasks" subline="Yours, and what people put on you"/>
+    {/* THREE TASK SURFACES, THREE SENTENCES (stage 12d). Each says WHOSE work and
+        HOW WIDE, in that order, so no two can be confused:
+          My tasks     — only yours, across every project.
+          Team tasks   — everybody's, across every project you are in.
+          Project Tasks— everybody's, in one project. */}
+    <PageHeader title="My tasks" subline="Only your tasks — yours and what people put on you, across every project."/>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
     <div class="view-cols todo-cols">
       <div class="view-main">
