@@ -90,10 +90,14 @@ describe("project at a glance inside Steering", () => {
 
     const stats = [...host.querySelectorAll("a.metric-tile")].map((n) => [n.textContent, n.getAttribute("href")]);
     expect(stats).toEqual([
-      ["1Open tickets", "/issues"],
-      ["1Boards", "/boards"],
-      ["1Channels", "/chat"],
-      ["1Documents", "/documents"],
+      // EVERY STAT OPENS THE PROJECT'S OWN TAB (stage 19). The old targets
+      // (`/issues`, `/boards`, `/chat`, `/documents`) dropped the project on the way
+      // and landed the reader in the global list. Tickets and boards share the Dev
+      // tab because that is one tab; packages have no project tab and keep theirs.
+      ["1Open tickets", "/projects/p1/dev"],
+      ["1Boards", "/projects/p1/dev"],
+      ["1Channels", "/projects/p1/chats"],
+      ["1Documents", "/projects/p1/knowledge"],
       ["1Upcoming meetings", "/projects/p1/calendar"],
       ["1Packages", "/packages"],
     ]);
