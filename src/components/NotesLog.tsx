@@ -43,8 +43,9 @@ const kindLabel = (kind: string) => KINDS.find((k) => k.key === kind)?.label ?? 
 // Relative in the log, absolute on hover — the exact moment stays one tooltip away.
 const relativeTime = (seconds: number) => {
   const elapsed = Math.floor(Date.now() / 1000) - seconds;
-  if (elapsed < 45) return "just now";
   const minutes = Math.floor(elapsed / 60);
+  // "0m ago" is not a time. Anything inside the first minute is simply just now.
+  if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
@@ -88,6 +89,9 @@ export default function NotesLog(props: {
   // reader can see what is being corrected while it is corrected.
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editBody, setEditBody] = createSignal("");
+  // Deleting is the one irreversible act here, and a log entry is somebody's statement of
+  // record. One stray click must not erase it, so Delete asks once, in place.
+  const [confirmId, setConfirmId] = createSignal<string | null>(null);
 
   const authorName = (id: string) =>
     profiles()?.find((p) => p.id === id)?.display_name ?? id;
@@ -134,6 +138,7 @@ export default function NotesLog(props: {
     setError(null);
     try {
       await channelNotesApi.remove(note.id, props.authorId);
+      setConfirmId(null);
       await refetch();
     } catch (reason) {
       setError(String(reason));
@@ -218,7 +223,16 @@ export default function NotesLog(props: {
         </p>
       </Show>
 
-      <Show when={!notes.loading && count() === 0}>
+      {/* A refused read is NOT an empty log. Saying "nothing logged yet" to somebody who
+          is simply not in the project would be a lie about the project's history, so the
+          two states are kept apart and named. */}
+      <Show when={notes.error}>
+        <EmptyState
+          title="You are not a member of this project"
+          hint="Notes and decisions are visible to the project's members. Ask a member to add you."
+        />
+      </Show>
+      <Show when={!notes.loading && !notes.error && count() === 0}>
         <EmptyState
           title="Nothing logged yet"
           hint="Write the first decision or status above — it stays here, in order, for everyone in this project."
@@ -293,7 +307,13 @@ export default function NotesLog(props: {
                     >
                       Edit
                     </GhostPill>
-                    <GhostPill onClick={() => void remove(note)}>Delete</GhostPill>
+                    <Show
+                      when={confirmId() === note.id}
+                      fallback={<GhostPill onClick={() => setConfirmId(note.id)}>Delete</GhostPill>}
+                    >
+                      <GhostPill onClick={() => void remove(note)}>Really delete</GhostPill>
+                      <GhostPill onClick={() => setConfirmId(null)}>Keep</GhostPill>
+                    </Show>
                   </span>
                 </Show>
               </div>

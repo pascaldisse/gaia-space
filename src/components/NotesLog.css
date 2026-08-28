@@ -18,6 +18,11 @@
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  /* A log is read line by line. Full-bleed prose on a 1300px panel is unreadable and
+     strands every right-aligned control a screen away from the text it belongs to, so
+     the column is capped at a measure and the panel's own padding does the rest. */
+  max-width: 720px;
+  padding: 16px 0 24px;
 }
 
 .notes-compose {
@@ -97,6 +102,14 @@
   font-weight: 700;
   letter-spacing: .02em;
   white-space: nowrap;
+}
+/* The weight difference between the two kinds is STRUCTURE, not decoration: if it only
+   existed in the light theme, the dark shells would show two identical pills and the
+   distinction the product asked for would be gone. `currentColor` makes one rule work in
+   both palettes; the light theme then sharpens it below. */
+.notes-kind.decision {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  border-color: currentColor;
 }
 .notes-author { font-weight: 620; }
 .notes-body {
