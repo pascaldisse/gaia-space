@@ -27,6 +27,9 @@
 .ph-list strong { color: var(--text-strong); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .ph-list small { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .ph-list time { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+/* "n more tasks →" under the preview: the list is a preview and admits it. */
+.ph-more { margin: 8px 0 0; }
+
 .ph-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); font-size: 12px; flex: none; }
 
 /* Project deadline banner on the overview — tone by urgency, opens the calendar. */
