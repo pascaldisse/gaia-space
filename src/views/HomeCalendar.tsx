@@ -128,9 +128,14 @@ export default function HomeCalendar() {
   });
 
   const todosToday = createMemo(() => todos().filter(todo => todo.due_date === dateKey(today)));
-  const todosCritical = createMemo(() => todos().filter(todo => urgencyOf(todo.due_date, todayKey(today)) === "overdue"));
   const meetingsToday = createMemo(() => itemsOnDay(feed(), today).filter(item => item.kind === "meeting"));
-  const highlighted = createMemo(() => [...todosCritical(), ...todos().filter(todo => ["soon", "later"].includes(urgencyOf(todo.due_date, todayKey(today))))].slice(0, 2));
+  /** Open work, nearest deadline first; undated last. A glance shows the two that
+   *  are closest and counts the rest — "+5 more" is information, five more rows are
+   *  a second task list. */
+  const openTodos = createMemo(() => todos().filter(todo => !todo.done));
+  const soonest = createMemo(() =>
+    [...openTodos()].sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999")).slice(0, 2));
+  const restCount = createMemo(() => Math.max(0, openTodos().length - soonest().length));
 
   const shiftMonth = (amount: number) => { const next = new Date(cursor()); next.setDate(1); next.setMonth(next.getMonth() + amount); setCursor(startOfLocalDay(next)); };
 
@@ -241,22 +246,32 @@ export default function HomeCalendar() {
             shows the WORK, the heading is the way through to it, and the tile grid
             is gone. (The subline here used to read "A small overview, not a second
             dashboard" — an internal design note that had leaked into the product.) */}
+      </div>
+
+      {/* THE WORK SITS UNDER THE CALENDAR, not beside it. Stacked in the right rail
+          these two cards ran longer than the month they were meant to accompany, and
+          two task-shaped boxes in one column read as the same thing twice. Below, in
+          their own row, each gets the width to show a row of work and the space to
+          say what it is. */}
+      <div class="home-work">
         <section class="agenda-card" aria-label="My tasks">
           <div class="agenda-head">
             <div>
               <div class="agenda-title">My tasks</div>
-              <div class="agenda-sub">Yours, and what people put on you</div>
+              <div class="agenda-sub">All your open work, in one place</div>
             </div>
             <a class="home-head-link" {...linkProps({ view: "To-Do" })}>Open →</a>
           </div>
           <Show when={dashboard.loading}><p class="hint">Loading tasks…</p></Show>
-          <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">Nothing open with a date.</p></Show>
-          <For each={highlighted()}>{todo => {
+          <Show when={!dashboard.loading && !openTodos().length}><p class="empty-state">Nothing open right now.</p></Show>
+          {/* The nearest deadlines first, and only a couple of them: this is a glance,
+              and a glance that scrolls is a list. The rest is a number, not a queue. */}
+          <For each={soonest()}>{todo => {
             const state = todoState(todo, today);
             return <Row title={todo.content} sub={projectLabel(todo.project_id)} label={state.label} tone={state.tone} to={todoRoute(todo)} />;
           }}</For>
-          <Show when={todos().length > highlighted().length}>
-            <a class="home-more" {...linkProps({ view: "To-Do" })}>All {todos().length} tasks</a>
+          <Show when={restCount() > 0}>
+            <a class="home-more" {...linkProps({ view: "To-Do" })}>+{restCount()} more</a>
           </Show>
         </section>
 
@@ -268,7 +283,7 @@ export default function HomeCalendar() {
           <div class="agenda-head">
             <div>
               <div class="agenda-title">Needs you</div>
-              <div class="agenda-sub">Everything waiting on you, in one count</div>
+              <div class="agenda-sub">Mentions, replies and work other people put on you</div>
             </div>
             <Show when={openMessages() > 0}><span class="tag teal">{openMessages()}</span></Show>
           </div>

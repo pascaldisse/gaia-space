@@ -301,3 +301,21 @@
    Activity view. Structure unscoped — the tokens carry both themes. */
 .home-more { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--text-dim); text-decoration: none; }
 .home-more:hover { color: var(--text-strong); }
+
+/* ── the work row, under the month ─────────────────────────────────────────
+   Two cards side by side, each as wide as it needs to say what it is. In the
+   right rail they stacked into a column taller than the calendar itself, and a
+   reader met three boxes before reaching the day they had clicked. */
+.home-cal .home-work {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+.home-cal .home-work .agenda-card { margin: 0; }
+.home-cal .home-more {
+  display: inline-block; margin-top: 6px;
+  font-size: 12.5px; font-weight: 680; color: var(--muted);
+}
+.home-cal .home-more:hover { color: var(--ink); }
