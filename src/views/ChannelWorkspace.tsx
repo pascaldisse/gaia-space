@@ -5,6 +5,7 @@ import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
+import ConfirmDialog from "../components/ConfirmDialog";
 import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import "./ChannelWorkspace.css";
@@ -156,8 +157,50 @@ export default function ChannelWorkspace(): JSX.Element {
   };
 
 
+  /* ── DELETING A CONVERSATION ──────────────────────────────────────────────
+     A channel could be left, renamed and detached, but never ended: the only way
+     out was to stop looking at it. Deleting is offered here, where the channel is
+     the page's subject, and it always asks first — a conversation takes everyone's
+     messages with it. */
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+  /* Its own error line: `bindError` is only drawn for project-less channels, so a
+     refused delete would have failed in silence everywhere else. */
+  const [deleteError, setDeleteError] = createSignal("");
+  const deleteChannel = async () => {
+    const id = channelId();
+    if (!id) return;
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      await chatApi.deleteChannel(id, actingProfileId());
+      setConfirmDelete(false);
+      // Nothing to return to inside a channel that no longer exists.
+      navigate({ view: "Chat" });
+    } catch (reason) {
+      setDeleteError(humanError(reason));
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div class="channel-workspace">
+      <ConfirmDialog
+        open={confirmDelete()}
+        title="Delete conversation?"
+        body={
+          <>
+            <strong>#{channel()?.name ?? "this channel"}</strong> is deleted for everyone, with every
+            message, file and note in it. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete conversation"
+        busy={deleting()}
+        onConfirm={() => void deleteChannel()}
+        onCancel={() => setConfirmDelete(false)}
+      />
       <header class="cw-header">
         <div class="cw-title-row">
           <div class="cw-title">
@@ -182,8 +225,21 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={nextMeeting()}>
               {(meeting) => <span class="cw-pill"><strong>{hhmm(meeting().starts_at)}</strong> Meeting</span>}
             </Show>
+            <button
+              type="button"
+              class="cw-delete"
+              title="Delete conversation"
+              aria-label="Delete conversation"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete
+            </button>
           </div>
         </div>
+
+        <Show when={deleteError()}>
+          <p class="cw-error" role="alert">{deleteError()}</p>
+        </Show>
 
         {/* A channel without a project has no work surfaces: the row is not drawn.
             In its place, the one act that would create them. */}

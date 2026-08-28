@@ -166,6 +166,9 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   createChannel: (channel: Channel, memberIds: string[]) =>
     invoke<Channel>("create_channel", { channel, memberIds }),
   updateChannel: (channel: Channel) => invoke<void>("update_channel", { channel }),
+  /** Ends a conversation for everyone: the channel, its messages and everything
+   *  hanging off them. Always ask first (ConfirmDialog). */
+  deleteChannel: (id: string, actorId: string) => invoke<void>("delete_channel", { id, actorId }),
   joinChannel: (channelId: string, profileId: string) =>
     invoke<void>("join_channel", { channelId, profileId }),
   leaveChannel: (channelId: string, profileId: string) =>

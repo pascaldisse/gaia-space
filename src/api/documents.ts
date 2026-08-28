@@ -143,6 +143,10 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   moveDocument: (id: string, containerType: string, containerId: string | null, folderId: string | null) =>
     invoke<void>("move_document", { id, containerType, containerId, folderId }),
   archiveDocument: (id: string, archived: boolean) => invoke<void>("archive_document", { id, archived }),
+  /** Gone means gone: the row and every version of it. Always ask first (ConfirmDialog). */
+  deleteDocument: (id: string) => invoke<void>("delete_document", { id }),
+  /** Refuses a folder that still holds anything — nothing is deleted implicitly. */
+  deleteDocumentFolder: (id: string) => invoke<void>("delete_document_folder", { id }),
   saveDocument: (id: string, title: string, body: string | null, actor: string | null) =>
     invoke<Document>("save_document", { id, title, body, actor }),
   listDocVersions: (documentId: string) => invoke<DocVersion[]>("list_doc_versions", { documentId }),

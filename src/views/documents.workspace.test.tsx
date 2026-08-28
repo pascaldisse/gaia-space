@@ -242,6 +242,53 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     expect(moved[0]).toMatchObject({ id: "d1", containerType: "my-docs", containerId: "me", folderId: "f1" });
   });
 
+  // NOTHING IS DELETED FROM A CLICK. The click asks; the command only runs once the
+  // question is answered, and cancelling leaves the document exactly where it was.
+  test("deleting a document asks first, and cancelling deletes nothing", async () => {
+    setProfileId("me");
+    const deleted: unknown[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "delete_document") {
+        deleted.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_document_folders: [],
+        list_documents: [{ id: "d1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "text", title: "Draft", body: "", version: 1, archived: false, created_by: "me" }],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+    registerViews(["Documents"]);
+    navigate({ view: "Documents", entityType: "document", entityId: "d1", containerType: "my-docs", containerId: "me" });
+    await settle();
+
+    const trigger = [...host.querySelectorAll("button")].find((b) => b.textContent === "delete") as HTMLButtonElement;
+    expect(trigger).not.toBeUndefined();
+    trigger.click();
+    await settle();
+
+    // Asking is not doing.
+    expect(deleted.length).toBe(0);
+    const dialog = document.querySelector('[role="alertdialog"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+    // The question names the document, so nobody deletes the wrong one.
+    expect(dialog.textContent).toContain("Draft");
+
+    (dialog.querySelector("button.confirm-cancel") as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(deleted.length).toBe(0);
+
+    trigger.click();
+    await settle();
+    (document.querySelector("button.confirm-danger") as HTMLButtonElement).click();
+    await settle();
+    expect(deleted.length).toBe(1);
+    expect(deleted[0]).toMatchObject({ id: "d1" });
+  });
+
   // The source (My Documents / organization book / project library) is chosen in the
   // shell's Knowledge sidebar, so this page shows no tabs and no picker.
   test("the source picker belongs to the shell, not to the page", async () => {

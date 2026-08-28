@@ -528,6 +528,10 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
   background: none; color: var(--text-muted); cursor: pointer;
 }
 .shelf-action:hover { border-color: var(--surface-border); background: var(--surface); color: var(--accent-text); }
+/* Red is reserved for the irreversible act, and only on hover: a delete button that
+   glows all day is a delete button somebody eventually hits. */
+.shelf-action.danger:hover { color: var(--danger, #c2384a); border-color: color-mix(in srgb, var(--danger, #c2384a) 45%, transparent); }
+.editor-toolbar .ghost.danger:hover { color: var(--danger, #c2384a); }
 .documents-shelf:hover .folder-actions,
 .documents-shelf:focus-within .folder-actions { display: flex; opacity: 1; }
 .documents-shelf .folder-rename-input { margin: var(--dk-space-md); }

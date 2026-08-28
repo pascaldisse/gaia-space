@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
 import { useDeepLink, linkEntity, linkProps, route } from "../router";
 import {
@@ -432,6 +433,36 @@ const [showArchived, setShowArchived] = createSignal(false);
       fail(e);
     }
   }
+  /** ── DELETING ─────────────────────────────────────────────────────────────
+   *  Nothing is deleted from a click. The click only ASKS; `pendingDelete` holds
+   *  the question until it is answered, and answering "no" is the easy path. */
+  type PendingDelete = { kind: "document"; id: string; name: string } | { kind: "folder"; id: string; name: string };
+  const [pendingDelete, setPendingDelete] = createSignal<PendingDelete | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  async function confirmDelete() {
+    const target = pendingDelete();
+    if (!target) return;
+    setDeleting(true);
+    try {
+      if (target.kind === "document") {
+        await documentsApi.deleteDocument(target.id);
+        if (selectedDocumentId() === target.id) setSelectedDocumentId(null);
+        await refetchDocuments();
+      } else {
+        await documentsApi.deleteDocumentFolder(target.id);
+        if (selectedFolderId() === target.id) setSelectedFolderId(null);
+        await refetchFolders();
+      }
+      setPendingDelete(null);
+    } catch (e) {
+      // A refusal (a folder that still holds documents) is shown, not swallowed.
+      fail(e);
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function toggleFolderArchived(f: DocumentFolder) {
     try {
       await documentsApi.updateDocumentFolder({ ...f, archived: !f.archived });
@@ -1570,6 +1601,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                                 >
                                   <Icon name={folder.archived ? "enter" : "close"} size={14} />
                                 </button>
+                                <button
+                                  class="shelf-action danger"
+                                  title="Delete"
+                                  aria-label={`Delete ${folder.name}`}
+                                  onClick={() => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name })}
+                                >
+                                  <Icon name="trash" size={14} />
+                                </button>
                               </span>
                             </div>
                           )}
@@ -1642,6 +1681,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </select>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
+                  </button>
+                  {/* Archive puts a document away; delete ends it. Both are offered, so
+                      nobody deletes because there was no other way to tidy up. */}
+                  <button
+                    class="ghost small danger"
+                    onClick={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
+                  >
+                    delete
                   </button>
                   <Show when={canManageAccess()}>
                     <button class="ghost small" aria-expanded={showSharing()} onClick={() => setShowSharing((open) => !open)}>
@@ -1794,6 +1841,23 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </aside>
         </Show>
       </div>
+
+      <ConfirmDialog
+        open={!!pendingDelete()}
+        title={pendingDelete()?.kind === "folder" ? "Delete folder?" : "Delete document?"}
+        body={
+          <>
+            <strong>{pendingDelete()?.name}</strong>{" "}
+            {pendingDelete()?.kind === "folder"
+              ? "is deleted for everyone. A folder that still holds documents is refused, so nothing disappears with it."
+              : "is deleted for everyone, with every saved version of it. This cannot be undone."}
+          </>
+        }
+        confirmLabel={pendingDelete()?.kind === "folder" ? "Delete folder" : "Delete document"}
+        busy={deleting()}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
 
       <Show when={createMode()}>
         {(mode) => (

@@ -1,0 +1,64 @@
+/* Self-scoped exactly like DocumentCreateDrawer.css: every token is redeclared
+   locally with a fallback, so the question reads the same in the light chat-first
+   shell and on the old dark theme, and nothing leaks out of `.confirm-root`. */
+.confirm-root {
+  --cfm-ink: var(--ink, #1f2328);
+  --cfm-muted: var(--muted, #68717d);
+  --cfm-paper: var(--paper, #ffffff);
+  --cfm-line: var(--line, #e5ddd3);
+  --cfm-danger: var(--danger, #c2384a);
+  --cfm-danger-dark: #a12b3b;
+  position: fixed;
+  inset: 0;
+  z-index: 80; /* above the drawers: it is asked ON TOP of whatever opened it */
+  color: var(--cfm-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: grid;
+  place-items: center;
+}
+.confirm-root * { box-sizing: border-box; }
+
+.confirm-root .confirm-backdrop { position: absolute; inset: 0; background: rgba(25, 16, 30, 0.34); }
+
+.confirm-root .confirm-panel {
+  position: relative;
+  width: 26rem;
+  max-width: 92vw;
+  padding: 22px;
+  display: grid;
+  gap: 12px;
+  border-radius: 14px;
+  background: var(--cfm-paper);
+  box-shadow: 0 24px 60px rgba(31, 35, 40, 0.28);
+  animation: cfm-rise 140ms ease-out;
+}
+@keyframes cfm-rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .confirm-root .confirm-panel { animation: none; } }
+
+.confirm-root .confirm-title { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.confirm-root .confirm-body { margin: 0; color: var(--cfm-muted); line-height: 1.5; font-size: 0.92rem; }
+.confirm-root .confirm-body strong { color: var(--cfm-ink); }
+
+.confirm-root .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.confirm-root .confirm-actions button {
+  min-height: 2.3em;
+  padding: 0.45em 0.95em;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.confirm-root .confirm-cancel {
+  border: 1px solid var(--cfm-line);
+  background: var(--cfm-paper);
+  color: var(--cfm-ink);
+}
+.confirm-root .confirm-cancel:hover { border-color: var(--cfm-muted); }
+/* Red, and only here: deleting is the one act the palette reserves red for. */
+.confirm-root .confirm-danger {
+  border: 1px solid var(--cfm-danger);
+  background: var(--cfm-danger);
+  color: #fff;
+}
+.confirm-root .confirm-danger:hover { background: var(--cfm-danger-dark); border-color: var(--cfm-danger-dark); }
+.confirm-root .confirm-danger:disabled { opacity: 0.6; cursor: not-allowed; }
