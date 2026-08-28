@@ -297,6 +297,31 @@
 .doc-action-copy { display: grid; gap: 0.1em; text-align: left; }
 .doc-action-copy strong { font: inherit; }
 .doc-action-copy small { display: none; }
+/* ONE ACTION BAR, SAME IN BOTH MOUNTS. The tree column is gone, so these four acts
+   sit in the page's own bar: upload leads, New document answers it, and New folder /
+   Import library are the same quiet third — previously one was underlined text and
+   the other a bordered panel trigger, stacked under a column nobody reads. */
+.documents-actionbar {
+  border-top: 0; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--dk-space-sm);
+}
+.documents-actionbar .doc-action-primary,
+.documents-actionbar .doc-action-secondary { flex: 0 0 auto; }
+.documents-actionbar .doc-action-primary {
+  gap: var(--dk-space-sm);
+  min-height: 2.4em;
+  padding: 0.4em 0.9em;
+}
+.documents-actionbar .doc-action-icon {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 1.5em; height: 1.5em; border-radius: var(--dk-radius-sm);
+  background: color-mix(in srgb, var(--surface) 78%, white);
+  color: var(--accent-text); font-size: 1em; line-height: 1;
+}
+.documents-actionbar .doc-action-copy small { display: none; }
+.documents-actionbar .doc-action-tertiary { flex: 0 0 auto; padding: 0.2em 0.4em; }
+.documents-actionbar .import-library-panel { flex: 1 1 100%; max-width: 32rem; }
+
 /* The project tab is a place to gather shared material, not a narrow legacy
    toolbar. The primary control becomes a compact drop surface with enough
    explanation to be self-evident before the native picker opens. */
@@ -415,10 +440,14 @@
    live together in the documents rail. */
 .documents-empty-canvas {
   flex: 1; display: grid; place-items: center; padding: var(--dk-space-4xl);
+  overflow: auto;
   background: linear-gradient(135deg, transparent, color-mix(in srgb, var(--accent-soft) 24%, transparent));
 }
 .documents-empty-card { max-width: 25rem; display: grid; gap: var(--dk-space-sm); text-align: center; }
-.documents-empty-card.has-library { width: min(100%, 46rem); max-width: 46rem; }
+/* An empty library is centred (there is nothing else to look at); a full one starts
+   at the top, so the cards sit under the action bar instead of floating mid-page. */
+.documents-empty-canvas.has-library { align-content: start; justify-items: center; padding-top: var(--dk-space-2xl); }
+.documents-empty-card.has-library { width: min(100%, 56rem); max-width: 56rem; }
 .documents-empty-icon {
   width: 3rem; height: 3rem; margin: 0 auto var(--dk-space-sm); display: grid; place-items: center;
   border-radius: var(--dk-radius-xl); border: var(--dk-hairline) solid var(--dk-field-border);
@@ -447,6 +476,19 @@
 /* A folder card is a button, not a link (it moves you inside the same page), so it
    must be told to stop looking like one. */
 button.documents-library-card { font: inherit; text-align: left; cursor: pointer; }
+/* A folder card carries its own upkeep (rename / move / archive), quiet until the
+   card is hovered or focused — the same rule the tree rows used to follow. */
+.documents-library-card.folder-row { padding: 0; gap: 0; }
+.documents-library-open-folder {
+  display: flex; align-items: center; gap: var(--dk-space-md); flex: 1; min-width: 0;
+  padding: var(--dk-space-lg); background: none; border: 0; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.documents-library-card.folder-row .folder-actions { padding-right: var(--dk-space-md); }
+.documents-library-card.folder-row:hover .folder-actions,
+.documents-library-card.folder-row:focus-within .folder-actions { display: flex; opacity: 1; }
+.documents-library-card.archived { opacity: 0.6; }
+.documents-library-card .folder-rename-input { margin: var(--dk-space-md); }
 .documents-library-up {
   justify-self: start; display: inline-flex; align-items: center; gap: var(--dk-space-xs);
   padding: 0.2rem 0.55rem; border: var(--dk-hairline) solid var(--surface-border);

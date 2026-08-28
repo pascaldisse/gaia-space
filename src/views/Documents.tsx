@@ -4,7 +4,6 @@ import { marked } from "marked";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
-import { Resizer, paneWidth } from "../components/Resizer";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import { useDeepLink, linkEntity, linkProps, route } from "../router";
 import {
@@ -64,7 +63,6 @@ export default function Documents(props: { container?: ContainerType; containerI
    *  them — there the scope genuinely is unknown.
    */
   const embedded = () => props.container !== undefined;
-  const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
   // Identity law: in web mode the personal container is the *session's* profile and
@@ -215,7 +213,6 @@ const [showArchived, setShowArchived] = createSignal(false);
     const e = allFolders.error ?? allDocuments.error;
     return e ? `Documents could not be loaded: ${String(e)}` : null;
   };
-  const isEmpty = () => !treeLoading() && !loadFailure() && displayFolders().length === 0 && scopedDocuments().length === 0;
 
   /** Reading an errored resource throws in Solid. The library canvas must survive a
    *  failed fetch, so it asks through this gate: no documents while loading or broken,
@@ -262,13 +259,8 @@ const [showArchived, setShowArchived] = createSignal(false);
   const displayFolders = () => scopedFolders().filter((f) => f.id !== rootParentId());
   const projectReady = () => activeContainer() !== "project" || !!projectRoot();
   const [selectedFolderId, setSelectedFolderId] = createSignal<string | null>(null);
-  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
-  function toggleExpand(id: string) {
-    const next = new Set(expanded());
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setExpanded(next);
-  }
+  // The tree column is gone (the library canvas IS the page), so nothing expands
+  // in place any more: opening a folder navigates one level, with Back to return.
 
   // ---- import (Confluence export / local notes folder) ----
   // Both are the same shape on disk; the Rust side mirrors the directory tree into folders.
@@ -1127,95 +1119,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     );
   }
 
-  function FolderRow(props: { folder: DocumentFolder; depth: number }) {
-    const f = () => props.folder;
-    const childFolders = () => displayFolders().filter((c) => c.parent_id === f().id);
-    const childDocs = () => scopedDocuments().filter((d) => d.folder_id === f().id);
-    const isOpen = () => expanded().has(f().id);
-    return (
-      <>
-        <li
-          class="folder-row"
-          role="treeitem"
-          aria-expanded={isOpen()}
-          aria-selected={selectedFolderId() === f().id}
-          style={{ "padding-left": `${props.depth * 1.1 + 0.4}em` }}
-        >
-          {/* A real button: Enter/Space expand the folder with no key handler of our own. */}
-          <button
-            type="button"
-            class="folder-toggle"
-            aria-expanded={isOpen()}
-            aria-label={`${isOpen() ? "Collapse" : "Expand"} ${f().name}`}
-            onClick={() => toggleExpand(f().id)}
-          >
-            {isOpen() ? "▾" : "▸"}
-          </button>
-          <Show
-            when={renamingFolderId() === f().id}
-            fallback={
-              <button
-                type="button"
-                class="folder-name"
-                classList={{ active: selectedFolderId() === f().id, archived: f().archived }}
-                onClick={() => setSelectedFolderId(f().id)}
-              >
-                {f().name}
-              </button>
-            }
-          >
-            <input
-              class="folder-rename-input"
-              value={renameValue()}
-              onInput={(e) => setRenameValue(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(f())}
-            />
-            <button class="ghost small" onClick={() => saveRenameFolder(f())}>
-              ✓
-            </button>
-          </Show>
-          <span class="folder-actions">
-            <button class="ghost small" title="rename" onClick={() => startRenameFolder(f())}>
-              ✎
-            </button>
-            <select
-              class="folder-move-select"
-              title="move to…"
-              value=""
-              onChange={(e) => e.currentTarget.value && moveFolderTo(f(), e.currentTarget.value)}
-            >
-              <option value="">move…</option>
-              <option value="">root</option>
-              <For each={displayFolders().filter((o) => o.id !== f().id)}>
-                {(o) => <option value={o.id}>{o.name}</option>}
-              </For>
-            </select>
-            <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(f())}>
-              {f().archived ? "restore" : "archive"}
-            </button>
-          </span>
-        </li>
-        <Show when={isOpen()}>
-          <For each={childDocs()}>
-            {(d) => (
-              <li style={{ "padding-left": `${(props.depth + 1) * 1.1 + 0.4}em` }}>
-                <a
-                  class="doc-row"
-                  classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                  {...linkProps(docRoute(d.id))}
-                >
-                  <span class="doc-icon">📄</span>
-                  <span class="doc-title">{d.title}</span>
-                  <span class="doc-version">v{d.version}</span>
-                </a>
-              </li>
-            )}
-          </For>
-          <For each={childFolders()}>{(c) => <FolderRow folder={c} depth={props.depth + 1} />}</For>
-        </Show>
-      </>
-    );
-  }
 
   return (
     <section class="documents-view">
@@ -1254,6 +1157,76 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
 
         </Show>
 
+        {/* THE ACTS, ONE ROW, THE SAME ROW EVERYWHERE, ALWAYS REACHABLE. Upload and
+            New document lead; New folder and Import library are quiet beside them in
+            the same dress — they used to be two differently-styled leftovers at the
+            foot of a column that no longer exists. They live in the page's action bar
+            rather than in the empty canvas, so they stay available while a document
+            is open, which is what the old tree column had been carrying them for. */}
+        <div class="doc-actions documents-actionbar">
+            <Show when={!isWeb()}>
+              {/* Desktop: the native picker returns a real path, which is what
+                  `upload_document_file` takes. No path is ever typed. */}
+              <button class="primary doc-action-primary" onClick={pickAndUploadFile} disabled={uploading() || !projectReady()}>
+                <span class="doc-action-icon" aria-hidden="true">↑</span>
+                <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file from your computer</small></span>
+              </button>
+            </Show>
+            <Show when={isWeb()}>
+              {/* In the browser there is no path to name, so the same primary act
+                  is a real file input wearing the same button. */}
+              <label class="primary doc-action-primary doc-action-file">
+                <span class="doc-action-icon" aria-hidden="true">↑</span>
+                <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file or drop it here</small></span>
+                <input
+                  type="file"
+                  aria-label="File to upload"
+                  disabled={uploading() || !projectReady()}
+                  onChange={(e) => {
+                    const picked = e.currentTarget.files?.[0];
+                    e.currentTarget.value = "";
+                    if (picked) void uploadBrowserFile(picked);
+                  }}
+                />
+              </label>
+            </Show>
+            {/* No `.ghost` here on purpose. `.theme-space-light button.ghost`
+                strips fill and border, which made this read as plain text. This
+                button is new, so no dark rule depends on `.ghost` for it, and
+                `.doc-action-secondary` styles both themes on its own. */}
+            <button class="doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
+              New document
+            </button>
+            <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
+              New folder
+            </button>
+            <Show when={!embedded()}>
+              <button class="link doc-action-tertiary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
+                {importOpen() ? "Close import" : "Import library"}
+              </button>
+              <Show when={importOpen()}>
+                <div class="import-library-panel">
+                  <p>Import a local Markdown or Confluence export.</p>
+                  <input
+                    aria-label="Import folder"
+                    placeholder="Choose a folder to import"
+                    value={importPath()}
+                    onInput={(e) => setImportPath(e.currentTarget.value)}
+                  />
+                  <div class="import-library-actions">
+                    <button class="doc-action-secondary" onClick={chooseImportFolder}>Choose folder</button>
+                    <button class="primary" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
+                      {importing() ? "Importing…" : "Import"}
+                    </button>
+                  </div>
+                  <Show when={importSummary()}>
+                    {(summary) => <span class="hint">{summary().documents_created} page(s), {summary().folders_created} folder(s)</span>}
+                  </Show>
+                </div>
+              </Show>
+            </Show>
+        </div>
+
         {/* A filter, not a scope: it survives the embedded mount. */}
         <label class="show-archived">
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
@@ -1261,9 +1234,9 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         </label>
       </nav>
 
-      <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
-        <aside
-          class="documents-tree"
+      <div class="documents-body">
+        <section
+          class="documents-editor"
           classList={{ "drop-target": dragOver() }}
           onDragOver={(event) => {
             if (!isWeb() || !event.dataTransfer?.types.includes("Files")) return;
@@ -1273,236 +1246,28 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           onDragLeave={() => setDragOver(false)}
           onDrop={onTreeDrop}
         >
-          <Show when={dragOver()}>
-            <p class="drop-hint" role="status">Drop to upload into {selectedFolderId() ? "this folder" : "the root"}</p>
-          </Show>
-          <Show when={uploadProgress()}>
-            {(progress) => (
-              <div class="upload-progress">
-                <p class="hint">Uploading {progress().name}… {Math.round(progress().fraction * 100)}%</p>
-                <progress
-                  aria-label={`Upload progress for ${progress().name}`}
-                  max="1"
-                  value={progress().fraction}
-                />
-              </div>
-            )}
-          </Show>
-          {/* Three states stay distinct: a fetch in flight is not emptiness, and a failed
-              fetch is never rendered as an empty tree (H7). */}
-          <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
-          <Show when={!treeLoading()} fallback={<p class="hint pad" role="status">Loading…</p>}>
-          <Show
-            when={containerId()}
-            fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
-          >
-            {/* Favourites head the personal tree: the documents you follow, wherever they
-                live, above the documents you own. Each row links into its own container,
-                so opening one lands in the project or book that owns it. */}
-            <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
-              <div class="favorites-section">
-                <p class="tree-heading">★ Favourites</p>
-                <For each={favoriteShelves()}>
-                  {(shelf) => (
-                    <div class="favorite-shelf">
-                      <p class="shelf-name">{shelf.name ?? "Unfiled"}</p>
-                      <ul
-                        class="favorite-list"
-                        role="list"
-                        aria-label={shelf.name ? `Favourites on ${shelf.name}` : "Favourite documents"}
-                      >
-                        <For each={shelf.items}>
-                          {(d, index) => (
-                            <li
-                              class="favorite-row"
-                              draggable={true}
-                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `favorite:${d.id}`)}
-                            >
-                              <a
-                                class="doc-row"
-                                classList={{ active: d.id === selectedDocumentId() }}
-                                {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
-                              >
-                                <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
-                                <span class="doc-title">{d.title}</span>
-                              </a>
-                              {/* Ordering is keyboard-operable, not drag-only: a list you
-                                  can only sort with a mouse is a list some people cannot
-                                  sort at all. */}
-                              <button
-                                class="ghost tiny"
-                                aria-label={`Move ${d.title} up`}
-                                disabled={index() === 0}
-                                onClick={() => void moveFavorite(d, -1)}
-                              >↑</button>
-                              <button
-                                class="ghost tiny"
-                                aria-label={`Move ${d.title} down`}
-                                disabled={index() === shelf.items.length - 1}
-                                onClick={() => void moveFavorite(d, 1)}
-                              >↓</button>
-                              <select
-                                class="shelf-picker"
-                                aria-label={`Shelf for ${d.title}`}
-                                value={d.group_name ?? ""}
-                                onChange={(event) => {
-                                  const value = event.currentTarget.value;
-                                  if (value === "__new") {
-                                    setNewShelfFor(d.id);
-                                    event.currentTarget.value = d.group_name ?? "";
-                                    return;
-                                  }
-                                  void fileFavorite(d, value || null);
-                                }}
-                              >
-                                <option value="">Unfiled</option>
-                                <For each={favoriteGroups()}>{(name) => <option value={name}>{name}</option>}</For>
-                                <option value="__new">New shelf…</option>
-                              </select>
-                              <Show when={newShelfFor() === d.id}>
-                                <input
-                                  class="shelf-new"
-                                  aria-label={`New shelf name for ${d.title}`}
-                                  placeholder="Shelf name…"
-                                  autofocus
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Escape") setNewShelfFor(null);
-                                    if (event.key !== "Enter") return;
-                                    const name = event.currentTarget.value.trim();
-                                    setNewShelfFor(null);
-                                    if (name) void fileFavorite(d, name);
-                                  }}
-                                />
-                              </Show>
-                            </li>
-                          )}
-                        </For>
-                      </ul>
+          <Show when={selectedDocument()} fallback={
+            <div class="documents-empty-canvas" classList={{ "has-library": libraryFolders().length + libraryDocuments().length > 0 }}>
+              <div class="documents-empty-card" classList={{ "has-library": libraryFolders().length + libraryDocuments().length > 0 }}>
+                <Show when={dragOver()}>
+                  <p class="drop-hint" role="status">Drop to upload into {selectedFolderId() ? "this folder" : "the root"}</p>
+                </Show>
+                <Show when={uploadProgress()}>
+                  {(progress) => (
+                    <div class="upload-progress">
+                      <p class="hint">Uploading {progress().name}… {Math.round(progress().fraction * 100)}%</p>
+                      <progress aria-label={`Upload progress for ${progress().name}`} max="1" value={progress().fraction} />
                     </div>
                   )}
-                </For>
-              </div>
-            </Show>
-            <button
-              type="button"
-              class="tree-root"
-              classList={{ active: selectedFolderId() === null }}
-              onClick={() => setSelectedFolderId(null)}
-            >
-              {activeContainer() === "project" ? "Documents" : "(root)"}
-            </button>
-            <Show when={activeContainer() === "kb" && bookQuery().trim()}>
-<div class="book-search-results" role="list" aria-label="Book search results">
-<Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
-<For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
-<Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
-</Show>
-</div>
-</Show>
-<ul class="folder-tree" role="tree" aria-label="Document folders">
-              <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
-                {(d) => (
-                  <li style={{ "padding-left": "0.4em" }}>
-                    <a
-                      class="doc-row"
-                      classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                      {...linkProps(docRoute(d.id))}
-                    >
-                      <span class="doc-icon">📄</span>
-                      <span class="doc-title">{d.title}</span>
-                      <span class="doc-version">v{d.version}</span>
-                    </a>
-                  </li>
-                )}
-              </For>
-              <For each={displayFolders().filter((f) => f.parent_id === rootParentId())}>
-                {(f) => <FolderRow folder={f} depth={0} />}
-              </For>
-            </ul>
-            <Show when={isEmpty()}>
-              <p class="empty-state">This container has no folders or documents yet.</p>
-            </Show>
-            {/* TWO ACTS, FRONT AND CENTRE — now on BOTH routes. Lane A gave the
-                embedded tab this pair and left `#/documents` with the old column:
-                folder name, document title, body type, a typed upload path and a
-                "Creating into: (root)" status line, five loose controls at the foot
-                of the tree at all times. They asked for things the drawer and the
-                native file picker only ask once you have said you want them, so the
-                column is gone and the standalone route uses the same two buttons. */}
-            <div class="doc-actions project-file-actions">
-                <Show when={!isWeb()}>
-                  {/* Desktop: the native picker returns a real path, which is what
-                      `upload_document_file` takes. No path is ever typed. */}
-                  <button class="primary doc-action-primary" onClick={pickAndUploadFile} disabled={uploading() || !projectReady()}>
-                    <span class="doc-action-icon" aria-hidden="true">↑</span>
-                    <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file from your computer</small></span>
-                  </button>
                 </Show>
-                <Show when={isWeb()}>
-                  {/* In the browser there is no path to name, so the same primary act
-                      is a real file input wearing the same button. */}
-                  <label class="primary doc-action-primary doc-action-file">
-                    <span class="doc-action-icon" aria-hidden="true">↑</span>
-                    <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file or drop it here</small></span>
-                    <input
-                      type="file"
-                      aria-label="File to upload"
-                      disabled={uploading() || !projectReady()}
-                      onChange={(e) => {
-                        const picked = e.currentTarget.files?.[0];
-                        e.currentTarget.value = "";
-                        if (picked) void uploadBrowserFile(picked);
-                      }}
-                    />
-                  </label>
-                </Show>
-                {/* No `.ghost` here on purpose. `.theme-space-light button.ghost`
-                    strips fill and border, which made this read as plain text. This
-                    button is new, so no dark rule depends on `.ghost` for it, and
-                    `.doc-action-secondary` styles both themes on its own. */}
-                <button class="doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
-                  New document
-                </button>
-                <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
-                  New folder
-                </button>
-                <Show when={!embedded()}>
-                  <button class="link doc-action-tertiary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
-                    {importOpen() ? "Close import" : "Import library"}
-                  </button>
-                  <Show when={importOpen()}>
-                    <div class="import-library-panel">
-                      <p>Import a local Markdown or Confluence export.</p>
-                      <input
-                        aria-label="Import folder"
-                        placeholder="Choose a folder to import"
-                        value={importPath()}
-                        onInput={(e) => setImportPath(e.currentTarget.value)}
-                      />
-                      <div class="import-library-actions">
-                        <button class="doc-action-secondary" onClick={chooseImportFolder}>Choose folder</button>
-                        <button class="primary" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
-                          {importing() ? "Importing…" : "Import"}
-                        </button>
-                      </div>
-                      <Show when={importSummary()}>
-                        {(summary) => <span class="hint">{summary().documents_created} page(s), {summary().folders_created} folder(s)</span>}
-                      </Show>
-                    </div>
-                  </Show>
-                </Show>
-            </div>
-          </Show>
-          </Show>
-          </Show>
-        </aside>
-
-        <Resizer width={treeW} setWidth={setTreeW} min={190} max={480} />
-
-        <section class="documents-editor">
-          <Show when={selectedDocument()} fallback={
-            <div class="documents-empty-canvas">
-              <div class="documents-empty-card" classList={{ "has-library": libraryFolders().length + libraryDocuments().length > 0 }}>
+                {/* Three states stay distinct: a fetch in flight is not emptiness, and a
+                    failed fetch is never rendered as an empty library (H7). */}
+                <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
+                <Show when={!treeLoading()} fallback={<p class="hint pad" role="status">Loading…</p>}>
+                <Show
+                  when={containerId()}
+                  fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
+                >
                 <Show when={levelFolder()}>
                   {(folder) => (
                     <button
@@ -1518,22 +1283,156 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <p>
                   {libraryFolders().length + libraryDocuments().length
                     ? "Open a document to read, edit, or preview it."
-                    : "Upload a file or create a document to start building this shared knowledge."}
+                    : "This container has no folders or documents yet — upload a file or create a document to start."}
                 </p>
+
+
+
+                <Show when={activeContainer() === "kb" && bookQuery().trim()}>
+    <div class="book-search-results" role="list" aria-label="Book search results">
+    <Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
+    <For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
+    <Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
+    </Show>
+    </div>
+    </Show>
+
+                {/* Favourites head the personal tree: the documents you follow, wherever they
+                    live, above the documents you own. Each row links into its own container,
+                    so opening one lands in the project or book that owns it. */}
+                <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
+                  <div class="favorites-section">
+                    <p class="tree-heading">★ Favourites</p>
+                    <For each={favoriteShelves()}>
+                      {(shelf) => (
+                        <div class="favorite-shelf">
+                          <p class="shelf-name">{shelf.name ?? "Unfiled"}</p>
+                          <ul
+                            class="favorite-list"
+                            role="list"
+                            aria-label={shelf.name ? `Favourites on ${shelf.name}` : "Favourite documents"}
+                          >
+                            <For each={shelf.items}>
+                              {(d, index) => (
+                                <li
+                                  class="favorite-row"
+                                  draggable={true}
+                                  onDragStart={(event) => event.dataTransfer?.setData("text/plain", `favorite:${d.id}`)}
+                                >
+                                  <a
+                                    class="doc-row"
+                                    classList={{ active: d.id === selectedDocumentId() }}
+                                    {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
+                                  >
+                                    <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
+                                    <span class="doc-title">{d.title}</span>
+                                  </a>
+                                  {/* Ordering is keyboard-operable, not drag-only: a list you
+                                      can only sort with a mouse is a list some people cannot
+                                      sort at all. */}
+                                  <button
+                                    class="ghost tiny"
+                                    aria-label={`Move ${d.title} up`}
+                                    disabled={index() === 0}
+                                    onClick={() => void moveFavorite(d, -1)}
+                                  >↑</button>
+                                  <button
+                                    class="ghost tiny"
+                                    aria-label={`Move ${d.title} down`}
+                                    disabled={index() === shelf.items.length - 1}
+                                    onClick={() => void moveFavorite(d, 1)}
+                                  >↓</button>
+                                  <select
+                                    class="shelf-picker"
+                                    aria-label={`Shelf for ${d.title}`}
+                                    value={d.group_name ?? ""}
+                                    onChange={(event) => {
+                                      const value = event.currentTarget.value;
+                                      if (value === "__new") {
+                                        setNewShelfFor(d.id);
+                                        event.currentTarget.value = d.group_name ?? "";
+                                        return;
+                                      }
+                                      void fileFavorite(d, value || null);
+                                    }}
+                                  >
+                                    <option value="">Unfiled</option>
+                                    <For each={favoriteGroups()}>{(name) => <option value={name}>{name}</option>}</For>
+                                    <option value="__new">New shelf…</option>
+                                  </select>
+                                  <Show when={newShelfFor() === d.id}>
+                                    <input
+                                      class="shelf-new"
+                                      aria-label={`New shelf name for ${d.title}`}
+                                      placeholder="Shelf name…"
+                                      autofocus
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Escape") setNewShelfFor(null);
+                                        if (event.key !== "Enter") return;
+                                        const name = event.currentTarget.value.trim();
+                                        setNewShelfFor(null);
+                                        if (name) void fileFavorite(d, name);
+                                      }}
+                                    />
+                                  </Show>
+                                </li>
+                              )}
+                            </For>
+                          </ul>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
                 <Show when={libraryFolders().length + libraryDocuments().length > 0}>
                   <div class="documents-library-grid" aria-label={`${libraryTitle()} library`}>
                     <For each={libraryFolders()}>
                       {(folder) => (
-                        <button class="documents-library-card" onClick={() => setSelectedFolderId(folder.id)}>
-                          <span class="documents-library-type" aria-hidden="true">▸</span>
-                          <span class="documents-library-card-copy"><strong>{folder.name}</strong><small>Folder</small></span>
-                          <span class="documents-library-open" aria-hidden="true">→</span>
-                        </button>
+                        <div class="documents-library-card folder-row" classList={{ archived: folder.archived }}>
+                          <Show
+                            when={renamingFolderId() === folder.id}
+                            fallback={
+                              <button class="documents-library-open-folder folder-name" onClick={() => setSelectedFolderId(folder.id)}>
+                                <span class="documents-library-type" aria-hidden="true">▸</span>
+                                <span class="documents-library-card-copy"><strong>{folder.name}</strong><small>Folder</small></span>
+                              </button>
+                            }
+                          >
+                            <input
+                              class="folder-rename-input"
+                              value={renameValue()}
+                              onInput={(e) => setRenameValue(e.currentTarget.value)}
+                              onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(folder)}
+                            />
+                            <button class="ghost small" onClick={() => saveRenameFolder(folder)}>✓</button>
+                          </Show>
+                          {/* Folder upkeep stays reachable but quiet: it appears on hover
+                              or keyboard focus, never as permanent furniture. */}
+                          <span class="folder-actions">
+                            <button class="ghost small" title="rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>✎</button>
+                            <select
+                              class="folder-move-select"
+                              title="move to…"
+                              aria-label={`Move ${folder.name} to`}
+                              value=""
+                              onChange={(e) => e.currentTarget.value && moveFolderTo(folder, e.currentTarget.value)}
+                            >
+                              <option value="">move…</option>
+                              <For each={displayFolders().filter((o) => o.id !== folder.id)}>
+                                {(o) => <option value={o.id}>{o.name}</option>}
+                              </For>
+                            </select>
+                            <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(folder)}>
+                              {folder.archived ? "restore" : "archive"}
+                            </button>
+                          </span>
+                        </div>
                       )}
                     </For>
                     <For each={libraryDocuments()}>
                       {(document) => (
-                        <a class="documents-library-card" {...linkProps(docRoute(document.id))}>
+                        <a class="documents-library-card" classList={{ archived: document.archived }} {...linkProps(docRoute(document.id))}>
                           <span class="documents-library-type" aria-hidden="true">{document.doc_type === "file" ? "↥" : "⌁"}</span>
                           <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
                           <span class="documents-library-open" aria-hidden="true">→</span>
@@ -1548,6 +1447,9 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   <a class="documents-library-link" {...linkProps(books().length ? { view: "Documents", containerType: "kb", containerId: books()[0].id } : { view: "Documents" })}>
                     Open organization library <span aria-hidden="true">→</span>
                   </a>
+                </Show>
+                </Show>
+                </Show>
                 </Show>
               </div>
             </div>

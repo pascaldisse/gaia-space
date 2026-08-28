@@ -148,7 +148,10 @@ check.click();
 await settle();
 expect(check.checked).toBe(true);
 });
-test("the folder tree is keyboard-operable and announces its expansion state", async () => {
+// THE LIBRARY IS THE PAGE. There is no tree column any more, so a folder is a CARD,
+// and opening it is a real button — reachable by Tab, fired by Enter/Space, with no
+// custom key handling — while Back returns to the level above.
+test("a folder opens and closes from the keyboard, and its documents follow", async () => {
     setProfileId("me");
     serve({
       list_document_folders: { ok: true, value: [folder({ id: "f1", name: "Mine" })] },
@@ -156,30 +159,29 @@ test("the folder tree is keyboard-operable and announces its expansion state", a
     });
     const host = await mount();
 
-    const tree = host.querySelector('[role="tree"]')!;
-    expect(tree).not.toBeNull();
-    const item = tree.querySelector('[role="treeitem"]')!;
-    expect(item.getAttribute("aria-expanded")).toBe("false");
-    // The toggle is a real button: a keyboard user reaches it by Tab and fires it
-    // with Enter/Space, no custom key handling involved.
-    const toggle = item.querySelector("button.folder-toggle") as HTMLButtonElement;
-    expect(toggle.tagName).toBe("BUTTON");
-    expect(toggle.getAttribute("aria-label")).toContain("Expand");
+    const card = host.querySelector("button.documents-library-open-folder") as HTMLButtonElement;
+    expect(card).not.toBeNull();
+    expect(card.tagName).toBe("BUTTON");
+    expect(card.textContent).toContain("Mine");
+    // A document inside the folder is not shown at the level above it.
     expect(host.textContent).not.toContain("Inside");
 
-    toggle.focus();
-    expect(document.activeElement).toBe(toggle);
-    toggle.click();
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    card.click();
     await settle();
 
-    expect(item.getAttribute("aria-expanded")).toBe("true");
-    expect(toggle.getAttribute("aria-label")).toContain("Collapse");
+    // Inside the folder: its name is the heading and its documents are listed.
+    expect(host.querySelector("h2")?.textContent).toBe("Mine");
     expect(host.textContent).toContain("Inside");
-    // Selecting a folder is a button too, and the selection is announced.
-    const name = item.querySelector("button.folder-name") as HTMLButtonElement;
-    name.click();
+
+    const back = host.querySelector("button.documents-library-up") as HTMLButtonElement;
+    expect(back).not.toBeNull();
+    back.click();
     await settle();
-    expect(item.getAttribute("aria-selected")).toBe("true");
+
+    expect(host.textContent).not.toContain("Inside");
+    expect(host.querySelector("button.documents-library-open-folder")).not.toBeNull();
   });
 
   // The source (My Documents / organization book / project library) is chosen in the
