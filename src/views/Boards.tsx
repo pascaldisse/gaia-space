@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+import { urgencyOf } from "../statusTone";
 import { planningApi, type Board, type BoardColumn, type BoardCardSettings, type Issue, type Status } from "../api/issues";
 import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
@@ -359,7 +360,9 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[];
   const people = () => props.issue.assignee_ids?.length ? props.issue.assignee_ids : (props.issue.assignee_id ? [props.issue.assignee_id] : []);
   const status = () => props.statuses?.find(s => s.id === props.issue.status_id);
   const doneCount = () => items()?.filter(i => i.item_done).length ?? 0;
-  const overdue = () => !!props.issue.due_date && props.issue.due_date < new Date().toISOString().slice(0, 10);
+  // One urgency model for the whole product; a local date comparison here drifted
+  // from the shared law the moment "due soon" was added to it.
+  const overdue = () => urgencyOf(props.issue.due_date) === "overdue";
   return <article classList={{ "issue-card": true, active: props.active }} role="button" tabindex="0"
       draggable={true}
       onDragStart={event => { event.dataTransfer?.setData("text/issue-id", props.issue.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}

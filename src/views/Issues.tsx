@@ -12,8 +12,7 @@ import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+import { dueTone, priorityTone, statusTone, todayISO } from "../statusTone";
 
 /** Workspace issue tracker: filters query the persisted planning domain; the
  * detail panel owns issue fields, tags, checklists, time entries, and children.
@@ -105,16 +104,11 @@ export default function Issues(props: { filterTagName?: string; sections?: JSX.E
   });
 
   const afterCreate = async (issue: Issue) => { await reloadIssues(); openInUrl(issue); };
-  // Colour law, one pill per row: red = overdue or urgent, amber = due within three days
-  // or high priority, teal = open work, neutral = a status the project calls resolved.
-  const pillTone = (issue: Issue) => {
-    const status = statuses()?.find(entry => entry.id === issue.status_id);
-    if (status?.resolved) return "done";
-    const priority = (issue.priority ?? "").toUpperCase();
-    if (priority === "URGENT" || (issue.due_date && issue.due_date < todayISO())) return "red";
-    if (priority === "HIGH" || (issue.due_date && issue.due_date <= inDays(3))) return "amber";
-    return "teal";
-  };
+  // Colour law: one pill states one fact. The status pill reads the STATUS and
+  // nothing else — folding urgency into it made two rows with the identical words
+  // "No status" render red and teal. Urgency lives on the date, priority on its own
+  // pill, both from the shared model in src/statusTone.ts.
+  const pillTone = (issue: Issue) => statusTone(statuses()?.find(entry => entry.id === issue.status_id));
   const csvCell = (value: string | number | null | undefined) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 const exportCsv = () => {
 const rows = issues() ?? [];
@@ -206,10 +200,12 @@ const createStatus = async () => {
               <strong>{issue.title}</strong>
               <span class="row-meta">
                 <span class="issue-number">#{issue.number}</span>
-                <Show when={issue.due_date}>{date => <time classList={{ overdue: date() < todayISO() }}>{date()}</time>}</Show>
+                <Show when={issue.due_date}>{date => <time classList={{ [dueTone(date())]: true, overdue: date() < todayISO() }}>{date()}</time>}</Show>
               </span>
             </span>
-            {/* Exactly one pill per row, coloured by the law: see `pillTone`. */}
+            <Show when={priorityTone(issue.priority)}>
+              <span class="status-name" classList={{ [priorityTone(issue.priority)]: true }}>{(issue.priority ?? "").toLowerCase()}</span>
+            </Show>
             <span class="status-name" classList={{ [pillTone(issue)]: true }}>
               {statuses()?.find(entry => entry.id === issue.status_id)?.name ?? "No status"}
             </span>
