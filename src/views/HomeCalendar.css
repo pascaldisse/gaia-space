@@ -102,12 +102,11 @@
   display: grid;
   grid-template-columns: minmax(520px, 1fr) 360px;
   gap: 18px;
-  /* STRETCH, not start: the month and the day it belongs to are one statement, and
-     a card that stops halfway down its neighbour reads as unfinished. The work row
-     below opts out again — it is its own row and sizes to its own content. */
+  /* STRETCH, not start: a card that stops halfway down its neighbour reads as
+     unfinished. It applies to BOTH rows — the month beside its day, and the two
+     work cards beside each other. Cards in a row end where the row ends. */
   align-items: stretch;
 }
-.home-cal .premium-home > .home-work { align-items: start; }
 
 /* ── month ──────────────────────────────────────────────────────────────── */
 .home-cal .premium-month {
@@ -322,6 +321,10 @@
   margin-top: 18px;
 }
 .home-cal .home-work .agenda-card { margin: 0; }
+/* Same rule one level down: the two work cards share a bottom edge, and each
+   keeps its content at the top so a short card is quiet space, not stretched rows. */
+.home-cal .home-work { align-items: stretch; }
+.home-cal .home-work > .agenda-card { display: flex; flex-direction: column; }
 .home-cal .home-more {
   display: inline-block; margin-top: 6px;
   font-size: 12.5px; font-weight: 680; color: var(--muted);
