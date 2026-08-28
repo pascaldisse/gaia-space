@@ -161,14 +161,10 @@ export default function TaskDrawer(props: {
         <Show when={props.advanced}>
           <label class="wid-person"><input type="checkbox" checked={form().content_kind === "markdown"}
             onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} /> Markdown body</label>
-          <fieldset class="wid-field"><legend>Source bookmark</legend>
-            <div class="task-drawer-fields">
-              <input class="wid-input" aria-label="Source entity type" placeholder="Entity type (issue, document…)"
-                value={form().source_entity_type} onInput={event => patch({ source_entity_type: event.currentTarget.value })} />
-              <input class="wid-input" aria-label="Source entity ID" placeholder="Entity ID"
-                value={form().source_entity_id} onInput={event => patch({ source_entity_id: event.currentTarget.value })} />
-            </div>
-          </fieldset>
+          {/* No hand-typed source anchor. A task created here has no origin message;
+              the anchor is written by the act that HAS one ("Create task" on a
+              message), and read back as a link on the row. Asking a person for an
+              entity type and a UUID could only produce a link to nothing. */}
         </Show>
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">

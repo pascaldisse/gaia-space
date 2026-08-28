@@ -192,15 +192,13 @@ export default function TaskRowEdit(props: {
       <Show when={props.advanced}>
         <label class="fld-check"><input type="checkbox" checked={form().content_kind === "markdown"}
           onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} /> Markdown body</label>
-        <details class="composer-source" open={Boolean(form().source_entity_type || form().source_entity_id)}>
-          <summary>Source bookmark</summary>
-          <div class="composer-source-fields">
-            <input placeholder="Entity type (issue, document…)" aria-label="Source entity type" value={form().source_entity_type}
-              onInput={event => patch({ source_entity_type: event.currentTarget.value })} />
-            <input placeholder="Entity ID" aria-label="Source entity ID" value={form().source_entity_id}
-              onInput={event => patch({ source_entity_id: event.currentTarget.value })} />
-          </div>
-        </details>
+        {/* The source anchor is NOT hand-editable, and it never should have been.
+            It is set by the act that creates the work — "Create task" on a message
+            writes it — and it is READ back as a link on the row (SourceLink). Two raw
+            fields asking a person to type an entity type and a UUID could only ever
+            produce a broken link, and they were the most confusing thing on this
+            surface. The value still travels through `form()` untouched, so editing a
+            task that HAS a source no longer risks erasing it by hand. */}
       </Show>
     </Show>
     <Show when={props.canComplete}>
