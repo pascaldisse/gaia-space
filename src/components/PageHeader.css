@@ -22,6 +22,7 @@
   border-bottom: var(--dk-hairline, 1px) solid var(--dk-line, var(--line, #e5ddd3));
 }
 .page-header:has(+ .container-tabs),
+.page-header:has(+ .page-actionbar),
 .page-header:has(+ .documents-actionbar),
 .page-header:has(+ .task-actionbar) {
   margin-bottom: 0;
@@ -188,3 +189,47 @@
 /* Filter bars are NOT here: the paper-card filter idiom lives with the rest of
    the paper surfaces, in components/paper.css (`.paper-filters` / `.filter-row`),
    scoped to .theme-space-light. One idiom, one home. */
+
+
+/* ── THE ACTION ROW ──────────────────────────────────────────────────────────
+   WHERE AN ACT LIVES IS DECIDED BY ITS KIND, not by the view it happens to be in.
+   Until now half the app put "New …" in the header's top-right corner and half put
+   it under the introduction, so the same act had two addresses.
+
+     · MAKES SOMETHING          → this row, left. New task, Upload file, New
+       project, New meeting, New ticket. They may be several, they carry words,
+       and they rank themselves: primary · secondary · quiet.
+     · CHANGES WHAT YOU SEE     → this row, right. Filters, "show archived",
+       "Show done". A filter acts on your view, not on the thing.
+     · FACTS AND THE ONE        → the header's top-right edge: metric chips, and
+       IRREVERSIBLE ACT           the red Delete of the page's own subject.
+
+   The row belongs to the introduction, so it carries the page's single hairline
+   (see .page-header:has(+ .page-actionbar) above). */
+.page-actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dk-space-sm, 8px);
+  margin: 0 0 var(--view-head-gap, 22px);
+  padding: 0 0 var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline, 1px) solid var(--dk-line, var(--line, #e5ddd3));
+}
+/* Views whose root has no padding of its own (they pad each block) need the inset
+   here too, exactly as their header gets it above. */
+.documents-view > .page-actionbar,
+.packages-view > .page-actionbar,
+.pipelines-view > .page-actionbar,
+.reviews-view > .page-actionbar,
+.repos-view > .page-actionbar,
+.locations-view > .page-actionbar {
+  padding-left: var(--view-pad-x);
+  padding-right: var(--view-pad-x);
+}
+/* Everything that changes the view rather than the content sits at the far end. */
+.page-actionbar > .actionbar-view-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--dk-space-sm, 8px);
+}
