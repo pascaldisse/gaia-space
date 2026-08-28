@@ -48,10 +48,12 @@ const itemState = (item: CalendarItem, today: Date): { label: string; tone: Tone
   if (item.kind === "meeting") return { label: "Meeting", tone: "teal" };
   if (item.kind === "deadline") {
     const key = item.date ?? dateKey(new Date(item.starts_at * 1000));
+    // Amber means "due soon", so a deadline months out must not wear it: only a near
+    // one is amber, a passed one is red, a distant one is quiet.
     const urgency = urgencyOf(key, todayKey(today), 2);
     return urgency === "overdue"
       ? { label: "Overdue", tone: urgencyTone(urgency) }
-      : { label: "Deadline", tone: "amber" };
+      : { label: "Deadline", tone: urgencyTone(urgency) };
   }
   if (item.kind === "task") return { label: "Task", tone: "" };
   return { label: item.kind === "blog" ? "Blog" : "Date", tone: "" };

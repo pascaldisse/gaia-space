@@ -987,6 +987,9 @@ a:hover { color: var(--text-strong); }
 .rail-metric .rail-lbl { font-size: 11px; color: #9297a3; }
 .rail-metric.accent .rail-num { color: var(--accent-text, var(--accent)); }
 .rail-metric.warn .rail-num { color: var(--status-warning-ink); }
+/* Colour law: amber is "due soon/waiting", so something already past its date needs
+   the critical red instead — see src/statusTone.ts. */
+.rail-metric.critical .rail-num { color: var(--status-danger-ink); }
 /* labelled key/value breakdown rows */
 .rail-rows { display: grid; gap: 2px; }
 .rail-row { display: flex; align-items: center; gap: 9px; padding: 7px 4px; border-radius: 8px; font-size: 13px; color: var(--text-muted); width: 100%; text-align: left; background: transparent; border: 0; }

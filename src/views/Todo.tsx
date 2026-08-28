@@ -195,8 +195,10 @@ export default function Todo() {
           <h3>At a glance</h3>
           <div class="rail-metrics">
             <div class="rail-metric accent"><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
-            <div class="rail-metric warn"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
-            <div class="rail-metric"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
+            {/* Colour law: overdue is critical (red), not merely waiting (amber), and
+                "due in 7 days" IS the amber case — they were the wrong way round. */}
+            <div class="rail-metric critical"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
+            <div class="rail-metric warn"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
             <div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div>
           </div>
         </div>
