@@ -1,62 +1,69 @@
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import {
-  personalApi,
-  type Notification,
-  type SubscriptionScope,
-  type SubscriptionSetting,
-} from "../api/personal";
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { personalApi, type Notification, type SubscriptionScope, type SubscriptionSetting } from "../api/personal";
+import { createResource } from "solid-js";
 import { Icon, type IconName } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
-import { entityView, linkProps } from "../router";
+import SourceLink from "../components/SourceLink";
+import { Disclosure, MetricGrid, MetricTile, SectionHeading } from "../components/blocks";
+import { linkProps } from "../router";
 import { humanError, profileId } from "../session";
-import "./Inbox.css";
 import { UI_LOCALE } from "../calendar";
-import { MetricGrid, MetricTile } from "../components/blocks";
+import {
+  attentionCount,
+  attentionLoading,
+  attentionSources,
+  isOrganisationEvent,
+  needsYou,
+  organisation,
+  refreshAttention,
+  type AttentionItem,
+  type AttentionKind,
+  type OrganisationEvent,
+} from "../attention";
+import "./Inbox.css";
 
-// Inbox — the human notification feed for the active profile. Same store the
-// Overview summarises, surfaced as a first-class destination: read/unread
-// hierarchy, category filters, and every row deep-linked to a real URL.
+// ── THE ACTIVITY VIEW ───────────────────────────────────────────────────────
+// Two streams, never mixed, and NEITHER of them computed here:
+//
+//   NEEDS YOU     — the worklist. It empties, it carries the count, its rows
+//                   can be resolved where they stand.
+//   ORGANISATION  — the feed. It never empties, it carries NO count, it is read
+//                   rather than cleared.
+//
+// Every number and every row comes from `src/attention.ts`. This file must never
+// grow a rule of its own — that is exactly the defect (a rail badge saying 2
+// while Home said nothing) the module exists to prevent.
 
-type Scope = "all" | "unread";
 type Category = { key: string; label: string; icon: IconName; tone: string };
 
-// Event types follow a `domain.action` convention, so the domain gives a
-// stable, data-driven grouping. Unknown domains fall back to "Updates".
-const CATEGORIES: Record<string, Category> = {
+/** The worklist's own filter axis: what KIND of thing is waiting, not which
+ *  backend delivered it. */
+const KINDS: Record<AttentionKind, Category> = {
   mention: { key: "mention", label: "Mentions", icon: "chat", tone: "mention" },
-  message: { key: "message", label: "Messages", icon: "chat", tone: "mention" },
-  chat: { key: "chat", label: "Messages", icon: "chat", tone: "mention" },
-  comment: { key: "comment", label: "Comments", icon: "chat", tone: "mention" },
-spacebox: { key: "spacebox", label: "#Spacebox", icon: "inbox", tone: "updates" },
-  issue: { key: "issue", label: "Tickets", icon: "check", tone: "issue" },
-  task: { key: "task", label: "Tasks", icon: "check", tone: "issue" },
+  dm: { key: "dm", label: "Direct messages", icon: "chat", tone: "mention" },
+  channel: { key: "channel", label: "Channels", icon: "chat", tone: "mention" },
   todo: { key: "todo", label: "Tasks", icon: "check", tone: "issue" },
+  issue: { key: "issue", label: "Tickets", icon: "check", tone: "issue" },
   review: { key: "review", label: "Code reviews", icon: "review", tone: "review" },
-  pipeline: { key: "pipeline", label: "Pipelines", icon: "pipeline", tone: "review" },
-  meeting: { key: "meeting", label: "Meetings", icon: "clock", tone: "meeting" },
-  calendar: { key: "calendar", label: "Calendar", icon: "calendar", tone: "meeting" },
-  absence: { key: "absence", label: "Time off", icon: "clock", tone: "absence" },
-  project: { key: "project", label: "Projects", icon: "layers", tone: "project" },
-  document: { key: "document", label: "Knowledge", icon: "book", tone: "doc" },
-  doc: { key: "doc", label: "Knowledge", icon: "book", tone: "doc" },
-};
-const UPDATES: Category = { key: "updates", label: "Updates", icon: "inbox", tone: "updates" };
-
-const categoryOf = (item: Notification): Category => {
-  const [domain] = item.event_type.split(".");
-  return CATEGORIES[(domain || item.event_type).toLowerCase()] ?? UPDATES;
+  notification: { key: "notification", label: "Updates", icon: "inbox", tone: "updates" },
 };
 
-// "issue.assigned" → "Assigned"; a bare event type keeps a neutral label.
-const actionLabel = (eventType: string) => {
-  const tail = eventType.split(".").slice(1).join(" ").replace(/[_-]+/g, " ").trim();
-  return tail ? tail[0].toUpperCase() + tail.slice(1) : "Update";
-};
+/** Icons for the organisation feed, by event domain. News is not work, so it
+ *  never borrows the worklist's accent tones. */
+const FEED_ICON = (verb: string): IconName =>
+  verb.includes("review") ? "review"
+  : verb.includes("ticket") ? "check"
+  : verb.includes("task") ? "check"
+  : verb.includes("document") ? "book"
+  : verb.includes("project") ? "layers"
+  : verb.includes("commit") || verb.includes("deployment") ? "pipeline"
+  : "user";
 
 // Relative in the feed, absolute on hover — the exact moment stays one tooltip away.
 const relativeTime = (seconds: number) => {
+  if (!seconds) return "";
   const elapsed = Math.floor(Date.now() / 1000) - seconds;
   if (elapsed < 45) return "just now";
   const minutes = Math.floor(elapsed / 60);
@@ -67,104 +74,81 @@ const relativeTime = (seconds: number) => {
   if (days < 7) return `${days}d ago`;
   return new Date(seconds * 1000).toLocaleDateString(UI_LOCALE, { month: "short", day: "numeric" });
 };
-const timestamp = (seconds: number) => new Date(seconds * 1000).toLocaleString(UI_LOCALE);
-
-// Best-effort routing from the anchored entity to the view that owns it, using
-// the app's existing registry — every link lands on a real URL.
-const relatedRoute = (item: Notification) =>
-  item.entity_type && item.entity_id && entityView(item.entity_type)
-    ? { view: entityView(item.entity_type)!, entityType: item.entity_type, entityId: item.entity_id }
-    : undefined;
+const timestamp = (seconds: number) => (seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "");
 
 export default function Inbox() {
-  const [scope, setScope] = createSignal<Scope>("all");
-  const [category, setCategory] = createSignal("all");
+  const [kind, setKind] = createSignal<"all" | AttentionKind>("all");
   const [error, setError] = createSignal("");
-  const [notifications, { refetch }] = createResource(profileId, (id) =>
-    id ? personalApi.notifications(id) : Promise.resolve([] as Notification[]),
-  );
 
-  const everything = () => notifications() ?? [];
-  const unreadAll = createMemo(() => everything().filter((item) => !item.read_at));
+  const worklist = createMemo(() => needsYou());
+  const feed = createMemo(() => organisation());
+  const visible = createMemo(() => worklist().filter((item) => kind() === "all" || item.kind === kind()));
 
-  // Only categories actually present in the feed become filters.
-  const categories = createMemo(() => {
-    const tally = new Map<string, { category: Category; count: number }>();
-    for (const item of everything()) {
-      const category = categoryOf(item);
-      const entry = tally.get(category.key) ?? { category, count: 0 };
-      entry.count += 1;
-      tally.set(category.key, entry);
-    }
-    return [...tally.values()].sort((a, b) => b.count - a.count);
+  /** The kinds actually present become filters — nothing else. */
+  const kindTally = createMemo(() => {
+    const tally = new Map<AttentionKind, number>();
+    for (const item of worklist()) tally.set(item.kind, (tally.get(item.kind) ?? 0) + 1);
+    return [...tally.entries()].sort((a, b) => b[1] - a[1]);
   });
 
-  const visible = createMemo(() =>
-    everything().filter(
-      (item) =>
-        (scope() === "all" || !item.read_at) &&
-        (category() === "all" || categoryOf(item).key === category()),
-    ),
+  /** The notification store, read straight from the shared snapshot: this view
+   *  keeps its archive and its subscription editor without a second fetch. */
+  const notifications = (): Notification[] => attentionSources().notifications;
+  const unreadNotifications = createMemo(() => notifications().filter((item) => !item.read_at));
+  /** Read personal notifications: not work any more, and not organisation news
+   *  either. Kept, collapsed, so nothing that used to be reachable is lost. */
+  const earlier = createMemo(() =>
+    notifications().filter((item) => item.read_at && !isOrganisationEvent(item.event_type)),
   );
-  const spacebox = createMemo(() => everything().filter((item) => item.event_type === "spacebox.message"));
-const unread = createMemo(() => visible().filter((item) => !item.read_at));
-  const earlier = createMemo(() => visible().filter((item) => item.read_at));
 
-  const markRead = async (id: string) => {
+  const guard = async (work: () => Promise<unknown>) => {
     try {
       setError("");
-      await personalApi.markRead(id);
-      await refetch();
+      await work();
+      await refreshAttention();
     } catch (reason) {
       setError(humanError(reason));
     }
   };
-  const markAllRead = async () => {
-    try {
-      setError("");
-      await Promise.all(unreadAll().map((item) => personalApi.markRead(item.id)));
-      await refetch();
-    } catch (reason) {
-      setError(humanError(reason));
-    }
-  };
+  const resolve = (item: AttentionItem) => guard(() => item.resolve!());
+  const markAllRead = () => guard(() => Promise.all(unreadNotifications().map((item) => personalApi.markRead(item.id))));
 
-  const row = (item: Notification) => {
-    const category = categoryOf(item);
-    const route = relatedRoute(item);
-    const isUnread = !item.read_at;
+  // ── A worklist row: what it is, where it lives, and how to be rid of it.
+  const workRow = (item: AttentionItem) => {
+    const category = KINDS[item.kind];
     return (
-      <li classList={{ unread: isUnread }}>
+      <li class="unread">
         <span class="inbox-ic" classList={{ [category.tone]: true }} aria-hidden="true">
           <Icon name={category.icon} size={16} />
         </span>
         <div class="inbox-body">
           <div class="inbox-line">
-            <Show when={isUnread}>
-              <span class="inbox-dot" role="img" aria-label="Unread" />
-            </Show>
+            <span class="inbox-dot" role="img" aria-label="Waiting for you" />
             <strong>{item.title}</strong>
           </div>
-          <Show when={item.body}>
-            <p>{item.body}</p>
+          <Show when={item.detail}>
+            <p>{item.detail}</p>
           </Show>
           <div class="inbox-meta">
             <span class="inbox-chip" classList={{ [category.tone]: true }}>
               {category.label}
             </span>
-            <span class="inbox-action">{actionLabel(item.event_type)}</span>
-            <time title={timestamp(item.created_at)}>{relativeTime(item.created_at)}</time>
+            <Show when={item.at}>
+              <time title={timestamp(item.at)}>{relativeTime(item.at)}</time>
+            </Show>
+            {/* A task raised in a channel leads back to the message that raised it. */}
+            <Show when={item.anchor}>
+              {(anchor) => <SourceLink entityType={anchor().entityType} entityId={anchor().entityId} />}
+            </Show>
           </div>
         </div>
         <div class="inbox-row-actions">
-          <Show when={route}>
-            <a class="ghost inbox-open" {...linkProps(route!)} title="Open the related item">
-              Open
-            </a>
-          </Show>
-          <Show when={isUnread}>
-            <button class="ghost" onClick={() => markRead(item.id)} title="Mark this notification as read">
-              Mark read
+          <a class="ghost inbox-open" {...linkProps(item.route)} title="Open the related item">
+            {item.action}
+          </a>
+          <Show when={item.resolve}>
+            <button class="ghost" onClick={() => resolve(item)} title="Clear this from your list">
+              Clear
             </button>
           </Show>
         </div>
@@ -172,21 +156,47 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
     );
   };
 
-  // Subscription editor: per-event delivery plus scoped (project/team/…) overrides.
+  // ── A feed row: actor, verb, object, and a way back to the object.
+  const feedRow = (event: OrganisationEvent) => (
+    <li class="inbox-feed-row">
+      <span class="inbox-ic" aria-hidden="true">
+        <Icon name={FEED_ICON(event.verb)} size={16} />
+      </span>
+      <div class="inbox-body">
+        <div class="inbox-line">
+          <strong>{event.actor}</strong> <span class="inbox-verb">{event.verb}</span>
+          <Show when={event.object}>
+            {" "}
+            <Show when={event.route} fallback={<span class="inbox-object">{event.object}</span>}>
+              <a class="inbox-object" {...linkProps(event.route!)}>
+                {event.object}
+              </a>
+            </Show>
+          </Show>
+        </div>
+        <div class="inbox-meta">
+          <Show when={event.detail}>
+            <span class="inbox-feed-detail">{event.detail}</span>
+          </Show>
+          <time title={timestamp(event.at)}>{relativeTime(event.at)}</time>
+        </div>
+      </div>
+    </li>
+  );
+
+  // ── Subscriptions: unchanged behaviour, still the rail's second card.
   const [settings, { refetch: refetchSettings }] = createResource(profileId, (id) =>
     id ? personalApi.subscriptions(id) : Promise.resolve([] as SubscriptionSetting[]),
   );
   const [scopes, { refetch: refetchScopes }] = createResource(profileId, (id) =>
     id ? personalApi.subscriptionScopes(id) : Promise.resolve([] as SubscriptionScope[]),
   );
-  // Event types seen in the feed, merged with the ones already configured.
   const eventTypes = createMemo(() => {
-    const seen = new Set<string>(everything().map((item) => item.event_type));
+    const seen = new Set<string>(notifications().map((item) => item.event_type));
     for (const setting of settings() ?? []) seen.add(setting.event_type);
     return [...seen].sort();
   });
-  const settingFor = (eventType: string) =>
-    (settings() ?? []).find((entry) => entry.event_type === eventType);
+  const settingFor = (eventType: string) => (settings() ?? []).find((entry) => entry.event_type === eventType);
   const toggleSetting = async (eventType: string) => {
     const id = profileId();
     if (!id) return;
@@ -237,9 +247,7 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
               onClick={() => toggleSetting(eventType)}
             >
               <span class="rail-row-label">{eventType}</span>
-              <span class="rail-row-val">
-                {settingFor(eventType)?.enabled === false ? "Muted" : "On"}
-              </span>
+              <span class="rail-row-val">{settingFor(eventType)?.enabled === false ? "Muted" : "On"}</span>
             </button>
           )}
         </For>
@@ -273,17 +281,15 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
   const summaryCard = () => (
     <div class="rail-card">
       <h3>
-        <Icon name="inbox" size={13} /> Inbox summary
+        <Icon name="inbox" size={13} /> At a glance
       </h3>
-      {/* ONE TILE (stage 11, defect 2), and the zero rule with it: `.rail-metric
-          .accent` painted the unread figure teal whether or not there was
-          anything unread. `tone="teal"` goes through metricTone, so an empty
-          inbox reads as an empty inbox. */}
+      {/* ONE COUNT, and it is `attentionCount()`. The second tile counts news,
+          and news is never a claim on anyone — hence no tone, ever. */}
       <MetricGrid label="Inbox at a glance" class="pairs">
-        <MetricTile value={unreadAll().length} label="Unread" tone="teal" />
-        <MetricTile value={everything().length} label="Total" />
+        <MetricTile value={attentionCount()} label="Needs you" tone="teal" />
+        <MetricTile value={feed().length} label="Organisation" />
       </MetricGrid>
-      <Show when={unreadAll().length}>
+      <Show when={unreadNotifications().length}>
         <div class="rail-actions">
           <button class="primary" onClick={markAllRead}>
             Mark all read
@@ -297,13 +303,13 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
     <section class="inbox-view">
       <PageHeader
         title="Inbox"
-        chips={<Show when={unreadAll().length}><Chip value={unreadAll().length} label="unread" /></Show>}
+        chips={
+          <Show when={attentionCount()}>
+            <Chip value={attentionCount()} label="needs you" />
+          </Show>
+        }
         actions={
-          /* The "Acting as" picker is GONE from this header (stage 10a): the
-             shell already carries identity in the account footer, and a second
-             identity control on one page reads as a per-view setting, which it
-             is not. */
-          <Show when={unreadAll().length}>
+          <Show when={unreadNotifications().length}>
             <button class="primary" onClick={markAllRead}>
               Mark all read
             </button>
@@ -318,9 +324,6 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
       </Show>
 
       <Show when={!profileId()}>
-        {/* No profile: not an empty inbox, a missing identity. The picker that
-            used to sit in this header is in the account footer of the shell now,
-            so the copy points there instead of "above". */}
         <EmptyState
           icon={<Icon name="user" size={18} />}
           title="No profile is active"
@@ -330,155 +333,119 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
       </Show>
 
       <Show when={profileId()}>
-        {/* A failed load is an error, never an empty inbox. */}
-        <Show when={notifications.error}>
-          <p class="inbox-error" role="alert">
-            {humanError(notifications.error)}
-          </p>
-        </Show>
-        <Show when={notifications.loading}>
+        <Show when={attentionLoading() && !worklist().length && !feed().length}>
           <p class="inbox-muted">Loading your inbox…</p>
         </Show>
 
-        <Show when={!notifications.loading && !notifications.error}>
-          {/* An empty inbox is GOOD NEWS, and a person looking at good news
-             wants nothing done to them. So: one quiet line, no onboarding
-             composition, no rail of controls for events that do not exist, and
-             above all no "Go to Overview" — a button that leaves the page is not
-             an answer to "there is nothing here". */}
-          <Show when={!everything().length}>
-            <EmptyState
-              class="inbox-quiet"
-              variant="no-match"
-              title="Nothing needs you right now"
-              hint="Mentions, assignments and review requests will appear here."
-            />
-          </Show>
-
-          <Show when={everything().length}>
-            <div class="view-cols inbox-cols">
-              <div class="view-main">
-                <Show when={spacebox().length}>
-<section class="inbox-spacebox" aria-label="#Spacebox feed"><h2>#Spacebox</h2><p class="inbox-muted">Subscribed channel activity</p><ul class="inbox-list"><For each={spacebox()}>{row}</For></ul></section>
-</Show>
-<div class="inbox-filters">
-                  <div class="inbox-scope">
-                    <button
-                      classList={{ on: scope() === "all" }}
-                      aria-pressed={scope() === "all"}
-                      onClick={() => setScope("all")}
-                    >
-                      All
+        <div class="view-cols inbox-cols">
+          <div class="view-main">
+            {/* ── STREAM 1 ── the worklist, first, with the count. */}
+            <section class="inbox-needs" aria-label="Needs you">
+              <SectionHeading
+                title="Needs you"
+                meta={attentionCount() ? `${attentionCount()} waiting` : "nothing waiting"}
+              />
+              <Show when={kindTally().length > 1}>
+                <div class="inbox-filters">
+                  <div class="inbox-cats">
+                    <button classList={{ on: kind() === "all" }} aria-pressed={kind() === "all"} onClick={() => setKind("all")}>
+                      All<em>{worklist().length}</em>
                     </button>
-                    <button
-                      classList={{ on: scope() === "unread" }}
-                      aria-pressed={scope() === "unread"}
-                      onClick={() => setScope("unread")}
-                    >
-                      Unread
-                      <Show when={unreadAll().length}>
-                        <em>{unreadAll().length}</em>
-                      </Show>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="inbox-groups">
-                  <section>
-                    <h2>
-                      Unread <span>{unread().length}</span>
-                    </h2>
-                    <Show
-                      when={unread().length}
-                      fallback={
-                        /* TWO DIFFERENT FACTS, two different answers: a filter
-                           that excludes everything can be cleared, and is; a
-                           genuinely read inbox has nothing to offer and offers
-                           nothing. */
-                        <Show
-                          when={scope() === "unread" || category() !== "all"}
-                          fallback={
-                            <div class="inbox-clear">
-                              <span class="inbox-clear-ic">
-                                <Icon name="check" size={16} />
-                              </span>
-                              <p>You're all caught up — no unread notifications.</p>
-                            </div>
-                          }
+                    <For each={kindTally()}>
+                      {([entry, count]) => (
+                        <button
+                          classList={{ on: kind() === entry }}
+                          aria-pressed={kind() === entry}
+                          onClick={() => setKind(kind() === entry ? "all" : entry)}
                         >
-                          <EmptyState
-                            variant="no-match"
-                            title="Nothing unread in this filter."
-                            actions={
-                              <GhostPill onClick={() => { setScope("all"); setCategory("all"); }}>
-                                Clear filters
-                              </GhostPill>
-                            }
-                          />
-                        </Show>
-                      }
-                    >
-                      <ul class="inbox-list">
-                        <For each={unread()}>{row}</For>
-                      </ul>
-                    </Show>
-                  </section>
-
-                  <Show when={scope() === "all" && earlier().length}>
-                    <section>
-                      <h2>
-                        Earlier <span>{earlier().length}</span>
-                      </h2>
-                      <ul class="inbox-list">
-                        <For each={earlier()}>{row}</For>
-                      </ul>
-                    </section>
-                  </Show>
-                </div>
-              </div>
-
-              <aside class="view-rail inbox-rail">
-                {summaryCard()}
-                <Show when={categories().length > 1}>
-                  <div class="rail-card">
-                    <h3>By type</h3>
-                    <div class="rail-rows">
-                      <button
-                        class="rail-row"
-                        classList={{ muted: category() !== "all" }}
-                        aria-pressed={category() === "all"}
-                        onClick={() => setCategory("all")}
-                      >
-                        <span class="rail-row-ic">
-                          <Icon name="inbox" size={13} />
-                        </span>
-                        <span class="rail-row-label">All types</span>
-                        <span class="rail-row-val">{everything().length}</span>
-                      </button>
-                      <For each={categories()}>
-                        {({ category: entry, count }) => (
-                          <button
-                            class="rail-row"
-                            classList={{ muted: category() !== "all" && category() !== entry.key }}
-                            aria-pressed={category() === entry.key}
-                            onClick={() => setCategory(category() === entry.key ? "all" : entry.key)}
-                          >
-                            <span class="rail-row-ic">
-                              <Icon name={entry.icon} size={13} />
-                            </span>
-                            <span class="rail-row-label">{entry.label}</span>
-                            <span class="rail-row-val">{count}</span>
-                          </button>
-                        )}
-                      </For>
-                    </div>
+                          <Icon name={KINDS[entry].icon} size={13} />
+                          {KINDS[entry].label}
+                          <em>{count}</em>
+                        </button>
+                      )}
+                    </For>
                   </div>
-                </Show>
-                {subscriptionsCard()}
-              </aside>
-            </div>
-          </Show>
-        </Show>
+                </div>
+              </Show>
+              <Show
+                when={visible().length}
+                fallback={
+                  /* An empty worklist is GOOD NEWS, and a person looking at good
+                     news wants nothing done to them: one quiet line, no
+                     onboarding, no button that leaves the page. A filter that
+                     hides everything is a different fact and can be cleared. */
+                  <Show
+                    when={kind() !== "all"}
+                    fallback={
+                      <div class="inbox-clear">
+                        <span class="inbox-clear-ic">
+                          <Icon name="check" size={16} />
+                        </span>
+                        <p>You're all caught up — nothing needs you right now.</p>
+                      </div>
+                    }
+                  >
+                    <EmptyState
+                      variant="no-match"
+                      title="Nothing of that kind is waiting."
+                      actions={<GhostPill onClick={() => setKind("all")}>Clear filter</GhostPill>}
+                    />
+                  </Show>
+                }
+              >
+                <ul class="inbox-list">
+                  <For each={visible()}>{workRow}</For>
+                </ul>
+              </Show>
+            </section>
+
+            {/* ── STREAM 2 ── the feed. No count, no clearing, never merged above. */}
+            <section class="inbox-org" aria-label="Organisation">
+              <SectionHeading title="Organisation" meta="What your colleagues did" />
+              <Show
+                when={feed().length}
+                fallback={<p class="inbox-muted">No organisation activity yet.</p>}
+              >
+                <ul class="inbox-list inbox-feed">
+                  <For each={feed()}>{feedRow}</For>
+                </ul>
+              </Show>
+            </section>
+
+            <Show when={earlier().length}>
+              <Disclosure class="inbox-earlier" title="Earlier notifications" meta={`${earlier().length} read`}>
+                <ul class="inbox-list">
+                  <For each={earlier()}>
+                    {(item) => (
+                      <li>
+                        <span class="inbox-ic" aria-hidden="true">
+                          <Icon name="inbox" size={16} />
+                        </span>
+                        <div class="inbox-body">
+                          <div class="inbox-line">
+                            <strong>{item.title}</strong>
+                          </div>
+                          <Show when={item.body}>
+                            <p>{item.body}</p>
+                          </Show>
+                          <div class="inbox-meta">
+                            <span class="inbox-action">{item.event_type}</span>
+                            <time title={timestamp(item.created_at)}>{relativeTime(item.created_at)}</time>
+                          </div>
+                        </div>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Disclosure>
+            </Show>
+          </div>
+
+          <aside class="view-rail inbox-rail">
+            {summaryCard()}
+            {subscriptionsCard()}
+          </aside>
+        </div>
       </Show>
     </section>
   );

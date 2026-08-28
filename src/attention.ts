@@ -73,6 +73,9 @@ export type AttentionItem = {
   action: string;
   tone: Tone;
   route: Route;
+  /** The chat anchor the work was born from, when it has one: a task raised in a
+   *  channel must lead back to the message that raised it (feeds `SourceLink`). */
+  anchor?: { entityType: string; entityId: string };
   /** Present when the row can be cleared in place. Absent = open it to resolve. */
   resolve?: () => Promise<void>;
 };
@@ -212,6 +215,10 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
       action: "Open",
       tone: "",
       route: todo.project_id ? { view: "Project Tasks", projectId: todo.project_id } : { view: "To-Do" },
+      anchor:
+        todo.source_entity_type && todo.source_entity_id
+          ? { entityType: todo.source_entity_type, entityId: todo.source_entity_id }
+          : undefined,
     });
   }
 
