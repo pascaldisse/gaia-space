@@ -6,7 +6,7 @@ import PageHeader from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import EmptyState from "../components/EmptyState";
 import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit from "../components/TaskRowEdit";
+import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
 import { todayISO, urgencyOf } from "../statusTone";
@@ -45,19 +45,10 @@ export default function Todo() {
      This surface keeps what is its own: which row is open, and where the focus goes
      when it closes. */
   const [editingId,setEditingId]=createSignal<string|null>(null);
-  // FOCUS RETURNS TO THE ROW ON CLOSE: the element that opened the editor is
-  // remembered, and given the focus back once the row is drawn again.
-  let openerEl:HTMLElement|undefined;
-  const startEdit=(todo:TodoItem,event?:{currentTarget:HTMLElement})=>{
-    openerEl=event?.currentTarget;
-    setEditingId(todo.id);
-    setError("");
-  };
-  const closeEdit=()=>{
-    setEditingId(null);
-    const opener=openerEl; openerEl=undefined;
-    queueMicrotask(()=>opener?.isConnected?opener.focus():document.querySelector<HTMLElement>(".todo-view .task-body-edit")?.focus());
-  };
+  // FOCUS RETURNS TO THE ROW ON CLOSE. Not to the element that opened it: closing
+  // follows a re-read that replaces that button. The row is found again by task id.
+  const startEdit=(todo:TodoItem)=>{ setEditingId(todo.id); setError(""); };
+  const closeEdit=(id:string)=>{ setEditingId(null); focusTaskRow(id); };
 
   const today=todayISO;
   const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
@@ -83,14 +74,14 @@ export default function Todo() {
           This is the caller's OWN list, so the caller owns every row in it — the
           server's owner rule (TodoOwnerWrite) is satisfied by construction here. */}
       <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)}
-        onCancel={closeEdit}
-        onSaved={()=>{ closeEdit(); refetch(); }}
+        onCancel={()=>closeEdit(todo.id)}
+        onSaved={()=>{ closeEdit(todo.id); refetch(); }}
         onError={setError}/>
     </div>
   </article>;
   const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <button type="button" class="task-body task-body-edit" aria-label={`Edit ${todo.content}`} onClick={e=>startEdit(todo,e)}>
+    <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
       <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
       <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
 <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>

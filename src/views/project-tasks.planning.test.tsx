@@ -268,3 +268,33 @@ test("Escape closes the row editor without writing", async () => {
   expect(host.textContent).toContain("Review the plan");
   expect(host.textContent).not.toContain("Something else entirely");
 });
+
+/* Keyboard-only reachability, and the focus contract: opening moves the caret into the
+   first field, closing gives the focus back to the ROW — not to nothing. The row is
+   re-created by the re-read that follows a save, so it is found again by task id
+   (`data-task-row`), never by holding on to the element that opened the editor. */
+test("focus goes into the editor on open and back to the row on close", async () => {
+  setProfileId("pa");
+  serve({
+    list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
+    list_profiles: [{ id: "pa", username: "alice", display_name: "Alice", archived: false }],
+    list_project_member_ids: ["pa"],
+    list_project_todos: [{ ...sharedTask, profile_id: "pa", content: "Review the plan" }],
+    project_dashboard_aggregate: { project_id: "p1", open_issues: 0, open_todos: 1, member_count: 1, deadline: null },
+  });
+  registerViews(["Dashboard", "Project Tasks", "Boards", "Issues"]); setAvailableViews(null);
+  navigate({ view: "Project Tasks", projectId: "p1" });
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <ProjectTasks />, host);
+  await until(() => !!host.querySelector(".project-task-row"));
+  const row = host.querySelector('.task-row-main[data-task-row="t1"]') as HTMLButtonElement;
+  expect(row).not.toBeNull();
+  row.click();
+  await until(() => !!host.querySelector(".task-row-editing"));
+  expect(document.activeElement).toBe(host.querySelector(".task-row-editing input.composer-title"));
+
+  (host.querySelector(".task-row-editing input.composer-title") as HTMLInputElement)
+    .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await until(() => document.activeElement === host.querySelector('.task-row-main[data-task-row="t1"]'));
+  expect((document.activeElement as HTMLElement).getAttribute("data-task-row")).toBe("t1");
+});

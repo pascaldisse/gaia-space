@@ -5,7 +5,7 @@ import { ProfilePicker } from "../components/Pickers";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit from "../components/TaskRowEdit";
+import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import { todayISO, urgencyOf } from "../statusTone";
@@ -49,7 +49,6 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   // ONE ROW OPEN AT A TIME, and the element that opened it is remembered so the
   // focus can go back where the person left it.
   const [editingId, setEditingId] = createSignal<string | null>(null);
-  let openerEl: HTMLElement | undefined;
   const [error, setError] = createSignal("");
   createEffect(() => { selectedProject(); setCreating(false); setEditingId(null); setError(""); });
 
@@ -102,11 +101,8 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   const taskFilters = () => !!text().trim() || !!assigneeId();
   const clearFilters = () => { setText(""); setAssigneeId(""); };
   const newTask = () => { setCreating(true); setError(""); };
-  const editTask = (task: Todo, event: { currentTarget: HTMLElement }) => { openerEl = event.currentTarget; setEditingId(task.id); setError(""); };
-  const closeEdit = () => {
-    const opener = openerEl; openerEl = undefined; setEditingId(null);
-    queueMicrotask(() => { if (opener?.isConnected) opener.focus(); });
-  };
+  const editTask = (task: Todo) => { setEditingId(task.id); setError(""); };
+  const closeEdit = (id: string) => { setEditingId(null); focusTaskRow(id); };
   /* WHO MAY WRITE WHAT is the server's rule, not this view's invention:
      `update_todo` is owner-only (TodoOwnerWrite), `set_todo_completion` is owner or
      assignee (TodoCompletionWrite). The row offers each write exactly where it is
@@ -168,7 +164,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
                 <input type="checkbox" class="task-row-check" aria-label={`Mark ${task.content} done`}
                   disabled={!mayComplete(task)}
                   checked={task.done} onChange={event => complete(task, event.currentTarget.checked)} />
-                <button type="button" class="task-row-main" aria-label={`Edit ${task.content}`} onClick={event => editTask(task, event)}>
+                <button type="button" class="task-row-main" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => editTask(task)}>
                   <strong class="task-row-title">{task.content}</strong>
                   {/* ONE quiet meta line: who made it, who carries it, when it is due.
                       Tone sits on the DATE alone — statusTone.ts decides, never this file. */}
@@ -184,8 +180,8 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
                 <div class="task-row-editing">
                   <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
                     ownerName={nameOf(task.profile_id)}
-                    onCancel={closeEdit}
-                    onSaved={() => { closeEdit(); void reloadTasks(); void reloadDashboard(); }}
+                    onCancel={() => closeEdit(task.id)}
+                    onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
                     onError={setError} />
                 </div>
               </Show>

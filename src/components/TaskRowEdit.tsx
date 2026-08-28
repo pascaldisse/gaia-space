@@ -27,6 +27,25 @@ import "./TaskRowEdit.css";
  * them, and nowhere else. Showing a live form that the server would refuse is a lie
  * the old surfaces told ("The task owner can edit full task details in My tasks").
  */
+/**
+ * FOCUS COMES BACK TO THE ROW when the editor closes — and it cannot simply be the
+ * element that opened it: closing follows a re-read, which replaces that button with a
+ * new one. So the row is found again BY TASK ID, and looked for a few times, because
+ * the list may still be re-rendering when the editor closes.
+ *
+ * setTimeout, NOT requestAnimationFrame: measured in the running app, rAF never fires
+ * while the window is not the foreground one (`document.hasFocus()` false), so a
+ * rAF-scheduled restore silently never happens. A timer runs either way.
+ */
+export function focusTaskRow(id: string, tries = 12): void {
+  const attempt = () => {
+    const row = document.querySelector<HTMLElement>(`[data-task-row="${id}"]`);
+    if (row) { row.focus(); return; }
+    if (tries-- > 0) setTimeout(attempt, 25);
+  };
+  queueMicrotask(attempt);
+}
+
 export default function TaskRowEdit(props: {
   task: Todo;
   /** The surface fixes the project (project Tasks tab): no chooser is drawn. */

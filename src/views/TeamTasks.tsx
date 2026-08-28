@@ -7,7 +7,7 @@ import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit from "../components/TaskRowEdit";
+import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
 import "../components/TaskList.css";
@@ -31,7 +31,6 @@ export default function TeamTasks() {
   // ONE ROW OPEN AT A TIME, and the focus goes back to the row that opened it.
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [rowError, setRowError] = createSignal("");
-  let openerEl: HTMLElement | undefined;
 
   const [tasks, { refetch: reloadTasks }] = createResource(
     () => [profileId(), includeDone()] as const,
@@ -78,11 +77,8 @@ export default function TeamTasks() {
      A filter that is ON forces the row back open — a short list must always be able
      to explain why it is short. */
   const toolsOpen = () => filtersOpen() || filtered() || includeDone();
-  const editTask = (task: Todo, event: { currentTarget: HTMLElement }) => { openerEl = event.currentTarget; setEditingId(task.id); setRowError(""); };
-  const closeEdit = () => {
-    const opener = openerEl; openerEl = undefined; setEditingId(null);
-    queueMicrotask(() => { if (opener?.isConnected) opener.focus(); });
-  };
+  const editTask = (task: Todo) => { setEditingId(task.id); setRowError(""); };
+  const closeEdit = (id: string) => { setEditingId(null); focusTaskRow(id); };
   /* The server's rule, quoted not invented: `update_todo` is owner-only
      (TodoOwnerWrite); `set_todo_completion` is owner or assignee. On a surface whose
      whole point is OTHER people's work, most rows are therefore read-only — and say
@@ -158,7 +154,7 @@ export default function TeamTasks() {
             <Show when={editingId() === task.id} fallback={
             <div class="task-row tt-row" classList={{ done: task.done, overdue: urgency() === "overdue" }}>
               <span class="task-row-marker" aria-hidden="true">{task.done ? "✓" : "○"}</span>
-              <button type="button" class="task-row-main" aria-label={`Open ${task.content}`} onClick={event => editTask(task, event)}>
+              <button type="button" class="task-row-main" data-task-row={task.id} aria-label={`Open ${task.content}`} onClick={() => editTask(task)}>
                 <strong class="task-row-title">{task.content}</strong>
                 <span class="task-row-meta">
                   <span class="tt-author">{nameOf(task.profile_id)}</span>
@@ -170,8 +166,8 @@ export default function TeamTasks() {
               <div class="task-row-editing">
                 <TaskRowEdit task={task} canEdit={owns(task)} canComplete={mayComplete(task)}
                   ownerName={nameOf(task.profile_id)}
-                  onCancel={closeEdit}
-                  onSaved={() => { closeEdit(); void reloadTasks(); }}
+                  onCancel={() => closeEdit(task.id)}
+                  onSaved={() => { closeEdit(task.id); void reloadTasks(); }}
                   onError={setRowError} />
               </div>
             </Show>

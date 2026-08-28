@@ -100,3 +100,8 @@
 .theme-space-light .task-tools { margin-bottom: 12px; }
 .theme-space-light .task-tools h2 { font-size: 12px; font-weight: 680; letter-spacing: .07em; color: var(--muted); }
 .theme-space-light .task-tools h2 small { background: transparent; color: var(--quiet); font-weight: 620; padding: 0; }
+/* QUIET IS NOT INVISIBLE. A GhostPill is borderless by default; the header's action
+   area already gives it a hairline (`.pgh-actions > .ghost-pill`) so it reads as a
+   button. This one is the only control over the list — it gets the same. */
+.theme-space-light .task-tools .ghost-pill { border-color: var(--line); }
+.theme-space-light .task-tools .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); }
