@@ -23,7 +23,12 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Inbox", "Chat"] },
   { id: "timeoff", label: "Time off", icon: "clock-nav", views: ["Absences"] },
-  { id: "org", label: "Organization", icon: "org", views: ["Members", "Locations", "Users", "Admin", "Applications", "Settings"] },
+  // Leads (landing-page contact submissions, administrator-only) is an ORGANISATION
+  // surface, not a second Inbox: it is administered, not worked in a conversation. It
+  // therefore joins the org group instead of the standalone group master gave it, and in
+  // the chat-first rail it falls through `railModeOfView` to "More" — the shell's home
+  // for organisation-level views.
+  { id: "org", label: "Organization", icon: "org", views: ["Members", "Locations", "Users", "Admin", "Applications", "Leads", "Settings"] },
 ];
 
 const LAYOUT_KEY = "space.nav.layout";

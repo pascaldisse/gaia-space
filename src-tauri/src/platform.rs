@@ -3329,6 +3329,26 @@ mod tests {
         assert_eq!(stored, ("Project".to_string(), None));
     }
     #[test]
+    fn project_lead_write_is_narrow_and_requires_an_active_project_member() {
+        let c = conn();
+        for id in ["owner", "member", "outside", "archived"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,archived,created_at) VALUES(?1,?1,?1,?2,1)", params![id, id == "archived"]).unwrap();
+        }
+        c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at) VALUES('pr','Project','PR','Original','owner',0,'2030-03-10',1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','member'),('pr','archived')", []).unwrap();
+        let chosen = set_project_lead_on(&c, "pr", Some("member")).unwrap();
+        assert_eq!(chosen.lead_id.as_deref(), Some("member"));
+        let untouched: (String, Option<String>, Option<String>) = c.query_row("SELECT name,description,deadline FROM projects WHERE id='pr'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(untouched, ("Project".into(), Some("Original".into()), Some("2030-03-10".into())));
+        // master's requirement, kept: a lead must be an ACTIVE MEMBER. Our wording splits
+        // the two reasons — a stranger to the project vs a profile that no longer exists —
+        // so the assertions name our messages while testing master's guarantee.
+        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("must be a project member"));
+        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("does not exist"));
+        assert_eq!(set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id, None);
+    }
+
+    #[test]
     fn project_role_inherits_its_template_and_bindings_stay_inside_the_project() {
         let c = conn();
         c.execute(

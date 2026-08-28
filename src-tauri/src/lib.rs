@@ -46,6 +46,8 @@ pub mod ics;
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod meetings;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod leads;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod auth_modules;

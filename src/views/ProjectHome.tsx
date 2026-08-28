@@ -68,7 +68,10 @@ export default function ProjectHome(props: { project?: Project }) {
       {/* ONE TILE (stage 11, defect 2): `.ph-stat` was this view's own shape.
           Each counting tile is now a LINK to the surface that owns the count —
           a glance whose numbers are dead ends is a glance you cannot act on. */}
-      <Show when={dashboard()} fallback={<p class="hint">Loading project dashboard…</p>}>{data => <MetricGrid label="Project at a glance" class="ph-stats">
+      {/* A FAILED READ IS NAMED, never rendered as a zero (carried over from master,
+          5680579): a glance that shows 0 open tickets because the read failed is a lie. */}
+      <Show when={dashboard.error}><p class="planning-error" role="alert">Could not load project metrics: {String(dashboard.error)}</p></Show>
+      <Show when={dashboard()} fallback={<Show when={!dashboard.error}><p class="hint">Loading project dashboard…</p></Show>}>{data => <MetricGrid label="Project at a glance" class="ph-stats">
         <MetricTile value={data()!.open_issues} label="Open tickets" tone="teal" aria-label={`${data()!.open_issues} open tickets — open the tickets surface`} {...ticketLink()} />
         <MetricTile value={data()!.open_todos} label="Open tasks" tone="teal" aria-label={`${data()!.open_todos} open tasks — open this project's tasks`} {...linkProps(tasksRoute())} />
         <MetricTile value={data()!.member_count} label="Members" {...linkProps({ view: "Project Settings", projectId: value().id })} />
@@ -84,11 +87,12 @@ export default function ProjectHome(props: { project?: Project }) {
 
       <section class="ph-card">
         <div class="ph-card-head"><h2>Running tasks</h2><a class="ph-link" {...linkProps(tasksRoute())}>All project tasks →</a></div>
+        <Show when={tasks.error}><p class="planning-error" role="alert">Could not load running tasks: {String(tasks.error)}</p></Show>
         <Show when={tasks.loading}><p class="hint">Loading project tasks…</p></Show>
         {/* NOTHING YET, not a filtered view: this list has no filters, so an
             empty result can only mean the project has no running task. Which of
             the two empty states applies is decided by the project as a whole. */}
-        <Show when={!tasks.loading && !preview().length}>
+        <Show when={!tasks.loading && !tasks.error && !preview().length}>
           <Show when={projectEmpty()} fallback={
             <EmptyState
               title="No running tasks in this project"

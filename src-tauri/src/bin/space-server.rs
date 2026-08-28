@@ -11,7 +11,7 @@ use axum::{
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
     chatbot, db,
-    devenv, documents, events, issues, meetings, oauth, organization, package_registry,
+    devenv, documents, events, issues, leads, meetings, oauth, organization, package_registry,
     payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
@@ -939,16 +939,38 @@ async fn app_join_room(
         .map_err(|_| err(StatusCode::FORBIDDEN, "room_join_denied").into_response())
 }
 
+/// Resolves either the browser session cookie or a script credential. Permanent
+/// tokens carry the caller's existing account identity and consequently take the
+/// same authorization path as an interactive session.
 fn user_by_token(headers: &HeaderMap) -> Result<User, (StatusCode, Json<Value>)> {
-    let t = headers
+    if let Some(session) = headers
         .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            s.split(';')
-                .find_map(|x| x.trim().strip_prefix("space_session="))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies
+                .split(';')
+                .find_map(|cookie| cookie.trim().strip_prefix("space_session="))
         })
+    {
+        if let Ok(user) = user_by_session_token(session) {
+            return Ok(user);
+        }
+    }
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
-    user_by_session_token(t)
+    let user_id = gaia_space_lib::auth_security::permanent_token_user(bearer)
+        .map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    user_by_id(&user_id)
 }
 /// Package clients (npm/bun/Maven) cannot send browser cookies: npm sends
 /// `Authorization: Bearer <token>`, Maven sends HTTP Basic. Registry routes accept those two
@@ -1524,15 +1546,39 @@ fn user_by_password(username: &str, password: &str) -> Result<User, (StatusCode,
     Ok(user)
 }
 fn user_by_session_token(t: &str) -> Result<User, (StatusCode, Json<Value>)> {
-    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    let mut user=c.query_row("SELECT u.id,u.username,u.display_name,u.profile_id,CASE WHEN u.role='admin' THEN 'GlobalAdmin' ELSE u.global_role END FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?1 AND s.expires_at>unixepoch() AND u.active=1",[t],|r|{let role:String=r.get(4)?;Ok(User{id:r.get(0)?,username:r.get(1)?,display_name:r.get(2)?,profile_id:r.get(3)?,account_admin:role=="GlobalAdmin",role})}).map_err(|_|err(StatusCode::UNAUTHORIZED,"unauthorized"))?;
-    // Every `user.role=="GlobalAdmin"` test below is the *unified* admin predicate
-    // (platform::is_admin_on): the account role or the Global.Superadmin right, one
-    // meaning on both transports. The raw column alone would leave a rights-model
-    // admin powerless over HTTP.
+    let c = db::conn().map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?;
+    let user_id: String = c
+        .query_row(
+            "SELECT user_id FROM sessions WHERE token=?1 AND expires_at>unixepoch()",
+            [t],
+            |row| row.get(0),
+        )
+        .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    user_by_id(&user_id)
+}
+
+fn user_by_id(user_id: &str) -> Result<User, (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?;
+    let mut user = c
+        .query_row(
+            "SELECT id,username,display_name,profile_id,CASE WHEN role='admin' THEN 'GlobalAdmin' ELSE global_role END FROM users WHERE id=?1 AND active=1",
+            [user_id],
+            |row| {
+                let role: String = row.get(4)?;
+                Ok(User {
+                    id: row.get(0)?,
+                    username: row.get(1)?,
+                    display_name: row.get(2)?,
+                    profile_id: row.get(3)?,
+                    account_admin: role == "GlobalAdmin",
+                    role,
+                })
+            },
+        )
+        .map_err(|_| err(StatusCode::UNAUTHORIZED, "unauthorized"))?;
     if user.role != "GlobalAdmin"
         && platform::is_admin_on(&c, &user.profile_id)
-            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            .map_err(|error| err(StatusCode::INTERNAL_SERVER_ERROR, &error))?
     {
         user.role = "GlobalAdmin".into();
     }
@@ -1870,6 +1916,53 @@ async fn logout(h: HeaderMap) -> impl IntoResponse {
     );
     r
 }
+#[derive(Deserialize)]
+struct CreatePermanentToken {
+    name: String,
+    expires_at: Option<i64>,
+}
+
+async fn permanent_tokens(h: HeaderMap) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::list_permanent_tokens(&user.id) {
+        Ok(tokens) => Json(tokens).into_response(),
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error).into_response(),
+    }
+}
+
+async fn create_permanent_token(
+    h: HeaderMap,
+    Json(input): Json<CreatePermanentToken>,
+) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::create_permanent_token(
+        &user.id,
+        &input.name,
+        input.expires_at,
+    ) {
+        Ok((record, token)) => Json(json!({"token": token, "record": record})).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+    }
+}
+
+async fn revoke_permanent_token(h: HeaderMap, Path(token_id): Path<String>) -> impl IntoResponse {
+    let user = match user_by_token(&h) {
+        Ok(user) => user,
+        Err(error) => return error.into_response(),
+    };
+    match gaia_space_lib::auth_security::revoke_permanent_token(&user.id, &token_id) {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "token not found").into_response(),
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error).into_response(),
+    }
+}
+
 async fn change_password(h: HeaderMap, Json(x): Json<Password>) -> impl IntoResponse {
     let u = match user_by_token(&h) {
         Ok(u) => u,
@@ -2406,6 +2499,8 @@ enum CommandPolicy {
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
     CalendarOptionsWrite,
+    /// Contact leads contain private contact data; GlobalAdmin only.
+    LeadRead,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -2433,6 +2528,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
         "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
+        "list_leads" => CommandPolicy::LeadRead,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
@@ -2575,7 +2671,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "issue_time_total" | "join_channel" | "launch_sprint" | "leave_channel"
         | "list_absences" => CommandPolicy::Session,
         "invite_meeting_participant" => CommandPolicy::MeetingWrite,
-        "list_backlog_issues" | "list_board_columns" | "list_board_issues" => {
+        "list_backlog_issues" | "list_board_columns" | "list_board_issues" | "get_board_card_settings" => {
             CommandPolicy::BoardRead
         }
         "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
@@ -2716,7 +2812,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "remove_team_membership"
         | "request_membership_edit"
         | "decide_membership_edit"
-        | "save_board_column" => CommandPolicy::Session,
+        | "save_board_column"
+        | "save_board_card_settings" => CommandPolicy::Session,
         "save_checklist"
         | "save_checklist_item"
         | "save_messenger_contact"
@@ -3318,6 +3415,14 @@ fn authorize_command(
                 )?;
             }
             Ok(())
+        }
+        // Contact leads are private PII, not a workspace-wide member feed.
+        CommandPolicy::LeadRead => {
+            if user.role == "GlobalAdmin" {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "only an administrator can view leads"))
+            }
         }
         // App credentials are workspace-wide secrets with no per-app owner to fall
         // back on: an ordinary member must not rotate another app's secret, mint a
@@ -5207,6 +5312,7 @@ async fn cmd(
     "list_backlog_issues" => issues::list_backlog_issues(board_id: String),
     "list_board_columns" => issues::list_board_columns(board_id: String),
     "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
+    "get_board_card_settings" => issues::get_board_card_settings(board_id: String),
     "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
     "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
@@ -5252,6 +5358,7 @@ async fn cmd(
     "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
+    "list_leads" => leads::list_leads(),
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
     "list_desk_assignments" => platform::list_desk_assignments(profile_id: Option<String>, location_id: Option<String>),
@@ -5381,6 +5488,7 @@ async fn cmd(
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
     "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
     "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
+    "save_board_card_settings" => issues::save_board_card_settings(settings: issues::BoardCardSettings),
     "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "ingest_teamcity_test_messages" => pipelines::ingest_teamcity_test_messages(input: pipelines::TeamCityTestReportInput),
     "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
@@ -5749,6 +5857,14 @@ async fn main() {
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
+        .route(
+            "/api/auth/tokens",
+            get(permanent_tokens).post(create_permanent_token),
+        )
+        .route(
+            "/api/auth/tokens/{token_id}",
+            axum::routing::delete(revoke_permanent_token),
+        )
         .route("/api/users", get(users).post(create_user))
         .route("/api/users/{id}", patch(patch_user).delete(delete_user))
         .route("/api/directory", get(directory))
@@ -5986,8 +6102,9 @@ mod tests {
             Some((30, 100))
         );
     }
-    use axum::body::to_bytes;
+    use axum::{body::{to_bytes, Body}, http::Request};
     use std::sync::{Mutex, OnceLock};
+    use tower::ServiceExt;
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     fn test_lock() -> std::sync::MutexGuard<'static, ()> {
         TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
@@ -6017,6 +6134,83 @@ mod tests {
         )
         .await
     }
+    #[tokio::test]
+    async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
+        let _serial = test_lock();
+        setup();
+        let app = Router::new()
+            .route(
+                "/api/auth/tokens",
+                get(permanent_tokens).post(create_permanent_token),
+            )
+            .route(
+                "/api/auth/tokens/{token_id}",
+                axum::routing::delete(revoke_permanent_token),
+            );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/tokens")
+            .header(header::COOKIE, "space_session=ta")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"deploy"}"#))
+            .unwrap();
+        let (status, minted) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        let raw = minted["token"].as_str().unwrap();
+        assert!(raw.starts_with("spat_"), "opaque token returned once");
+        let id = minted["record"]["id"].as_str().unwrap().to_string();
+        assert_eq!(minted["record"]["name"], json!("deploy"));
+
+        let request = Request::builder()
+            .uri("/api/auth/tokens")
+            .header(header::COOKIE, "space_session=ta")
+            .body(Body::empty())
+            .unwrap();
+        let (status, listed) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(listed[0]["id"], json!(id));
+        assert!(listed[0].get("token").is_none(), "plaintext is never listed");
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/auth/tokens/{id}"))
+            .header(header::COOKIE, "space_session=tb")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "another user cannot revoke it");
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/auth/tokens/{id}"))
+            .header(header::COOKIE, "space_session=ta")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn permanent_bearer_token_authenticates_command_api_as_its_owner() {
+        let _serial = test_lock();
+        setup();
+        let (record, raw) = gaia_space_lib::auth_security::create_permanent_token(
+            "ua",
+            "script",
+            None,
+        )
+        .unwrap();
+
+        let (status, body) = call(bearer(&raw), "list_projects", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["ok"], json!(true));
+        assert_eq!(
+            gaia_space_lib::auth_security::revoke_permanent_token("ua", &record.id),
+            Ok(true)
+        );
+        let (status, _) = call(bearer(&raw), "list_projects", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "a revoked script token is unusable");
+    }
+
     async fn login_call(
         app: App,
         source_ip: &str,
@@ -6083,6 +6277,24 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {value}")).unwrap(),
         );
         headers
+    }
+
+    #[tokio::test]
+    async fn leads_are_an_admin_only_read_over_the_real_command_route() {
+        let _serial = test_lock();
+        setup();
+        let path = env::temp_dir().join(format!("gaia-space-leads-http-{}.json", std::process::id()));
+        std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
+        env::set_var("SPACE_LEADS_PATH", &path);
+
+        let (status, _) = call(cookie("ta"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not receive lead PII");
+        let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"][0]["email"], "ada@example.test");
+
+        env::remove_var("SPACE_LEADS_PATH");
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@
 .project-card-head { display: flex; align-items: baseline; gap: 9px; }
 .project-card-head strong { font-family: var(--font-head); font-size: 15.5px; color: var(--text-strong); }
 .project-card-head code { color: var(--text-faint); font-size: 11.5px; }
+/* Informational only: lead chip is a name, not a permission indicator. */
+.project-lead-chip { margin-left: auto; color: var(--text-muted); border: 1px solid var(--surface-border); padding: 2px 6px; font-size: 11px; }
 .project-card > p { margin: 0; color: var(--text-muted); font-size: 13px; }
 .project-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
 .project-card-foot label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
@@ -28,7 +30,6 @@
 .project-deadline .deadline-readonly span { color: var(--text-emphasis); }
 .project-deadline .hint { color: var(--text-dim); }
 .project-deadline .error { margin: 0; color: var(--status-danger-ink); }
-
 /* Opened project: the board surface lives inside the project, not in a sibling tab. */
 .project-open { margin-top: 26px; border-top: 1px solid var(--surface-border); padding-top: 18px; }
 /* the embedded board must not re-declare the page frame */

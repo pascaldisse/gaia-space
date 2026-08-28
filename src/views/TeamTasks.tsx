@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { profileId, profiles, projects, reloadProjects } from "../session";
@@ -27,7 +27,12 @@ export default function TeamTasks() {
     () => [profileId(), includeDone()] as const,
     ([profile_id, include_done]) => profile_id ? personalApi.teamTodos(profile_id, include_done) : Promise.resolve([] as Todo[]),
   );
-  onMount(() => { void reloadProjects().catch(() => undefined); });
+  /* A FAILED PROJECT READ IS NOT AN EMPTY LIST (carried over from master, 5680579).
+     Swallowing it used to leave the rows labelled "Unknown project", which invents a
+     fact. The failure is carried as a value and shown as one alert instead. */
+  const [projectError, setProjectError] = createSignal<unknown>();
+  const [projectsLoading, setProjectsLoading] = createSignal(true);
+  onMount(() => { void reloadProjects().catch(setProjectError).finally(() => setProjectsLoading(false)); });
   // A team surface is collaborative: another member's write must arrive without making
   // the current user discover a secret reload gesture. Focus refresh is immediate; the
   // bounded interval covers two people who keep the view open side by side.
@@ -39,7 +44,14 @@ export default function TeamTasks() {
   });
 
   const nameOf = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
-  const projectName = (id: string) => projects()?.find(item => item.id === id)?.name ?? "Unknown project";
+  const projectName = (id: string) => projects()?.find(item => item.id === id)?.name;
+  /* A task pointing at a project this client never received is metadata we do not
+     have — reported, never invented as a label. */
+  const missingProjectId = createMemo(() => {
+    if (projectsLoading() || projectError() || tasks.error) return undefined;
+    return (tasks() ?? []).find(task => task.project_id && !projects()?.some(item => item.id === task.project_id))?.project_id;
+  });
+  const loadError = () => tasks.error ?? projectError() ?? (missingProjectId() ? "Project metadata is unavailable." : undefined);
   const visible = () => (tasks() ?? []).filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
@@ -58,14 +70,15 @@ export default function TeamTasks() {
       const bucket = by.get(key); bucket ? bucket.push(task) : by.set(key, [task]);
     }
     return [...by.entries()]
-      .map(([project_id, items]) => ({ project_id, name: projectName(project_id), items }))
+      .map(([project_id, items]) => { const name = projectName(project_id); return name === undefined ? undefined : { project_id, name, items }; })
+      .filter((group): group is { project_id: string; name: string; items: Todo[] } => group !== undefined)
       .sort((a, b) => a.name.localeCompare(b.name));
   };
 
   return <section class="planning-view team-tasks-view">
     {/* Sibling sentences live in Todo.tsx and ProjectTasks.tsx: whose work, how wide. */}
     <PageHeader title="Team tasks" subline="Everybody's tasks, across every project you are in — not just yours." />
-    <Show when={tasks.error}><p class="planning-error" role="alert">Could not load team tasks: {String(tasks.error)}</p></Show>
+    <Show when={loadError()}>{error => <p class="planning-error" role="alert">Could not load team tasks: {String(error())}</p>}</Show>
     <div class="filter-row" aria-label="Team task filters">
       {/* One control language: a quiet search and a pill whose resting value
           ("All profiles") is its own label — no caption above either. */}
@@ -73,25 +86,25 @@ export default function TeamTasks() {
       <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
       <label class="tt-toggle"><input type="checkbox" aria-label="Show completed" checked={includeDone()} onChange={event => setIncludeDone(event.currentTarget.checked)} /> Show completed</label>
     </div>
-    <Show when={!profileId()}><p class="hint">Your account profile is still loading; team tasks will appear when it is ready.</p></Show>
-    <Show when={tasks.loading}><p class="hint">Loading team tasks…</p></Show>
+    <Show when={!loadError() && !profileId()}><p class="hint">Your account profile is still loading; team tasks will appear when it is ready.</p></Show>
+    <Show when={!loadError() && (tasks.loading || projectsLoading())}><p class="hint">Loading team tasks…</p></Show>
     {/* FILTERS MATCH NOTHING: the store has work, this filter simply hides it,
         so the only right offer is to clear the filter — never "create", which
         would invite a duplicate of the task being searched for. */}
-    <Show when={!tasks.loading && !groups().length && filtered()}>
+    <Show when={!loadError() && !tasks.loading && !projectsLoading() && !groups().length && filtered()}>
       <EmptyState variant="no-match" title="No team tasks match these filters." actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>} />
     </Show>
     {/* NOTHING YET across every project the caller is a member of. This surface
         has no composer of its own; creation lives in My tasks, so that is where
         the primary goes — named for what it does, not for where it lands. */}
-    <Show when={!tasks.loading && !groups().length && !filtered() && !!profileId()}>
+    <Show when={!loadError() && !tasks.loading && !projectsLoading() && !groups().length && !filtered() && !!profileId()}>
       <EmptyState
         title="Nobody has a running task yet"
         hint="This is everyone's work across your projects — it fills up as people add tasks."
         actions={<button type="button" class="primary" onClick={() => navigate({ view: "To-Do" })}>Add the first task</button>}
       />
     </Show>
-    <For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
+    <Show when={!loadError() && !projectsLoading()}><For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
       <h2 class="tt-group-head"><a {...linkProps({ view: "Project Tasks", projectId: group.project_id })}>{group.name}</a> <small>{group.items.length}</small></h2>
       <ul class="issue-list tt-list">
         <For each={group.items}>{task => <li>
@@ -111,6 +124,6 @@ export default function TeamTasks() {
           </div>
         </li>}</For>
       </ul>
-    </section>}</For>
+    </section>}</For></Show>
   </section>;
 }

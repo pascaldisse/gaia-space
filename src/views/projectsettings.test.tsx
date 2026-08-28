@@ -47,6 +47,17 @@ describe("project settings", () => {
     expect(calls.find(call => call.cmd === "create_role_assignment")?.args).toMatchObject({ input: { role_id: "role-manager", profile_id: "owner", scope_type: "project", scope_id: "p1" } });
   });
 
+  // master's requirement (f4ac0c9), adapted to our fixture: profiles and member ids
+  // resolve AFTER the select mounts, so a project that already has a lead must not be
+  // rendered as "No lead".
+  test("reapplies an existing lead after asynchronous options load", async () => {
+    project.lead_id = "member";
+    try {
+      const host = await mount();
+      expect(host.querySelector<HTMLSelectElement>('select[aria-label="Project lead"]')?.value).toBe("member");
+    } finally { project.lead_id = null; }
+  });
+
   // The lead is informational; the ONLY thing it restricts is who may write the field.
   test("lead select saves the chosen member through set_project_lead", async () => {
     const host = await mount();

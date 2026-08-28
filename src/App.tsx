@@ -40,6 +40,7 @@ import Admin from "./views/Admin";
 import Applications from "./views/Applications";
 import Users from "./views/Users";
 import Settings from "./views/Settings";
+import Leads from "./views/Leads";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
@@ -62,6 +63,7 @@ const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"C
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
+const leadsView:View={name:"Leads",icon:"inbox",component:Leads};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
 // Cross-project, project-id-free: routed by its own slug (`team-tasks`), unlike the
 // project-scoped views below which live under /projects/<id>/…
@@ -79,14 +81,14 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   const visibleWorkspaceViews=()=>{
     let list=workspaceViews;
     if(isWeb()) list=list.filter(v=>!localOnlyViews.includes(v));
-    if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView];
+    if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
     return list;
   };
   const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
-    registerViews([...personalViews,...workspaceViews,usersView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
+    registerViews([...personalViews,...workspaceViews,usersView,leadsView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();

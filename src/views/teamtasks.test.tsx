@@ -27,27 +27,36 @@ const teamTodos = [
   { id: "t3", profile_id: "other", content: "Borealis theirs", due_date: null, project_id: "p2", done: false, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: ["other"], content_kind: "text" },
 ];
 
+// Failure switches for master's load-failure requirements (5680579), adapted to this
+// file's fixture: a read that fails is an ERROR the view must name, never silence.
+let failProjectReload = false;
+let failTeamTodos = false;
+let teamTodoResponse: typeof teamTodos | [] = teamTodos;
+
 const reply = (cmd: string) => {
-  if (cmd === "list_projects") return projects;
+  if (cmd === "list_projects") return failProjectReload ? new Error("projects unavailable") : projects;
   if (cmd === "list_profiles") return profiles;
-  if (cmd === "list_team_todos") return teamTodos;
+  if (cmd === "list_team_todos") return failTeamTodos ? new Error("team tasks unavailable") : teamTodoResponse;
   if (cmd === "list_project_todos") return teamTodos.filter(todo => todo.project_id === "p1");
   if (cmd === "list_project_member_ids") return ["me", "other"];
   return [];
 };
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 50));
-const mount = async (component: () => unknown) => {
-  (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => { calls.push({ cmd, args }); return Promise.resolve(reply(cmd)); } };
+const mount = async (component: () => unknown, options: { failProjectReload?: boolean; failTeamTodos?: boolean } = {}) => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => { calls.push({ cmd, args }); const result = reply(cmd); return result instanceof Error ? Promise.reject(result) : Promise.resolve(result); } };
   registerViews(["Projects", "Team Tasks", "Project Tasks"]); setAvailableViews(null); initRouter(createMemoryAdapter());
+  // The session cache is seeded from a SUCCESSFUL read first; the switches then decide
+  // what the view's own reload sees, exactly as master's fixture did.
   setProfileId("me"); await reloadProjects();
+  failProjectReload = options.failProjectReload ?? false; failTeamTodos = options.failTeamTodos ?? false;
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(component as any, host);
   await settle();
   return host;
 };
 
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; teamTodoResponse = teamTodos; failProjectReload = false; failTeamTodos = false; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); });
 
 describe("team tasks", () => {
   test("groups running todos from every project, including other people's", async () => {
@@ -76,6 +85,28 @@ describe("team tasks", () => {
     const done = host.querySelector<HTMLInputElement>('input[aria-label="Show completed"]')!;
     expect(done.checked).toBe(false);
     expect(host.querySelectorAll(".tt-row").length).toBe(3);
+  });
+
+  // ── master's load-failure requirements (5680579), adapted to our empty-state copy ──
+  test("reports team task load failure without rendering an empty state", async () => {
+    const host = await mount(() => <TeamTasks /> as any, { failTeamTodos: true });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Could not load team tasks: Error: team tasks unavailable");
+    expect(host.textContent).not.toContain("No team tasks match these filters.");
+    expect(host.textContent).not.toContain("Nobody has a running task yet");
+  });
+
+  test("reports project metadata load failure without fabricating a project label", async () => {
+    const host = await mount(() => <TeamTasks /> as any, { failProjectReload: true });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Could not load team tasks: Error: projects unavailable");
+    expect(host.textContent).not.toContain("Nobody has a running task yet");
+    expect(host.textContent).not.toContain("Unknown project");
+  });
+
+  test("shows the nothing-yet state only after successful loads return zero rows", async () => {
+    teamTodoResponse = [];
+    const host = await mount(() => <TeamTasks /> as any);
+    expect(host.textContent).toContain("Nobody has a running task yet");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
   test("show completed re-reads with include_done", async () => {

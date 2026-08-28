@@ -2401,6 +2401,63 @@ mod tests {
         migrate(&conn).expect("idempotent");
     }
 
+    /// MERGE PROOF (master → space-redesign-communication-first): the two branches each
+    /// added a V132 (`projects.lead_id`, both idempotent via `add_column_if_missing`) and
+    /// ours stacked V133 (source anchors) and V134 (`channel_notes`) on top. The ladder
+    /// must therefore still be LINEAR from an old stamp and runnable twice.
+    #[test]
+    fn the_merged_ladder_climbs_from_an_old_stamp_to_134_and_survives_a_second_run() {
+        let temp = TempDb::new("gaia-space-merged-ladder");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        // Stamp the database BELOW every rung the merge touched and climb the whole way.
+        conn.pragma_update(None, "user_version", 100).expect("rewind");
+        migrate(&conn).expect("climb from V100");
+        let head = |label: &str| {
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("version");
+            println!("MIGRATION PROOF {label}: user_version={version}");
+            version
+        };
+        assert_eq!(head("after climb from 100"), 134);
+        assert_eq!(SCHEMA_VERSION, 134);
+        // Every rung the merge touched exists exactly once, and by name.
+        for (table, column) in [
+            ("projects", "lead_id"),
+            ("issues", "source_entity_type"),
+            ("meetings", "source_entity_type"),
+        ] {
+            let present: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"),
+                    [column],
+                    |row| row.get(0),
+                )
+                .expect("columns");
+            assert_eq!(present, 1, "{table}.{column} is missing after the climb");
+        }
+        assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
+        migrate(&conn).expect("migrate() is idempotent at head");
+        assert_eq!(head("after second run at head"), 134);
+    }
+
+    #[test]
+    fn v132_adds_nullable_informational_project_lead_without_rewriting_rows() {
+        let temp = TempDb::new("gaia-space-v132-lead");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("UPDATE projects SET lead_id='default-org' WHERE id='demo-project'", []).expect("set lead");
+        conn.pragma_update(None, "user_version", 131).expect("rewind version");
+        migrate(&conn).expect("V132 migration");
+        let lead: Option<String> = conn.query_row("SELECT lead_id FROM projects WHERE id='demo-project'", [], |row| row.get(0)).expect("lead");
+        assert_eq!(lead.as_deref(), Some("default-org"));
+        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).expect("version"), SCHEMA_VERSION);
+        migrate(&conn).expect("V132 is idempotent");
+    }
+
     #[test]
     fn v60_adds_caldav_events_to_a_v59_database() {
         let temp = TempDb::new("gaia-space-v60-caldav");
