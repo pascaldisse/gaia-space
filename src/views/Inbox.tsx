@@ -44,6 +44,7 @@ const KINDS: Record<AttentionKind, Category> = {
   mention: { key: "mention", label: "Mentions", icon: "chat", tone: "mention" },
   dm: { key: "dm", label: "Direct messages", icon: "chat", tone: "mention" },
   channel: { key: "channel", label: "Channels", icon: "chat", tone: "mention" },
+  thread: { key: "thread", label: "Threads", icon: "chat", tone: "mention" },
   todo: { key: "todo", label: "Tasks", icon: "check", tone: "issue" },
   issue: { key: "issue", label: "Tickets", icon: "check", tone: "issue" },
   review: { key: "review", label: "Code reviews", icon: "review", tone: "review" },

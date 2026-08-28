@@ -26,7 +26,12 @@
  *  `ORGANISATION_EVENTS` is the closed set of "news" event types — everything
  *  else that lands in my notifications is work.
  *
- *  WHAT COUNTS AS "NEEDS YOU" (the exact rule, one place, six sources):
+ *  WHAT COUNTS AS "NEEDS YOU" (the exact rule, one place, seven sources):
+ *    0. unread replies in a THREAD I take part in (wrote the root, or replied)
+ *       — a reply to my message addresses me, which is the whole test above.
+ *         Thread channels are filtered out of the channel list on purpose, so
+ *         this is the ONE place they can be seen; `list_unread_threads` already
+ *         applies participation, authorship and the parent channel's ACL.
  *    1. unread mentions of me
  *    2. unread DM channels                      (one item per channel)
  *    3. unread ENTITY-BOUND channels            (one item per channel)
@@ -48,7 +53,7 @@
  */
 
 import { createResource, createRoot, createSignal } from "solid-js";
-import { chatApi, type ChannelSummary, type MentionView } from "./api/chat";
+import { chatApi, type ChannelSummary, type MentionView, type UnreadThread } from "./api/chat";
 import { personalApi, type Dashboard, type Notification, type Todo } from "./api/personal";
 import { platformApi, type DirectoryFeedEvent } from "./api/platform";
 import { reviewApi, type Review, type ReviewParticipant } from "./api/review";
@@ -58,7 +63,7 @@ import type { Tone } from "./statusTone";
 
 /** Which worklist source produced a row. Used for icons and grouping only —
  *  never to re-derive the count, which is `needsYou().length` and nothing else. */
-export type AttentionKind = "mention" | "dm" | "channel" | "todo" | "issue" | "review" | "notification";
+export type AttentionKind = "mention" | "dm" | "channel" | "thread" | "todo" | "issue" | "review" | "notification";
 
 export type AttentionItem = {
   id: string;
@@ -129,6 +134,7 @@ export type AttentionSources = {
   profileId: string;
   mentions: MentionView[];
   channels: ChannelSummary[];
+  threads: UnreadThread[];
   dashboard: Dashboard | null;
   todos: Todo[];
   notifications: Notification[];
@@ -140,6 +146,7 @@ export const emptySources = (profileId = ""): AttentionSources => ({
   profileId,
   mentions: [],
   channels: [],
+  threads: [],
   dashboard: null,
   todos: [],
   notifications: [],
@@ -198,6 +205,26 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
       tone: isDm ? "amber" : "teal",
       route: channelRoute(channel.id),
       resolve: () => chatApi.markChannelRead(channel.id, me),
+    });
+  }
+
+  // 3b. Unread replies in a thread I take part in. The backend has already decided
+  //     participation, authorship and visibility; this is presentation only — the row
+  //     must SAY what it is, so a person knows why it is on their list.
+  for (const thread of sources.threads) {
+    const who = thread.last_reply_author ?? "Someone";
+    items.push({
+      id: `thread:${thread.channel_id}`,
+      kind: "thread",
+      title: `${who} replied in “${trimTitle(thread.root_excerpt, "your message")}”`,
+      detail: `${thread.unread_count} unread ${thread.unread_count === 1 ? "reply" : "replies"} · thread in #${thread.parent_channel_name ?? thread.parent_channel_id}`,
+      at: thread.last_reply_at ?? 0,
+      action: "Reply",
+      tone: "teal",
+      // The thread channel's OWN route: Chat decodes it back to the parent plus the
+      // open thread panel, so the click lands on the replies, not merely near them.
+      route: channelRoute(thread.channel_id),
+      resolve: () => chatApi.markChannelRead(thread.channel_id, me),
     });
   }
 
@@ -410,16 +437,17 @@ async function loadReviewRequests(profileId: string) {
 
 export async function loadAttention(profileId: string): Promise<AttentionSources> {
   if (!profileId) return emptySources("");
-  const [mentions, channels, dashboard, todos, notifications, directory, reviewRequests] = await Promise.all([
+  const [mentions, channels, threads, dashboard, todos, notifications, directory, reviewRequests] = await Promise.all([
     settled(chatApi.listMentionsForProfile(profileId, true), [] as MentionView[]),
     settled(chatApi.listChannelsWithMeta(profileId), [] as ChannelSummary[]),
+    settled(chatApi.listUnreadThreads(profileId), [] as UnreadThread[]),
     settled<Dashboard | null>(personalApi.dashboard(profileId), null),
     settled(personalApi.todos(profileId), [] as Todo[]),
     settled(personalApi.notifications(profileId), [] as Notification[]),
     settled(platformApi.directoryFeed(50), [] as DirectoryFeedEvent[]),
     loadReviewRequests(profileId),
   ]);
-  return { profileId, mentions, channels, dashboard, todos, notifications, directory, reviewRequests };
+  return { profileId, mentions, channels, threads, dashboard, todos, notifications, directory, reviewRequests };
 }
 
 /** ── THE LIVE SINGLETON ─────────────────────────────────────────────────────

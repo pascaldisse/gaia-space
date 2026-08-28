@@ -8,7 +8,7 @@ import {
   readActor,
   type AttentionSources,
 } from "./attention";
-import type { ChannelSummary, MentionView } from "./api/chat";
+import type { ChannelSummary, MentionView, UnreadThread } from "./api/chat";
 import type { Notification, Todo } from "./api/personal";
 import type { DirectoryFeedEvent } from "./api/platform";
 
@@ -69,6 +69,37 @@ describe("one definition of what needs me", () => {
     });
     expect(countNeedsYou(s)).toBe(1);
     expect(buildNeedsYou(s)[0]).toMatchObject({ kind: "channel", detail: "2 unread messages" });
+  });
+
+  // A reply to my message addresses me. Thread channels are filtered out of the
+  // channel list on purpose, so before this source they could not reach ANY surface:
+  // the badge, Home and the Inbox were all blind to them at once.
+  test("unread replies in a thread I take part in are work, counted like everything else", () => {
+    const thread: UnreadThread = {
+      channel_id: "thread:msg-1",
+      parent_channel_id: "c-design",
+      parent_channel_name: "design",
+      root_message_id: "msg-1",
+      root_excerpt: "Which way should the worklist read?",
+      unread_count: 2,
+      last_reply_at: 1200,
+      last_reply_author: "Ada",
+    };
+    const s = sources({ threads: [thread] });
+    expect(countNeedsYou(s)).toBe(1);
+    expect(buildNeedsYou(s)[0]).toMatchObject({
+      kind: "thread",
+      title: "Ada replied in “Which way should the worklist read?”",
+      detail: "2 unread replies · thread in #design",
+      // The thread's own id: Chat decodes it back to parent + open panel.
+      route: { view: "Chat", entityType: "channel", entityId: "thread:msg-1" },
+    });
+    expect(buildNeedsYou(s)[0].resolve).toBeDefined();
+  });
+
+  test("a single unread reply is not pluralised into nonsense", () => {
+    const s = sources({ threads: [{ channel_id: "thread:m", parent_channel_id: "c", parent_channel_name: null, root_message_id: "m", root_excerpt: "q", unread_count: 1, last_reply_at: 1, last_reply_author: null } as UnreadThread] });
+    expect(buildNeedsYou(s)[0]).toMatchObject({ title: "Someone replied in “q”", detail: "1 unread reply · thread in #c" });
   });
 
   test("a busy public channel is noise, not a claim on a person", () => {

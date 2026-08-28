@@ -9,6 +9,7 @@ import "./Chat.css";
 import {
   chatApi,
   newId,
+  threadRootOf,
   type Channel,
   type ChannelContentType,
   type ChannelSummary,
@@ -128,7 +129,10 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   const preferenceKey = () => { const profile_id=actingProfileId(), channel_id=activeChannelId(); return profile_id&&channel_id ? {profile_id,channel_id} : null; };
   const [notificationPreference, { refetch: refetchNotificationPreference }] = createResource(preferenceKey, key => chatApi.channelNotificationPreference(key.profile_id, key.channel_id));
   const updateNotificationPreference = async (patch: Partial<ChannelNotificationPreference>) => { const current=notificationPreference(); if (!current) return; try { await chatApi.saveChannelNotificationPreference({...current,...patch}); await refetchNotificationPreference(); } catch (e) { fail(e); } };
-  useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
+  // A thread is addressed by its OWN channel id, but it is not a peer channel and
+  // cannot be "selected": it opens as a panel over its parent (resolved below).
+  // Selecting it here would blank the pane — which is exactly what such a URL did.
+  useDeepLink("channel", (id) => { if (!threadRootOf(id)) setActiveChannelId(id); }, () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {
@@ -212,11 +216,27 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     const id = threadRootId();
     return id ? { id, p: actingProfileId() } : null;
   };
+  // Reopening a thread FROM A URL — the attention worklist links here. The root's own
+  // channel comes from the existing anchor resolver, so no new grammar and no new read.
+  useDeepLink("channel", (id) => {
+    const root = threadRootOf(id);
+    if (!root || threadRootId() === root) return;
+    chatApi.resolveSourceRef("message", root)
+      .then((ref) => { setActiveChannelId(ref.channel_id); setThreadRootId(root); })
+      .catch(fail);
+  });
   // A content thread is a real channel, linked to its root message. The root stays
   // in the parent pane (`skip_first_message`), while this resource owns only replies.
   const [threadChannel] = createResource(threadKey, (k) =>
     chatApi.ensureThreadChannel(k.id, null, k.p),
   );
+  // Reading a thread is reading a channel. Without this the replies stayed "unread"
+  // after you had them open, and the worklist row they produce would never clear.
+  createEffect(() => {
+    const thread = threadChannel();
+    const p = actingProfileId();
+    if (thread && p) chatApi.markChannelRead(thread.id, p).catch(fail);
+  });
   const threadPageKey = () => {
     const k = threadKey(); const thread = threadChannel();
     return k && thread ? { ...k, channelId: thread.id } : null;

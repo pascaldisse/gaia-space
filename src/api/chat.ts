@@ -22,6 +22,13 @@ export type ChannelSummary = Channel & {
 };
 // A thread is its own channel; its root stays in `parent_channel_id` and is not repeated.
 export type ThreadChannel = Channel & { root_message_id: string; parent_channel_id: string; skip_first_message: boolean; title: string | null; always_show: boolean; };
+// A thread waiting on you, complete enough to render a worklist row without a second call.
+export type UnreadThread = { channel_id: string; parent_channel_id: string; parent_channel_name: string | null; root_message_id: string; root_excerpt: string; unread_count: number; last_reply_at: number | null; last_reply_author: string | null };
+/** A thread channel's id is `thread:<root message id>` (`ensure_thread_channel_impl`).
+ *  That format is the backend's invariant, decoded in ONE place so a URL naming a
+ *  thread can be reopened at its root instead of dead-ending on "No channel selected". */
+export const threadRootOf = (channelId: string): string | null =>
+  channelId.startsWith("thread:") ? channelId.slice("thread:".length) : null;
 
 export type ChannelNotificationPreference = { profile_id:string; channel_id:string; email_enabled:boolean; push_enabled:boolean; thread_scope:"all"|"followed"|"none"; };
 export type ChannelMember = {
@@ -149,6 +156,9 @@ export const chatApi = {
   listChannels: () => invoke<Channel[]>("list_channels"),
   listChannelsWithMeta: (profileId: string) =>
     invoke<ChannelSummary[]>("list_channels_with_meta", { profileId }),
+  // Threads are filtered OUT of listChannelsWithMeta on purpose; this is the only
+  // way a surface learns that replies are waiting in one.
+  listUnreadThreads: (profileId: string) => invoke<UnreadThread[]>("list_unread_threads", { profileId }),
   getChannel: (id: string) => invoke<Channel | null>("get_channel", { id }),
 privateFeed: (profileId:string) => invoke<Channel>("private_feed", {profileId}),
 channelNotificationPreference: (profileId:string,channelId:string) => invoke<ChannelNotificationPreference>("get_channel_notification_preference", {profileId,channelId}),
