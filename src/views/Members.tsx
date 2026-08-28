@@ -15,7 +15,8 @@ import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
-import { GhostPill } from "../components/controls";
+import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import "./operatorForm.css";
 import { linkProps, useDeepLink } from "../router";
 import { profileId as sessionProfileId } from "../session";
 import "./Members.css";
@@ -334,7 +335,7 @@ export default function Members() {
       </Show>
       <Show when={selectedProfile()}>{(profile) => (
         <section class="org-profile-panel" aria-label="Profile detail">
-          <div class="panel-title"><Avatar name={profile().display_name || profile().username} size={34} /><div><h2>{isOwnProfile() ? "My profile" : profile().display_name}</h2><span class="org-sub"><code>@{profile().username}</code>{profile().email ? <><span class="dot">·</span>{profile().email}</> : null}</span></div><button class="ghost small" onClick={() => { setSelectedProfile(null); abandonEdit(); }}>Close</button></div>
+          <div class="panel-title"><Avatar name={profile().display_name || profile().username} size={34} /><div><h2>{isOwnProfile() ? "My profile" : profile().display_name}</h2><span class="org-sub"><code>@{profile().username}</code>{profile().email ? <><span class="dot">·</span>{profile().email}</> : null}</span></div><GhostPill class="small" onClick={() => { setSelectedProfile(null); abandonEdit(); }}>Close</GhostPill></div>
           <Show when={isOwnProfile()} fallback={<>
             <div class="org-profile-tabs" role="tablist"><button classList={{ active: profileTab() === "about" }} onClick={() => setProfileTab("about")}>About</button><button classList={{ active: profileTab() === "teams" }} onClick={() => setProfileTab("teams")}>Teams</button><button classList={{ active: profileTab() === "contacts" }} onClick={() => setProfileTab("contacts")}>Contacts</button></div>
             <Show when={profileTab() === "about"}><p class="org-profile-readonly">Username <strong>@{profile().username}</strong></p><p class="org-profile-readonly">Email <strong>{profile().email ?? "Not set"}</strong></p></Show>
@@ -342,19 +343,21 @@ export default function Members() {
             <Show when={profileTab() === "contacts"}><ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <a href={link()} target="_blank" rel="noreferrer">Open chat</a>}</Show></li>}</For></ul><Show when={(profileContacts() ?? []).length === 0}><p class="org-hint">No contact methods shared.</p></Show></Show>
           </>}>
             <form class="org-profile-edit" onSubmit={saveProfile} aria-label="My profile">
-              <label>Display name<input value={profileDraft().display_name} onInput={(event) => setProfileDraft({ ...profileDraft(), display_name: event.currentTarget.value })} /></label>
-              <label>Username<input value={profileDraft().username} onInput={(event) => setProfileDraft({ ...profileDraft(), username: event.currentTarget.value })} /></label>
-              <label>Email<input type="email" value={profileDraft().email} onInput={(event) => setProfileDraft({ ...profileDraft(), email: event.currentTarget.value })} /></label>
+              {/* The caption above each box is gone: the placeholder already
+                  names the field, and two names for one control is one too many. */}
+              <input class="op-input" aria-label="Display name" placeholder="Display name" value={profileDraft().display_name} onInput={(event) => setProfileDraft({ ...profileDraft(), display_name: event.currentTarget.value })} />
+              <input class="op-input" aria-label="Username" placeholder="Username" value={profileDraft().username} onInput={(event) => setProfileDraft({ ...profileDraft(), username: event.currentTarget.value })} />
+              <input class="op-input" type="email" aria-label="Email" placeholder="Email" value={profileDraft().email} onInput={(event) => setProfileDraft({ ...profileDraft(), email: event.currentTarget.value })} />
               <button class="primary">Save my profile</button>
             </form>
             <section class="org-profile-settings" aria-label="Email status">
-              <label>Email status<select value={profileEmailStatus()?.status ?? "unverified"} onChange={(event) => void saveEmailStatus(event.currentTarget.value as "unverified" | "verified" | "bounced")}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
+              <PillSelect label="Email status" value={profileEmailStatus()?.status ?? "unverified"} onChange={(value) => void saveEmailStatus(value as "unverified" | "verified" | "bounced")}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></PillSelect>
               <span class="org-hint">{profileEmailStatus()?.verified_at ? `Verified ${new Date(profileEmailStatus()!.verified_at! * 1000).toLocaleDateString(UI_LOCALE)}` : "No verified email timestamp"}</span>
             </section>
             <section class="org-profile-settings" aria-label="Messenger contacts">
               <div class="panel-title"><h2>Messenger contacts</h2></div>
-              <form class="org-form-inline" onSubmit={(event) => { event.preventDefault(); void saveMessengerContact(); }}><select aria-label="Messenger type" value={contactDraft().contact_type} onChange={(event) => setContactDraft({ ...contactDraft(), contact_type: event.currentTarget.value })}><For each={["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"]}>{(type) => <option value={type}>{type}</option>}</For></select><input aria-label="Messenger login" placeholder="Username or address" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })}/><button class="ghost">Add contact</button></form>
-              <ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <a href={link()} target="_blank" rel="noreferrer">Open chat</a>}</Show><button class="ghost small" onClick={() => void removeMessengerContact(contact)}>Remove</button></li>}</For></ul>
+              <form class="org-form-inline op-form" onSubmit={(event) => { event.preventDefault(); void saveMessengerContact(); }}><PillSelect label="Messenger type" value={contactDraft().contact_type} onChange={(value) => setContactDraft({ ...contactDraft(), contact_type: value })}><For each={["Twitter", "Slack", "Telegram", "Skype", "ICQ", "XMPP", "Space"]}>{(type) => <option value={type}>{type}</option>}</For></PillSelect><input class="op-input op-grow" aria-label="Messenger login" placeholder="Username or address" value={contactDraft().login} onInput={(event) => setContactDraft({ ...contactDraft(), login: event.currentTarget.value })}/><GhostPill type="submit">Add contact</GhostPill></form>
+              <ul class="org-list"><For each={profileContacts()}>{(contact) => <li><strong>{contact.contact_type}</strong><span class="org-sub">{contact.login}</span><Show when={contact.deep_link}>{(link) => <GhostPill class="small" href={link()} target="_blank" rel="noreferrer">Open chat</GhostPill>}</Show><GhostPill class="small" onClick={() => void removeMessengerContact(contact)}>Remove</GhostPill></li>}</For></ul>
             </section>
           </Show>
         </section>
@@ -367,13 +370,20 @@ export default function Members() {
               <span class="count-chip">{profileCount()}</span>
             </Show>
           </div>
-          <div class="org-form">
-            <input aria-label="Search directory" placeholder="Search people" value={directoryQuery()} onInput={(event) => setDirectoryQuery(event.currentTarget.value)} />
-            <select aria-label="Filter by position" value={positionFilter()} onChange={(event) => setPositionFilter(event.currentTarget.value)}><option value="">All positions</option><For each={positions()}>{(position) => <option value={position}>{position}</option>}</For></select>
-            <select aria-label="Filter by location" value={locationFilter()} onChange={(event) => setLocationFilter(event.currentTarget.value)}><option value="">All locations</option><For each={locationNames()}>{(location) => <option value={location}>{location}</option>}</For></select>
+          {/* THE FILTER LINE. This is the one block on the page that already
+              exists everywhere else in the app — Development's search + three
+              pills — and it was three bare boxes. Now it is the same line. */}
+          <div class="org-form op-form org-filter-row">
+            <QuietSearch label="Search directory" placeholder="Search people" value={directoryQuery()} onInput={setDirectoryQuery} />
+            <PillSelect label="Filter by position" value={positionFilter()} onChange={setPositionFilter}><option value="">All positions</option><For each={positions()}>{(position) => <option value={position}>{position}</option>}</For></PillSelect>
+            <PillSelect label="Filter by location" value={locationFilter()} onChange={setLocationFilter}><option value="">All locations</option><For each={locationNames()}>{(location) => <option value={location}>{location}</option>}</For></PillSelect>
           </div>
-          <form class="org-form" onSubmit={saveProfile}>
+          {/* Add-person STAYS on the surface: Members is an operator tool and a
+             directory is filled in runs (L3 relaxed, L4 in full). */}
+          <form class="org-form op-form" onSubmit={saveProfile}>
             <input
+              class="op-input op-grow"
+              aria-label="Display name"
               placeholder="Display name"
               value={profileDraft().display_name}
               onInput={(event) =>
@@ -384,6 +394,8 @@ export default function Members() {
               }
             />
             <input
+              class="op-input op-grow"
+              aria-label="Username"
               placeholder="Username"
               value={profileDraft().username}
               onInput={(event) =>
@@ -394,6 +406,8 @@ export default function Members() {
               }
             />
             <input
+              class="op-input op-grow"
+              aria-label="Email"
               placeholder="Email (optional)"
               value={profileDraft().email}
               onInput={(event) =>
@@ -408,19 +422,17 @@ export default function Members() {
                 {profileEditing() ? "Save changes" : "Add person"}
               </button>
               <Show when={profileEditing()}>
-                <button type="button" class="ghost" onClick={abandonEdit}>
-                  Cancel
-                </button>
+                <GhostPill onClick={abandonEdit}>Cancel</GhostPill>
               </Show>
             </div>
           </form>
-          <div class="org-form">
-            <select aria-label="Person location" value={locationProfileId()} onChange={(event) => setLocationProfileId(event.currentTarget.value)}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></select>
-            <input aria-label="Location name" placeholder="Location" value={locationDraft()} onInput={(event) => setLocationDraft(event.currentTarget.value)} />
-            <select aria-label="Location type" value={locationType()} onChange={(event) => setLocationType(event.currentTarget.value)}><For each={["Region", "Campus", "Building", "Floor", "Room", "ConferenceRoom"]}>{(type) => <option value={type}>{type}</option>}</For></select>
-            <button type="button" class="ghost" disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</button>
+          <div class="org-form op-form">
+            <PillSelect label="Person to place" value={locationProfileId()} onChange={setLocationProfileId}><option value="">Assign location to…</option><For each={listedProfiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For></PillSelect>
+            <input class="op-input op-grow" aria-label="Location name" placeholder="Location" value={locationDraft()} onInput={(event) => setLocationDraft(event.currentTarget.value)} />
+            <PillSelect label="Location type" value={locationType()} onChange={setLocationType}><For each={["Region", "Campus", "Building", "Floor", "Room", "Conference room"]}>{(type) => <option value={type.replace(" r", "R")}>{type}</option>}</For></PillSelect>
+            <GhostPill disabled={!locationProfileId() || !locationDraft().trim()} onClick={addLocation}>Add location</GhostPill>
           </div>
-          <Show when={(locations() ?? []).length > 0}><ul class="org-list"><For each={locations()}>{(location) => <li><div class="org-list-text"><strong>{location.location}</strong><span class="org-sub">{personName(location.profile_id)} · {location.location_type}</span></div><button class="ghost small" onClick={() => removeLocation(location)}>Remove</button></li>}</For></ul></Show>
+          <Show when={(locations() ?? []).length > 0}><ul class="org-list"><For each={locations()}>{(location) => <li><div class="org-list-text"><strong>{location.location}</strong><span class="org-sub">{personName(location.profile_id)} · {location.location_type}</span></div><GhostPill class="small" onClick={() => removeLocation(location)}>Remove</GhostPill></li>}</For></ul></Show>
           <Show when={profiles.loading}>
             <p class="org-hint">Loading…</p>
           </Show>
@@ -475,13 +487,10 @@ export default function Members() {
                     </span>
                   </div>
                   <div class="row-buttons hover-actions">
-                    <button class="ghost small" onClick={() => selectProfile(profile)}>View profile</button>
-                    <button
-                      class="ghost small"
-                      onClick={() => archiveProfile(profile)}
-                    >
+                    <GhostPill class="small" onClick={() => selectProfile(profile)}>View profile</GhostPill>
+                    <GhostPill class="small" onClick={() => archiveProfile(profile)}>
                       {profile.archived ? "Restore" : "Archive"}
-                    </button>
+                    </GhostPill>
                   </div>
                 </li>
               )}
@@ -495,8 +504,10 @@ export default function Members() {
               <span class="count-chip">{teamCount()}</span>
             </Show>
           </div>
-          <form class="org-form-inline" onSubmit={saveTeam}>
+          <form class="org-form-inline op-form" onSubmit={saveTeam}>
             <input
+              class="op-input op-grow"
+              aria-label="New team name"
               placeholder="New team name"
               value={teamDraft().name}
               onInput={(event) =>
@@ -530,15 +541,15 @@ export default function Members() {
                     <Icon name="org" size={15} />
                   </span>
                   <strong>{team.name}</strong>
-                  <button
-                    class="ghost small hover-actions"
-                    onClick={(event) => {
+                  <GhostPill
+                    class="small hover-actions"
+                    onClick={(event: MouseEvent) => {
                       event.stopPropagation();
                       archiveTeam(team);
                     }}
                   >
                     {team.archived ? "Restore" : "Archive"}
-                  </button>
+                  </GhostPill>
                 </li>
               )}
             </For>
@@ -569,11 +580,8 @@ export default function Members() {
                   </span>
                   {team().name}
                 </p>
-                <div class="org-form">
-                  <select
-                    value={memberId()}
-                    onChange={(event) => setMemberId(event.currentTarget.value)}
-                  >
+                <div class="org-form op-form">
+                  <PillSelect label="Person to add" value={memberId()} onChange={setMemberId}>
                     <option value="">Choose a person…</option>
                     <For each={listedProfiles()}>
                       {(profile) => (
@@ -582,16 +590,13 @@ export default function Members() {
                         </option>
                       )}
                     </For>
-                  </select>
-                  <select
-                    value={roleId()}
-                    onChange={(event) => setRoleId(event.currentTarget.value)}
-                  >
+                  </PillSelect>
+                  <PillSelect label="Per-team role" value={roleId()} onChange={setRoleId}>
                     <option value="">No per-team role</option>
                     <For each={roles()}>
                       {(role) => <option value={role.id}>{role.name}</option>}
                     </For>
-                  </select>
+                  </PillSelect>
                   <button
                     class="primary"
                     onClick={addMembership}
@@ -612,14 +617,14 @@ export default function Members() {
                     hint="Add the first member with the picker above — the team is already chosen."
                   />
                 </Show>
-                <div class="org-form">
-                  <select value={approverId()} onChange={(event) => setApproverId(event.currentTarget.value)} aria-label="Membership edit approver">
+                <div class="org-form op-form">
+                  <PillSelect label="Membership edit approver" value={approverId()} onChange={setApproverId}>
                     <option value="">Choose edit approver…</option>
                     <For each={profiles()}>{(profile) => <option value={profile.id}>{profile.display_name}</option>}</For>
-                  </select>
+                  </PillSelect>
                 </div>
                 <Show when={(membershipEdits() ?? []).filter((request) => request.status === "PENDING" && memberships()?.some((membership) => membership.id === request.membership_id)).length}>
-                  <ul class="org-list"> <For each={(membershipEdits() ?? []).filter((request) => request.status === "PENDING" && memberships()?.some((membership) => membership.id === request.membership_id))}>{(request) => <li><span>Pending edit for {personName(request.requested_by)}</span><button class="ghost small" onClick={() => decideMembershipEdit(request, true)}>Approve</button><button class="ghost small" onClick={() => decideMembershipEdit(request, false)}>Reject</button></li>}</For></ul>
+                  <ul class="org-list"> <For each={(membershipEdits() ?? []).filter((request) => request.status === "PENDING" && memberships()?.some((membership) => membership.id === request.membership_id))}>{(request) => <li><span>Pending edit for {personName(request.requested_by)}</span><GhostPill class="small" onClick={() => decideMembershipEdit(request, true)}>Approve</GhostPill><GhostPill class="small" onClick={() => decideMembershipEdit(request, false)}>Reject</GhostPill></li>}</For></ul>
                 </Show>
                 <ul class="org-list">
                   <For each={memberships()}>
@@ -640,12 +645,12 @@ export default function Members() {
                             </span>
                           </span>
                         </div>
-                        <button class="ghost small hover-actions" onClick={() => requestMembershipArchive(membership)}>
+                        <GhostPill class="small hover-actions" onClick={() => requestMembershipArchive(membership)}>
                           Request {membership.archived ? "restore" : "archive"}
-                        </button>
-                        <button class="ghost small hover-actions" onClick={() => removeMembership(membership)}>
+                        </GhostPill>
+                        <GhostPill class="small hover-actions" onClick={() => removeMembership(membership)}>
                           Remove
-                        </button>
+                        </GhostPill>
                       </li>
                     )}
                   </For>
