@@ -200,3 +200,46 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 }
 .theme-space-light .task-add-trigger:hover { border-color: var(--teal); background: var(--wash); color: var(--ink); }
 .theme-space-light .task-add-plus { background: var(--teal-soft); color: var(--teal-ink); }
+
+/* ── the row must LOOK like the thing you click ───────────────────────────────
+   Observed by the product owner: a task read as "four words, a date, and an ×
+   a world away on the right", with no sense that anything here is operable.
+   Three causes, three fixes — none of them a mandatory description field, which
+   would only buy rows that say "test" twice.
+   1. The row stretched the full window, so its own ends stopped belonging together.
+   2. Nothing marked it as pressable until the pointer was already on the title.
+   3. Row actions sat permanently at the far edge, competing with the content and
+      putting delete one stray click from a title.                               */
+.theme-space-light .task-list { max-width: 880px; }
+.theme-space-light .task-card {
+  align-items: center;
+  gap: 12px;
+  padding-inline: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+/* The whole row lifts, not just the words in it. */
+.theme-space-light .task-card:hover { background: var(--wash-2); }
+/* Keyboard focus lands on the row's own button; show it on the ROW. */
+.theme-space-light .task-card:focus-within { background: var(--wash-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.theme-space-light button.task-body-edit:focus-visible { outline: none; }
+.theme-space-light button.task-body-edit:hover .task-title { color: var(--ink); }
+
+/* A title with nothing under it says the task is thin. Offer the line instead of
+   demanding it: the hint appears on hover, costs nothing, and one click writes it. */
+.theme-space-light .task-body-edit .task-notes:empty { display: none; }
+.theme-space-light .task-card .task-note-hint {
+  margin: 2px 0 0; font-size: 12px; color: var(--quiet); opacity: 0;
+  transition: opacity .12s ease;
+}
+.theme-space-light .task-card:hover .task-note-hint,
+.theme-space-light .task-card:focus-within .task-note-hint { opacity: 1; }
+
+/* Actions belong to the row, so they arrive with it and leave with it. Delete is
+   destructive: it never sits ready under an idle pointer. */
+.theme-space-light .task-row-actions { gap: 4px; opacity: 0; transition: opacity .12s ease; }
+.theme-space-light .task-card:hover .task-row-actions,
+.theme-space-light .task-card:focus-within .task-row-actions { opacity: 1; }
+.theme-space-light .task-row-actions .ghost { border-color: transparent; }
+.theme-space-light .task-row-actions .ghost:hover { border-color: var(--line); background: var(--paper); }
+.theme-space-light .task-delete:hover { color: var(--red-ink); border-color: var(--red-soft); background: var(--red-soft); }

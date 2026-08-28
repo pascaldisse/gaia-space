@@ -88,7 +88,7 @@ export default function Todo() {
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
     <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
       <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
-      <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
+      <Show when={todo.notes} fallback={<p class="task-note-hint">Add a short description…</p>}>{notes=><p class="task-notes">{notes()}</p>}</Show>
 <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
         <div class="task-meta">
           <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
