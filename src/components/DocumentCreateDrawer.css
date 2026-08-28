@@ -50,9 +50,11 @@
 
 .dcd-root .dcd-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
 .dcd-root .dcd-field { display: grid; gap: 6px; margin: 0; min-width: 0; }
+/* Sentence case since stage 13 — the drawer caption idiom, shared with
+   WorkItemDrawer.css and MeetingDrawer.css. */
 .dcd-root .dcd-field > span {
-  color: var(--dcd-muted); font-size: 12px; font-weight: 680;
-  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--dcd-muted); font-size: 12.5px; font-weight: 620;
+  text-transform: none; letter-spacing: 0;
 }
 .dcd-root .dcd-input {
   min-height: 40px; width: 100%;
@@ -62,6 +64,19 @@
   font: inherit; font-size: 14px;
 }
 .dcd-root .dcd-input:focus-visible { outline: 2px solid var(--dcd-teal); outline-offset: 1px; }
+/* The Type control is a PillMenu now; it wears the field's silhouette so the
+   two-question form reads as one pair, not a field and a pill. */
+.dcd-root .dcd-form .pill-menu {
+  display: flex; width: 100%; min-height: 40px;
+  border: 1px solid var(--dcd-line); border-radius: 11px;
+  background: #fbfaf8; color: var(--dcd-ink);
+  font-size: 14px; font-weight: 400;
+}
+.dcd-root .dcd-form .pill-menu:hover { border-color: var(--dcd-line); background: #fbfaf8; }
+.dcd-root .dcd-form .pill-menu-trigger {
+  width: 100%; height: 38px; padding: 0 12px 0 11px;
+  border-radius: inherit; background: transparent; color: inherit; font: inherit;
+}
 
 .dcd-root .dcd-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
 .dcd-root .dcd-btn {
