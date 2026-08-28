@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
 import {
   documentsApi,
@@ -50,6 +51,23 @@ function when(ts: number | null) {
 
 export default function Documents(props: { container?: ContainerType; containerId?: string } = {}) {
   const [error, setError] = createSignal<string | null>(null);
+  /** ── EMBEDDED MEANS THE SCOPE IS ALREADY ANSWERED ────────────────────────
+   *
+   *  ChannelWorkspace mounts this view for a channel's "Files & Links" tab and
+   *  passes the channel's project in. In that mount there is nothing to ask: you
+   *  are in the channel, the channel belongs to the project, that IS the project.
+   *  So every control whose only job is to CHOOSE A SCOPE is not rendered at all
+   *  — not disabled, not shrunk. A disabled picker still asks the question.
+   *
+   *  Hidden when embedded: the My Documents / Project Docs container toggle, the
+   *  project + knowledge-base source picker, the book controls, the "Acting as"
+   *  identity picker, and the folder-import path field with its two buttons.
+   *  "show archived" STAYS: it filters what you see, it does not pick a scope.
+   *
+   *  The standalone `#/documents` route passes no props, so it keeps every one of
+   *  them — there the scope genuinely is unknown.
+   */
+  const embedded = () => props.container !== undefined;
   const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
   const fail = (e: unknown) => setError(String(e));
 
@@ -579,6 +597,59 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       setUploading(false);
     }
   }
+  /** Desktop upload without typing a path.
+   *
+   *  `upload_document_file` names a path on the BACKEND filesystem — it takes a
+   *  path, not bytes — so in the desktop build the honest way to "just upload a
+   *  file" is the native picker, which hands back a real path. That is also why
+   *  drag-and-drop of dropped bytes stays gated on `isWeb()` further down: the
+   *  web transport can post the bytes, the invoke command cannot receive them.
+   *  Nothing here fakes a path for a dropped file. */
+  async function pickAndUploadFile() {
+    try {
+      const picked = await openDialog({ directory: false, multiple: false, title: "Upload a file" });
+      if (typeof picked !== "string") return;
+      setUploadPath(picked);
+      await uploadFile();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  // The embedded surface offers two acts, so the few facts each needs are asked
+  // in a drawer at the moment you ask for them, not in a permanent column.
+  const [createMode, setCreateMode] = createSignal<DocumentCreateMode | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const openCreate = (mode: DocumentCreateMode) => {
+    if (mode === "document") setNewDocTitle(""); else setNewFolderName("");
+    setCreateMode(mode);
+  };
+  async function submitCreate() {
+    const mode = createMode();
+    if (!mode) return;
+    setCreating(true);
+    setError(null);
+    try {
+      if (mode === "document") await createDocument();
+      else await createFolder();
+      // createDocument/createFolder report their own failure through `fail()`;
+      // the drawer closes only when nothing was reported.
+      if (!error()) setCreateMode(null);
+    } finally {
+      setCreating(false);
+    }
+  }
+  // Where a new item lands, as a sentence — the destination is a fact here, not a picker.
+  const createScopeLabel = () => {
+    const folder = selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name : null;
+    const place = activeContainer() === "project"
+      ? projects()?.find((p) => p.id === containerId())?.name ?? "this project"
+      : activeContainer() === "kb"
+        ? books().find((b) => b.id === containerId())?.name ?? "this book"
+        : "your documents";
+    return folder ? `${place} / ${folder}` : place;
+  };
+
   const [filePreview] = createResource(
     () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
     (id) => (id ? documentsApi.readDocumentFile(id) : Promise.resolve(null)),
@@ -1129,7 +1200,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       </Show>
 
       <PageHeader title="Documents" subline="Yours first — what you wrote and starred" actions={<>
-        <Show when={!profileLocked()}>
+        <Show when={!profileLocked() && !embedded()}>
         <label>
           Acting as
           <select value={actingProfileId() ?? ""} onChange={(e) => {
@@ -1144,6 +1215,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       </>} />
 
       <nav class="container-tabs">
+        {/* Every scope control below is wrapped, not disabled: see `embedded`. */}
+        <Show when={!embedded()}>
         <For each={CONTAINER_TABS}>
           {(t) => (
             <a
@@ -1226,7 +1299,9 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             </span>
           )}
         </Show>
+        </Show>
 
+        {/* A filter, not a scope: it survives the embedded mount. */}
         <label class="show-archived">
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
           show archived
@@ -1394,6 +1469,49 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <Show when={isEmpty()}>
               <p class="empty-state">This container has no folders or documents yet.</p>
             </Show>
+            {/* EMBEDDED: two acts, front and centre. The four raw inputs that used
+                to live here (folder name, document title, body type, upload path)
+                each asked for something the drawer or the picker now asks only
+                when you have said you want it. Note this also retires the clipping
+                fix that column needed — the elements it guarded are gone, so that
+                fix is moot here rather than lost; the standalone branch below still
+                carries it. */}
+            <Show when={embedded()}>
+              <div class="doc-actions">
+                <Show when={!isWeb()}>
+                  {/* Desktop: the native picker returns a real path, which is what
+                      `upload_document_file` takes. No path is ever typed. */}
+                  <button class="primary doc-action-primary" onClick={pickAndUploadFile} disabled={uploading() || !projectReady()}>
+                    {uploading() ? "Uploading…" : "Upload file"}
+                  </button>
+                </Show>
+                <Show when={isWeb()}>
+                  {/* In the browser there is no path to name, so the same primary act
+                      is a real file input wearing the same button. */}
+                  <label class="primary doc-action-primary doc-action-file">
+                    {uploading() ? "Uploading…" : "Upload file"}
+                    <input
+                      type="file"
+                      aria-label="File to upload"
+                      disabled={uploading() || !projectReady()}
+                      onChange={(e) => {
+                        const picked = e.currentTarget.files?.[0];
+                        e.currentTarget.value = "";
+                        if (picked) void uploadBrowserFile(picked);
+                      }}
+                    />
+                  </label>
+                </Show>
+                <button class="ghost doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
+                  New document
+                </button>
+                <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
+                  New folder
+                </button>
+              </div>
+            </Show>
+
+            <Show when={!embedded()}>
             <div class="new-item-forms">
               <div class="new-item-row">
                 <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
@@ -1446,6 +1564,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
               </p>
             </div>
+            </Show>
           </Show>
           </Show>
           </Show>
@@ -1635,6 +1754,22 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </aside>
         </Show>
       </div>
+
+      <Show when={createMode()}>
+        {(mode) => (
+          <DocumentCreateDrawer
+            mode={mode()}
+            scopeLabel={createScopeLabel()}
+            name={mode() === "document" ? newDocTitle() : newFolderName()}
+            setName={mode() === "document" ? setNewDocTitle : setNewFolderName}
+            bodyFormat={newDocBodyFormat()}
+            setBodyFormat={setNewDocBodyFormat}
+            busy={creating()}
+            onSubmit={() => void submitCreate()}
+            onClose={() => setCreateMode(null)}
+          />
+        )}
+      </Show>
     </section>
   );
 }

@@ -69,17 +69,14 @@
 .cal-agenda-link:hover{text-decoration:underline}
 .cal-side-add{width:100%;margin-top:var(--cal-space-4xl);padding:var(--cal-space-lg);border:var(--cal-hairline) dashed var(--surface-line-dashed);border-radius:var(--radius-option);background:transparent;color:var(--text-faint);cursor:pointer}
 .cal-side-add:hover{color:var(--text-strong);border-color:var(--accent)}
-.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
-.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
-.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
-.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
+/* `.calendar-filter` / `.calendar-filters` are GONE, not just unstyled: the
+   captioned fields in a bordered card they described no longer exist in any
+   theme — the filters are pills in the header lane. */
 
 .calendar-grid.day{grid-template-columns:minmax(0,1fr)}
 .calendar-grid.day .calendar-day{min-height:var(--cal-week-cell-min-h);border-right:0}
 .cal-schedule{display:flex;flex-direction:column;gap:var(--cal-space-xl);border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--cal-radius-grid);background:var(--cal-grid-bg);padding:var(--cal-space-xl)}
 .cal-schedule-day h3{margin:0 0 var(--cal-space-xs);font-size:.82rem;color:var(--text-faint)}
-
-.calendar-filters{display:flex;flex-wrap:wrap;align-items:end;gap:var(--cal-space-xl);margin:0 0 var(--cal-space-2xl)}.calendar-filters .picker,.calendar-filters .calendar-filter{margin:0}
 
 .calendar-options{display:flex;gap:var(--cal-space-lg);border:0;padding:0;margin:0;color:var(--text-faint);font-size:var(--cal-fs-sm)}.calendar-options label{display:flex;gap:var(--cal-space-3xs);align-items:center}
 

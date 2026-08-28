@@ -1,0 +1,75 @@
+/* Self-scoped exactly like WorkItemDrawer.css / MeetingDrawer.css: every token is
+   redeclared locally with a fallback, so the drawer renders the same in the light
+   chat-first shell and on the old dark theme, and nothing leaks out of `.dcd-root`. */
+.dcd-root {
+  --dcd-ink: var(--ink, #1f2328);
+  --dcd-muted: var(--muted, #68717d);
+  --dcd-paper: var(--paper, #ffffff);
+  --dcd-wash: var(--wash, #faf8f4);
+  --dcd-line: var(--line, #e5ddd3);
+  --dcd-teal: var(--teal, #00bfa6);
+  --dcd-teal-dark: var(--teal-dark, #008d7b);
+  --dcd-teal-soft: var(--teal-soft, #dcf7f2);
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  color: var(--dcd-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.dcd-root * { box-sizing: border-box; }
+
+.dcd-root .dcd-backdrop { position: absolute; inset: 0; background: rgba(25, 16, 30, 0.28); }
+
+.dcd-root .dcd-panel {
+  position: absolute;
+  top: 0; right: 0;
+  height: 100%;
+  width: 400px;
+  max-width: 92vw;
+  background: var(--dcd-paper);
+  box-shadow: -22px 0 60px rgba(31, 35, 40, 0.18);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  overflow: hidden;
+  animation: dcd-slide-in 180ms ease-out;
+}
+@keyframes dcd-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dcd-root .dcd-panel { animation: none; } }
+
+.dcd-root .dcd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dcd-root .dcd-head h2 { margin: 0; font-size: 22px; letter-spacing: -0.04em; font-weight: 720; color: var(--dcd-ink); }
+.dcd-root .dcd-head p { margin: 6px 0 0; color: var(--dcd-muted); font-size: 14px; line-height: 1.45; }
+.dcd-root .dcd-head strong { color: var(--dcd-ink); font-weight: 680; }
+.dcd-root .dcd-close {
+  border: 0; background: transparent; color: var(--dcd-muted);
+  font-size: 24px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 9px;
+}
+.dcd-root .dcd-close:hover { background: var(--dcd-wash); color: var(--dcd-ink); }
+
+.dcd-root .dcd-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
+.dcd-root .dcd-field { display: grid; gap: 6px; margin: 0; min-width: 0; }
+.dcd-root .dcd-field > span {
+  color: var(--dcd-muted); font-size: 12px; font-weight: 680;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.dcd-root .dcd-input {
+  min-height: 40px; width: 100%;
+  border: 1px solid var(--dcd-line); border-radius: 11px;
+  padding: 10px 11px;
+  background: #fbfaf8; color: var(--dcd-ink);
+  font: inherit; font-size: 14px;
+}
+.dcd-root .dcd-input:focus-visible { outline: 2px solid var(--dcd-teal); outline-offset: 1px; }
+
+.dcd-root .dcd-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
+.dcd-root .dcd-btn {
+  min-height: 40px; border: 1px solid var(--dcd-line); border-radius: 11px;
+  padding: 0 15px; background: var(--dcd-paper); color: var(--dcd-ink);
+  font: inherit; font-size: 14px; font-weight: 640; cursor: pointer;
+}
+.dcd-root .dcd-btn:hover:not(:disabled) { background: var(--dcd-wash); }
+.dcd-root .dcd-primary { background: var(--dcd-teal); border-color: var(--dcd-teal-dark); color: #05302a; }
+.dcd-root .dcd-primary:hover:not(:disabled) { background: var(--dcd-teal-dark); color: var(--dcd-teal-soft); }
+.dcd-root .dcd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
