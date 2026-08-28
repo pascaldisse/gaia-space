@@ -277,6 +277,12 @@
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
   min-width: 0;
+  /* A grid ITEM's automatic minimum size is its content, so this column grew as
+     tall as the tallest view and the shell (overflow:hidden) clipped whatever
+     fell past the window — a full-height view could not scroll its own panes,
+     and its cards ran off the bottom edge. With the minimum released,
+     `.space-content` below is the scroller it was written to be. */
+  min-height: 0;
   background: var(--wash);
 }
 .space-chat-shell .commandbar {

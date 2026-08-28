@@ -7,15 +7,20 @@ import "../App.css";
 import "./Repos.css";
 import EmptyState from "../components/EmptyState";
 import { GhostPill, IconButton } from "../components/controls";
+import PageHeader, { Chip } from "../components/PageHeader";
 import { UI_LOCALE } from "../calendar";
 
-/* NO PageHeader HERE, deliberately. Every other view in this lane got one,
- * because every other view is a page: a title, a subline, a list. Repos is not
- * a page — it is a three-pane git client that owns the whole window, with its
- * own sidebar, two draggable resizers and a full-height diff. Putting a kicker
- * and an h1 above that would push the panes down and leave the product with a
- * title bar it never had. What Repos shares with the rest of the lane is the
- * CONTROL language, not the page frame, and that is what changed below. */
+/* THE PAGE FRAME, restored (stage 11).
+ *
+ * The earlier note here argued that a three-pane git client is not a page and
+ * so deserves no header. Next to its seven siblings in Development that reads
+ * as an omission, not as a decision: the surface had no h1 at all, and its two
+ * "nothing here" cases were bare strips instead of empty states. Repos is a
+ * page whose body happens to be three panes.
+ *
+ * WHAT THIS SURFACE HONESTLY IS: repositories are registered in a LOCAL
+ * `repos.json`, keyed by filesystem path. They are not in the database and no
+ * project owns them — hence the subline, and hence no project picker here. */
 
 function when(ts: number) {
   const d = new Date(ts * 1000);
@@ -110,31 +115,41 @@ export default function App() {
     }
   }
 
+  const hasRepos = () => !!repos()?.length;
+
   return (
+    <section class="repos-view">
+      {/* ONE ACTION, ONE PLACE: while nothing is registered, the empty state
+          below carries "Open a repository…" and the header does not. */}
+      <PageHeader
+        title="Repositories"
+        subline="Local git checkouts registered on this machine"
+        chips={<Show when={hasRepos()}><Chip value={repos()!.length} label="open" /></Show>}
+        actions={<Show when={hasRepos()}><button class="primary" type="button" onClick={addRepo}>Open a repository…</button></Show>}
+      />
+
+      <Show when={error()}>
+        <div class="repos-error" role="alert" onClick={() => setError(null)}>{error()}</div>
+      </Show>
+
+      {/* NOTHING YET: one lead on the page, not an empty pane rail plus two
+          strips saying the same absence three times. */}
+      <Show when={hasRepos()} fallback={
+        <div class="repos-lead">
+          <EmptyState
+            title="No repositories yet"
+            hint="Open a local git repository to browse its branches and commits, and to stage and commit from here."
+            actions={<button class="primary" type="button" onClick={addRepo}>Open a repository…</button>}
+          />
+        </div>
+      }>
     <div
-      class="app"
+      class="app repos-panes"
       style={{ "--col-side": sideW() + "px", "--col-center": centerW() + "px" }}
     >
       <aside class="sidebar">
-        <header class="brand">
-          <span>Repositories</span>
-          <IconButton label="Open repository…" onClick={addRepo}>+</IconButton>
-        </header>
-
         <div class="section-label">Repositories</div>
-        {/* The old line pointed at a glyph: "press “+”". An instruction to hunt
-            for a character on screen is not an action — this one IS the action. */}
-        <Show
-          when={repos()?.length}
-          fallback={
-            <EmptyState
-              class="repos-empty"
-              title="No repositories yet"
-              hint="Open a local git repository to browse its branches, commits and diffs."
-              actions={<button class="primary" type="button" onClick={addRepo}>Open a repository…</button>}
-            />
-          }
-        >
+        <Show when={hasRepos()}>
           <ul class="repo-list">
             <For each={repos()}>
               {(r) => (
@@ -177,15 +192,19 @@ export default function App() {
       <Resizer width={sideW} setWidth={setSideW} min={170} max={460} />
 
       <section class="center">
-        <header class="topbar">
-          <Show when={info()} fallback={<span class="hint">No repository open</span>}>
+        <Show when={info()}>
+          <header class="topbar">
             <strong>{info()!.name}</strong>
             <span class="branch-chip">{info()!.head ?? "unborn"}</span>
             <span class="path">{info()!.path}</span>
-          </Show>
-        </header>
+          </header>
+        </Show>
 
-        <Show when={active()}>
+        {/* A registered repository that is not open: the list is one click to
+            the left, so this offers no creation — it says where to look. */}
+        <Show when={active()} fallback={
+          <EmptyState variant="no-match" title="No repository open" hint="Pick a repository on the left to see its commits." />
+        }>
           <div
             class="working-row"
             classList={{ active: selected() === "working" }}
@@ -208,9 +227,13 @@ export default function App() {
                   }}
                   onClick={() => setSelected(c)}
                 >
-                  <span class="sha">{c.short_id}</span>
+                  {/* The row is the paper idiom every list uses now: the line
+                      worth reading first, its facts muted underneath. Side by
+                      side in a 340px pane the summary was squeezed to "Ho…"
+                      between the sha and the date. */}
                   <span class="summary">{c.summary}</span>
                   <span class="meta">
+                    <span class="sha">{c.short_id}</span>
                     {c.author} · {when(c.time)}
                   </span>
                 </li>
@@ -223,12 +246,9 @@ export default function App() {
       <Resizer width={centerW} setWidth={setCenterW} min={240} max={720} />
 
       <section class="detail">
-        <Show when={error()}>
-          <div class="error-bar" onClick={() => setError(null)}>
-            {error()}
-          </div>
-        </Show>
-
+        {/* The error used to be printed here, inside the right pane. It is the
+            page's error — it belongs under the header, once, and that is where
+            it is now. */}
         <Show when={selected() === "working"}>
           <div class="commit-box">
             <ul class="status-list">
@@ -262,11 +282,15 @@ export default function App() {
             nothing is offered. */}
         <Show
           when={selected()}
-          fallback={<EmptyState variant="no-match" title="Nothing selected" hint="Pick a commit, or the working tree, to see its diff." />}
+          fallback={<Show when={active()}>
+            <EmptyState variant="no-match" title="Nothing selected" hint="Pick a commit, or the working tree, to see its diff." />
+          </Show>}
         >
           <Diff text={diff() ?? ""} loading={diff.loading} />
         </Show>
       </section>
     </div>
+      </Show>
+    </section>
   );
 }
