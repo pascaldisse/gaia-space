@@ -80,6 +80,19 @@
    control — align on the BOTTOM edge so they share one baseline. */
 .pgh-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .pgh-actions .picker { min-width: 0; }
+/* A button on the action edge is ONE LINE. Time off's `+ Record time off` had
+   wrapped its own plus sign onto a second line: the button was a plain block
+   flex item, so the icon and the words were two wrappable children inside a box
+   the row was free to squeeze. Structure, unscoped — a button that breaks its
+   own label is broken in every theme. */
+.pgh-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
 
 .metric-pill {
   min-height: 34px;
