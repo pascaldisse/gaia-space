@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { createStore, produce } from "solid-js/store";
@@ -349,7 +350,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                             <summary>
                               <strong>{nameFor(run.job_id)}</strong>
                               <span class={`status status-${run.status.toLowerCase()}`}>{run.status}</span>
-                              <span class="hint">triggered {new Date(run.triggered_at * 1000).toLocaleTimeString()}</span>
+                              <span class="hint">triggered {new Date(run.triggered_at * 1000).toLocaleTimeString(UI_LOCALE)}</span>
                               <Show when={!isTerminalRun(run.status)}><span class="live-dot" title="live" /></Show>
                             </summary>
                             <pre class="run-log">{run.log || "(no output yet)"}</pre>

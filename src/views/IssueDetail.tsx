@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry, type TrackerLink } from "../api/issues";
 import { personalApi } from "../api/personal";
@@ -156,7 +157,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
 
         <section class="idp-section">
           <h3>Comments <small>{detail()?.comments?.length ?? 0}</small></h3>
-          <Show when={detail()?.comments?.length} fallback={<p class="hint">No comments yet.</p>}><ul class="issue-comments"><For each={detail()?.comments}>{comment => <li><strong>{nameOf(comment.author_id)}</strong><time>{new Date(comment.created_at * 1000).toLocaleString()}</time><p>{comment.body}</p></li>}</For></ul></Show>
+          <Show when={detail()?.comments?.length} fallback={<p class="hint">No comments yet.</p>}><ul class="issue-comments"><For each={detail()?.comments}>{comment => <li><strong>{nameOf(comment.author_id)}</strong><time>{new Date(comment.created_at * 1000).toLocaleString(UI_LOCALE)}</time><p>{comment.body}</p></li>}</For></ul></Show>
           <div class="comment-form"><textarea aria-label="New comment" placeholder="Write a comment…" value={commentBody()} onInput={event => setCommentBody(event.currentTarget.value)} /><button type="button" onClick={addComment}>Comment</button></div>
           <h3>Activity</h3>
           <Show when={detail()?.activities?.length} fallback={<p class="hint">No activity recorded yet.</p>}><ul class="issue-activity"><For each={detail()?.activities}>{activity => <ActivityRow activity={activity} nameOf={nameOf} />}</For></ul></Show>
@@ -229,7 +230,16 @@ const transferIssue = async () => { const current = issue(), target = targetProj
   </aside>;
 }
 
-function ActivityRow(props: { activity: IssueActivity; nameOf: (id: string | null) => string }) { return <li><strong>{props.nameOf(props.activity.actor_id)}</strong><span>{props.activity.detail || props.activity.activity_type}</span><time>{new Date(props.activity.created_at * 1000).toLocaleString()}</time></li>; }
+/** Activity details are written by the server and live in the database, so rows
+ *  recorded before the Issue→Ticket rename still say "Issue created". Translating
+ *  at render covers old and new rows alike; rewriting history would need a
+ *  migration that buys nothing. Unknown details pass through untouched. */
+const ACTIVITY_WORDING: Record<string, string> = { "Issue created": "Ticket created" };
+const activityText = (activity: IssueActivity) => {
+  const raw = activity.detail || activity.activity_type;
+  return ACTIVITY_WORDING[raw] ?? raw.replace(/\bIssue\b/g, "Ticket").replace(/\bissue\b/g, "ticket");
+};
+function ActivityRow(props: { activity: IssueActivity; nameOf: (id: string | null) => string }) { return <li><strong>{props.nameOf(props.activity.actor_id)}</strong><span>{activityText(props.activity)}</span><time>{new Date(props.activity.created_at * 1000).toLocaleString(UI_LOCALE)}</time></li>; }
 function TimeEntryRow(props: { entry: TimeEntry; nameOf: (id: string | null) => string }) {
   return <li><time>{props.entry.entry_date}</time><strong>{props.entry.duration_minutes} min</strong><span>{props.entry.description || "No description"}</span><small>{props.nameOf(props.entry.profile_id)}</small></li>;
 }

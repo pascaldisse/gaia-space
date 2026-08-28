@@ -78,7 +78,9 @@ describe("issue detail contract", () => {
     expect(host.textContent).toContain("45 min");
     expect(host.textContent).toContain("bug");
 expect(host.textContent).toContain("Please verify the fix.");
-expect(host.textContent).toContain("Issue created");
+// The stored activity detail still reads "Issue created" (fixture line 25) — the
+// view translates it at render, so old rows read as tickets without a migration.
+expect(host.textContent).toContain("Ticket created");
     const priority = [...host.querySelectorAll("select")].find(s => [...s.options].some(o => o.value === "URGENT"))!;
     expect(priority.value).toBe("HIGH");
   });

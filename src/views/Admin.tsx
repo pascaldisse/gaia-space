@@ -8,6 +8,10 @@ const CF_ENTITY_TYPES = ["issue", "profile", "team", "membership"];
 const CF_TYPES: CfType[] = ["text", "text_list", "int", "int_list", "enum", "enum_list", "open_enum", "open_enum_list", "bool", "date", "datetime", "percentage", "fraction", "profile", "profile_list", "team", "location", "project", "url", "contact", "contact_list", "autonumber", "issue", "issue_list"];
 const blankRole = () => ({ name: "", description: "" });
 const blankCf = () => ({ entity_type: "issue", cf_type: "text" as CfType, name: "", constraints: "" });
+/** These lists are stored values AND, until now, the label the user read. Only the
+ *  label follows the Issue→Ticket rename; the value stays `issue` / `issue_list`,
+ *  because it is what the server persists and compares. */
+const cfLabel = (value: string) => value.replace(/^issue$/, "ticket").replace(/^issue_list$/, "ticket_list");
 
 export default function Admin() {
   const [error, setError] = createSignal("");
@@ -192,10 +196,10 @@ export default function Admin() {
 
       <section class="admin-panel">
         <div class="panel-title"><h2>Custom fields</h2></div>
-        <div class="cf-tabs"><For each={CF_ENTITY_TYPES}>{t => <button classList={{ active: cfEntityType() === t }} onClick={() => setCfEntityType(t)}>{t}</button>}</For></div>
+        <div class="cf-tabs"><For each={CF_ENTITY_TYPES}>{t => <button classList={{ active: cfEntityType() === t }} onClick={() => setCfEntityType(t)}>{cfLabel(t)}</button>}</For></div>
         <div class="inline-form-col">
           <input placeholder="Field name" value={cfForm().name} onInput={e => setCfForm({ ...cfForm(), name: e.currentTarget.value })} />
-          <select value={cfForm().cf_type} onChange={e => setCfForm({ ...cfForm(), cf_type: e.currentTarget.value as CfType })}><For each={CF_TYPES}>{t => <option value={t}>{t}</option>}</For></select>
+          <select value={cfForm().cf_type} onChange={e => setCfForm({ ...cfForm(), cf_type: e.currentTarget.value as CfType })}><For each={CF_TYPES}>{t => <option value={t}>{cfLabel(t)}</option>}</For></select>
           <Show when={(cfForm().cf_type === "enum" || cfForm().cf_type === "enum_list")}><input placeholder="Comma-separated options" value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
           <Show when={cfForm().cf_type === "int" || cfForm().cf_type === "text"}><input placeholder='Constraints JSON e.g. {"min":0,"max":100}' value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
           <button class="primary" onClick={saveCfDefinition}>Add field</button>

@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import {
   platformApi,
@@ -336,7 +337,7 @@ export default function Members() {
             </form>
             <section class="org-profile-settings" aria-label="Email status">
               <label>Email status<select value={profileEmailStatus()?.status ?? "unverified"} onChange={(event) => void saveEmailStatus(event.currentTarget.value as "unverified" | "verified" | "bounced")}><option value="unverified">Unverified</option><option value="verified">Verified</option><option value="bounced">Bounced</option></select></label>
-              <span class="org-hint">{profileEmailStatus()?.verified_at ? `Verified ${new Date(profileEmailStatus()!.verified_at! * 1000).toLocaleDateString()}` : "No verified email timestamp"}</span>
+              <span class="org-hint">{profileEmailStatus()?.verified_at ? `Verified ${new Date(profileEmailStatus()!.verified_at! * 1000).toLocaleDateString(UI_LOCALE)}` : "No verified email timestamp"}</span>
             </section>
             <section class="org-profile-settings" aria-label="Messenger contacts">
               <div class="panel-title"><h2>Messenger contacts</h2></div>
@@ -632,7 +633,7 @@ export default function Members() {
         </section>
       </div>
       <div class="org-directory-addons">
-        <section class="org-panel" aria-label="Company feed"><div class="panel-title"><h2>Company feed</h2><span class="org-hint">Member and role activity</span></div><Show when={directoryFeed.loading}><p class="org-hint">Loading activity…</p></Show><Show when={!directoryFeed.loading && (directoryFeed() ?? []).length === 0}><p class="org-hint">No directory activity yet.</p></Show><ul class="org-list"><For each={directoryFeed()}>{(event) => <li><Avatar name={event.profile_name} size={28} /><div class="org-list-text"><strong>{feedText(event)}</strong><span class="org-sub">{new Date(event.created_at * 1000).toLocaleDateString()}</span></div></li>}</For></ul></section>
+        <section class="org-panel" aria-label="Company feed"><div class="panel-title"><h2>Company feed</h2><span class="org-hint">Member and role activity</span></div><Show when={directoryFeed.loading}><p class="org-hint">Loading activity…</p></Show><Show when={!directoryFeed.loading && (directoryFeed() ?? []).length === 0}><p class="org-hint">No directory activity yet.</p></Show><ul class="org-list"><For each={directoryFeed()}>{(event) => <li><Avatar name={event.profile_name} size={28} /><div class="org-list-text"><strong>{feedText(event)}</strong><span class="org-sub">{new Date(event.created_at * 1000).toLocaleDateString(UI_LOCALE)}</span></div></li>}</For></ul></section>
         <section class="org-panel" aria-label="Organization calendar"><div class="panel-title"><h2>Organization calendar</h2><span class="org-hint">Approved time off</span></div><Show when={directoryCalendar.loading}><p class="org-hint">Loading calendar…</p></Show><Show when={!directoryCalendar.loading && (directoryCalendar() ?? []).length === 0}><p class="org-hint">No approved absences.</p></Show><ul class="org-list"><For each={directoryCalendar()}>{(absence) => <li><Avatar name={absence.profile_name} size={28} /><div class="org-list-text"><strong>{absence.profile_name} · {absence.reason_type}</strong><span class="org-sub">{absence.date_from} – {absence.date_to} · {absence.availability}</span></div></li>}</For></ul></section>
       </div>
     </section>

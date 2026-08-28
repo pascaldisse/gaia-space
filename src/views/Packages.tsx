@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, For, Match, Show, Switch } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { api } from "../api";
@@ -264,7 +265,7 @@ async function togglePinned(v: PackageVersion) {
                           <tr>
                             <td>{v.package_name}</td>
                             <td><code>{v.version}</code>{v.pinned && " 📌"}{v.immutable && " 🔒"}</td>
-                            <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
+                            <td>{new Date(v.created_at * 1000).toLocaleString(UI_LOCALE)}</td>
                             <td class="row-actions">
                               <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
 <button class="ghost small" onClick={() => showDetail(v)}>Detail</button>

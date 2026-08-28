@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { Room, RoomEvent, Track, type Participant } from "livekit-client";
 import { meetingsApi, type CallJoin, type CallRecording, type CallTranscriptSegment, type Meeting } from "../api/meetings";
@@ -68,7 +69,7 @@ const [transcriptSegments, setTranscriptSegments] = createSignal<CallTranscriptS
   const organizer = () => props.meeting.organizer_id === props.identity;
   const activeRecording = () => recordings().find(item => ["starting", "recording", "stopping"].includes(item.status));
   const recordingInProgress = () => activeRecording()?.status === "recording";
-  const timeLabel = (seconds: number | null) => seconds === null ? "—" : new Date(seconds * 1_000).toLocaleString();
+  const timeLabel = (seconds: number | null) => seconds === null ? "—" : new Date(seconds * 1_000).toLocaleString(UI_LOCALE);
   const lifecycleFact = () => {
     const started = props.meeting.video_started_at === null ? "" : `Started ${timeLabel(props.meeting.video_started_at)}`;
     const ended = props.meeting.video_ended_at === null ? "" : `Ended ${timeLabel(props.meeting.video_ended_at)}${props.meeting.video_ended_by ? ` by ${props.meeting.video_ended_by}` : ""}`;

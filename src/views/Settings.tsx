@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
@@ -10,7 +11,7 @@ import { humanError, profileId } from "../session";
 import PageHeader from "../components/PageHeader";
 import "./Settings.css";
 
-const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString() : "never";
+const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "never";
 
 /** Read-only external calendars (Settings → Connected calendars): a pasted
  *  secret iCal address, synced server-side, shown in Calendar as its own

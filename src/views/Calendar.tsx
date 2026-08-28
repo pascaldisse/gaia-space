@@ -222,7 +222,7 @@ return <section class="calendar-view">
 </div>
 <Show when={quickKind()==="meeting"}>
 <form onSubmit={create} aria-label="New meeting">
-<h2>New meeting — {day().toLocaleDateString()}</h2>
+<h2>New meeting — {day().toLocaleDateString(UI_LOCALE)}</h2>
 <input autofocus placeholder="Title" aria-label="Meeting title" value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/>
 <label>Start<input type="datetime-local" value={form().starts_at} onInput={e=>setForm({...form(),starts_at:e.currentTarget.value})}/></label>
 <label>End<input type="datetime-local" value={form().ends_at} onInput={e=>setForm({...form(),ends_at:e.currentTarget.value})}/></label>
@@ -235,7 +235,7 @@ return <section class="calendar-view">
 </Show>
 <Show when={quickKind()==="task"}>
 <form onSubmit={createTask} aria-label="New task">
-<h2>New task — {day().toLocaleDateString()}</h2>
+<h2>New task — {day().toLocaleDateString(UI_LOCALE)}</h2>
 <input autofocus placeholder="What needs doing?" aria-label="Task title" value={taskForm().title} onInput={e=>setTaskForm({...taskForm(),title:e.currentTarget.value})}/>
 <label>Due<input type="date" value={taskForm().day} onInput={e=>setTaskForm({...taskForm(),day:e.currentTarget.value})}/></label>
 <div class="detail-actions"><button class="primary">Add task</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
@@ -243,7 +243,7 @@ return <section class="calendar-view">
 </Show>
 <Show when={quickKind()==="deadline"}>
 <form onSubmit={createDeadline} aria-label="New project deadline">
-<h2>Project deadline — {day().toLocaleDateString()}</h2>
+<h2>Project deadline — {day().toLocaleDateString(UI_LOCALE)}</h2>
 <label>Project<select aria-label="Project" value={deadlineForm().project_id} onChange={e=>setDeadlineForm({...deadlineForm(),project_id:e.currentTarget.value})}>
 <option value="">Select a project…</option>
 <For each={deadlineProjects()}>{project=><option value={project.id}>{project.name}</option>}</For>
@@ -257,7 +257,7 @@ return <section class="calendar-view">
 }</Show>
 <Show when={composerDay()?undefined:selected()}>{event=>
 <aside class="calendar-detail">
-<Show when={draft()} fallback={<div><h2>{event().title}</h2><p><span class={`cal-tag ${event().kind}`}>{kindLabels[event().kind]}</span> {event().date ?? new Date(event().starts_at*1000).toLocaleString()}</p><Show when={event().kind==="external"}><p class="hint">Synced from a connected calendar (read-only) — edit it at the source; see Settings to manage the connection.</p></Show><Show when={event().kind!=="meeting"&&event().kind!=="external"}><p class="hint">Open the owning view to edit this item.</p></Show><Show when={event().kind!=="external"}><a {...itemHref(event())}>Open this item</a></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
+<Show when={draft()} fallback={<div><h2>{event().title}</h2><p><span class={`cal-tag ${event().kind}`}>{kindLabels[event().kind]}</span> {event().date ?? new Date(event().starts_at*1000).toLocaleString(UI_LOCALE)}</p><Show when={event().kind==="external"}><p class="hint">Synced from a connected calendar (read-only) — edit it at the source; see Settings to manage the connection.</p></Show><Show when={event().kind!=="meeting"&&event().kind!=="external"}><p class="hint">Open the owning view to edit this item.</p></Show><Show when={event().kind!=="external"}><a {...itemHref(event())}>Open this item</a></Show><button onClick={()=>setSelected(undefined)}>Close</button></div>}>
 {item=><div class="meeting-detail">
 <div class="detail-actions"><button onClick={save}>Save</button><button class="danger" onClick={archive}>Archive</button><button onClick={()=>{setSelected(undefined);setDraft(undefined)}}>Close</button></div>
 <input class="meeting-title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/>
