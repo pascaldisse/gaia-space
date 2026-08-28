@@ -109,6 +109,12 @@ const PATHS = {
       <path d="M12 7.5V12l3 2" />
     </>
   ),
+  /* A shelf of books: the library's own mark, used where the Knowledge surface used
+     to show a glyph placeholder. */
+  books: () => <path d="M4 20V6h3v14zM9 20V4h3v16zM14.5 20 17 6l3 .5-2.5 14z" />,
+  folder: () => <path d="M4 6h5l2 2h9v11H4z" />,
+  /* An uploaded file: a page with an arrow into it. */
+  upload: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,

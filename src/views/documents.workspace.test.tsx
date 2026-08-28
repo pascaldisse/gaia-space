@@ -159,7 +159,7 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     });
     const host = await mount();
 
-    const card = host.querySelector("button.documents-library-open-folder") as HTMLButtonElement;
+    const card = host.querySelector("button.documents-shelf-open") as HTMLButtonElement;
     expect(card).not.toBeNull();
     expect(card.tagName).toBe("BUTTON");
     expect(card.textContent).toContain("Mine");
@@ -181,7 +181,60 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     await settle();
 
     expect(host.textContent).not.toContain("Inside");
-    expect(host.querySelector("button.documents-library-open-folder")).not.toBeNull();
+    expect(host.querySelector("button.documents-shelf-open")).not.toBeNull();
+  });
+
+  // THE BOOKSHELF. Folders stand side by side as shelves and are drop targets: a
+  // document dragged onto one is filed inside it, which is the structural half of the
+  // library. A shelf also states what it holds, so choosing one is not a guess.
+  test("a shelf states what it holds and takes a document dropped onto it", async () => {
+    setProfileId("me");
+    const moved: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "move_document") {
+        moved.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_document_folders: [folder({ id: "f1", name: "Specs" })],
+        list_documents: [
+          { id: "d1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", title: "Loose note", body: "", version: 1, archived: false, created_by: "me" },
+          { id: "d2", container_type: "my-docs", container_id: "me", folder_id: "f1", doc_type: "text", title: "Filed", body: "", version: 1, archived: false, created_by: "me" },
+        ],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+
+    const shelf = host.querySelector(".documents-shelf") as HTMLElement;
+    expect(shelf).not.toBeNull();
+    // It says what is inside it, so the shelf is readable before it is opened.
+    expect(shelf.textContent).toContain("Specs");
+    expect(shelf.textContent).toContain("1 document");
+
+    // The loose document is a drag source; the shelf accepts it.
+    const card = host.querySelector("a.documents-library-card") as HTMLElement;
+    expect(card.getAttribute("draggable")).toBe("true");
+
+    const payload = new Map<string, string>();
+    const dataTransfer = {
+      types: ["text/plain"],
+      setData: (kind: string, value: string) => payload.set(kind, value),
+      getData: (kind: string) => payload.get(kind) ?? "",
+    };
+    const dragStart = new Event("dragstart", { bubbles: true }) as DragEvent;
+    Object.defineProperty(dragStart, "dataTransfer", { value: dataTransfer });
+    card.dispatchEvent(dragStart);
+    expect(payload.get("text/plain")).toBe("document:d1");
+
+    const drop = new Event("drop", { bubbles: true }) as DragEvent;
+    Object.defineProperty(drop, "dataTransfer", { value: dataTransfer });
+    shelf.dispatchEvent(drop);
+    await settle();
+
+    expect(moved.length).toBe(1);
+    expect(moved[0]).toMatchObject({ id: "d1", containerType: "my-docs", containerId: "me", folderId: "f1" });
   });
 
   // The source (My Documents / organization book / project library) is chosen in the

@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
+import { Icon } from "../components/Icon";
 import { useDeepLink, linkEntity, linkProps, route } from "../router";
 import {
   documentsApi,
@@ -239,6 +240,60 @@ const [showArchived, setShowArchived] = createSignal(false);
     return projects()?.find((p) => p.id === selectedProjectId())?.name ?? "Project library";
   };
   const libraryTitle = () => levelFolder()?.name ?? containerName();
+
+  /** ── THE SHELF ─────────────────────────────────────────────────────────────
+   *
+   *  Folders stand side by side like books on a shelf and are DROP TARGETS: a
+   *  document (or another folder) dragged onto one is filed inside it. This is the
+   *  structural half of the library — the part that has to exist before there is
+   *  enough material to need it. Payloads are plain text so the same handler can
+   *  tell an internal drag from a file drop (which carries `Files` instead).
+   */
+  const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+  const folderCount = (id: string) => ({
+    documents: safeDocuments().filter((d) => d.folder_id === id).length,
+    folders: safeFolders().filter((f) => f.parent_id === id).length,
+  });
+  const shelfSubline = (id: string) => {
+    const { documents, folders } = folderCount(id);
+    if (!documents && !folders) return "Empty shelf";
+    const parts: string[] = [];
+    if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
+    if (documents) parts.push(`${documents} document${documents === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+  };
+  const isInternalDrag = (event: DragEvent) => !event.dataTransfer?.types.includes("Files");
+  /** `null` files at the level's root; the backend wants the project root row there. */
+  async function fileInto(payload: string, targetFolderId: string | null) {
+    const cid = containerId();
+    if (!cid) return;
+    const [kind, ...rest] = payload.split(":");
+    const id = rest.join(":");
+    if (!id) return;
+    const root = activeContainer() === "my-docs" ? null : rootParentId();
+    try {
+      if (kind === "document" || kind === "favorite") {
+        const doc = scopedDocuments().find((d) => d.id === id);
+        if (!doc || doc.folder_id === (targetFolderId ?? root)) return;
+        await documentsApi.moveDocument(doc.id, doc.container_type, cid, targetFolderId ?? root);
+        await refetchDocuments();
+      } else if (kind === "folder") {
+        // A shelf cannot be filed into itself, nor into a shelf it already holds.
+        if (id === targetFolderId) return;
+        const descends = (folderId: string | null): boolean => {
+          if (!folderId) return false;
+          if (folderId === id) return true;
+          const parent = safeFolders().find((f) => f.id === folderId)?.parent_id ?? null;
+          return descends(parent);
+        };
+        if (descends(targetFolderId)) return;
+        await documentsApi.moveDocumentFolder(id, targetFolderId ?? root);
+        await refetchFolders();
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -1276,13 +1331,28 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   {(folder) => (
                     <button
                       class="documents-library-up"
+                      classList={{ "drop-into": dropTargetId() === "__up" }}
+                      title="Back — or drop here to move an item out of this shelf"
                       onClick={() => setSelectedFolderId(folder().parent_id === rootParentId() ? null : folder().parent_id)}
+                      onDragOver={(event) => {
+                        if (!isInternalDrag(event)) return;
+                        event.preventDefault();
+                        setDropTargetId("__up");
+                      }}
+                      onDragLeave={() => setDropTargetId((current) => (current === "__up" ? null : current))}
+                      onDrop={(event) => {
+                        const payload = event.dataTransfer?.getData("text/plain") ?? "";
+                        setDropTargetId(null);
+                        if (!payload) return;
+                        event.preventDefault();
+                        void fileInto(payload, folder().parent_id === rootParentId() ? null : folder().parent_id);
+                      }}
                     >
                       <span aria-hidden="true">←</span> Back
                     </button>
                   )}
                 </Show>
-                <span class="documents-empty-icon" aria-hidden="true">⌁</span>
+                <span class="documents-empty-icon" aria-hidden="true"><Icon name="books" size={26} /></span>
                 <h2>{libraryTitle()}</h2>
                 <p>
                   {libraryFolders().length + libraryDocuments().length
@@ -1390,59 +1460,101 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </Show>
 
                 <Show when={libraryFolders().length + libraryDocuments().length > 0}>
-                  <div class="documents-library-grid" aria-label={`${libraryTitle()} library`}>
-                    <For each={libraryFolders()}>
-                      {(folder) => (
-                        <div class="documents-library-card folder-row" classList={{ archived: folder.archived }}>
-                          <Show
-                            when={renamingFolderId() === folder.id}
-                            fallback={
-                              <button class="documents-library-open-folder folder-name" onClick={() => setSelectedFolderId(folder.id)}>
-                                <span class="documents-library-type" aria-hidden="true">▸</span>
-                                <span class="documents-library-card-copy"><strong>{folder.name}</strong><small>Folder</small></span>
-                              </button>
-                            }
-                          >
-                            <input
-                              class="folder-rename-input"
-                              value={renameValue()}
-                              onInput={(e) => setRenameValue(e.currentTarget.value)}
-                              onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(folder)}
-                            />
-                            <button class="ghost small" onClick={() => saveRenameFolder(folder)}>✓</button>
-                          </Show>
-                          {/* Folder upkeep stays reachable but quiet: it appears on hover
-                              or keyboard focus, never as permanent furniture. */}
-                          <span class="folder-actions">
-                            <button class="ghost small" title="rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>✎</button>
-                            <select
-                              class="folder-move-select"
-                              title="move to…"
-                              aria-label={`Move ${folder.name} to`}
-                              value=""
-                              onChange={(e) => e.currentTarget.value && moveFolderTo(folder, e.currentTarget.value)}
+                  <div class="documents-library">
+                    {/* SHELVES FIRST, SIDE BY SIDE. Each one takes what you drag onto it. */}
+                    <Show when={libraryFolders().length > 0}>
+                      <p class="documents-library-heading">Shelves</p>
+                      <div class="documents-shelf-grid" aria-label={`${libraryTitle()} shelves`}>
+                        <For each={libraryFolders()}>
+                          {(folder) => (
+                            <div
+                              class="documents-shelf folder-row"
+                              classList={{ archived: folder.archived, "drop-into": dropTargetId() === folder.id }}
+                              draggable={renamingFolderId() !== folder.id}
+                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `folder:${folder.id}`)}
+                              onDragOver={(event) => {
+                                if (!isInternalDrag(event)) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setDropTargetId(folder.id);
+                              }}
+                              onDragLeave={() => setDropTargetId((current) => (current === folder.id ? null : current))}
+                              onDrop={(event) => {
+                                const payload = event.dataTransfer?.getData("text/plain") ?? "";
+                                setDropTargetId(null);
+                                if (!payload) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void fileInto(payload, folder.id);
+                              }}
                             >
-                              <option value="">move…</option>
-                              <For each={displayFolders().filter((o) => o.id !== folder.id)}>
-                                {(o) => <option value={o.id}>{o.name}</option>}
-                              </For>
-                            </select>
-                            <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(folder)}>
-                              {folder.archived ? "restore" : "archive"}
-                            </button>
-                          </span>
-                        </div>
-                      )}
-                    </For>
-                    <For each={libraryDocuments()}>
-                      {(document) => (
-                        <a class="documents-library-card" classList={{ archived: document.archived }} {...linkProps(docRoute(document.id))}>
-                          <span class="documents-library-type" aria-hidden="true">{document.doc_type === "file" ? "↥" : "⌁"}</span>
-                          <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
-                          <span class="documents-library-open" aria-hidden="true">→</span>
-                        </a>
-                      )}
-                    </For>
+                              <Show
+                                when={renamingFolderId() === folder.id}
+                                fallback={
+                                  <button class="documents-shelf-open folder-name" onClick={() => setSelectedFolderId(folder.id)}>
+                                    <span class="documents-shelf-icon" aria-hidden="true"><Icon name="folder" size={20} /></span>
+                                    <span class="documents-library-card-copy">
+                                      <strong>{folder.name}</strong>
+                                      <small>{shelfSubline(folder.id)}</small>
+                                    </span>
+                                  </button>
+                                }
+                              >
+                                <input
+                                  class="folder-rename-input"
+                                  value={renameValue()}
+                                  onInput={(e) => setRenameValue(e.currentTarget.value)}
+                                  onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(folder)}
+                                />
+                                <button class="ghost small" onClick={() => saveRenameFolder(folder)}>✓</button>
+                              </Show>
+                              {/* Shelf upkeep stays reachable but quiet: on hover or focus only. */}
+                              <span class="folder-actions">
+                                <button class="ghost small" title="rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>✎</button>
+                                <select
+                                  class="folder-move-select"
+                                  title="move to…"
+                                  aria-label={`Move ${folder.name} to`}
+                                  value=""
+                                  onChange={(e) => e.currentTarget.value && moveFolderTo(folder, e.currentTarget.value)}
+                                >
+                                  <option value="">move…</option>
+                                  <For each={displayFolders().filter((o) => o.id !== folder.id)}>
+                                    {(o) => <option value={o.id}>{o.name}</option>}
+                                  </For>
+                                </select>
+                                <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(folder)}>
+                                  {folder.archived ? "restore" : "archive"}
+                                </button>
+                              </span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+
+                    <Show when={libraryDocuments().length > 0}>
+                      <p class="documents-library-heading">Documents</p>
+                      <div class="documents-library-grid" aria-label={`${libraryTitle()} library`}>
+                        <For each={libraryDocuments()}>
+                          {(document) => (
+                            <a
+                              class="documents-library-card"
+                              classList={{ archived: document.archived }}
+                              draggable={true}
+                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `document:${document.id}`)}
+                              {...linkProps(docRoute(document.id))}
+                            >
+                              <span class="documents-library-type" aria-hidden="true">
+                                <Icon name={document.doc_type === "file" ? "upload" : "doc"} size={16} />
+                              </span>
+                              <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
+                              <span class="documents-library-open" aria-hidden="true">→</span>
+                            </a>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
                   </div>
                 </Show>
                 {/* Inside a project the wider organization library is one click away; on

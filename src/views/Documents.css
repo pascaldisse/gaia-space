@@ -476,19 +476,49 @@
 /* A folder card is a button, not a link (it moves you inside the same page), so it
    must be told to stop looking like one. */
 button.documents-library-card { font: inherit; text-align: left; cursor: pointer; }
-/* A folder card carries its own upkeep (rename / move / archive), quiet until the
-   card is hovered or focused — the same rule the tree rows used to follow. */
-.documents-library-card.folder-row { padding: 0; gap: 0; }
-.documents-library-open-folder {
+.documents-library-card.archived { opacity: 0.6; }
+
+/* ── THE SHELF ────────────────────────────────────────────────────────────────
+   Folders stand side by side, wider than a document card and taller, because a
+   shelf is a PLACE you drop things into, not a row you read past. */
+.documents-library { width: 100%; display: grid; gap: var(--dk-space-sm); text-align: left; }
+.documents-library-heading {
+  margin: var(--dk-space-xl) 0 0; color: var(--text-muted);
+  font-size: var(--dk-fs-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.documents-shelf-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: var(--dk-space-sm); width: 100%;
+}
+.documents-shelf {
+  position: relative; display: flex; align-items: center; min-width: 0;
+  border: var(--dk-hairline) solid var(--surface-border); border-radius: var(--dk-radius-lg);
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--accent-soft) 22%, var(--surface)));
+  cursor: grab;
+}
+.documents-shelf:hover { border-color: var(--accent); }
+.documents-shelf.archived { opacity: 0.6; }
+/* The one state a drop target must have: it says YES before you let go. */
+.documents-shelf.drop-into,
+.documents-library-up.drop-into {
+  border-color: var(--brand-teal); border-style: dashed;
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+.documents-shelf-open {
   display: flex; align-items: center; gap: var(--dk-space-md); flex: 1; min-width: 0;
   padding: var(--dk-space-lg); background: none; border: 0; color: inherit; font: inherit;
   text-align: left; cursor: pointer;
 }
-.documents-library-card.folder-row .folder-actions { padding-right: var(--dk-space-md); }
-.documents-library-card.folder-row:hover .folder-actions,
-.documents-library-card.folder-row:focus-within .folder-actions { display: flex; opacity: 1; }
-.documents-library-card.archived { opacity: 0.6; }
-.documents-library-card .folder-rename-input { margin: var(--dk-space-md); }
+.documents-shelf-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.documents-shelf .folder-actions { padding-right: var(--dk-space-md); }
+.documents-shelf:hover .folder-actions,
+.documents-shelf:focus-within .folder-actions { display: flex; opacity: 1; }
+.documents-shelf .folder-rename-input { margin: var(--dk-space-md); }
+/* A document card is draggable: it must say so before the drag starts. */
+a.documents-library-card { cursor: grab; }
 .documents-library-up {
   justify-self: start; display: inline-flex; align-items: center; gap: var(--dk-space-xs);
   padding: 0.2rem 0.55rem; border: var(--dk-hairline) solid var(--surface-border);
