@@ -73,3 +73,32 @@
 .tm-clear:hover { background: var(--status-danger-bg); }
 /* the three controls sit as one row in the composer */
 .tm-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+
+/* ── light shell: the composer control joins the pill family ───────────────
+   The trigger was designed as a boxed field with a caption above its value and
+   a filled teal icon tile — the "field in a box with an old icon" the product
+   owner kept pointing at. Under the light shell it becomes a pill: the VALUE is
+   the label (the caption survives only for assistive tech), the icon loses its
+   tile, and the silhouette matches PillSelect exactly.
+   Colour and weight are theme-scoped; the dark shell keeps its boxed control. */
+.theme-space-light .tm-trigger {
+  min-height: var(--pillctl-h, 36px);
+  padding: 0 12px;
+  gap: 8px;
+  border-radius: var(--pillctl-r, 999px);
+  background: var(--wash-2);
+  border-color: transparent;
+}
+.theme-space-light .tm-trigger:hover { background: var(--wash-2); border-color: var(--line-strong); }
+.theme-space-light .tm-icon {
+  width: auto; height: auto; border-radius: 0;
+  background: transparent; color: var(--muted);
+}
+.theme-space-light .tm-trigger.set .tm-icon { color: var(--teal-dark); }
+/* The caption is furniture on a pill: the value already says what this is. */
+.theme-space-light .tm-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.theme-space-light .tm-text { display: block; }
+.theme-space-light .tm-value { font-size: 14px; font-weight: 500; color: var(--ink); }
+.theme-space-light .tm-value.placeholder { color: var(--muted); }
+.theme-space-light .tm-chevron { color: var(--muted); }
+.theme-space-light .tm-date-caption { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
