@@ -9,7 +9,13 @@
  * theme-agnostic `--status-danger-*` tokens, so an error stays legible in dark.
  */
 
-.locations-grid { display: grid; gap: 0; }
+/* Two columns where there is room: the form is a tool, the list is the point, and
+   a form that fills the page while the list is nowhere reads as if the page were a
+   form. Below 1100px they stack, form last. */
+.locations-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .theme-space-light .locations-grid { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
+}
 
 /* A field is now a COLUMN — label, control, explanation — where it used to be a
    bare control on a flex line. Without this the hint would wrap under the whole

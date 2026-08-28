@@ -308,7 +308,7 @@ export default function Locations() {
             <Field
               id="loc-type"
               label="Type"
-              hint="Your own word for what this is. Shown on the row; nothing in the app branches on it."
+              hint="Your own word for it. Shown on the row."
             >
               {(describedBy) => (
                 <>
@@ -341,12 +341,7 @@ export default function Locations() {
               id="loc-tz"
               label="Time zone"
               grow
-              hint={
-                <>
-                  An IANA name such as <code>Europe/Berlin</code> or <code>America/New_York</code>.
-                  Required, and shown on the row — the app does not yet convert any times by it.
-                </>
-              }
+              hint={<>Required. An IANA name such as <code>Europe/Berlin</code>.</>}
             >
               {(describedBy) => (
                 <input
@@ -369,13 +364,7 @@ export default function Locations() {
               id="loc-schedule"
               label="Work schedule (JSON)"
               wide
-              hint={
-                <>
-                  Free-form JSON kept with the location as a note for future automation. It is
-                  stored exactly as typed and validated only for being valid JSON — nothing in the
-                  app reads it yet, so no shape is required.
-                </>
-              }
+              hint={<>A note for later. Stored as typed; only checked for being valid JSON.</>}
             >
               {(describedBy) => (
                 <textarea
@@ -423,7 +412,7 @@ export default function Locations() {
               id="loc-equipment"
               label="Equipment"
               grow
-              hint="Comma-separated, stored per location and shown on its row. Meetings filters bookable rooms by a separate equipment list held on the meeting room itself."
+              hint="Comma-separated. Room booking uses its own list on the meeting room."
             >
               {(describedBy) => (
                 <input

@@ -78,6 +78,9 @@ export default function Absences() {
     personalApi.absences(id || undefined),
   );
 
+  /** True while the empty branch below draws its own "Record time off". */
+  const showsEmptyPrimary = () => !records.loading && allRecords().length === 0;
+
   const allRecords = createMemo(() =>
     [...(records() ?? [])].sort((left, right) =>
       right.date_from.localeCompare(left.date_from),
@@ -167,9 +170,14 @@ export default function Absences() {
               onChange={setFilterProfileId}
               allowAll
             />
-            <button class="primary" onClick={openForm}>
-              <Icon name="plus" size={15} /> Record time off
-            </button>
+            {/* ONE ACTION, ONE PLACE: while the empty state carries this same act,
+                the header does not draw it a second time. Same rule as the task
+                surfaces (src/views/one-action-one-place.test.tsx). */}
+            <Show when={!showsEmptyPrimary()}>
+              <button class="primary" onClick={openForm}>
+                <Icon name="plus" size={15} /> Record time off
+              </button>
+            </Show>
           </>
         }
       />
