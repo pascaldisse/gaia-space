@@ -15,11 +15,16 @@
 /* Some view roots deliberately carry no padding — they scroll their own body and
    each block pads itself. Their old bespoke header carried that inset; the shared
    one has to carry it too, or the kicker sits flush against the command bar. */
+/* HAND-KEPT LISTS DRIFT, and this one had: `.dev-environments` DOES pad its own
+   root, so it received the inset twice and its heading sat 28px right and 18px
+   below every sibling. The list now carries only roots whose padding is genuinely
+   zero — verified in the running app, not assumed — and the rule states the test so
+   the next addition is checked rather than guessed. */
 .documents-view > .page-header,
 .packages-view > .page-header,
 .pipelines-view > .page-header,
 .reviews-view > .page-header,
-.dev-environments > .page-header {
+.repos-view > .page-header {
   padding: var(--view-pad-y) var(--view-pad-x) 0;
 }
 

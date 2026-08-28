@@ -25,10 +25,10 @@
 /* The view root pads nothing itself (the panes have to reach the bottom), so
    the shared header carries the inset, exactly like the other body-scrolling
    views listed in PageHeader.css. */
-.repos-view > .page-header {
-  padding: var(--view-pad-y) var(--view-pad-x) 0;
-  margin-bottom: 14px;
-}
+/* The inset itself now comes from PageHeader.css, where every body-scrolling view
+   is listed together — one place decides the page inset. Only the gap below the
+   header is this view's own business. */
+.repos-view > .page-header { margin-bottom: 14px; }
 
 .repos-error {
   margin: 0 var(--view-pad-x) 12px;
