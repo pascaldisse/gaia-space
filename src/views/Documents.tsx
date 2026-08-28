@@ -1199,7 +1199,10 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         </div>
       </Show>
 
-      <PageHeader title="Documents" subline="Yours first — what you wrote and starred" actions={<>
+      {/* "Yours first" is a true statement about the personal container and a false
+         one inside a project's Files & Links tab, where everything shown belongs to
+         the project. The title is unchanged; only the subline tells the truth. */}
+      <PageHeader title="Documents" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} actions={<>
         <Show when={!profileLocked() && !embedded()}>
         <label>
           Acting as
@@ -1502,7 +1505,11 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     />
                   </label>
                 </Show>
-                <button class="ghost doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
+                {/* No `.ghost` here on purpose. `.theme-space-light button.ghost`
+                    strips fill and border, which made this read as plain text. This
+                    button is new, so no dark rule depends on `.ghost` for it, and
+                    `.doc-action-secondary` styles both themes on its own. */}
+                <button class="doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
                   New document
                 </button>
                 <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>

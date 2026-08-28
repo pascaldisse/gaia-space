@@ -294,15 +294,36 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   opacity: 0; cursor: pointer;
 }
-.doc-action-secondary { min-height: 2.2em; padding: 0.45em 0.9em; border-radius: var(--dk-radius-md); cursor: pointer; }
+/* A secondary action must still LOOK like a button. `.ghost` alone renders as bare
+   text in the light shell, which is how "New document" stopped reading as clickable. */
+.doc-action-secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 2.2em; padding: 0.45em 0.9em;
+  border: var(--dk-hairline) solid var(--dk-field-border);
+  border-radius: var(--dk-radius-md);
+  background: var(--dk-field-bg);
+  color: inherit; font-weight: 600; cursor: pointer;
+}
 .doc-action-tertiary {
   flex: 1 1 100%;
   background: none; border: 0; padding: 0.2em 0;
-  color: var(--dk-text-muted, inherit); font-size: 0.85em;
-  text-decoration: underline; cursor: pointer; opacity: 0.85;
+  /* `inherit` and not a muted token: a token tuned for the light paper turns
+     dark-on-dark in the grouped/flat layout. Inheriting the surface's own text
+     colour and dimming it keeps the same relationship in both themes. */
+  color: inherit; font-size: 0.85em;
+  text-decoration: underline; cursor: pointer; opacity: 0.75;
 }
 .doc-action-tertiary:hover { opacity: 1; }
 .doc-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
+/* `.ghost` keeps the class for the DARK layout, but in the light shell
+   `.theme-space-light .ghost` strips fill and border — which left the secondary
+   action reading as plain text. Two classes beat one, scoped to the light theme. */
+.theme-space-light .doc-action-secondary {
+  border: 1px solid var(--dk-field-border, #d2c6b9);
+  background: var(--dk-field-bg, #fff);
+  color: inherit;
+}
+.theme-space-light .doc-action-secondary:hover { border-color: var(--teal, #00bfa6); }
 
 .new-item-forms {
   border-top: var(--dk-hairline) solid var(--dk-line);
