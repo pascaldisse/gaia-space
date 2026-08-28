@@ -337,13 +337,10 @@ export default function Absences() {
                 actions={<button type="button" class="primary" onClick={openForm}>Record time off</button>}
               />
             </div>
-            <aside class="view-rail timeoff-rail">
-              <OverviewRail
-                current={current().length}
-                pending={pending().length}
-                upcoming={upcoming().length}
-              />
-            </aside>
+            {/* NO RAIL WHILE THERE IS NOTHING TO SUMMARISE. "0 Away now · 0 Pending ·
+                0 Upcoming" beside "No time off recorded yet" says the same absence a
+                second time, and having a rail at all pushed the one real action into
+                the middle of an empty page. The rail returns with the first record. */}
           </div>
         }
       >

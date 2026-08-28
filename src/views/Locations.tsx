@@ -173,6 +173,13 @@ export default function Locations() {
   const [desks, { refetch: refetchDesks }] = createResource(() => platformApi.deskAssignments());
 
   const [draft, setDraft] = createSignal<Location>(blank());
+  /** The form is not the page. It was permanently open beside an empty state that
+   *  asked the reader to add a location — the app telling you to do the thing whose
+   *  form was already filling half the screen. It opens when you ask for it, and it
+   *  is open whenever you are editing an existing row. */
+  const [editorOpen, setEditorOpen] = createSignal(false);
+  const openEditor = (value?: Location) => { setDraft(value ?? blank()); setEditorOpen(true); focusName(); };
+  const closeEditor = () => { setDraft(blank()); setEditorOpen(false); };
   const [desk, setDesk] = createSignal<DeskAssignment>(blankDesk());
   const [error, setError] = createSignal("");
   const [query, setQuery] = createSignal("");
@@ -272,6 +279,11 @@ export default function Locations() {
             </Show>
           </>
         }
+        actions={
+          <Show when={!editorOpen() && (locations() ?? []).length > 0}>
+            <button type="button" class="primary" onClick={() => openEditor()}>New location</button>
+          </Show>
+        }
       />
 
       <Show when={error()}>
@@ -280,6 +292,7 @@ export default function Locations() {
 
       <div class="settings-grid locations-grid">
         {/* ── the location itself ─────────────────────────────────────────── */}
+        <Show when={editorOpen()}>
         <form class="settings-card paper-card" onSubmit={save}>
           <h2 class="paper-section-label">{draft().id ? "Edit location" : "New location"}</h2>
 
@@ -390,7 +403,7 @@ export default function Locations() {
             <Show when={draft().work_schedule_json.trim() !== SCHEDULE_EXAMPLE}>
               {" "}
               <GhostPill
-                onClick={() => setDraft({ ...draft(), work_schedule_json: SCHEDULE_EXAMPLE })}
+                onClick={() => openEditor({ ...draft(), work_schedule_json: SCHEDULE_EXAMPLE })}
               >
                 Use this example
               </GhostPill>
@@ -461,10 +474,11 @@ export default function Locations() {
               {draft().id ? "Save location" : "Add location"}
             </button>
             <Show when={draft().id}>
-              <GhostPill onClick={() => setDraft(blank())}>Cancel edit</GhostPill>
+              <GhostPill onClick={closeEditor}>Cancel</GhostPill>
             </Show>
           </div>
         </form>
+        </Show>
 
         {/* ── the list ────────────────────────────────────────────────────── */}
         <div class="settings-card paper-card">
@@ -490,7 +504,7 @@ export default function Locations() {
               title="No locations yet"
               hint="A location is an office, a floor or a room. People and desks are assigned to one."
               actions={
-                <button class="primary" type="button" onClick={() => { setDraft(blank()); focusName(); }}>
+                <button class="primary" type="button" onClick={() => openEditor()}>
                   Add the first location
                 </button>
               }
@@ -511,7 +525,7 @@ export default function Locations() {
               <button
                 class="paper-row"
                 type="button"
-                onClick={() => setDraft({ ...location, equipment: [...location.equipment] })}
+                onClick={() => openEditor({ ...location, equipment: [...location.equipment] })}
               >
                 <span>
                   <span class="paper-row-title">{location.name}</span>

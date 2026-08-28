@@ -54,7 +54,10 @@
 .timeoff-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
 .timeoff-empty-card p { max-width: 560px; margin: 0; color: var(--text-muted); line-height: 1.5; }
 .timeoff-empty-cta { margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; }
-.timeoff-onboarding .view-main { display: grid; gap: 0; align-content: start; }
+/* One column while empty, and the lead sits where reading starts — not centred in
+   a page-sized void. */
+.timeoff-onboarding { display: block; }
+.timeoff-onboarding .view-main { display: grid; gap: 0; align-content: start; max-width: 640px; }
 .timeoff-onboarding .rail-card + .rail-card { margin-top: 12px; }
 
 /* ── availability panels ── the page's working surface: current coverage,
