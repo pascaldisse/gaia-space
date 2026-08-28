@@ -266,11 +266,13 @@ export default function Meetings() {
         <Chip value={todayCount()} label="Today" tone="amber" />
         <Chip value={seriesCount()} label="Recurring" />
       </>}
-      actions={<>
-        <GhostPill class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</GhostPill>
-        <button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>
-      </>}
     />
+    {/* Both acts rank themselves in the one row: New meeting makes something, Open
+       calendar is the quieter way out to the day view. */}
+    <nav class="page-actionbar" aria-label="Meeting actions">
+      <button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>
+      <GhostPill class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</GhostPill>
+    </nav>
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="meeting-notice" role="status">{notice()}</p></Show>
 

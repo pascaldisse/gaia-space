@@ -218,14 +218,16 @@ export default function Inbox() {
             <Chip value={attentionCount()} label="needs you" />
           </Show>
         }
-        actions={
-          <Show when={unreadNotifications().length}>
-            <button class="primary" onClick={markAllRead}>
-              Mark all read
-            </button>
-          </Show>
-        }
       />
+      {/* The one act this surface has — it changes the inbox, not the way you look
+         at it — so it is the row's primary, not a corner button. */}
+      <Show when={unreadNotifications().length}>
+        <nav class="page-actionbar" aria-label="Inbox actions">
+          <button type="button" class="primary" onClick={markAllRead}>
+            Mark all read
+          </button>
+        </nav>
+      </Show>
 
       <Show when={error()}>
         <p class="inbox-error" role="alert">

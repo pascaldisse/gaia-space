@@ -47,6 +47,16 @@ const mount = async () => {
 };
 const deadlineInput = (host: HTMLElement) =>
   host.querySelector<HTMLInputElement>('.project-deadline input[type="date"]');
+/** THE DEADLINE IS A PILL FIRST. A card carries the date as one fact at its edge; the
+ *  date field is an ACT and is only drawn once somebody asks for it — by pressing the
+ *  pill (offered only to whoever may move it) or through the card's menu. Every write
+ *  test therefore opens the editor the way a person does. */
+const duePill = (host: HTMLElement) => host.querySelector<HTMLButtonElement>(".project-due");
+const openEditor = async (host: HTMLElement) => {
+  host.querySelector<HTMLButtonElement>("button.project-due.editable")!.click();
+  await settle();
+  return deadlineInput(host)!;
+};
 const setDate = async (input: HTMLInputElement, value: string) => {
   input.value = value;
   input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -60,7 +70,9 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: "2030-06-01" }));
     const host = await mount();
 
-    const input = deadlineInput(host)!;
+    // The pill states the fact and carries the band's colour.
+    expect(duePill(host)?.textContent).toBe("Due 2030-03-10");
+    const input = await openEditor(host);
     expect(input).toBeTruthy();
     expect(input.value).toBe("2030-03-10");
     await setDate(input, "2030-06-01");
@@ -84,7 +96,7 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: "2030-06-01" }));
     const host = await mount();
 
-    const input = deadlineInput(host)!;
+    const input = await openEditor(host);
     input.value = "2030-06-01";
     input.dispatchEvent(new Event("change", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -100,7 +112,10 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project({ deadline: null })] : project());
     const host = await mount();
 
-    await setDate(deadlineInput(host)!, "2030-03-10");
+    // With no date the pill says so, quietly and with no colour.
+    expect(duePill(host)?.textContent).toBe("No deadline");
+    expect(duePill(host)?.className).toContain("untoned");
+    await setDate(await openEditor(host), "2030-03-10");
     expect(calls.some((c) => c.cmd === "set_project_deadline")).toBe(true);
     expect(calls.some((c) => c.cmd === "update_project_deadline")).toBe(false);
   });
@@ -111,6 +126,7 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: null }));
     const host = await mount();
 
+    await openEditor(host);
     const clear = host.querySelector<HTMLButtonElement>('.project-deadline button')!;
     expect(clear.getAttribute("aria-label")).toBe("Clear deadline for Atlas");
     clear.click();
@@ -127,7 +143,9 @@ describe("project deadline editing", () => {
 
     expect(deadlineInput(host)).toBeNull();
     expect(host.querySelector(".project-deadline button")).toBeNull();
-    expect(host.querySelector(".deadline-readonly")?.textContent).toContain("2030-03-10");
+    // The same pill, as a plain fact: no button, nothing to press and be refused.
+    expect(host.querySelector("button.project-due")).toBeNull();
+    expect(duePill(host)?.textContent).toBe("Due 2030-03-10");
   });
 
   test("a refused write is reported in place and the stored value is restored", async () => {
@@ -136,7 +154,7 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : new Error("That deadline changed since you loaded it; reload and try again"));
     const host = await mount();
 
-    await setDate(deadlineInput(host)!, "2031-01-01");
+    await setDate(await openEditor(host), "2031-01-01");
     const alert = host.querySelector('.project-deadline [role="alert"]');
     expect(alert?.textContent).toContain("changed since you loaded it");
     // The refused date never sticks: the list is re-read and the input shows the truth.

@@ -99,7 +99,7 @@ describe("calendar day agenda", () => {
     expect(host.querySelector(".calendar-legend")?.textContent).toBe("MeetingTaskDeadline");
   });
 
-  test("the filters are named pills in the header, not captioned fields in a card", async () => {
+  test("the filters are named pills at the far end of the action row, not captioned fields in a card", async () => {
     stubFetch();
     setProfileId("pa");
     const today = new Date();
@@ -111,9 +111,14 @@ describe("calendar day agenda", () => {
     // The card of captioned fields is gone in every theme, not merely restyled.
     expect(host.querySelector(".calendar-filters")).toBeNull();
     expect(host.querySelector(".calendar-filter")).toBeNull();
-    // Both filters live in the header action lane and keep an accessible name,
-    // with the VALUE as the visible label.
-    const actions = host.querySelector(".pgh-actions")!;
+    // Both filters CHANGE WHAT YOU SEE, so since the shared action row they live at
+    // its far end (`.actionbar-view-controls`), not in the header's top-right corner.
+    // They keep an accessible name, with the VALUE as the visible label.
+    const actions = host.querySelector(".page-actionbar > .actionbar-view-controls")!;
+    expect(actions).toBeTruthy();
+    // The creation act is the row's primary, on the left, outside the view controls.
+    const create = host.querySelector(".page-actionbar > button.primary") as HTMLButtonElement;
+    expect(create?.textContent).toBe("New meeting");
     const location = actions.querySelector("select[aria-label='Location calendar']") as HTMLSelectElement;
     expect(actions.querySelector("select[aria-label='Member calendar']")).toBeTruthy();
     expect(location).toBeTruthy();

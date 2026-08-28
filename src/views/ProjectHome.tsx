@@ -63,7 +63,11 @@ export default function ProjectHome(props: { project?: Project }) {
   const overflow = () => Math.max(0, (tasks() ?? []).length - PREVIEW);
 
   return <section class="ph-view project-home" aria-label={`${project()?.name ?? "Project"} dashboard`}>
-    <PageHeader icon="layers" kicker={project()?.name ?? "Project unavailable"} title="Project overview" subline="What is running, who is on it, and when it is due — each figure opens the surface that owns it." actions={<button class="ghost small" onClick={() => void refetch()}>Refresh</button>} />
+    <PageHeader icon="layers" kicker={project()?.name ?? "Project unavailable"} title="Project overview" subline="What is running, who is on it, and when it is due — each figure opens the surface that owns it." />
+    {/* Re-reading changes what you SEE, not what exists: far end of the action row. */}
+    <nav class="page-actionbar" aria-label="Project overview actions">
+      <span class="actionbar-view-controls"><button type="button" class="ghost small" onClick={() => void refetch()}>Refresh</button></span>
+    </nav>
     <Show when={project()} fallback={<p class="ph-empty" role="alert">This project does not exist or is unavailable.</p>}>{value => <>
       {/* ONE TILE (stage 11, defect 2): `.ph-stat` was this view's own shape.
           Each counting tile is now a LINK to the surface that owns the count —

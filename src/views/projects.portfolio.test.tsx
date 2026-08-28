@@ -2,7 +2,7 @@ import { expect, test, describe, afterEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
-import Projects, { deriveKey } from "./Projects";
+import Projects, { DESCRIPTION_MAX, deriveKey, shortDescription } from "./Projects";
 import { setProfileId, setProjectId } from "../session";
 
 // The portfolio strip and the per-row health signals are read off ONE issue read plus
@@ -67,6 +67,31 @@ describe("portfolio summary and open-issue counts", () => {
     expect(deriveKey("")).toBe("");
   });
 
+  /* A CARD MUST ALWAYS FIT IN THE WINDOW. The description is free text with no server
+     limit, so the card cuts it — at a word boundary, ending in an ellipsis, never wider
+     than DESCRIPTION_MAX. The CSS line-clamp is the second guard and cannot be asserted
+     here; what IS asserted is that the DOM never receives more than the limit. */
+  test("a description is cut to 96 characters at a word boundary, and a short one is untouched", () => {
+    expect(DESCRIPTION_MAX).toBe(96);
+    expect(shortDescription(null)).toBe("");
+    expect(shortDescription("   ")).toBe("");
+    const short = "A small project.";
+    expect(shortDescription(short)).toBe(short);
+
+    const long = "Rebuilding the customer portal so that invoices, contracts and support tickets finally live in one place instead of three.";
+    const cut = shortDescription(long);
+    expect(cut.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
+    expect(cut.endsWith("\u2026")).toBe(true);
+    // The cut lands between words: no half word before the ellipsis.
+    expect(long.startsWith(cut.slice(0, -1))).toBe(true);
+    expect(cut.slice(0, -1).endsWith(" ")).toBe(false);
+    expect(long[cut.length - 1]).toBe(" ");
+
+    // One unbroken word longer than any limit still has to fit: the hard cut wins.
+    const wall = "x".repeat(300);
+    expect(shortDescription(wall)).toBe(`${"x".repeat(95)}\u2026`);
+  });
+
   test("counts come from one issue read and one status read, not one per card", async () => {
     stubTauriIpc();
     setProfileId("p-owner");
@@ -111,11 +136,15 @@ describe("portfolio summary and open-issue counts", () => {
     const health = healthOf(host);
     expect(health[0]).toEqual(["2 open tickets", "1 open tasks"]);
     expect(health[1].slice(0, 3)).toEqual(["1 open tickets", "0 open tasks", "3 unread"]);
-    // The deadline chip states the date; the human note beside it is relative to
-    // TODAY, so the test asserts the date and the shape, never a day count that
-    // would rot into a failure on its own.
-    expect(health[1][3]).toContain("Due 2030-01-02");
-    expect(health[1][3]).toMatch(/· (in \d+ days?|due today|\d+ days? overdue)$/);
+    // THE DEADLINE IS NOT A HEALTH CHIP. It is the card's one pill at the edge, the same
+    // shape a task tile carries, coloured only by bandTone(deadlineBand(…)); and a card
+    // without a date says so quietly rather than going blank.
+    expect(health[1]).toHaveLength(3);
+    const pills = [...host.querySelectorAll(".project-card .project-due")];
+    expect(pills.map((pill) => pill.textContent)).toEqual(["No deadline", "Due 2030-01-02"]);
+    expect(pills[0].className).toContain("untoned");
+    // 2030 is far away, so the far band — never red for a date nobody is near.
+    expect(pills[1].className).toContain("teal");
     const quiet = host.querySelectorAll(".project-health .paper-pill.untoned");
     expect([...quiet].map((pill) => pill.textContent)).toContain("0 open tasks");
 

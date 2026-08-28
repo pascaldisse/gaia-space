@@ -13,7 +13,9 @@
 
 .blogs-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(360px, 1.7fr); min-height: 0; gap: 18px; }
 .blogs-list, .blog-detail { min-width: 0; }
-.blogs-filter { display: grid; gap: 8px; margin-bottom: 12px; }
+/* The two list filters moved into the shared action row (they change what you see),
+   so this is a lane inside that row now: no margin, no line of its own. */
+.blogs-filter { display: flex; align-items: center; gap: 8px; margin: 0; }
 
 /* THE KNOWLEDGE CARD, not a bare row. Same measures/radii/tokens as
    `.documents-library-card` in Documents.css — icon tile left, title bold, ONE

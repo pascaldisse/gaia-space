@@ -77,19 +77,21 @@ const menuEntry = (label: string) =>
 const deleteCalls = () => calls.filter(call => call.cmd === "delete_project");
 
 describe("the project list: right-click is the second door", () => {
-  test("the owner's card offers Open and Delete project…", async () => {
+  // THE CARD HAS NO FOOTER, so the acts on a listed project are all in this one menu:
+  // the way in first, then the reversible acts, then the irreversible one, last and red.
+  test("the owner's card offers the way in, the acts, and Delete last", async () => {
     const host = await mount(() => <Projects /> as any);
     rightClick(cardOf(host, "Atlas"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Delete project…"]);
+    expect(menuEntries()).toEqual(["Open", "Set deadline…", "Archive", "Delete project…"]);
     expect(menuEntry("Delete project…")?.classList.contains("danger")).toBe(true);
   });
 
-  test("somebody else's card offers Open only — no disabled delete", async () => {
+  test("somebody else's card offers no delete and no deadline — not a disabled one", async () => {
     const host = await mount(() => <Projects /> as any);
     rightClick(cardOf(host, "Borealis"));
     await settle();
-    expect(menuEntries()).toEqual(["Open"]);
+    expect(menuEntries()).toEqual(["Open", "Archive"]);
     expect(document.querySelector(".context-item.disabled")).toBeNull();
   });
 

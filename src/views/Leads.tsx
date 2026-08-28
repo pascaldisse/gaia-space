@@ -44,8 +44,11 @@ export default function Leads() {
       /* The label carries its own leading space: a chip is `<strong>1</strong>` +
          label, so without it the line reads "1lead" to a screen reader. */
       chips={<Show when={settled() && count() > 0}><Chip value={count()} label={count() === 1 ? " lead" : " leads"} /></Show>}
-      actions={<GhostPill onClick={() => void refetch()} disabled={leads.loading}>Refresh</GhostPill>}
     />
+    {/* Re-reading changes the view, not the leads: far end of the action row. */}
+    <nav class="page-actionbar" aria-label="Leads actions">
+      <span class="actionbar-view-controls"><GhostPill onClick={() => void refetch()} disabled={leads.loading}>Refresh</GhostPill></span>
+    </nav>
     <Show when={leads.loading}><p class="paper-loading" role="status">Loading leads…</p></Show>
     {/* A refusal is NAMED, and it replaces the list — never an empty state, which
         would claim there are no submissions when we simply were not allowed to see them. */}

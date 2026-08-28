@@ -38,14 +38,25 @@ export default function Blogs() {
      are not read as list filters here; only the two list controls are. */
   const blogFiltered=()=>!!term().trim()||!!author();
   const clearBlogFilters=()=>{setTerm("");setAuthor("");};
+  /** While the empty state offers "Write the first article", the row draws no second one. */
+  const showsEmptyPrimary=()=>!posts.loading&&!result().length&&!blogFiltered();
   return <section class="blogs-view">
-    <PageHeader icon="book" title="Blogs" subline="Organization articles, published from drafts"
-      actions={<button type="button" class="primary" onClick={()=>setComposing(true)}>Write article</button>} />
+    <PageHeader icon="book" title="Blogs" subline="Organization articles, published from drafts" />
+    {/* The row: writing left, the two list filters at the far end — they used to be a
+       second lane inside the list column, above its first article. */}
+    <nav class="page-actionbar" aria-label="Blog actions">
+      {/* ONE ACTION, ONE PLACE: the empty state offers "Write the first article" itself. */}
+      <Show when={!showsEmptyPrimary()}>
+        <button type="button" class="primary" onClick={()=>setComposing(true)}>Write article</button>
+      </Show>
+      <span class="actionbar-view-controls blogs-filter">
+        <QuietSearch label="Search articles" placeholder="Search articles" value={term()} onInput={setTerm}/>
+        <PillSelect label="Author" value={author()} onChange={setAuthor}><option value="">All authors</option><For each={profiles()??[]}>{item=><option value={item.id}>{item.display_name}</option>}</For></PillSelect>
+      </span>
+    </nav>
     <Show when={error()}><p class="blogs-error" role="alert">{error()}</p></Show>
     <div class="blogs-layout">
-      <section class="blogs-list"><div class="blogs-filter">
-        <QuietSearch label="Search articles" placeholder="Search articles" value={term()} onInput={setTerm}/>
-        <PillSelect label="Author" value={author()} onChange={setAuthor}><option value="">All authors</option><For each={profiles()??[]}>{item=><option value={item.id}>{item.display_name}</option>}</For></PillSelect></div>
+      <section class="blogs-list">
         <Show when={posts.loading}><p class="hint">Loading articles…</p></Show>{/* Two cases: a filter hides the articles (clear it), or nothing has been
             published (write one — the primary opens the publishing drawer, which
             is the only place the fields live). */}

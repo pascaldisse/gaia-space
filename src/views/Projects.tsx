@@ -3,7 +3,6 @@ import PageHeader, { Chip } from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
-import { GhostPill } from "../components/controls";
 import { Icon } from "../components/Icon";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
@@ -50,6 +49,24 @@ const empty = () => ({ name: "", key: "", description: "", deadline: "" });
 export const KEY_LENGTH = 5;
 export const deriveKey = (name: string, length = KEY_LENGTH) =>
   name.replace(/[^a-zA-Z0-9]/g, "").slice(0, length).toUpperCase();
+
+/** A CARD MUST ALWAYS FIT IN THE WINDOW (the owner's rule, verbatim). A description is
+ *  free text and there is no length the server refuses, so the card refuses instead:
+ *  the note is cut at a WORD boundary and ends in an ellipsis. CSS clamps it to two
+ *  lines as well — the character limit keeps the DOM honest, the clamp keeps a single
+ *  very long word from widening the card. Nothing is lost: the full text is on the
+ *  project itself. */
+export const DESCRIPTION_MAX = 96;
+export const shortDescription = (text: string | null | undefined, max = DESCRIPTION_MAX): string => {
+  const value = (text ?? "").trim();
+  if (value.length <= max) return value;
+  // Cut one character short of the limit so the ellipsis fits INSIDE it, then walk
+  // back to the last space. A word boundary that never comes (one long word) falls
+  // back to the hard cut rather than returning the whole string.
+  const cut = value.slice(0, max - 1);
+  const boundary = cut.lastIndexOf(" ");
+  return `${(boundary > max / 2 ? cut.slice(0, boundary) : cut).trimEnd()}\u2026`;
+};
 
 export default function Projects() {
   const [form, setForm] = createSignal(empty());
@@ -128,7 +145,15 @@ export default function Projects() {
   });
   const unreadCount = (id: string) => unreadCounts()?.get(id) ?? 0;
 
+  /** The card's ONE coloured fact, decided in statusTone and nowhere else: teal beyond a
+   *  week, amber inside it, red today/tomorrow/past, and nothing at all without a date.
+   *  Archived work is finished, so it stays quiet — the same rule the card's mark obeys. */
+  const dueTone = (project: Project) => (project.archived ? "" : bandTone(deadlineBand(project.deadline)));
+
   const live = createMemo(() => (items() ?? []).filter((project) => !project.archived));
+  /** The empty state below carries "New project" itself; while it is on screen the
+   *  action row must not draw a second one (src/views/one-action-one-place.test.tsx). */
+  const showsEmptyPrimary = () => !items.loading && !items()?.length;
   /** The portfolio stays useful after it grows: find by name/key, then narrow to
       projects asking for attention or carrying a live deadline. */
   const visibleProjects = createMemo(() => {
@@ -175,6 +200,9 @@ export default function Projects() {
   // Per-project write state: idle -> saving -> saved | failed, keyed by project id so
   // two rows never share one spinner or one error.
   const [deadlineState, setDeadlineState] = createSignal<Record<string, { status: "saving" | "saved" | "failed"; message?: string }>>({});
+  /** Which card has its deadline editor open. The date field is an ACT, not a fact, so
+   *  it is not drawn until somebody asks for it — through the pill or the menu. */
+  const [editingDeadline, setEditingDeadline] = createSignal<string | null>(null);
   const deadlineStatus = (id: string) => deadlineState()[id];
   const writeDeadline = async (project: Project, next: string | null) => {
     // A date input yields `YYYY-MM-DD` and is stored verbatim: no Date object is
@@ -194,6 +222,8 @@ export default function Projects() {
         await platformApi.updateProjectDeadline(project.id, project.deadline, value, desktopActor);
       await refetch();
       setDeadlineState({ ...deadlineState(), [project.id]: { status: "saved" } });
+      // The act is finished: the field folds away and the card is a card again.
+      setEditingDeadline(null);
     } catch (reason) {
       // The stored value is the truth: reload it so the input never keeps a date the
       // server refused, and say why in the same place the control lives.
@@ -214,8 +244,20 @@ export default function Projects() {
   const [pendingDelete, setPendingDelete] = createSignal<Project | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const ownsProject = (project: Project) => !!actingProfileId() && project.created_by === actingProfileId();
+  /* THE CARD CARRIES NO FOOTER. Archive/Restore and the deadline used to sit on every
+     card as furniture: a way OUT of the project standing beside the way IN, and a bare
+     date field under a card nobody was editing. They are acts on a project, so they live
+     where every other act on a listed project already lives — the right-click menu.
+     Order: the way in, then the acts, then the irreversible one, last and red. */
   const menuItems = (project: Project): ContextMenuItem[] => [
     { label: "Open", onSelect: () => { setProjectId(project.id); navigate(openRoute(project.id)); } },
+    ...(mayEditDeadline(project)
+      ? [
+          { label: project.deadline ? "Change deadline…" : "Set deadline…", onSelect: () => setEditingDeadline(project.id) },
+          ...(project.deadline ? [{ label: "Clear deadline", onSelect: () => void writeDeadline(project, null) }] : []),
+        ]
+      : []),
+    { label: project.archived ? "Restore" : "Archive", onSelect: () => void update(project, { archived: !project.archived }) },
     ...(ownsProject(project)
       ? [{ label: "Delete project…", danger: true, onSelect: () => setPendingDelete(project) }]
       : []),
@@ -265,8 +307,26 @@ export default function Projects() {
       title="Projects"
       subline="The projects that are running, and whether each one is healthy"
       chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>}
-      actions={<button type="button" class="primary" onClick={() => setCreateOpen(true)}>New project</button>}
     />
+    {/* THE ACTION ROW. Creation left, everything that only changes what you see at the
+       far end — the portfolio toolbar used to be a second lane of its own below. */}
+    <nav class="page-actionbar" aria-label="Project actions">
+      {/* ONE ACTION, ONE PLACE: while the empty state offers New project, the row does not. */}
+      <Show when={!showsEmptyPrimary()}>
+        <button type="button" class="primary" onClick={() => setCreateOpen(true)}>New project</button>
+      </Show>
+      <Show when={live().length}>
+        <span class="actionbar-view-controls portfolio-toolbar" aria-label="Project filters">
+          <input class="portfolio-search" type="search" aria-label="Search projects" placeholder="Search projects" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
+          <span class="portfolio-filters" role="group" aria-label="Filter projects">
+            <button type="button" classList={{ active: portfolioFilter() === "all" }} onClick={() => setPortfolioFilter("all")}>All projects</button>
+            <button type="button" classList={{ active: portfolioFilter() === "attention" }} onClick={() => setPortfolioFilter("attention")}>Needs attention</button>
+            <button type="button" classList={{ active: portfolioFilter() === "due" }} onClick={() => setPortfolioFilter("due")}>Due soon</button>
+          </span>
+          <button type="button" class="portfolio-archive-toggle" classList={{ active: showArchived() }} onClick={() => setShowArchived((shown) => !shown)}>{showArchived() ? "Hide archived" : "Show archived"}</button>
+        </span>
+      </Show>
+    </nav>
     <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
     <Show when={createOpen()}>
       <div class="wid-root">
@@ -287,17 +347,6 @@ export default function Projects() {
     </Show>
     <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 
-    <Show when={live().length}>
-      <div class="portfolio-toolbar" aria-label="Project filters">
-        <input class="portfolio-search" type="search" aria-label="Search projects" placeholder="Search projects" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
-        <div class="portfolio-filters" role="group" aria-label="Filter projects">
-          <button type="button" classList={{ active: portfolioFilter() === "all" }} onClick={() => setPortfolioFilter("all")}>All projects</button>
-          <button type="button" classList={{ active: portfolioFilter() === "attention" }} onClick={() => setPortfolioFilter("attention")}>Needs attention</button>
-          <button type="button" classList={{ active: portfolioFilter() === "due" }} onClick={() => setPortfolioFilter("due")}>Due soon</button>
-        </div>
-        <button type="button" class="portfolio-archive-toggle" classList={{ active: showArchived() }} onClick={() => setShowArchived((shown) => !shown)}>{showArchived() ? "Hide archived" : "Show archived"}</button>
-      </div>
-    </Show>
 
     {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty result
         can only be an empty workspace — the only honest offer is creation. */}
@@ -315,7 +364,6 @@ export default function Projects() {
       </Show>
     }>
     <ul class="project-cards"><For each={visibleProjects()}>{project => {
-      const due = () => (project.deadline ? deadlineTone(project.deadline) : undefined);
       return <li classList={{ "project-card": true, archived: project.archived }} onContextMenu={(event) => openMenu(event, project)}>
         {/* THE ROW IS THE LINK. One anchor over the identifying part of the card, so
             a single click opens the project and the keyboard reaches it by tabbing.
@@ -347,7 +395,9 @@ export default function Projects() {
                 gating nothing. Editing it lives in Project settings. */}
             <Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Who is responsible for this project (informational)">Responsible: {leadName(lead())}</span>}</Show>
           </div>
-          <Show when={project.description}><p>{project.description}</p></Show>
+          {/* ONE SHORT NOTE, or none at all — an absent description leaves no empty line
+              and no placeholder. */}
+          <Show when={shortDescription(project.description)}>{note => <p class="project-card-note">{note()}</p>}</Show>
           {/* THE HEALTH LINE. Every chip is one fact and one element; zero carries no
               tone, so a calm project reads calm. */}
           <div class="project-health">
@@ -366,23 +416,40 @@ export default function Projects() {
                 <b>{unreadCount(project.id)}</b> unread
               </span>
             </Show>
-            {/* A deadline earns amber/red only when it is actually near or past — and
-                `deadlineTone` is the single place that decides, never this view. */}
-            <Show when={due()}>{info => (
-              <span class="paper-pill" classList={{ [info().colour || "untoned"]: true }}>
-                Due {project.deadline} · {info().note}
-              </span>
-            )}</Show>
           </div>
         </a>
 
-        {/* A FACT IS NOT AN ACTION: the deadline control and Archive live OUTSIDE the
-            row link, in their own quiet action row. */}
-        <div class="project-deadline">
+        {/* THE DEADLINE IS A PILL, exactly as it is on a task tile (.task-due): one
+            fact, at the card's edge, coloured ONLY by bandTone(deadlineBand(…)) — teal
+            beyond a week, amber inside it, red today/tomorrow/past, and NO colour at all
+            without a date. It sits outside the row link because for somebody who may
+            move it, it is also the way in: a control nested in a link cannot be pressed
+            without navigating. Whoever may not move it gets the same pill as plain fact. */}
+        <span class="project-card-edge">
           <Show
-            when={mayEditDeadline(project)}
-            fallback={<p class="deadline-readonly">Deadline <span>{project.deadline ?? "none"}</span></p>}
+            when={mayEditDeadline(project) && !project.archived}
+            fallback={
+              <span class="project-due" classList={{ [dueTone(project) || "untoned"]: true }}>
+                {project.deadline ? `Due ${project.deadline}` : "No deadline"}
+              </span>
+            }
           >
+            <button
+              type="button"
+              class="project-due editable"
+              classList={{ [dueTone(project) || "untoned"]: true }}
+              aria-label={`${project.deadline ? "Change" : "Set"} deadline for ${project.name}`}
+              aria-expanded={editingDeadline() === project.id}
+              onClick={() => setEditingDeadline(id => (id === project.id ? null : project.id))}
+            >{project.deadline ? `Due ${project.deadline}` : "No deadline"}</button>
+          </Show>
+        </span>
+
+        {/* A FACT IS NOT AN ACTION: the date field appears only once somebody asks for
+            it (the pill, or "Set deadline…" in the card's menu). The write's own status
+            stays where the control was, even after it closes. */}
+        <div class="project-deadline">
+          <Show when={mayEditDeadline(project) && editingDeadline() === project.id}>
             <label>Deadline <input
               type="date"
               aria-label={`Deadline for ${project.name}`}
@@ -398,24 +465,17 @@ export default function Projects() {
                 onClick={() => void writeDeadline(project, null)}
               >Clear</button>
             </Show>
+            <button class="ghost" type="button" onClick={() => setEditingDeadline(null)}>Done</button>
           </Show>
           <Show when={deadlineStatus(project.id)?.status === "saving"}><span class="hint" role="status">Saving deadline…</span></Show>
           <Show when={deadlineStatus(project.id)?.status === "saved"}><span class="hint" role="status">Deadline saved</span></Show>
           <Show when={deadlineStatus(project.id)?.status === "failed"}><span class="error" role="alert">{deadlineStatus(project.id)?.message}</span></Show>
         </div>
-        <div class="project-card-foot">
-          <div class="row-actions">
-            <GhostPill {...linkProps({ view: "Project Workspace", projectId: project.id, tab: "tasks" })}>Tasks</GhostPill>
-            <GhostPill {...linkProps({ view: "Project Workspace", projectId: project.id, tab: "calendar" })}>Calendar</GhostPill>
-            {/* ARCHIVE IS NOT A PEER OF "Tasks". Two ways in and one way to put the
-                project away sat in one row at one weight, so the destructive act was
-                the easiest thing to hit by accident. It keeps its place — last, apart,
-                and quiet — rather than a seat in the navigation. */}
-            <span class="project-card-aside">
-              <GhostPill onClick={() => void update(project, { archived: !project.archived })}>{project.archived ? "Restore" : "Archive"}</GhostPill>
-            </span>
-          </div>
-        </div>
+        {/* NO FOOTER. "Tasks" and "Calendar" were two sub-destinations standing beside
+            the card that IS the way into the project, which turned a card into a
+            navigation bar; both surfaces are one click further in, and nothing can be
+            reached only from here. Archive/Restore moved to the card's menu, where the
+            other acts on a listed project already are. */}
       </li>;
     }}</For></ul>
     </Show>

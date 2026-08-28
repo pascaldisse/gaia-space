@@ -281,12 +281,14 @@ export default function Locations() {
             </Show>
           </>
         }
-        actions={
-          <Show when={!editorOpen() && (locations() ?? []).length > 0}>
-            <button type="button" class="primary" onClick={() => openEditor()}>New location</button>
-          </Show>
-        }
       />
+      {/* Making a location is a creation act: the row, left. It stays hidden while the
+         editor is open, and while the empty state carries the same offer. */}
+      <Show when={!editorOpen() && (locations() ?? []).length > 0}>
+        <nav class="page-actionbar" aria-label="Location actions">
+          <button type="button" class="primary" onClick={() => openEditor()}>New location</button>
+        </nav>
+      </Show>
 
       <Show when={error()}>
         <p class="meeting-error">{error()}</p>

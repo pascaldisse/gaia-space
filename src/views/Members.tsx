@@ -314,8 +314,11 @@ export default function Members() {
         icon="org"
         title="Organization"
         subline="Everyone in this organization, the teams they are in and the roles they hold."
-        actions={
-          <Show when={hasArchived()}>
+      />
+      {/* "Show archived" changes what you SEE: far end of the shared action row. */}
+      <Show when={hasArchived()}>
+        <nav class="page-actionbar" aria-label="Organization actions">
+          <span class="actionbar-view-controls">
             <label class="org-archived-toggle">
               <input
                 type="checkbox"
@@ -326,9 +329,9 @@ export default function Members() {
               />{" "}
               Show archived
             </label>
-          </Show>
-        }
-      />
+          </span>
+        </nav>
+      </Show>
       <Show when={problem()}>
         <p class="org-error" onClick={() => setProblem("")}>
           {problem()}

@@ -161,28 +161,28 @@ export default function Absences() {
         icon="clock"
         title="Time off"
         subline="Who is away, when, and what is still waiting for approval."
-        actions={
-          <>
-            {/* A filter, not an identity: it stays, but as a pill whose value
-                ("All profiles") is its own label — no caption in the header. */}
-            <ProfilePicker
-              label="Show time off for"
-              labelHidden
-              value={filterProfileId()}
-              onChange={setFilterProfileId}
-              allowAll
-            />
-            {/* ONE ACTION, ONE PLACE: while the empty state carries this same act,
-                the header does not draw it a second time. Same rule as the task
-                surfaces (src/views/one-action-one-place.test.tsx). */}
-            <Show when={!showsEmptyPrimary()}>
-              <button class="primary" onClick={openForm}>
-                <Icon name="plus" size={15} /> Record time off
-              </button>
-            </Show>
-          </>
-        }
       />
+      <nav class="page-actionbar" aria-label="Time off actions">
+        {/* ONE ACTION, ONE PLACE: while the empty state carries this same act,
+            the row does not draw it a second time. Same rule as the task
+            surfaces (src/views/one-action-one-place.test.tsx). */}
+        <Show when={!showsEmptyPrimary()}>
+          <button type="button" class="primary" onClick={openForm}>
+            <Icon name="plus" size={15} /> Record time off
+          </button>
+        </Show>
+        {/* A filter, not an identity: it changes whose time off you see, so it sits
+            at the far end of the row as a pill whose value is its own label. */}
+        <span class="actionbar-view-controls">
+          <ProfilePicker
+            label="Show time off for"
+            labelHidden
+            value={filterProfileId()}
+            onChange={setFilterProfileId}
+            allowAll
+          />
+        </span>
+      </nav>
 
       <Show when={message()}>
         <p class="timeoff-error" onClick={() => setMessage("")}>

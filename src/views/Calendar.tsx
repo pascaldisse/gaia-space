@@ -201,7 +201,13 @@ return <section class="calendar-view">
     its label ("Jannes", "All locations"), so no caption floats above a field
     and the row reads like Development's. Names live in `aria-label`. */}
 <PageHeader kicker={scopeName()} icon="calendar" title={scopeProjectId() ? "Project calendar" : "Calendar"}
-subline={scopeProjectId() ? "This project's meetings, deadlines and time off on one grid" : "Every meeting, deadline and absence on one grid"} actions={<>
+subline={scopeProjectId() ? "This project's meetings, deadlines and time off on one grid" : "Every meeting, deadline and absence on one grid"} />
+{/* THE ACTION ROW. New meeting MAKES something, so it leads on the left; every
+    picker only changes whose/which calendar you are looking at, so they sit at
+    the far end together with the view options. */}
+<nav class="page-actionbar" aria-label="Calendar actions">
+<button type="button" class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
+<span class="actionbar-view-controls">
 <ProfilePicker label="Member calendar" labelHidden value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/>
 <PillSelect label="Location calendar" value={targetLocation()} onChange={setTargetLocation}>
 <option value="">All locations</option>
@@ -228,8 +234,8 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <For each={quickKinds}>{kind=><li class={`cal-key ${kind}`}>{kindLabels[kind]}</li>}</For>
 </ul>
 </ViewOptions>
-<button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
-</>}/>
+</span>
+</nav>
 {/* ONE CLUSTER, not two orphans (stage 11, defect 1). The switcher chooses the
     SHAPE of the period and the navigation chooses WHICH period — two halves of
     one question, so they sit on one lane separated by a hairline instead of
