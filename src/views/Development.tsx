@@ -3,6 +3,9 @@ import Issues from "./Issues";
 import { reviewApi, type Review } from "../api/review";
 import { projectId as sessionProject } from "../session";
 import { linkProps } from "../router";
+import PageHeader from "../components/PageHeader";
+import { GhostPill } from "../components/controls";
+import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
 import "./Development.css";
@@ -40,27 +43,41 @@ export default function Development(): JSX.Element {
     (reviews() ?? []).filter((review) => !projectId() || review.project_id === projectId()),
   );
 
+  /* ORDERING (stage 9a): the pills used to render ABOVE the page header, so the
+     page began with a switch and only then said what it was. The reading order is
+     header (kicker · title · chips · actions) → section pills → content. The two
+     ticket sections mount Issues, which owns the header, so the pills are handed
+     DOWN into its `sections` slot instead of being printed before it. */
+  const tabs = () => (
+    <nav class="dev-tabs" aria-label="Development sections">
+      <For each={SECTIONS}>
+        {(entry) => (
+          <button
+            type="button"
+            class="dev-tab"
+            classList={{ active: section() === entry.key }}
+            aria-current={section() === entry.key ? "page" : undefined}
+            onClick={() => setSection(entry.key)}
+          >
+            {entry.label}
+          </button>
+        )}
+      </For>
+    </nav>
+  );
+  const sectionLabel = () => SECTIONS.find((entry) => entry.key === section())!.label;
+
   return (
     <section class="dev-view">
-      {/* Section switch only — the page header itself belongs to the header lane. */}
-      <nav class="dev-tabs" aria-label="Development sections">
-        <For each={SECTIONS}>
-          {(entry) => (
-            <button
-              type="button"
-              class="dev-tab"
-              classList={{ active: section() === entry.key }}
-              aria-current={section() === entry.key ? "page" : undefined}
-              onClick={() => setSection(entry.key)}
-            >
-              {entry.label}
-            </button>
-          )}
-        </For>
-      </nav>
+      <Show when={section() === "tickets"}><Issues sections={tabs()} /></Show>
+      <Show when={section() === "bugs"}><Issues filterTagName="bug" sections={tabs()} /></Show>
 
-      <Show when={section() === "tickets"}><Issues /></Show>
-      <Show when={section() === "bugs"}><Issues filterTagName="bug" /></Show>
+      <Show when={section() === "pull-requests" || section() === "releases"}>
+        {/* These two have no view of their own to bring a header, so this lane
+            supplies one — same shape, same order. */}
+        <PageHeader kicker={projectName(projectId())} title={sectionLabel()} />
+        {tabs()}
+      </Show>
 
       <Show when={section() === "pull-requests"}>
         <div class="dev-section">
@@ -94,10 +111,11 @@ export default function Development(): JSX.Element {
       <Show when={section() === "releases"}>
         <div class="dev-section">
           {/* HONEST EMPTY STATE: there is no release store behind this app. */}
+          {/* The PageHeader above already says "Releases"; saying it twice was the
+              old two-title idiom. */}
           <div class="dev-empty" role="status">
-            <h2>Releases</h2>
             <p>Not available yet — nothing in the workspace records releases. Pipelines run builds; a release is not one of their outputs today.</p>
-            <a class="ghost" {...linkProps({ view: "Pipelines" })}>Open pipelines</a>
+            <GhostPill {...linkProps({ view: "Pipelines" })}>Open pipelines</GhostPill>
           </div>
         </div>
       </Show>

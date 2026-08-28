@@ -68,7 +68,7 @@ test("project tasks filters persisted issues and links to the matching board", a
   dispose = render(() => <ProjectTasks />, host);
   await until(() =>
     host.textContent?.includes("Plan the release") === true &&
-    ((host.querySelector("a.primary") as HTMLAnchorElement | null)
+    ((host.querySelector(".planning-actions a") as HTMLAnchorElement | null)
       ?.getAttribute("href")
       ?.includes("boards") ?? false));
 
@@ -78,8 +78,13 @@ test("project tasks filters persisted issues and links to the matching board", a
   expect(host.textContent).toContain("Review somebody else's work");
   expect(calls.some(call => call.command === "list_project_todos" && call.body.projectId === "p1")).toBe(true);
   expect(host.textContent).toContain("Open board");
-  expect((host.querySelector('.planning-actions label.picker select') as HTMLSelectElement).value).toBe("p1");
-  const board = host.querySelector('a.primary') as HTMLAnchorElement;
+  // Stage 9a moved the markup, not the meaning: the project picker is now a
+  // `.pill-select` (a real <select>, value-as-label, no floating caption) and the
+  // board link is the header's only anchor, demoted from `.primary` to a GhostPill
+  // because "Add task" is this header's one primary. The assertions below are the
+  // same two facts as before — the picker reads p1, the link goes to the board.
+  expect((host.querySelector('.planning-actions .pill-select select') as HTMLSelectElement).value).toBe("p1");
+  const board = host.querySelector('.planning-actions a') as HTMLAnchorElement;
   expect(board.getAttribute("href")).toContain("boards");
   // The tag filter is present and populated from the same resource the view uses.
   const tag = host.querySelector('select[aria-label="Filter by tag"]') as HTMLSelectElement;

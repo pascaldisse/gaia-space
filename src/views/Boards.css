@@ -185,3 +185,50 @@
   .board-column, .add-column { width: 232px; }
   .chip-select select { max-width: 120px; }
 }
+
+/* ── light theme: the board toolbar joins the control language (stage 9a) ────
+   Everything below is scoped to `.theme-space-light`; the dark board keeps the
+   boxed `--ctl-*` chips defined above, untouched.
+
+   The chips KEEP their visible words — "Sprint", "Lane", "Group". This is not
+   an oversight and not an exception to the floating-label sweep: that sweep
+   removes a caption the VALUE already gives you ("Project" above "Demo Project
+   (DEMO)"). Here the value does not give it to you — "No swimlane" and "No
+   grouping" are two different controls that read almost identically, and
+   "Sprint 4" alone does not say it is a filter. A caption that carries meaning
+   the value cannot is a label, not furniture. What changes is the SHAPE: same
+   height, same radius, same soft fill as every other control on the page. */
+.theme-space-light .chip {
+  min-height: var(--pillctl-h);
+  border: 1px solid transparent;
+  border-radius: var(--pillctl-r);
+  background: var(--wash-2);
+  color: var(--ink);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .chip:hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .chip > span { color: var(--muted); font-weight: 620; }
+.theme-space-light .chip > small { background: var(--paper); color: var(--muted); }
+.theme-space-light .chip-select select {
+  height: calc(var(--pillctl-h) - 8px);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .chip-select select:hover { background-color: transparent; }
+/* Round like the rail `+`, not a lozenge. */
+.theme-space-light .chip-icon { width: var(--pillctl-h); color: var(--muted); }
+.theme-space-light .chip-primary,
+.theme-space-light .chip-toggle.active,
+.theme-space-light .chip[aria-expanded="true"] { background: var(--teal-soft); border-color: transparent; color: var(--teal-ink); }
+.theme-space-light .chip-primary:hover { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-ink); }
+.theme-space-light .chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+/* The joined select+`+` pair: only the outer corners stay round. */
+.theme-space-light .chip-group > .chip-select { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.theme-space-light .chip-group > .chip-wrap > .chip-icon { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.theme-space-light .board-tabs { background: var(--wash-2); border-color: transparent; border-radius: var(--pillctl-r); }
+.theme-space-light .board-tabs button { border-radius: var(--pillctl-r); color: var(--muted); font-weight: 650; }
+.theme-space-light .board-tabs button:hover { background: var(--paper); color: var(--ink); }
+.theme-space-light .board-tabs button.active { background: var(--teal-soft); border-color: transparent; color: var(--teal-ink); }

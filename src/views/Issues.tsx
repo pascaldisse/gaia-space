@@ -1,4 +1,4 @@
-import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
 import { platformApi } from "../api/platform";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
@@ -7,6 +7,7 @@ import IssueCreateDrawer from "../components/IssueCreateDrawer";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
 import PageHeader, { Chip } from "../components/PageHeader";
+import { ControlRow, GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
 import "./Issues.css";
@@ -22,8 +23,13 @@ const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOS
  * permanent form column, no permanent empty column.
  *
  * `filterTagName` pins the view to one planning tag (Development's "Bugs" section). If
- * the project has no such tag, the view says so rather than showing every issue. */
-export default function Issues(props: { filterTagName?: string } = {}) {
+ * the project has no such tag, the view says so rather than showing every issue.
+ *
+ * `sections` is a slot, not a second header: Development owns the section pills but
+ * this view owns the PageHeader, and the pills must render BELOW it (stage 9a
+ * ordering fix). Passing them in is the only way to get header-then-pills without
+ * forking the header out of here. */
+export default function Issues(props: { filterTagName?: string; sections?: JSX.Element } = {}) {
   const projectId = sessionProject;
   const [query, setQuery] = createSignal("");
   const [statusFilter, setStatusFilter] = createSignal("");
@@ -139,16 +145,21 @@ const createStatus = async () => {
       title="Tickets"
       chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="tickets" /></Show>}
       actions={<>
-        <ProjectPicker />
-        {/* Header region is the PageHeader lane's; these two entries are only ADDED to
+        {/* The picker's VALUE is its label now — the word "Project" above it was the
+            old idiom and is gone from the screen, not from the accessibility tree. */}
+        <ProjectPicker labelHidden />
+        {/* Header region is the PageHeader lane's; these three entries are only ADDED to
             its actions slot, because the creation column and the status editor column
-            were removed from the body and their acts must stay reachable. */}
-        <button type="button" class="ghost" onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</button>
-        <button type="button" class="ghost" disabled={!issues()?.length} onClick={exportCsv}>Export CSV</button>
-        <a class="ghost" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
+            were removed from the body and their acts must stay reachable. They were
+            reading as bare text links; as GhostPills they read as pressable. */}
+        <GhostPill onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</GhostPill>
+        <GhostPill disabled={!issues()?.length} onClick={exportCsv}>Export CSV</GhostPill>
+        <GhostPill {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</GhostPill>
         <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>
       </>}
     />
+    {/* Header first, THEN the section switch. */}
+    {props.sections}
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     {/* Statuses used to be a permanent column; it is the same editor, on demand. */}
     <Show when={statusEditorOpen()}>
@@ -167,16 +178,18 @@ const createStatus = async () => {
     </Show>
     <div class="issue-layout" classList={{ "with-detail": !!selected() }}>
       <main class="issue-list-pane">
-        <div class="filter-row" aria-label="Ticket filters">
-          <input aria-label="Search tickets" placeholder="Search title or description" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
-          <select aria-label="Filter by status" value={statusFilter()} onChange={event => setStatusFilter(event.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
+        {/* ONE calm line of pills inside the paper card: search, then the four
+            pickers, each labelled by its own current value. */}
+        <ControlRow label="Ticket filters" class="filter-row">
+          <QuietSearch label="Search tickets" placeholder="Search title or description" value={query()} onInput={setQuery} />
+          <PillSelect label="Filter by status" value={statusFilter()} onChange={setStatusFilter}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></PillSelect>
           <Show when={!props.filterTagName}>
-            <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+            <PillSelect label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={setTagFilter}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></PillSelect>
           </Show>
-          <ProfilePicker label="Assignee" value={assigneeFilter()} onChange={setAssigneeFilter} allowAll />
-          <select aria-label="Filter by custom field" value={customFieldFilter()} disabled={!projectId()} onChange={event => { setCustomFieldFilter(event.currentTarget.value); setCustomValueFilter(""); }}><option value="">All custom fields</option><For each={customFields()}>{field => <option value={field.id}>{field.name}</option>}</For></select>
-          <Show when={customFieldFilter()}><input aria-label="Filter custom field value" placeholder="Exact custom value" value={customValueFilter()} onInput={event => setCustomValueFilter(event.currentTarget.value)} /></Show>
-        </div>
+          <ProfilePicker label="Assignee" labelHidden value={assigneeFilter()} onChange={setAssigneeFilter} allowAll />
+          <PillSelect label="Filter by custom field" value={customFieldFilter()} disabled={!projectId()} onChange={value => { setCustomFieldFilter(value); setCustomValueFilter(""); }}><option value="">All custom fields</option><For each={customFields()}>{field => <option value={field.id}>{field.name}</option>}</For></PillSelect>
+          <Show when={customFieldFilter()}><QuietSearch label="Filter custom field value" placeholder="Exact custom value" grow={false} value={customValueFilter()} onInput={setCustomValueFilter} /></Show>
+        </ControlRow>
         <Show when={pinnedTagMissing()}>
           {/* Honest: no such tag in this project, so there is no list to show — not
               "every issue" pretending to be the bug list. */}

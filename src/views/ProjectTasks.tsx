@@ -3,6 +3,7 @@ import PageHeader from "../components/PageHeader";
 import { planningApi, type Issue } from "../api/issues";
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker, ProjectPicker } from "../components/Pickers";
+import { ControlRow, GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import IssueDetail from "./IssueDetail";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
@@ -109,10 +110,12 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   return <section class="planning-view project-tasks-view">
     <PageHeader kicker={project()?.name} title="Work" subline="Shared tasks and tracked tickets" actions={
       <div class="planning-actions">
-        <ProjectPicker value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
+        {/* Value-as-label: the project name IS the picker's caption. */}
+        <ProjectPicker labelHidden value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
         <button type="button" class="primary" onClick={() => { setPane({ kind: "new-task" }); setError(""); }}>Add task</button>
-        <button type="button" class="ghost" onClick={() => { setPane({ kind: "new-issue" }); setError(""); }}>Add ticket</button>
-        <a class="primary" {...linkProps(board())} onClick={openBoard}>Open board</a>
+        <GhostPill onClick={() => { setPane({ kind: "new-issue" }); setError(""); }}>Add ticket</GhostPill>
+        {/* One primary per header: "Add task" is it, so the board link is secondary. */}
+        <GhostPill {...linkProps(board())} onClick={openBoard}>Open board</GhostPill>
       </div>
     } />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
@@ -120,10 +123,10 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>
     <div class="issue-layout project-issue-layout">
       <main class="issue-list-pane">
-        <div class="filter-row" aria-label="Ticket filters">
-          <input aria-label="Search tickets" placeholder="Search tasks and tickets" value={text()} onInput={event => setText(event.currentTarget.value)} />
-          <ProfilePicker label="Assignee" value={assigneeId()} onChange={setAssigneeId} allowAll />
-        </div>
+        <ControlRow label="Ticket filters" class="filter-row">
+          <QuietSearch label="Search tickets" placeholder="Search tasks and tickets" value={text()} onInput={setText} />
+          <ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll />
+        </ControlRow>
         <section class="project-work-group" aria-labelledby="project-task-heading">
           <h2 id="project-task-heading">Tasks <small>{visibleTasks().length}</small></h2>
           <Show when={!profileId()}><p class="hint">Your account profile is still loading; project tasks will appear when it is ready.</p></Show>
@@ -142,10 +145,10 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         </section>
         <section class="project-work-group" aria-labelledby="project-issue-heading">
           <h2 id="project-issue-heading">Tickets <small>{issues()?.length ?? 0}</small></h2>
-          <div class="filter-row project-issue-filters" aria-label="Ticket-only filters">
-            <select aria-label="Filter by status" value={statusId()} onChange={event => setStatusId(event.currentTarget.value)}><option value="">All ticket statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
-            <select aria-label="Filter by tag" value={tagId()} onChange={event => setTagId(event.currentTarget.value)}><option value="">All ticket tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
-          </div>
+          <ControlRow label="Ticket-only filters" class="filter-row project-issue-filters">
+            <PillSelect label="Filter by status" value={statusId()} onChange={setStatusId}><option value="">All ticket statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></PillSelect>
+            <PillSelect label="Filter by tag" value={tagId()} onChange={setTagId}><option value="">All ticket tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></PillSelect>
+          </ControlRow>
           <Show when={issues.loading}><p class="hint">Loading tickets…</p></Show>
           <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No tickets match these filters.</p></Show>
           <ul class="issue-list">

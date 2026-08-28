@@ -175,7 +175,7 @@ const addSprint = async () => {
 };
 const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All tickets";
 return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
-    <PageHeader kicker={projectName(projectId())} title="Ticket boards" subline="Columns map ticket statuses" actions={<ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
+    <PageHeader kicker={projectName(projectId())} title="Ticket boards" subline="Columns map ticket statuses" actions={<ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
     {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
