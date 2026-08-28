@@ -143,10 +143,12 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   moveDocument: (id: string, containerType: string, containerId: string | null, folderId: string | null) =>
     invoke<void>("move_document", { id, containerType, containerId, folderId }),
   archiveDocument: (id: string, archived: boolean) => invoke<void>("archive_document", { id, archived }),
-  /** Gone means gone: the row and every version of it. Always ask first (ConfirmDialog). */
-  deleteDocument: (id: string) => invoke<void>("delete_document", { id }),
+  /** Gone means gone: the row and every version of it. The backend re-checks the
+   *  owner rule; `actorId` is overwritten with the session identity on the server,
+   *  so nobody deletes under another name. Always ask first (ConfirmDialog). */
+  deleteDocument: (id: string, actorId: string) => invoke<void>("delete_document", { id, actorId }),
   /** Refuses a folder that still holds anything — nothing is deleted implicitly. */
-  deleteDocumentFolder: (id: string) => invoke<void>("delete_document_folder", { id }),
+  deleteDocumentFolder: (id: string, actorId: string) => invoke<void>("delete_document_folder", { id, actorId }),
   saveDocument: (id: string, title: string, body: string | null, actor: string | null) =>
     invoke<Document>("save_document", { id, title, body, actor }),
   listDocVersions: (documentId: string) => invoke<DocVersion[]>("list_doc_versions", { documentId }),
@@ -163,6 +165,9 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   publishDocument: (documentId: string, published: boolean, slug: string | null = null) =>
     invoke<DocumentPublication>("publish_document", { documentId, published, slug }),
   getPublicDocument: (slug: string) => invoke<Document | null>("get_public_document", { slug }),
+  /** The owners of a book: only they may end it, and the surface must be able to
+   *  say so before somebody clicks. */
+  listBookOwners: (bookId: string) => invoke<string[]>("list_book_owners", { bookId }),
   listBookAccess: (bookId: string) =>
     invoke<DocumentAccessRecipient[]>("list_book_access", { bookId }),
   updateBookAccess: (bookId: string, permissions: DocumentAccessRecipient[]) =>
@@ -254,5 +259,7 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
   // read-only cross-lane lookups (owned elsewhere, only invoked here)
   listProfiles: () => invoke<{ id: string; username: string; display_name: string; archived?: boolean }[]>("list_profiles"),
   listTeams: () => invoke<{ id: string; name: string; archived?: boolean }[]>("list_teams"),
-  listProjects: () => invoke<{ id: string; name: string; key: string }[]>("list_projects"),
+  /** `created_by` comes along because the library must know who OWNS a project
+   *  before it offers to delete anything inside it. */
+  listProjects: () => invoke<{ id: string; name: string; key: string; created_by: string | null }[]>("list_projects"),
 };

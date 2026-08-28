@@ -8,6 +8,7 @@ import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/Doc
 import ConfirmDialog from "../components/ConfirmDialog";
 import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
 import { Icon } from "../components/Icon";
 import { useDeepLink, linkEntity, linkProps, navigate, route } from "../router";
 import {
@@ -195,6 +196,7 @@ const [bookSearch] = createResource(
 () => ({ bookId: selectedBookId(), query: bookQuery().trim() }),
 ({ bookId, query }) => bookId && query ? documentsApi.searchBookDocuments(bookId, query) : Promise.resolve([]),
 );
+const [bookOwners] = createResource(selectedBookId, (id) => (id ? documentsApi.listBookOwners(id).catch(() => [] as string[]) : Promise.resolve([] as string[])));
 const [bookAccess, { refetch: refetchBookAccess }] = createResource(selectedBookId, (id) =>
 id ? documentsApi.listBookAccess(id) : Promise.resolve([]),
 );
@@ -451,11 +453,11 @@ const [showArchived, setShowArchived] = createSignal(false);
     setDeleting(true);
     try {
       if (target.kind === "document") {
-        await documentsApi.deleteDocument(target.id);
+        await documentsApi.deleteDocument(target.id, actingProfileId() ?? "");
         if (selectedDocumentId() === target.id) setSelectedDocumentId(null);
         await refetchDocuments();
       } else {
-        await documentsApi.deleteDocumentFolder(target.id);
+        await documentsApi.deleteDocumentFolder(target.id, actingProfileId() ?? "");
         if (selectedFolderId() === target.id) setSelectedFolderId(null);
         await refetchFolders();
       }
@@ -469,6 +471,31 @@ const [showArchived, setShowArchived] = createSignal(false);
     }
   }
 
+  /** ── WHO MAY DELETE ───────────────────────────────────────────────────────
+   *  Personal documents belong to their container. A project document belongs to
+   *  its author or to the project's owner. The organization library belongs to
+   *  whoever owns the book — not to everyone who may write in it. The backend
+   *  enforces the same rule; this only decides whether the act is OFFERED, because
+   *  a rule that shows up as a failed click is a rule nobody can read.
+   */
+  const projectOwnerId = (projectId: string | null) =>
+    projectId ? projects()?.find((p) => p.id === projectId)?.created_by ?? null : null;
+  const ownsContainer = () => {
+    const me = actingProfileId();
+    if (!me) return false;
+    if (activeContainer() === "my-docs") return containerId() === me;
+    if (activeContainer() === "project") return projectOwnerId(selectedProjectId()) === me;
+    // A book's owner is the only one who may end it; editors may write, not delete.
+    return (bookOwners() ?? []).includes(me);
+  };
+  const canDeleteDocument = (doc: Document | null) => {
+    const me = actingProfileId();
+    if (!doc || !me) return false;
+    if (doc.container_type === "my-docs") return doc.container_id === me;
+    if (doc.created_by === me) return true;
+    return ownsContainer();
+  };
+
   /** EVERY ACT A CARD HAS, IN ONE MENU. Right-click opens it where the click was;
    *  the card's ⋯ button opens the same list for anyone not reaching for a right
    *  mouse button. Words, not glyphs — the ✕ that archived was read as a delete. */
@@ -477,12 +504,16 @@ const [showArchived, setShowArchived] = createSignal(false);
     { label: "Open", onSelect: () => setSelectedFolderId(folder.id) },
     { label: "Rename…", onSelect: () => startRenameFolder(folder) },
     { label: folder.archived ? "Restore" : "Archive", onSelect: () => void toggleFolderArchived(folder) },
-    { label: "Delete folder…", danger: true, onSelect: () => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name }) },
+    ...(ownsContainer()
+      ? [{ label: "Delete folder…", danger: true, onSelect: () => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name }) }]
+      : []),
   ];
   const documentMenu = (document: Document): ContextMenuItem[] => [
     { label: "Open", onSelect: () => navigate(docRoute(document.id)) },
     { label: document.archived ? "Restore" : "Archive", onSelect: () => void archiveDocumentRow(document) },
-    { label: "Delete document…", danger: true, onSelect: () => setPendingDelete({ kind: "document", id: document.id, name: document.title }) },
+    ...(canDeleteDocument(document)
+      ? [{ label: "Delete document…", danger: true, onSelect: () => setPendingDelete({ kind: "document", id: document.id, name: document.title }) }]
+      : []),
   ];
   const openCardMenu = (event: MouseEvent, items: ContextMenuItem[]) => {
     event.preventDefault();
@@ -1359,6 +1390,38 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             </Show>
         </div>
 
+        {/* THE ONE DELETE, WHERE EVERY SURFACE PUTS IT: top right, beside the thing's
+            own facts. It names what is open — the document you are reading, or the
+            shelf you are standing in — and it is absent for anyone who does not own
+            the library, rather than present and refusing. */}
+        <Show when={selectedDocument() ?? levelFolder()}>
+          <span class="documents-delete-slot">
+            <Show
+              when={selectedDocument()}
+              fallback={
+                <DeleteButton
+                  label={`Delete folder ${levelFolder()?.name ?? ""}`}
+                  canDelete={ownsContainer()}
+                  deniedReason={`Only the owner of ${containerName()} can delete this`}
+                  onRequest={() => {
+                    const folder = levelFolder();
+                    if (folder) setPendingDelete({ kind: "folder", id: folder.id, name: folder.name });
+                  }}
+                />
+              }
+            >
+              {(doc) => (
+                <DeleteButton
+                  label={`Delete document ${doc().title}`}
+                  canDelete={canDeleteDocument(doc())}
+                  deniedReason={`Only the owner of ${containerName()} can delete this`}
+                  onRequest={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
+                />
+              )}
+            </Show>
+          </span>
+        </Show>
+
         {/* A filter, not a scope: it survives the embedded mount. */}
         <label class="show-archived">
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
@@ -1698,14 +1761,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </select>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
-                  </button>
-                  {/* Archive puts a document away; delete ends it. Both are offered, so
-                      nobody deletes because there was no other way to tidy up. */}
-                  <button
-                    class="ghost small danger"
-                    onClick={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
-                  >
-                    delete
                   </button>
                   <Show when={canManageAccess()}>
                     <button class="ghost small" aria-expanded={showSharing()} onClick={() => setShowSharing((open) => !open)}>

@@ -126,6 +126,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The delete button ends the action row; "show archived" follows it, so the row reads
+   left-to-right as: make things · end this thing · change what you see. */
+.container-tabs .documents-delete-slot { margin-left: auto; display: inline-flex; align-items: center; }
+.container-tabs .documents-delete-slot + .show-archived { margin-left: var(--dk-space-xl); }
 .container-tabs .show-archived {
   margin-left: auto;
   display: flex;

@@ -264,8 +264,9 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     navigate({ view: "Documents", entityType: "document", entityId: "d1", containerType: "my-docs", containerId: "me" });
     await settle();
 
-    const trigger = [...host.querySelectorAll("button")].find((b) => b.textContent === "delete") as HTMLButtonElement;
-    expect(trigger).not.toBeUndefined();
+    // The one red button, top right, named after what it ends.
+    const trigger = host.querySelector('button.delete-button[aria-label="Delete document Draft"]') as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
     trigger.click();
     await settle();
 
@@ -381,6 +382,40 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
 
     expect(renamed.length).toBe(1);
     expect(renamed[0].folder).toMatchObject({ id: "f1", name: "Specifications" });
+  });
+
+  // OWNERSHIP IS SHOWN, NOT DISCOVERED BY FAILING. In the organization library only a
+  // book's owner may end anything; everybody else gets no button and a reason.
+  test("the organization library offers delete to its owner only", async () => {
+    setProfileId("me");
+    let owners: string[] = ["someone-else"];
+    globalThis.fetch = (async (url: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      const table: Record<string, unknown> = {
+        list_book_owners: owners,
+        list_document_folders: [
+          { id: "book-1", container_type: "kb", container_id: "book-1", parent_id: null, name: "Handbook", description: null, archived: false, created_at: 0 },
+        ],
+        list_documents: [{ id: "kb1", container_type: "kb", container_id: "book-1", folder_id: null, doc_type: "text", body_format: "text", title: "House rules", body: "", version: 1, archived: false, created_by: "someone-else" }],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+    registerViews(["Documents"]);
+    navigate({ view: "Documents", entityType: "document", entityId: "kb1", containerType: "kb", containerId: "book-1" });
+    await settle();
+
+    // Not an owner, not the author: no red button, and the rule is stated.
+    expect(host.querySelector("button.delete-button")).toBeNull();
+    expect(host.textContent).toContain("Only the owner of Handbook can delete this");
+
+    owners = ["me"];
+    dispose?.(); dispose = undefined;
+    document.body.innerHTML = "";
+    const owned = await mount();
+    navigate({ view: "Documents", entityType: "document", entityId: "kb1", containerType: "kb", containerId: "book-1" });
+    await settle();
+    expect(owned.querySelector("button.delete-button")).not.toBeNull();
   });
 
   // The source (My Documents / organization book / project library) is chosen in the
