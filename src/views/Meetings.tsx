@@ -3,7 +3,10 @@ import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meeti
 import { localInput, meetingDraftError, UI_LOCALE} from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
-import PageHeader from "../components/PageHeader";
+import PageHeader, { Chip } from "../components/PageHeader";
+import { SectionHeading } from "../components/blocks";
+import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { humanError, isWeb, profileId } from "../session";
 import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
@@ -11,6 +14,34 @@ import "./Meetings.css";
 
 // MeetingForm now lives beside the drawer that owns the composer; re-exported
 // shape, same fields, so nothing about the create payload changed.
+
+/** ── DOES MEETINGS DESERVE TO BE ITS OWN SURFACE? YES — AND NOT AS A CALENDAR ──
+ *
+ *  The question is fair, because Calendar already lists meetings and owns the day
+ *  detail and the day composer. Asked honestly: what does this surface do that
+ *  Calendar does not?
+ *
+ *    RSVP / attendance  invite a person, record invited/accepted/declined
+ *    ROOMS              filter by equipment, reserve, resolve booking overlaps
+ *    AVAILABILITY       attendee + room conflicts for a chosen time, suggestions
+ *    SERIES             the RRULE that makes a meeting recurring
+ *    HISTORY            meetings that have already ended
+ *
+ *  None of that is a date on a grid, and none of it fits a day cell. Calendar
+ *  answers WHEN something is; this surface answers WHO IS COMING, WHERE IT SITS,
+ *  and DOES IT REPEAT. So it is not a duplicate — it is the MANAGEMENT surface.
+ *
+ *  It only LOOKED like a duplicate because it presented itself as one: a bare
+ *  `Meetings` title with no subline, and a list card headed `Upcoming meetings`
+ *  above a plain filter box — i.e. a worse second agenda. The restructure below
+ *  changes nothing about what it does and everything about what it says it is:
+ *  the header names attendance/rooms/series as the job, the chips count the
+ *  management work outstanding, and the scope control offers `Upcoming` vs
+ *  `All & history` instead of a lone `Show history` toggle button.
+ *
+ *  Every capability stays reachable: scheduling (`New meeting` -> MeetingDrawer),
+ *  recurrence (drawer + the detail pane's RRULE), RSVP/attendance and rooms (the
+ *  detail pane), history (the scope pill), and `Open calendar` in the header. */
 
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
@@ -57,6 +88,30 @@ export default function Meetings() {
       .filter((meeting) => !needle || [meeting.title, meeting.description, meeting.location, meeting.organizer_id].some((value) => value?.toLocaleLowerCase().includes(needle)))
       .sort((a, b) => a.starts_at - b.starts_at);
   });
+  /* The chips count only what this surface can honestly know from the meetings it
+     already loaded — no extra fetch, no invented metric. Tone follows the law:
+     teal = open/actionable (still to come), amber = due soon (starts today), and
+     `Chip` runs every value through `metricTone`, so a 0 carries no colour. A
+     recurring-series count is a fact rather than a call to act, so it is untoned. */
+  const liveMeetings = createMemo(() => (meetings() ?? []).filter((meeting) => !meeting.archived));
+  const upcomingCount = createMemo(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return liveMeetings().filter((meeting) => meeting.ends_at >= now).length;
+  });
+  const todayCount = createMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const from = Math.floor(start.getTime() / 1000);
+    return liveMeetings().filter((meeting) => meeting.starts_at >= from && meeting.starts_at < from + 86400).length;
+  });
+  const seriesCount = createMemo(() => liveMeetings().filter((meeting) => meeting.rrule).length);
+  /* Which empty state is truthful: a narrowed view that excluded everything is a
+     `no-match` (offer to widen), an unnarrowed empty view is `nothing yet` (offer
+     to create). Offering "create" to someone whose filter simply hid the thing is
+     the failure EmptyState exists to prevent. */
+  const narrowed = () => !!query().trim() || !showHistory();
+  const openComposer = () => { setError(""); setNotice(""); setComposing(true); };
+  const clearFilters = () => { setQuery(""); setShowHistory(true); };
   const setFormField = <K extends keyof MeetingForm>(field: K, value: MeetingForm[K]) => setForm({ ...form(), [field]: value });
   const setMeetingField = <K extends keyof Meeting>(field: K, value: Meeting[K]) => {
     const meeting = selected();
@@ -201,10 +256,19 @@ export default function Meetings() {
   }, () => setSelected(undefined));
 
   return <section class="meetings-view">
-    <PageHeader title="Meetings" actions={<>
-      <a class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</a>
-      <button type="button" class="primary meeting-new" onClick={() => { setError(""); setNotice(""); setComposing(true); }}>New meeting</button>
-    </>} />
+    <PageHeader
+      title="Meetings"
+      subline="Attendance, rooms and recurring series — Calendar owns the day view."
+      chips={<>
+        <Chip value={upcomingCount()} label="Upcoming" tone="teal" />
+        <Chip value={todayCount()} label="Today" tone="amber" />
+        <Chip value={seriesCount()} label="Recurring" />
+      </>}
+      actions={<>
+        <GhostPill class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</GhostPill>
+        <button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>
+      </>}
+    />
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="meeting-notice" role="status">{notice()}</p></Show>
 
@@ -223,15 +287,42 @@ export default function Meetings() {
 
     <div class="meetings-layout">
       <main class="meeting-list" aria-label="Meetings">
-        <div class="meeting-list-head"><div><h2>{showHistory() ? "All meetings" : "Upcoming meetings"}</h2><p>{visibleMeetings().length} visible</p></div><button type="button" onClick={() => setShowHistory(!showHistory())}>{showHistory() ? "Hide history" : "Show history"}</button></div>
-        <input class="meeting-filter" type="search" aria-label="Filter meetings" placeholder="Filter by title, place, or organizer" value={query()} onInput={(event) => setQuery(event.currentTarget.value)}/>
+        {/* The scope is a choice between two named views, so it is a PillSelect, not
+            a `Show history` toggle whose label had to describe its own next state. */}
+        <SectionHeading
+          title={showHistory() ? "All meetings" : "Upcoming meetings"}
+          meta={`${visibleMeetings().length} of ${liveMeetings().length}`}
+          actions={<PillSelect label="Meetings shown" value={showHistory() ? "all" : "upcoming"} onChange={(value) => setShowHistory(value === "all")}>
+            <option value="upcoming">Upcoming</option>
+            <option value="all">All &amp; history</option>
+          </PillSelect>}
+        />
+        <div class="meeting-filter-row">
+          <QuietSearch label="Filter meetings" placeholder="Filter by title, place, or organizer" value={query()} onInput={setQuery} />
+        </div>
         <Show when={meetings.loading}><p class="meeting-empty" role="status">Loading meetings…</p></Show>
-        <Show when={!meetings.loading && !visibleMeetings().length}><p class="meeting-empty">No meetings match this view.</p></Show>
+        <Show when={!meetings.loading && !visibleMeetings().length}>
+          <Show
+            when={liveMeetings().length && narrowed()}
+            fallback={<EmptyState
+              title="No meetings yet"
+              hint="Schedule one to manage its attendance, room and recurrence here."
+              actions={<button type="button" class="primary" onClick={openComposer}>New meeting</button>}
+            />}
+          >
+            <EmptyState
+              variant="no-match"
+              title="No meetings match this view."
+              hint={showHistory() ? "Try a different search term." : "Past meetings are hidden — widen the view to include history."}
+              actions={<GhostPill onClick={clearFilters}>Clear filters</GhostPill>}
+            />
+          </Show>
+        </Show>
         <div class="meeting-rows"><For each={visibleMeetings()}>{(meeting) => <button type="button" classList={{ "meeting-row": true, active: selected()?.id === meeting.id }} onClick={() => selectMeeting(meeting)}><strong>{meeting.title}</strong><time datetime={new Date(meeting.starts_at * 1000).toISOString()}>{displayDate(meeting.starts_at)}</time><span>{meeting.location || "No location"} · {recurrenceLabel(meeting.rrule)}</span></button>}</For></div>
       </main>
 
       <aside class="meeting-detail" aria-label="Meeting details">
-        <Show when={selected()} fallback={<div class="meeting-empty"><h2>Meeting details</h2><p>Select a meeting to edit it, manage RSVPs, or open it on Calendar.</p></div>}>
+        <Show when={selected()} fallback={<EmptyState title="No meeting selected" hint="Pick a meeting to manage its attendance, room booking and recurrence." />}>
           {(meeting) => <>
             <div class="detail-actions"><a class="meeting-permalink" {...linkProps({ view: "Calendar", entityType: "meeting", entityId: meeting().id })}>Open on calendar</a><Show when={meeting().channel_id} fallback={<button type="button" onClick={async () => { try { const channel_id = await meetingsApi.attachChannel(meeting().id); setSelected({ ...meeting(), channel_id }); await refetch(); } catch (reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({ view: "Chat", entityType: "channel", entityId: meeting().channel_id! })}>Open discussion</a></Show><button type="button" onClick={save}>Save</button><button type="button" class="danger" onClick={archive}>Archive</button></div>
             <label>Title<input class="meeting-title" value={meeting().title} onInput={(event) => setMeetingField("title", event.currentTarget.value)}/></label>
