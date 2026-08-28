@@ -7,7 +7,17 @@
    Shared by My tasks, Team tasks and a project's task list. Nothing in this file
    is scoped to a theme: colour comes from tokens that both themes define. */
 
+/* The action row closes the introduction, so it carries the page's one hairline and
+   the breathing room the content needs under it. */
+/* Doubled class: `.documents-actionbar` (loaded later) zeroes the padding, and this
+   row needs room under it because it carries the page's one line. */
+.task-actionbar.task-actionbar {
+  padding: 0 0 var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline) solid var(--dk-line);
+  margin-bottom: var(--view-head-gap, 22px);
+}
 .task-board { width: 100%; display: grid; gap: var(--dk-space-sm); }
+.task-board > .task-board-head { margin-bottom: var(--dk-space-sm); }
 
 .task-board-head { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--dk-space-lg); }
 .task-board-icon {

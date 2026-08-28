@@ -8,9 +8,30 @@
 
    Structure only, no decoration: no icon lozenge, no explanatory paragraph. */
 
+/* ── THE INTRODUCTION ENDS IN A LINE ─────────────────────────────────────────
+   Every surface now names itself: mark, title, one sentence. That block is the
+   page's introduction, and it ends where the content begins — Knowledge drew that
+   hairline first and it is the reason its top reads calmly instead of stacking four
+   things on top of each other.
+   ONE line per page, never two: when an action row follows the header immediately
+   (Knowledge's four acts, My tasks' New task), the row belongs to the introduction,
+   so the line moves down to IT and the header keeps none. */
 .page-header {
   margin-bottom: var(--view-head-gap, 22px);
+  padding-bottom: var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline, 1px) solid var(--dk-line, var(--line, #e5ddd3));
 }
+.page-header:has(+ .container-tabs),
+.page-header:has(+ .documents-actionbar),
+.page-header:has(+ .task-actionbar) {
+  margin-bottom: 0;
+  /* The row is part of the introduction, but it is not glued to the sentence above
+     it: the gap here is the same rhythm the header keeps from any other content. */
+  padding-bottom: var(--view-head-gap, 22px);
+  border-bottom: 0;
+}
+/* An embedded header is a label inside somebody else's page, not an introduction. */
+.page-header.embedded { padding-bottom: 0; border-bottom: 0; }
 
 /* Some view roots deliberately carry no padding — they scroll their own body and
    each block pads itself. Their old bespoke header carried that inset; the shared
