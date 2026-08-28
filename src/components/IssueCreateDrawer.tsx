@@ -80,7 +80,11 @@ export default function IssueCreateDrawer(props: {
             <For each={props.statuses}>{(status) => <option value={status.id}>{status.name}</option>}</For>
           </select>
         </label>
-        <div class="wid-field"><ProfilePicker label="Assignee" value={assigneeId()} onChange={setAssigneeId} allowAll /></div>
+        {/* A DRAWER IS A FORM, not a filter row: here a visible caption is correct
+            and stays. What was wrong was WHICH caption — the picker printed its own,
+            in the picker's voice, next to five fields captioned in the form's voice.
+            So the form supplies the caption and the control goes silent. */}
+        <div class="wid-field"><span>Assignee</span><ProfilePicker label="Assignee" labelHidden value={assigneeId()} onChange={setAssigneeId} allowAll /></div>
         <label class="wid-field"><span>Due date</span>
           <input class="wid-input" type="date" aria-label="Due date" value={dueDate()} onInput={(event) => setDueDate(event.currentTarget.value)} />
         </label>
