@@ -328,6 +328,16 @@ const DIRECTORY_VERBS: Record<string, string> = {
   "role.changed": "changed role",
 };
 
+/** THE ACTOR CONVENTION (mirrored in `src-tauri/src/events.rs::actor_body`):
+ *  the notification store has no actor column, so an emitter that knows who
+ *  acted writes `by <name>` or `by <name> · <context>` into the body. Anything
+ *  else is left alone — a name is read, never guessed out of free text. */
+export function readActor(body: string | null): { actor?: string; detail?: string } {
+  const match = /^by ([^·]+?)(?:\s·\s(.*))?$/.exec((body ?? "").trim());
+  if (!match) return { detail: body ?? undefined };
+  return { actor: match[1].trim(), detail: match[2]?.trim() || undefined };
+}
+
 export function buildOrganisation(sources: AttentionSources): OrganisationEvent[] {
   const events: OrganisationEvent[] = [];
 
@@ -335,15 +345,15 @@ export function buildOrganisation(sources: AttentionSources): OrganisationEvent[
     const type = notification.event_type.trim().toLowerCase();
     const shape = ACTIVITY_VERBS[type];
     if (!shape) continue;
+    const { actor, detail } = readActor(notification.body);
     events.push({
       id: `activity:${notification.id}`,
       at: notification.created_at,
-      // The notification store keeps no actor column; the body carries who,
-      // when the emitter wrote one. Never invent a name.
-      actor: "Someone",
+      // "Someone" is the honest answer when the emitter recorded no actor.
+      actor: actor ?? "Someone",
       verb: shape.verb,
       object: trimTitle(shape.object(notification), type),
-      detail: notification.body ?? undefined,
+      detail,
       route: routeForAnchor(notification.entity_type, notification.entity_id),
       anchor:
         notification.entity_type && notification.entity_id

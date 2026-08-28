@@ -5,6 +5,7 @@ import {
   countNeedsYou,
   emptySources,
   isOrganisationEvent,
+  readActor,
   type AttentionSources,
 } from "./attention";
 import type { ChannelSummary, MentionView } from "./api/chat";
@@ -151,5 +152,35 @@ describe("the organisation feed", () => {
     expect(isOrganisationEvent("todo.completed")).toBe(true);
     expect(isOrganisationEvent("project.created")).toBe(true);
     expect(isOrganisationEvent("mention.created")).toBe(false);
+  });
+});
+
+describe("the actor convention", () => {
+  test("an emitted actor line is read, never guessed", () => {
+    expect(readActor("by Ada Lovelace · Orbital")).toEqual({ actor: "Ada Lovelace", detail: "Orbital" });
+    expect(readActor("by Ada Lovelace")).toEqual({ actor: "Ada Lovelace", detail: undefined });
+  });
+  test("free text stays free text: no actor is invented", () => {
+    expect(readActor("Fixes the login crash")).toEqual({ detail: "Fixes the login crash" });
+    expect(readActor(null)).toEqual({ detail: undefined });
+  });
+  test("the feed names the person the emitter recorded", () => {
+    const [event] = buildOrganisation({
+      ...emptySources(ME),
+      notifications: [
+        {
+          id: "n",
+          recipient_id: ME,
+          event_type: "todo.completed",
+          title: "Prepare the review",
+          body: "by GAIA Organization · Demo Project",
+          entity_type: "todo",
+          entity_id: "t1",
+          created_at: 10,
+          read_at: null,
+        },
+      ],
+    });
+    expect(event).toMatchObject({ actor: "GAIA Organization", verb: "completed a task", object: "Prepare the review", detail: "Demo Project" });
   });
 });
