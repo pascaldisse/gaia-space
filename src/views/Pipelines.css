@@ -14,6 +14,16 @@
 .pipelines-view button.ghost { background: transparent; }
 .pipelines-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
 .pipelines-view button.danger { color: var(--status-danger-ink); border-color: var(--status-danger-ink); }
+/* In the light theme a control at rest is a SOFT SHAPE, not a box: a red ring
+   drawn permanently around 'Delete script' reads as an error on the page, not
+   as a destructive action waiting to be chosen. The red stays where it belongs
+   — in the ink, and in the fill once you are actually touching the control. */
+.theme-space-light .pipelines-view .ghost-pill.danger { border-color: transparent; color: var(--red-ink, var(--status-danger-ink)); }
+.theme-space-light .pipelines-view .ghost-pill.danger:hover:not(:disabled) { background: var(--red-soft, var(--status-danger-bg)); }
+/* The section pills come from Development.css; this view only has to stop its
+   own blanket `button` rule from repainting them. */
+.pipelines-view .dev-tab { background: none; }
+.pipelines-tabs { margin: 0 0 4px; }
 .pipelines-view button:disabled { opacity: 0.6; cursor: default; }
 
 .pipelines-error { margin-top: 12px; background: var(--status-danger-bg); border: 1px solid var(--status-danger-ink); color: var(--status-danger-ink); padding: 8px 12px; border-radius: 6px; cursor: pointer; }

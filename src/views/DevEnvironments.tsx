@@ -3,6 +3,10 @@ import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
+import EmptyState from "../components/EmptyState";
+import { GhostPill, IconButton, PillSelect } from "../components/controls";
+import "./operatorForm.css";
+import "./DevEnvironments.css";
 
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const minutesAgo = (at: number) => Math.max(0, Math.round(Date.now() / 1000 - at) / 60);
@@ -60,41 +64,55 @@ const [poolTarget, setPoolTarget] = createSignal(0);
 
   return (
     <div class="view dev-environments">
-      <PageHeader title="Dev environments" />
-      <header class="view-header">
-        <select value={projectId()} onChange={(e) => setProjectId(e.currentTarget.value)}>
-          <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
-        <button class="ghost small" onClick={() => run(() => devenvApi.sweepIdle())}>
-          Hibernate idle
-        </button>
-        <button
-          class="ghost small"
-          onClick={() => {
-            const pid = projectId();
-            const me = actor();
-            if (pid && me) run(() => devenvApi.claimStandby(pid, me));
-          }}
-        >
-          Claim standby
-        </button>
-        <button
-          class="ghost small"
-          onClick={() => {
-            const pid = projectId();
-            if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
-          }}
-        >
-          Refill standby
-        </button>
-      </header>
+      {/* THE HAND-ROLLED HEADER IS GONE. A <header class="view-header"> sitting
+          under a PageHeader is a second header on one screen: the project picker
+          and the three pool actions belong ON the page header's own action line,
+          which is where every other view in the app puts them. */}
+      <PageHeader
+        title="Dev environments"
+        chips={
+          <PillSelect label="Project" value={projectId()} onChange={setProjectId}>
+            <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+          </PillSelect>
+        }
+        actions={<>
+          <GhostPill onClick={() => run(() => devenvApi.sweepIdle())}>Hibernate idle</GhostPill>
+          <GhostPill
+            onClick={() => {
+              const pid = projectId();
+              const me = actor();
+              if (pid && me) run(() => devenvApi.claimStandby(pid, me));
+            }}
+          >
+            Claim standby
+          </GhostPill>
+          <GhostPill
+            onClick={() => {
+              const pid = projectId();
+              if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
+            }}
+          >
+            Refill standby
+          </GhostPill>
+        </>}
+      />
 
       <Show when={error()}>
         <p class="error">{error()}</p>
       </Show>
 
       <ul class="devenv-list">
-        <For each={envs()} fallback={<li class="hint">No dev environments in this project.</li>}>
+        {/* A page-filling panel, so a real empty state. The create form is the
+            block below, so the action puts the cursor in it. */}
+        <For each={envs()} fallback={
+          <li class="devenv-empty">
+            <EmptyState
+              title="No dev environments in this project"
+              hint="An environment is a running workspace with your IDE attached. It hibernates on its own when it goes quiet."
+              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.dev-environments input[aria-label="Environment name"]')?.focus()}>Create an environment</button>}
+            />
+          </li>
+        }>
           {(env) => (
             <li>
               <strong>{env.name}</strong>
@@ -106,49 +124,58 @@ const [poolTarget, setPoolTarget] = createSignal(0);
               <Show when={env.persisted_home}>
                 <span class="hint">preserved: {env.persisted_home} + {env.persisted_worktree}</span>
               </Show>
-              <button class="ghost small" onClick={() => run(() => devenvApi.touch(env.id))}>
+              <GhostPill class="small" onClick={() => run(() => devenvApi.touch(env.id))}>
                 Activity
-              </button>
+              </GhostPill>
               <Show when={env.state === "RUNNING" || env.state === "STARTING"}>
-                <button class="ghost small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
                   Hibernate
-                </button>
+                </GhostPill>
               </Show>
               <Show when={env.state === "HIBERNATED"}>
-                <button class="ghost small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
                   Resume
-                </button>
+                </GhostPill>
               </Show>
-              <button class="ghost small" onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
+              {/* A round × with no accessible name is a button nobody can read.
+                  IconButton makes the name mandatory. */}
+              <IconButton label={`Delete ${env.name}`} onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
                 ×
-              </button>
+              </IconButton>
             </li>
           )}
         </For>
       </ul>
 
-      <form class="new-rule-form" onSubmit={create}>
-        <input placeholder="environment name" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
-        <input
-          type="number"
-          min="1"
-          value={idleTimeout()}
-          onInput={(e) => setIdleTimeout(Number(e.currentTarget.value))}
-        />
-        <label>
-          <input type="checkbox" checked={standby()} onChange={(e) => setStandby(e.currentTarget.checked)} /> standby
-          pool
+      {/* Stays on the surface: operator tool (L3 relaxed, L4 in full). */}
+      <form class="new-rule-form op-form" onSubmit={create}>
+        <input class="op-input op-grow" aria-label="Environment name" placeholder="Environment name" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
+        {/* A bare number box said nothing about what it counted. It is minutes,
+            so it says minutes — the one place a caption earns its line. */}
+        <label class="op-field">
+          <span>Idle timeout (min)</span>
+          <input
+            class="op-input op-narrow"
+            type="number"
+            min="1"
+            value={idleTimeout()}
+            onInput={(e) => setIdleTimeout(Number(e.currentTarget.value))}
+          />
         </label>
-        <input
-          type="number"
-          min="0"
-          placeholder="standby target"
-          value={poolTarget()}
-          onInput={(e) => setPoolTarget(Number(e.currentTarget.value))}
-        />
-        <button
-          type="button"
-          class="ghost"
+        <label class="devenv-standby">
+          <input type="checkbox" checked={standby()} onChange={(e) => setStandby(e.currentTarget.checked)} /> Standby pool
+        </label>
+        <label class="op-field">
+          <span>Standby target</span>
+          <input
+            class="op-input op-narrow"
+            type="number"
+            min="0"
+            value={poolTarget()}
+            onInput={(e) => setPoolTarget(Number(e.currentTarget.value))}
+          />
+        </label>
+        <GhostPill
           onClick={() => {
             const pid = projectId();
             if (pid)
@@ -161,8 +188,10 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           }}
         >
           Set pool target
-        </button>
-        <button class="ghost">Create</button>
+        </GhostPill>
+        {/* Creating the environment is the point of this form, so it is the
+            primary, not one more grey pill among four. */}
+        <button class="primary" type="submit">Create environment</button>
       </form>
     </div>
   );

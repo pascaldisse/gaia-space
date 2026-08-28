@@ -1,0 +1,34 @@
+/* Dev environments had NO stylesheet of its own. It was borrowing `.view`,
+ * `.view-header` and — by accident, only because some other view happened to
+ * import Reviews.css first — `.new-rule-form`. A view whose layout depends on
+ * another view's import order is one refactor away from falling apart, so the
+ * handful of rules it actually needs live here now.
+ *
+ * Structure is UNSCOPED (the dark layouts need the same list and the same form
+ * line); only colour is scoped to `.theme-space-light`.
+ */
+
+.dev-environments { height: 100%; overflow: auto; padding: var(--view-pad-y, 24px) var(--view-pad-x, 30px) var(--view-pad-bottom, 60px); }
+
+.devenv-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 4px; }
+.devenv-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; }
+/* The empty state is a panel answer, not a row: it must not inherit the row's
+   flex line, or the dashed frame collapses to the height of one word. */
+.devenv-list > li.devenv-empty { display: block; padding: 0; }
+
+.devenv-state { font-size: 11px; font-weight: 680; letter-spacing: .04em; text-transform: uppercase; }
+
+.devenv-standby { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+
+.new-rule-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 6px; }
+
+/* ── light theme colour ──────────────────────────────────────────────────── */
+.theme-space-light .devenv-list > li:not(.devenv-empty) { border-top: 1px solid var(--line); }
+.theme-space-light .devenv-list > li:first-child { border-top: 0; }
+.theme-space-light .devenv-list > li strong { color: var(--ink); font-weight: 710; }
+.theme-space-light .devenv-list .hint { color: var(--muted); font-size: 12.5px; }
+/* Colour law: a RUNNING environment is open work (teal); HIBERNATED is finished
+   for now and goes quiet (neutral). Nothing here is critical, so nothing is red. */
+.theme-space-light .devenv-state { color: var(--muted); }
+.theme-space-light .devenv-running, .theme-space-light .devenv-starting { color: var(--teal-ink); }
+.theme-space-light .devenv-standby { color: var(--ink); }
