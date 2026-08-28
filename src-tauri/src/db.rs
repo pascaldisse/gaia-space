@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 133;
+pub const SCHEMA_VERSION: i64 = 134;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -992,6 +992,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
         tx.execute_batch(SCHEMA_V109)?;
     }
+    // V134: a channel's Notes & Decisions log. A LOG, not a document: rows are appended,
+    // never silently rewritten, and an owner's edit is stamped in `edited_at` so history
+    // stays readable. The attachment is a REFERENCE to an existing document, not a second
+    // blob store — see `channel_notes.rs` for why. Table-guarded like every additive rung.
+    if version < 134
+        && table_exists(&tx, "channels")?
+        && table_exists(&tx, "projects")?
+        && table_exists(&tx, "profiles")?
+        && table_exists(&tx, "documents")?
+    {
+        tx.execute_batch(SCHEMA_V134)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1223,6 +1235,33 @@ CREATE TABLE IF NOT EXISTS document_discussions (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS document_discussions_meeting ON document_discussions(meeting_id);
+"#;
+/// V134: the channel Notes & Decisions log.
+///
+/// `project_id` is stored, not derived, because authorization reads it on every row and a
+/// join to `channels` on each read would make the scope depend on a mutable column.
+/// The anchor keeps the both-or-neither CHECK the todos table already uses, so a note born
+/// from a message can never lose half its back-link.
+/// `attachment_document_id` is ON DELETE SET NULL: deleting the document must not delete
+/// the decision that referenced it — the log outlives its attachments.
+pub(crate) const SCHEMA_V134: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_notes (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('decision','status')),
+  body TEXT NOT NULL,
+  author_id TEXT NOT NULL REFERENCES profiles(id),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  edited_at INTEGER,
+  attachment_document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  source_entity_type TEXT,
+  source_entity_id TEXT,
+  CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS channel_notes_channel_created ON channel_notes(channel_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS channel_notes_project ON channel_notes(project_id);
 "#;
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
@@ -2342,7 +2381,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 133);
+        assert_eq!(SCHEMA_VERSION, 134);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)

@@ -21,6 +21,8 @@ pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod channel_feeds;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod channel_notes;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chat_links;
@@ -558,6 +560,10 @@ pub fn run() {
             personal::postpone_todo,
             personal::convert_todo_to_issue,
             personal::delete_todo,
+            channel_notes::list_channel_notes,
+            channel_notes::create_channel_note,
+            channel_notes::update_channel_note,
+            channel_notes::delete_channel_note,
             personal::list_absences,
             personal::create_absence,
             personal::update_absence,
