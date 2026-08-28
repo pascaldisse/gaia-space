@@ -60,7 +60,7 @@ const doc = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("documents navigation", () => {
-  test("there are two tabs, and one picker covers both projects and knowledge-base books", async () => {
+  test("Project Docs is one combined project/library picker", async () => {
     setProfileId("me");
     serve({
       list_projects: [{ id: "p1", name: "Orbital", key: "ORB" }],
@@ -72,18 +72,16 @@ describe("documents navigation", () => {
     const host = await mount();
 
     const tabs = Array.from(host.querySelectorAll(".container-tab")).map((a) => a.textContent);
-    expect(tabs).toEqual(["My Documents", "Project Docs"]);
-    expect(host.textContent).not.toContain("Knowledge Base");
+    expect(tabs).toEqual(["My Documents"]);
 
-    // Switching to Project Docs offers projects and books in the same control.
-    registerViews(["Documents"]);
-    navigate({ view: "Documents", containerType: "project", containerId: "p1" });
-    await settle();
-    const picker = host.querySelector('select[aria-label="Documents source"]') as HTMLSelectElement;
+    // Project Docs itself is the picker: no second adjacent control is needed.
+    const picker = host.querySelector('select[aria-label="Project Docs"]') as HTMLSelectElement;
     expect(picker).not.toBeNull();
     expect(Array.from(picker.options).map((option) => option.value)).toEqual(["project:p1", "kb:book-1"]);
+    expect(Array.from(picker.options).map((option) => option.textContent))
+      .toEqual(["Project Docs · Orbital", "Organization Library · Handbook"]);
     expect(Array.from(picker.querySelectorAll("optgroup")).map((g) => g.label))
-      .toEqual(["Projects", "Knowledge base"]);
+      .toEqual(["Projects", "Organization library"]);
   });
 
   test("favourites appear in My Documents and keep pointing at their own container", async () => {

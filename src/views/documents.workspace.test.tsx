@@ -182,17 +182,19 @@ test("the folder tree is keyboard-operable and announces its expansion state", a
     expect(item.getAttribute("aria-selected")).toBe("true");
   });
 
-  // Two homes, not three: yours, and the ones a project owns (books included, chosen in
-  // the source picker). The kb container still exists in storage and in the URL.
-  test("both containers are presented as canonical anchors", async () => {
+  // My Documents remains an anchor; Project Docs is its own combined picker (books
+  // included), so the selection happens in one place instead of two.
+  test("Project Docs is presented as the combined source picker", async () => {
     setProfileId("me");
     serve({ list_document_folders: { ok: true, value: [] }, list_documents: { ok: true, value: [] } });
     const host = await mount();
 
     const tabs = [...host.querySelectorAll("a.container-tab")];
-    expect(tabs.map((a) => a.textContent)).toEqual(["My Documents", "Project Docs"]);
-    // Navigation is real hrefs, never clickable divs (SPEC H8).
-    for (const a of tabs) expect(a.getAttribute("href")).toMatch(/\/documents\/(my-docs|project|kb)/);
+    expect(tabs.map((a) => a.textContent)).toEqual(["My Documents"]);
+    // Project Docs is a real native select, retaining keyboard access and the
+    // platform picker while combining source and project selection.
+    expect(host.querySelector('select[aria-label="Project Docs"]')).not.toBeNull();
+    expect(tabs[0]?.getAttribute("href")).toMatch(/\/documents\/my-docs/);
   });
 
   // In KB the book row is itself the root of the tree, so an article filed directly in

@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import { Resizer, paneWidth } from "../components/Resizer";
+import { PillSelect } from "../components/controls";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
 import {
@@ -33,12 +34,6 @@ import { UI_LOCALE } from "../calendar";
 // choice of *source* inside Project Docs (books are org-wide project-shaped shelves).
 // The storage containers are unchanged — `kb` is still its own container_type — this
 // is purely the navigation the person sees.
-const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
-  { key: "my-docs", label: "My Documents" },
-  { key: "project", label: "Project Docs" },
-];
-const tabFor = (container: ContainerType): ContainerType =>
-  container === "my-docs" ? "my-docs" : "project";
 
 function when(ts: number | null) {
   if (!ts) return "";
@@ -52,6 +47,7 @@ function when(ts: number | null) {
 
 export default function Documents(props: { container?: ContainerType; containerId?: string } = {}) {
   const [error, setError] = createSignal<string | null>(null);
+  const [importOpen, setImportOpen] = createSignal(false);
   /** ── EMBEDDED MEANS THE SCOPE IS ALREADY ANSWERED ────────────────────────
    *
    *  ChannelWorkspace mounts this view for a channel's "Files & Links" tab and
@@ -184,7 +180,11 @@ export default function Documents(props: { container?: ContainerType; containerI
     if (rootId && rootId !== previousRootId) void Promise.all([refetchFolders(), refetchDocuments()]);
     return rootId;
   }, null);
-  const books = () => (allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
+  // Reading an errored resource THROWS in Solid. The source picker is now always
+  // mounted (it is the Project Docs control itself), so this reader must survive a
+  // failed fetch — otherwise the whole view dies and the error-bar never renders (H7).
+  const books = () =>
+    (allFolders.error ? [] : allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
   createEffect(() => {
     if (activeContainer() === "kb" && !selectedBookId() && books().length) setSelectedBookId(books()[0].id);
   });
@@ -217,6 +217,12 @@ const [showArchived, setShowArchived] = createSignal(false);
     return e ? `Documents could not be loaded: ${String(e)}` : null;
   };
   const isEmpty = () => !treeLoading() && !loadFailure() && displayFolders().length === 0 && scopedDocuments().length === 0;
+
+  /** Reading an errored resource throws in Solid. The library canvas must survive a
+   *  failed fetch, so it asks through this gate: no documents while loading or broken,
+   *  which keeps the error-bar the visible state (SPEC H7). */
+  const safeDocuments = () => (treeLoading() || loadFailure() ? [] : scopedDocuments());
+  const rootLibrary = () => safeDocuments().filter((d) => d.folder_id === rootParentId());
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -1211,61 +1217,48 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
          shell owns the one "Acting as" control; this was the second one, and on the
          standalone route it was the last bare select left here. The acting profile
          is still switchable — in the shell — and this view follows it. */}
-      <PageHeader title="Documents" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} />
+      <PageHeader title="Knowledge" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} />
 
       <nav class="container-tabs">
         {/* Every scope control below is wrapped, not disabled: see `embedded`. */}
         <Show when={!embedded()}>
-        <For each={CONTAINER_TABS}>
-          {(t) => (
-            <a
-              class="container-tab"
-              classList={{ active: tabFor(activeContainer()) === t.key }}
-              {...linkProps(containerRoute(t.key))}
-              onClick={(event) => {
-                linkProps(containerRoute(t.key)).onClick(event);
-                if (event.defaultPrevented) {
-                  setSelectedFolderId(null);
-                  setSelectedDocumentId(null);
-                }
-              }}
-            >
-              {t.label}
-            </a>
-          )}
-        </For>
+        <a
+          class="container-tab"
+          classList={{ active: activeContainer() === "my-docs" }}
+          {...linkProps(containerRoute("my-docs"))}
+          onClick={(event) => {
+            linkProps(containerRoute("my-docs")).onClick(event);
+            if (event.defaultPrevented) { setSelectedFolderId(null); setSelectedDocumentId(null); }
+          }}
+        >
+          My Documents
+        </a>
 
-        {/* One picker for the whole "somewhere other than mine" half: projects and
-            knowledge-base books in a single list, because to the reader they are the
-            same question — *whose docs am I looking at?* */}
-        <Show when={tabFor(activeContainer()) === "project"}>
-          <select
-            aria-label="Documents source"
-            value={`${activeContainer()}:${activeContainer() === "kb" ? selectedBookId() ?? "" : selectedProjectId() ?? ""}`}
-            onChange={(e) => {
-              const [kind, ...rest] = e.currentTarget.value.split(":");
-              const id = rest.join(":") || null;
-              if (kind === "kb") {
-                setActiveContainer("kb");
-                setSelectedBookId(id);
-                linkContainer("kb", id ?? undefined);
-              } else {
-                setActiveContainer("project");
-                setSelectedProjectId(id);
-                linkContainer("project", id ?? undefined);
-              }
-              setSelectedFolderId(null);
-              setSelectedDocumentId(null);
-            }}
-          >
-            <optgroup label="Projects">
-              <For each={projects()}>{(p) => <option value={`project:${p.id}`}>{p.name}</option>}</For>
-            </optgroup>
-            <optgroup label="Knowledge base">
-              <For each={books()}>{(b) => <option value={`kb:${b.id}`}>{b.name}</option>}</For>
-            </optgroup>
-          </select>
-        </Show>
+        {/* One combined control answers both questions at once: clicking Project Docs
+            opens the project/library choice, rather than making someone first choose
+            a tab and then reach for a second picker beside it. */}
+        <PillSelect
+          class="project-docs-picker"
+          label="Project Docs"
+          value={`${activeContainer() === "kb" ? "kb" : "project"}:${activeContainer() === "kb" ? selectedBookId() ?? "" : selectedProjectId() ?? ""}`}
+          onChange={(value) => {
+            const [kind, ...rest] = value.split(":");
+            const id = rest.join(":") || null;
+            if (kind === "kb") {
+              setActiveContainer("kb"); setSelectedBookId(id); linkContainer("kb", id ?? undefined);
+            } else {
+              setActiveContainer("project"); setSelectedProjectId(id); linkContainer("project", id ?? undefined);
+            }
+            setSelectedFolderId(null); setSelectedDocumentId(null);
+          }}
+        >
+          <optgroup label="Projects">
+            <For each={projects()}>{(p) => <option value={`project:${p.id}`}>Project Docs · {p.name}</option>}</For>
+          </optgroup>
+          <optgroup label="Organization library">
+            <For each={books()}>{(b) => <option value={`kb:${b.id}`}>Organization Library · {b.name}</option>}</For>
+          </optgroup>
+        </PillSelect>
 
         <Show when={activeContainer() === "kb"}>
           <input placeholder="New book name" value={newBookName()} onInput={(e) => setNewBookName(e.currentTarget.value)} />
@@ -1278,26 +1271,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </Show>
         </Show>
 
-        <label class="import-folder">
-          Import folder
-          <input
-            placeholder="path to a markdown / Confluence-export folder"
-            value={importPath()}
-            onInput={(e) => setImportPath(e.currentTarget.value)}
-          />
-        </label>
-        <button class="ghost small" onClick={chooseImportFolder}>Choose folder…</button>
-        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
-          {importing() ? "Importing…" : "Import"}
-        </button>
-        <Show when={importSummary()}>
-          {(summary) => (
-            <span class="hint import-summary">
-              {summary().documents_created} page(s), {summary().folders_created} folder(s)
-              {summary().skipped.length ? ` · skipped ${summary().skipped.length}: ${summary().skipped.join("; ")}` : ""}
-            </span>
-          )}
-        </Show>
         </Show>
 
         {/* A filter, not a scope: it survives the embedded mount. */}
@@ -1475,19 +1448,21 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 of the tree at all times. They asked for things the drawer and the
                 native file picker only ask once you have said you want them, so the
                 column is gone and the standalone route uses the same two buttons. */}
-            <div class="doc-actions">
+            <div class="doc-actions project-file-actions">
                 <Show when={!isWeb()}>
                   {/* Desktop: the native picker returns a real path, which is what
                       `upload_document_file` takes. No path is ever typed. */}
                   <button class="primary doc-action-primary" onClick={pickAndUploadFile} disabled={uploading() || !projectReady()}>
-                    {uploading() ? "Uploading…" : "Upload file"}
+                    <span class="doc-action-icon" aria-hidden="true">↑</span>
+                    <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file from your computer</small></span>
                   </button>
                 </Show>
                 <Show when={isWeb()}>
                   {/* In the browser there is no path to name, so the same primary act
                       is a real file input wearing the same button. */}
                   <label class="primary doc-action-primary doc-action-file">
-                    {uploading() ? "Uploading…" : "Upload file"}
+                    <span class="doc-action-icon" aria-hidden="true">↑</span>
+                    <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file or drop it here</small></span>
                     <input
                       type="file"
                       aria-label="File to upload"
@@ -1510,6 +1485,31 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 <button class="link doc-action-tertiary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
                   New folder
                 </button>
+                <Show when={!embedded()}>
+                  <button class="link doc-action-tertiary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
+                    {importOpen() ? "Close import" : "Import library"}
+                  </button>
+                  <Show when={importOpen()}>
+                    <div class="import-library-panel">
+                      <p>Import a local Markdown or Confluence export.</p>
+                      <input
+                        aria-label="Import folder"
+                        placeholder="Choose a folder to import"
+                        value={importPath()}
+                        onInput={(e) => setImportPath(e.currentTarget.value)}
+                      />
+                      <div class="import-library-actions">
+                        <button class="doc-action-secondary" onClick={chooseImportFolder}>Choose folder</button>
+                        <button class="primary" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
+                          {importing() ? "Importing…" : "Import"}
+                        </button>
+                      </div>
+                      <Show when={importSummary()}>
+                        {(summary) => <span class="hint">{summary().documents_created} page(s), {summary().folders_created} folder(s)</span>}
+                      </Show>
+                    </div>
+                  </Show>
+                </Show>
             </div>
           </Show>
           </Show>
@@ -1519,7 +1519,52 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         <Resizer width={treeW} setWidth={setTreeW} min={190} max={480} />
 
         <section class="documents-editor">
-          <Show when={selectedDocument()} fallback={<p class="hint pad">Select or create a document.</p>}>
+          <Show when={selectedDocument()} fallback={
+            <Show when={embedded()} fallback={
+              <div class="documents-empty-canvas">
+                <div class="documents-empty-card" classList={{ "has-library": rootLibrary().length > 0 }}>
+                  <span class="documents-empty-icon" aria-hidden="true">⌁</span>
+                  <h2>Knowledge, in one place</h2>
+                  <p>{rootLibrary().length ? "Open a document to read, edit, or preview it." : "Upload a file or create a document to start building your shared knowledge."}</p>
+                  <Show when={rootLibrary().length > 0}>
+                    <div class="documents-library-grid" aria-label="Knowledge library">
+                      <For each={rootLibrary()}>
+                        {(document) => (
+                          <a class="documents-library-card" {...linkProps(docRoute(document.id))}>
+                            <span class="documents-library-type" aria-hidden="true">{document.doc_type === "file" ? "↥" : "⌁"}</span>
+                            <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Knowledge document"} · v{document.version}</small></span>
+                            <span class="documents-library-open" aria-hidden="true">→</span>
+                          </a>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </div>
+            }>
+            <div class="documents-empty-canvas">
+              <div class="documents-empty-card" classList={{ "has-library": safeDocuments().length > 0 }}>
+                <span class="documents-empty-icon" aria-hidden="true">⌁</span>
+                <h2>Project knowledge, in one place</h2>
+                <p>{safeDocuments().length ? "Open a document to read, edit, or preview it." : "Add a file or create a document to start building this project’s shared knowledge."}</p>
+                <Show when={safeDocuments().length > 0}>
+                  <div class="documents-library-grid" aria-label="Project library">
+                    <For each={safeDocuments()}>
+                      {(document) => (
+                        <a class="documents-library-card" {...linkProps(docRoute(document.id))}>
+                          <span class="documents-library-type" aria-hidden="true">{document.doc_type === "file" ? "↥" : "⌁"}</span>
+                          <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Project document"} · v{document.version}</small></span>
+                          <span class="documents-library-open" aria-hidden="true">→</span>
+                        </a>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+                <a class="documents-library-link" {...linkProps({ view: "Documents" })}>Open organization library <span aria-hidden="true">→</span></a>
+              </div>
+            </div>
+            </Show>
+          }>
             {(doc) => (
               <>
                 <div class="editor-toolbar">

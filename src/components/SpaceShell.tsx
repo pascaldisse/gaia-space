@@ -36,6 +36,7 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
+  { mode: "knowledge", label: "Knowledge", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 
@@ -90,6 +91,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Locations", view: "Locations", icon: "org" },
     { label: "Time off", view: "Absences", icon: "clock-nav" },
   ],
+  knowledge: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
     { label: "Tickets", view: "Issues", icon: "target" },
@@ -110,7 +112,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 
 const MODE_TITLE: Record<RailMode, string> = {
   home: "Home", chats: "Chats", activity: "Activity",
-  tasks: "Tasks", projects: "Projects", calendar: "Calendar", development: "Development", more: "More",
+  tasks: "Tasks", projects: "Projects", calendar: "Calendar", knowledge: "Knowledge", development: "Development", more: "More",
 };
 
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the

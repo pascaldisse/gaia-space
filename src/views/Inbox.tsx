@@ -1,12 +1,11 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { personalApi, type Notification, type SubscriptionScope, type SubscriptionSetting } from "../api/personal";
-import { createResource } from "solid-js";
+import { personalApi, type Notification } from "../api/personal";
 import { Icon, type IconName } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import SourceLink from "../components/SourceLink";
-import { Disclosure, MetricGrid, MetricTile, SectionHeading } from "../components/blocks";
+import { Disclosure, SectionHeading } from "../components/blocks";
 import { linkProps, navigate, route } from "../router";
 import { humanError, profileId } from "../session";
 import { UI_LOCALE } from "../calendar";
@@ -100,6 +99,11 @@ export default function Inbox() {
   const worklist = createMemo(() => needsYou());
   const feed = createMemo(() => organisation());
   const visible = createMemo(() => filterAttention(worklist(), filter()));
+  const selectedFilter = createMemo(() => ACTIVITY_FILTERS.find((entry) => entry.id === filter()) ?? ACTIVITY_FILTERS[0]);
+  const worklistTitle = () => filter() === "all" ? "Needs you" : selectedFilter().label;
+  const worklistMeta = () => filter() === "all"
+    ? (attentionCount() ? `${attentionCount()} waiting` : "nothing waiting")
+    : (visible().length ? `${visible().length} waiting` : "nothing waiting");
 
   /** Every filter with its own count, from the one source. A filter with nothing in
    *  it right now is still offered while it is the active one — otherwise the pill
@@ -203,121 +207,6 @@ export default function Inbox() {
     </li>
   );
 
-  // ── Subscriptions: unchanged behaviour, still the rail's second card.
-  const [settings, { refetch: refetchSettings }] = createResource(profileId, (id) =>
-    id ? personalApi.subscriptions(id) : Promise.resolve([] as SubscriptionSetting[]),
-  );
-  const [scopes, { refetch: refetchScopes }] = createResource(profileId, (id) =>
-    id ? personalApi.subscriptionScopes(id) : Promise.resolve([] as SubscriptionScope[]),
-  );
-  const eventTypes = createMemo(() => {
-    const seen = new Set<string>(notifications().map((item) => item.event_type));
-    for (const setting of settings() ?? []) seen.add(setting.event_type);
-    return [...seen].sort();
-  });
-  const settingFor = (eventType: string) => (settings() ?? []).find((entry) => entry.event_type === eventType);
-  const toggleSetting = async (eventType: string) => {
-    const id = profileId();
-    if (!id) return;
-    try {
-      setError("");
-      await personalApi.saveSubscription({
-        profile_id: id,
-        event_type: eventType,
-        enabled: !(settingFor(eventType)?.enabled ?? true),
-      });
-      await refetchSettings();
-    } catch (reason) {
-      setError(humanError(reason));
-    }
-  };
-  const toggleScope = async (scope: SubscriptionScope) => {
-    try {
-      setError("");
-      await personalApi.saveSubscriptionScope({ ...scope, enabled: !scope.enabled });
-      await refetchScopes();
-    } catch (reason) {
-      setError(humanError(reason));
-    }
-  };
-  const removeScope = async (scope: SubscriptionScope) => {
-    try {
-      setError("");
-      await personalApi.deleteSubscriptionScope(scope);
-      await refetchScopes();
-    } catch (reason) {
-      setError(humanError(reason));
-    }
-  };
-
-  const subscriptionsCard = () => (
-    <div class="rail-card">
-      <h3>
-        <Icon name="inbox" size={13} /> Subscriptions
-      </h3>
-      <div class="rail-rows">
-        <For each={eventTypes()}>
-          {(eventType) => (
-            <button
-              class="rail-row"
-              classList={{ muted: settingFor(eventType)?.enabled === false }}
-              aria-pressed={settingFor(eventType)?.enabled !== false}
-              title="Turn this event type on or off for your feed"
-              onClick={() => toggleSetting(eventType)}
-            >
-              <span class="rail-row-label">{eventType}</span>
-              <span class="rail-row-val">{settingFor(eventType)?.enabled === false ? "Muted" : "On"}</span>
-            </button>
-          )}
-        </For>
-        <Show when={!eventTypes().length}>
-          <p class="rail-empty">No event types yet — subscriptions appear as events arrive.</p>
-        </Show>
-      </div>
-      <Show when={(scopes() ?? []).length}>
-        <h3>Scoped</h3>
-        <div class="rail-rows">
-          <For each={scopes() ?? []}>
-            {(scope) => (
-              <div class="rail-row">
-                <span class="rail-row-label">
-                  {scope.event_type} · {scope.target_type}:{scope.target_id}
-                </span>
-                <button class="ghost" onClick={() => toggleScope(scope)}>
-                  {scope.enabled ? "On" : "Muted"}
-                </button>
-                <button class="ghost" onClick={() => removeScope(scope)} title="Remove this scope">
-                  Remove
-                </button>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-    </div>
-  );
-
-  const summaryCard = () => (
-    <div class="rail-card">
-      <h3>
-        <Icon name="inbox" size={13} /> At a glance
-      </h3>
-      {/* ONE COUNT, and it is `attentionCount()`. The second tile counts news,
-          and news is never a claim on anyone — hence no tone, ever. */}
-      <MetricGrid label="Inbox at a glance" class="pairs">
-        <MetricTile value={attentionCount()} label="Needs you" tone="teal" />
-        <MetricTile value={feed().length} label="Organisation" />
-      </MetricGrid>
-      <Show when={unreadNotifications().length}>
-        <div class="rail-actions">
-          <button class="primary" onClick={markAllRead}>
-            Mark all read
-          </button>
-        </div>
-      </Show>
-    </div>
-  );
-
   return (
     <section class="inbox-view">
       <PageHeader
@@ -356,13 +245,12 @@ export default function Inbox() {
           <p class="inbox-muted">Loading your inbox…</p>
         </Show>
 
-        <div class="view-cols inbox-cols">
-          <div class="view-main">
+        <div class="inbox-main">
             {/* ── STREAM 1 ── the worklist, first, with the count. */}
             <section class="inbox-needs" aria-label="Needs you">
               <SectionHeading
-                title="Needs you"
-                meta={attentionCount() ? `${attentionCount()} waiting` : "nothing waiting"}
+                title={worklistTitle()}
+                meta={worklistMeta()}
               />
               <Show when={filterTally().length > 1}>
                 <div class="inbox-filters">
@@ -417,23 +305,23 @@ export default function Inbox() {
               </Show>
             </section>
 
-            {/* ── STREAM 2 ── the feed. No count, no clearing, never merged above — and
-                NOT narrowed by the worklist's filters: those select kinds of WORK, and
-                the feed is news, which has no kind and makes no claim on anybody. It
-                stays whole under every filter. */}
-            <section class="inbox-org" aria-label="Organisation">
-              <SectionHeading title="Organisation" meta="What your colleagues did" />
-              <Show
-                when={feed().length}
-                fallback={<p class="inbox-muted">No organisation activity yet.</p>}
-              >
-                <ul class="inbox-list inbox-feed">
-                  <For each={feed()}>{feedRow}</For>
-                </ul>
-              </Show>
-            </section>
+            {/* Organisation news belongs to the complete Inbox. A filtered worklist
+                must not repeat this unchanged feed below every distinct filter. */}
+            <Show when={filter() === "all"}>
+              <section class="inbox-org" aria-label="Organisation">
+                <SectionHeading title="Organisation" meta="What your colleagues did" />
+                <Show
+                  when={feed().length}
+                  fallback={<p class="inbox-muted">No organisation activity yet.</p>}
+                >
+                  <ul class="inbox-list inbox-feed">
+                    <For each={feed()}>{feedRow}</For>
+                  </ul>
+                </Show>
+              </section>
+            </Show>
 
-            <Show when={earlier().length}>
+            <Show when={filter() === "all" && earlier().length}>
               <Disclosure class="inbox-earlier" title="Earlier notifications" meta={`${earlier().length} read`}>
                 <ul class="inbox-list">
                   <For each={earlier()}>
@@ -460,12 +348,6 @@ export default function Inbox() {
                 </ul>
               </Disclosure>
             </Show>
-          </div>
-
-          <aside class="view-rail inbox-rail">
-            {summaryCard()}
-            {subscriptionsCard()}
-          </aside>
         </div>
       </Show>
     </section>

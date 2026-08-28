@@ -133,10 +133,33 @@
 /* ── the portfolio reads like Home ─────────────────────────────────────────
    One measure for the page, not one per block: the tile strip ran the full
    window while the cards stopped short, so the page had two right edges.      */
-.theme-space-light .projects-view .metric-grid,
-.theme-space-light .project-cards { max-width: var(--view-max, 1160px); }
-/* Cards fill the measure instead of leaving a void beside two of them. */
-.theme-space-light .project-cards { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* The list is a portfolio, not a vertical stack: search and meaningful filters
+   scale to dozens of projects, while cards use the entire available page measure. */
+.portfolio-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 18px 0 14px;
+}
+.portfolio-search { flex: 1 1 15rem; min-width: 12rem; }
+.portfolio-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.portfolio-filters button, .portfolio-archive-toggle {
+  min-height: 2.25rem; padding: 0 11px; border: 1px solid var(--surface-border);
+  border-radius: 999px; background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer;
+}
+.portfolio-filters button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); font-weight: 650; }
+.portfolio-archive-toggle { margin-left: auto; }
+.portfolio-archive-toggle.active { color: var(--text-emphasis); }
+.portfolio-no-results { margin: 28px 0; color: var(--text-muted); }
+.theme-space-light .portfolio-toolbar { max-width: var(--view-max, 1400px); }
+.theme-space-light .portfolio-search {
+  min-height: 2.5rem; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); color: var(--ink); font: inherit;
+}
+.theme-space-light .portfolio-filters button,
+.theme-space-light .portfolio-archive-toggle { border-color: var(--line); background: var(--paper); color: var(--muted); }
+.theme-space-light .portfolio-filters button.active { border-color: transparent; background: var(--teal-soft); color: var(--teal-ink); }
+/* Four compact cards fit before the page needs to scroll; each still carries the
+   project's name, its health facts and its safe secondary actions. */
+.theme-space-light .project-cards { max-width: var(--view-max, 1400px); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 /* Archive sits apart from the two ways in — same row, not the same group. */
 .theme-space-light .project-card-aside { margin-left: auto; }
 .theme-space-light .project-card-foot .row-actions { display: flex; align-items: center; gap: 8px; width: 100%; }

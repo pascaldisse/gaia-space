@@ -1,6 +1,5 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
-import { MetricGrid, MetricTile } from "../components/blocks";
 import EmptyState from "../components/EmptyState";
 import { GhostPill } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
@@ -48,7 +47,6 @@ const empty = () => ({ name: "", key: "", description: "", deadline: "" });
 export const KEY_LENGTH = 5;
 export const deriveKey = (name: string, length = KEY_LENGTH) =>
   name.replace(/[^a-zA-Z0-9]/g, "").slice(0, length).toUpperCase();
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function Projects() {
   const [form, setForm] = createSignal(empty());
@@ -57,6 +55,9 @@ export default function Projects() {
   /* Creating a project is an ACT, not a permanent band across the top of the list.
      The four fields live in a drawer behind the header primary. */
   const [createOpen, setCreateOpen] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  const [portfolioFilter, setPortfolioFilter] = createSignal<"all" | "attention" | "due">("all");
+  const [showArchived, setShowArchived] = createSignal(false);
   const [items, { refetch }] = createResource(platformApi.projects);
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   const leadName = (id: string) => {
@@ -125,20 +126,19 @@ export default function Projects() {
   const unreadCount = (id: string) => unreadCounts()?.get(id) ?? 0;
 
   const live = createMemo(() => (items() ?? []).filter((project) => !project.archived));
-  const openTotal = createMemo(() => {
-    let sum = 0; const by = openMap();
-    if (by) for (const value of by.values()) sum += value;
-    return sum;
+  /** The portfolio stays useful after it grows: find by name/key, then narrow to
+      projects asking for attention or carrying a live deadline. */
+  const visibleProjects = createMemo(() => {
+    const needle = query().trim().toLocaleLowerCase();
+    return (items() ?? []).filter((project) => {
+      if (project.archived && !showArchived()) return false;
+      if (needle && !`${project.name} ${project.key} ${project.description ?? ""}`.toLocaleLowerCase().includes(needle)) return false;
+      if (portfolioFilter() === "attention")
+        return openCount(project.id) > 0 || taskCount(project.id) > 0 || unreadCount(project.id) > 0 || !!(project.deadline && deadlineTone(project.deadline).colour);
+      if (portfolioFilter() === "due") return !!(project.deadline && deadlineTone(project.deadline).colour);
+      return true;
+    });
   });
-  /** Same aggregate the cards read, summed once — never a second derivation. */
-  const openTaskTotal = createMemo(() => {
-    let sum = 0; const by = taskCounts();
-    if (by) for (const value of by.values()) sum += value;
-    return sum;
-  });
-  const nextDeadline = createMemo(() => live()
-    .filter((project) => project.deadline && project.deadline >= todayISO())
-    .sort((a, b) => (a.deadline ?? "").localeCompare(b.deadline ?? ""))[0]);
 
   /** THE destination of a row: the project workspace, on its overview. */
   const openRoute = (id: string): Route => ({ view: "Project Workspace", projectId: id });
@@ -227,24 +227,15 @@ export default function Projects() {
     <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 
     <Show when={live().length}>
-      {/* FOUR TILES FOR TWO CARDS IS NOT A SUMMARY. "Active projects" is already the
-          header chip, and "Carrying a deadline" answers a question nobody asked while
-          the next deadline itself is the useful fact. What is left is what the cards
-          below CANNOT tell you at a glance: the totals, and what is due first. */}
-      <MetricGrid label="Portfolio at a glance">
-        <MetricTile value={countsFailed() ? "—" : openTotal()} label="Open tickets" tone="teal" />
-        <MetricTile value={countsFailed() ? "—" : openTaskTotal()} label="Open tasks" />
-        <Show when={nextDeadline()} fallback={<MetricTile value="—" label="Next deadline" small />}>{next => {
-          const target = () => openRoute(next().id);
-          return <MetricTile
-            small
-            value={next().deadline}
-            label={`Next: ${next().name}`}
-            href={linkProps(target()).href}
-            onClick={(event: MouseEvent) => { linkProps(target()).onClick(event as MouseEvent & { currentTarget: HTMLAnchorElement }); setProjectId(next().id); }}
-          />;
-        }}</Show>
-      </MetricGrid>
+      <div class="portfolio-toolbar" aria-label="Project filters">
+        <input class="portfolio-search" type="search" aria-label="Search projects" placeholder="Search projects" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
+        <div class="portfolio-filters" role="group" aria-label="Filter projects">
+          <button type="button" classList={{ active: portfolioFilter() === "all" }} onClick={() => setPortfolioFilter("all")}>All projects</button>
+          <button type="button" classList={{ active: portfolioFilter() === "attention" }} onClick={() => setPortfolioFilter("attention")}>Needs attention</button>
+          <button type="button" classList={{ active: portfolioFilter() === "due" }} onClick={() => setPortfolioFilter("due")}>Due soon</button>
+        </div>
+        <button type="button" class="portfolio-archive-toggle" classList={{ active: showArchived() }} onClick={() => setShowArchived((shown) => !shown)}>{showArchived() ? "Hide archived" : "Show archived"}</button>
+      </div>
     </Show>
 
     {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty result
@@ -257,7 +248,12 @@ export default function Projects() {
       />
     </Show>
 
-    <ul class="project-cards"><For each={items()}>{project => {
+    <Show when={visibleProjects().length} fallback={
+      <Show when={!items.loading && items()?.length}>
+        <p class="portfolio-no-results">No projects match these filters.</p>
+      </Show>
+    }>
+    <ul class="project-cards"><For each={visibleProjects()}>{project => {
       const due = () => (project.deadline ? deadlineTone(project.deadline) : undefined);
       return <li classList={{ "project-card": true, archived: project.archived }}>
         {/* THE ROW IS THE LINK. One anchor over the identifying part of the card, so
@@ -350,5 +346,6 @@ export default function Projects() {
         </div>
       </li>;
     }}</For></ul>
+    </Show>
   </section>;
 }

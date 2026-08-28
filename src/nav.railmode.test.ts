@@ -26,11 +26,12 @@ describe("rail mode derived from the view", () => {
     expect(railModeOfView("Inbox")).toBe("activity");
     expect(railModeOfView("To-Do")).toBe("tasks");
     expect(railModeOfView("Calendar")).toBe("calendar");
+    expect(railModeOfView("Documents")).toBe("knowledge");
     expect(railModeOfView("Development")).toBe("development");
   });
 
   it("puts every view in EXACTLY ONE mode", () => {
-    const modes: RailMode[] = ["home", "chats", "activity", "tasks", "calendar", "development", "more"];
+    const modes: RailMode[] = ["home", "chats", "activity", "tasks", "projects", "calendar", "knowledge", "development", "more"];
     const seen = new Map<string, RailMode>();
     for (const mode of modes)
       for (const view of viewsInMode(mode)) {
@@ -42,8 +43,10 @@ describe("rail mode derived from the view", () => {
   it("sends unmapped/registry views to More, so nothing becomes unreachable", () => {
     // "Projects" left this list on purpose: it now has a rail mode of its own, so
     // the four project surfaces no longer pile up in the drawer for the homeless.
-    for (const view of ["Documents", "Blogs", "Admin", "Settings", "A Brand New View"])
+    for (const view of ["Admin", "Settings", "A Brand New View"])
       expect(railModeOfView(view)).toBe("more");
+    expect(railModeOfView("Documents")).toBe("knowledge");
+    expect(railModeOfView("Blogs")).toBe("knowledge");
   });
 
   it("keeps people/locations with the calendars and Dashboard with Home", () => {
@@ -89,9 +92,9 @@ describe("deep links arrive with the right mode", () => {
     ]) expect(modeOfPath(path)).toBe("projects");
   });
 
-  it("a document URL is More", () => {
-    expect(modeOfPath("documents/d-1")).toBe("more");
-    expect(modeOfPath("documents/project/p-1/d-1")).toBe("more");
+  it("a document URL is Knowledge", () => {
+    expect(modeOfPath("documents/d-1")).toBe("knowledge");
+    expect(modeOfPath("documents/project/p-1/d-1")).toBe("knowledge");
   });
 
   it("task and calendar URLs keep their mode across project scoping", () => {

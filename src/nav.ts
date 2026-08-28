@@ -70,7 +70,7 @@ export const groupOfView = (groups: NavGroup[], view: string) => groups.find(gro
 /** View names are ROUTING KEYS (router.ts, buildPath, deep links) and must not move.
  *  When the product's word differs from the key, it is mapped here — the nav shows the
  *  product's word, the URL keeps the app's own name. */
-const VIEW_LABELS: Record<string, string> = { Issues: "Tickets" };
+const VIEW_LABELS: Record<string, string> = { Issues: "Tickets", Documents: "Knowledge" };
 export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "development" | "more";
+export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "knowledge" | "development" | "more";
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -111,6 +111,8 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Meetings: "calendar",
   Absences: "calendar",
   Locations: "calendar",
+  Documents: "knowledge",
+  Blogs: "knowledge",
   Members: "calendar",
   Development: "development",
   Issues: "development",
