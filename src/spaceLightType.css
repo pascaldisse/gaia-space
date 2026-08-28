@@ -93,19 +93,26 @@
 
 /* App.css pins `color-scheme: dark` on every field: native date pickers,
    spinners, scrollbars and autofill would all render dark-on-paper. */
-.theme-space-light input,
-.theme-space-light select,
-.theme-space-light textarea,
+/* THE LIGHT FIELD RULES ARE ABOUT THE PAPER, so they stop at the paper. The shell's
+   rail and sidebar are dark chrome INSIDE the light layout, and a blanket
+   `select { color: ink; -webkit-text-fill-color: ink }` painted the sidebar's
+   identity picker in near-black on plum — the CSS `color` measured correct and the
+   text was still unreadable, because `-webkit-text-fill-color` wins. Scoping the
+   field rules to the content area fixes the cause instead of adding an exception
+   for every dark control we later put in the chrome. */
+.theme-space-light .space-content input,
+.theme-space-light .space-content select,
+.theme-space-light .space-content textarea,
 .theme-space-light .space-content { color-scheme: light; }
 
-.theme-space-light textarea,
-.theme-space-light select,
-.theme-space-light input[type="text"], .theme-space-light input[type="search"],
-.theme-space-light input[type="email"], .theme-space-light input[type="password"],
-.theme-space-light input[type="date"], .theme-space-light input[type="time"],
-.theme-space-light input[type="datetime-local"], .theme-space-light input[type="month"],
-.theme-space-light input[type="number"], .theme-space-light input[type="url"],
-.theme-space-light input[type="tel"], .theme-space-light input:not([type]) {
+.theme-space-light .space-content textarea,
+.theme-space-light .space-content select,
+.theme-space-light .space-content input[type="text"], .theme-space-light .space-content input[type="search"],
+.theme-space-light .space-content input[type="email"], .theme-space-light .space-content input[type="password"],
+.theme-space-light .space-content input[type="date"], .theme-space-light .space-content input[type="time"],
+.theme-space-light .space-content input[type="datetime-local"], .theme-space-light .space-content input[type="month"],
+.theme-space-light .space-content input[type="number"], .theme-space-light .space-content input[type="url"],
+.theme-space-light .space-content input[type="tel"], .theme-space-light .space-content input:not([type]) {
   min-height: 40px;
   color: var(--ink);
   -webkit-text-fill-color: var(--ink);
