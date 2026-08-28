@@ -202,15 +202,16 @@ async function togglePinned(v: PackageVersion) {
 
       <div class="packages-body">
         <aside class="repos-list">
-          {/* The old line said "create one above" — an instruction about where on
-              the page to look, which is exactly what stops being true the moment
-              the layout moves. It is an action now, and the action puts the
-              cursor in the field instead of describing its position. */}
+          {/* ONE ACTION, ONE PLACE, operator-tool form: the creation band is on
+              the surface, permanently visible, and "Create repository" is the
+              act. Drawing "Create a repository" a second time here — as a
+              primary that only moved the caret into that band's first field —
+              was the same act twice on one screen. The state names the absence;
+              the form performs the act. */}
           <Show when={repos()?.length} fallback={
             <EmptyState
               title="No package repositories yet"
               hint="A repository holds published versions of one package format."
-              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.packages-view input[aria-label="Repository name"]')?.focus()}>Create a repository</button>}
             />
           }>
             <ul>
@@ -228,8 +229,12 @@ async function togglePinned(v: PackageVersion) {
         </aside>
 
         {/* A missing SELECTION, not an empty store: the repositories are one
-            click to the left, so nothing is offered here. */}
-        <Show when={selected()} fallback={<EmptyState variant="no-match" title="No repository selected" hint="Pick a repository on the left to publish, browse and retain its versions." />}>
+            click to the left, so nothing is offered here — and with no
+            repository at all there is nothing to select, so the pane says
+            nothing rather than repeating the absence beside it. */}
+        <Show when={selected()} fallback={<Show when={repos()?.length}>
+          <EmptyState variant="no-match" title="No repository selected" hint="Pick a repository on the left to publish, browse and retain its versions." />
+        </Show>}>
           {(repo) => (
             <section class="repo-detail">
               <header class="repo-detail-head">

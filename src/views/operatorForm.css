@@ -123,3 +123,12 @@ textarea.op-input {
 .theme-space-light .op-input:disabled { color: var(--quiet); cursor: not-allowed; }
 
 .theme-space-light .op-hint { color: var(--muted); }
+
+/* A ghost pill sitting IN an operator form row: at rest it was borderless, so
+   between two filled `.op-input` pills it read as a sentence, not as a control
+   ("Set pool target", "Trigger run", "Fire event"). Same reasoning as the page
+   header's action line, which already draws the hairline (controls.css §415):
+   a control among controls has to look pressable. Colour only. */
+.theme-space-light .op-form > .ghost-pill { border-color: var(--line); }
+.theme-space-light .op-form > .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); background: var(--wash-2); }
+.theme-space-light .op-form > .ghost-pill:disabled { border-color: var(--line); }

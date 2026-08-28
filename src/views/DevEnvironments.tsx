@@ -68,14 +68,15 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           under a PageHeader is a second header on one screen: the project picker
           and the three pool actions belong ON the page header's own action line,
           which is where every other view in the app puts them. */}
+      {/* The `chips` lane is for METRICS — a value and its word. A picker there
+         is a control in the readout's place, so the project picker moved to the
+         action line, where every other view keeps it. */}
       <PageHeader
         title="Dev environments"
-        chips={
+        actions={<>
           <PillSelect label="Project" value={projectId()} onChange={setProjectId}>
             <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
           </PillSelect>
-        }
-        actions={<>
           <GhostPill onClick={() => run(() => devenvApi.sweepIdle())}>Hibernate idle</GhostPill>
           <GhostPill
             onClick={() => {
@@ -101,53 +102,10 @@ const [poolTarget, setPoolTarget] = createSignal(0);
         <p class="error">{error()}</p>
       </Show>
 
-      <ul class="devenv-list">
-        {/* A page-filling panel, so a real empty state. The create form is the
-            block below, so the action puts the cursor in it. */}
-        <For each={envs()} fallback={
-          <li class="devenv-empty">
-            <EmptyState
-              title="No dev environments in this project"
-              hint="An environment is a running workspace with your IDE attached. It hibernates on its own when it goes quiet."
-              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.dev-environments input[aria-label="Environment name"]')?.focus()}>Create an environment</button>}
-            />
-          </li>
-        }>
-          {(env) => (
-            <li>
-              <strong>{env.name}</strong>
-              <span class={`devenv-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
-              <span class="hint">
-                {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
-                {minutesAgo(env.last_activity_at).toFixed(0)}m
-              </span>
-              <Show when={env.persisted_home}>
-                <span class="hint">preserved: {env.persisted_home} + {env.persisted_worktree}</span>
-              </Show>
-              <GhostPill class="small" onClick={() => run(() => devenvApi.touch(env.id))}>
-                Activity
-              </GhostPill>
-              <Show when={env.state === "RUNNING" || env.state === "STARTING"}>
-                <GhostPill class="small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
-                  Hibernate
-                </GhostPill>
-              </Show>
-              <Show when={env.state === "HIBERNATED"}>
-                <GhostPill class="small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
-                  Resume
-                </GhostPill>
-              </Show>
-              {/* A round × with no accessible name is a button nobody can read.
-                  IconButton makes the name mandatory. */}
-              <IconButton label={`Delete ${env.name}`} onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
-                ×
-              </IconButton>
-            </li>
-          )}
-        </For>
-      </ul>
-
-      {/* Stays on the surface: operator tool (L3 relaxed, L4 in full). */}
+      {/* READING ORDER: the band that creates an environment comes BEFORE the
+          list of environments, as on every other operator tool here (Packages,
+          Pipelines). It used to sit under the list, so an empty project showed
+          "nothing yet" floating above the very form that fixes it. */}
       <form class="new-rule-form op-form" onSubmit={create}>
         <input class="op-input op-grow" aria-label="Environment name" placeholder="Environment name" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
         {/* A bare number box said nothing about what it counted. It is minutes,
@@ -193,6 +151,52 @@ const [poolTarget, setPoolTarget] = createSignal(0);
             primary, not one more grey pill among four. */}
         <button class="primary" type="submit">Create environment</button>
       </form>
+
+      <ul class="devenv-list">
+        {/* ONE ACTION, ONE PLACE: the band above IS "create an environment", so
+            this state names the absence and does not draw that act again. */}
+        <For each={envs()} fallback={
+          <li class="devenv-empty">
+            <EmptyState
+              title="No dev environments in this project"
+              hint="An environment is a running workspace with your IDE attached. It hibernates on its own when it goes quiet."
+            />
+          </li>
+        }>
+          {(env) => (
+            <li>
+              <strong>{env.name}</strong>
+              <span class={`devenv-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
+              <span class="hint">
+                {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
+                {minutesAgo(env.last_activity_at).toFixed(0)}m
+              </span>
+              <Show when={env.persisted_home}>
+                <span class="hint">preserved: {env.persisted_home} + {env.persisted_worktree}</span>
+              </Show>
+              <GhostPill class="small" onClick={() => run(() => devenvApi.touch(env.id))}>
+                Activity
+              </GhostPill>
+              <Show when={env.state === "RUNNING" || env.state === "STARTING"}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
+                  Hibernate
+                </GhostPill>
+              </Show>
+              <Show when={env.state === "HIBERNATED"}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
+                  Resume
+                </GhostPill>
+              </Show>
+              {/* A round × with no accessible name is a button nobody can read.
+                  IconButton makes the name mandatory. */}
+              <IconButton label={`Delete ${env.name}`} onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
+                ×
+              </IconButton>
+            </li>
+          )}
+        </For>
+      </ul>
+
     </div>
   );
 }

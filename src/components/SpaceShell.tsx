@@ -97,7 +97,12 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Pull requests", view: "Code Reviews", icon: "review" },
     { label: "Repositories", view: "Repos", icon: "repo" },
     { label: "Pipelines", view: "Pipelines", icon: "pipeline" },
-    { label: "Releases", view: "Packages", icon: "package" },
+    /* ONE THING, ONE NAME: this entry opens the Packages view, whose h1 is
+       "Packages" and whose content is package repositories and their versions.
+       Calling it "Releases" in the rail put a second name on the same surface
+       AND collided with Development's own Releases section, which honestly
+       reports that nothing in the workspace records a release. */
+    { label: "Packages", view: "Packages", icon: "package" },
     { label: "Dev environments", view: "Dev Environments", icon: "repo" },
   ],
   more: [],

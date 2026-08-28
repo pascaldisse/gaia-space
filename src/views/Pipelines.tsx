@@ -30,6 +30,7 @@ import {
   type TestReport,
 } from "../api/pipelines";
 import EmptyState from "../components/EmptyState";
+import { SectionHeading } from "../components/blocks";
 import { GhostPill, PillSelect } from "../components/controls";
 import "./Pipelines.css";
 import "./operatorForm.css";
@@ -278,11 +279,13 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
 
       <div class="automation-grid">
         <aside class="scripts-list">
+          {/* ONE ACTION, ONE PLACE: "New script" sits permanently in the band
+              above (an operator tool's form may live on the surface). A primary
+              here that only focused that band's field drew the same act twice. */}
           <Show when={scripts()?.length} fallback={
             <EmptyState
               title="No pipeline scripts yet"
               hint="A script is a file in a repository. Adding one here registers it so its jobs can be run."
-              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.pipelines-view input[aria-label="Script path"]')?.focus()}>Add a script</button>}
             />
           }>
             <ul>
@@ -298,7 +301,9 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
           </Show>
         </aside>
 
-        <Show when={selected()} fallback={<EmptyState variant="no-match" title="No script selected" hint="Pick a script on the left to edit its jobs and trigger a run." />}>
+        <Show when={selected()} fallback={<Show when={scripts()?.length}>
+          <EmptyState variant="no-match" title="No script selected" hint="Pick a script on the left to edit its jobs and trigger a run." />
+        </Show>}>
           {(script) => (
             <section class="script-detail">
               <header class="script-detail-head op-form">
@@ -327,7 +332,14 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
               </div>
 
               <section class="jobs-editor">
-                <h3 classList={{ over: jobs.length > MAX_JOBS_PER_SCRIPT }}>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
+                {/* A heading NAMES the section; the count and the rule about how
+                    jobs run are facts ABOUT it, so they sit in the heading's meta
+                    lane instead of inside the title. Same shape as every other
+                    section in the app. */}
+                <SectionHeading
+                  title="Jobs"
+                  meta={<span classList={{ over: jobs.length > MAX_JOBS_PER_SCRIPT }}>{jobs.length}/{MAX_JOBS_PER_SCRIPT} · always run in parallel, no dependency graph</span>}
+                />
                 <For each={jobs}>
                   {(job, i) => (
                     <div class="job-card">
@@ -371,7 +383,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
               </section>
 
               <section class="runs-section">
-                <h3>Runs</h3>
+                <SectionHeading title="Runs" />
                 <Show when={runs()?.length} fallback={<p class="hint pad">No runs yet — trigger this script above.</p>}>
                   <ul class="runs-list">
                     <For each={runs()}>
@@ -414,7 +426,7 @@ async function assign(workerId: string) { try { const run = await pipelinesApi.a
   async function artifact() { const id = runId(); if (!id) return; try { await pipelinesApi.createJobArtifact({ id: newId("artifact"), job_run_id: id, name: "build.txt", content: Array.from(new TextEncoder().encode("artifact")) }); refetchArtifacts(); } catch (error) { props.setError(String(error)); } }
 async function downloadArtifact(id: string, name: string) { try { const bytes = await pipelinesApi.downloadJobArtifact(id); const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); const link = document.createElement("a"); link.href = url; link.download = name; link.click(); URL.revokeObjectURL(url); } catch (error) { props.setError(String(error)); } }
   async function report() { const id = runId(); if (!id) return; try { const value: TestReport = { id: newId("test"), job_run_id: id, suite: "manual", test_name: "reported test", status: "PASSED", duration_ms: 0, message: null, created_at: Math.floor(Date.now() / 1000) }; await pipelinesApi.saveTestReport(value); refetchReports(); } catch (error) { props.setError(String(error)); } }
-  return <section class="runs-section"><h3>Workers · artifacts · test reports</h3><form class="new-script-form op-form" onSubmit={register}><input class="op-input op-grow" aria-label="Worker name" placeholder="Worker name" value={name()} onInput={e => setName(e.currentTarget.value)} /><GhostPill type="submit">Register worker</GhostPill></form><ul class="entity-list">{workers()?.map((worker: Worker) => <li>{worker.name} ({worker.os}) · {worker.status}<GhostPill class="small" onClick={() => void heartbeat(worker.id)}>Heartbeat</GhostPill><GhostPill class="small" disabled={worker.suspended || worker.status !== "ONLINE"} onClick={() => void assign(worker.id)}>Assign next</GhostPill></li>) || <li class="hint">No workers registered.</li>}</ul>{/* An EMPTY picker is a control with nothing to pick and no way to know it:
+  return <section class="runs-section"><SectionHeading title="Workers, artifacts and test reports" /><form class="new-script-form op-form" onSubmit={register}><input class="op-input op-grow" aria-label="Worker name" placeholder="Worker name" value={name()} onInput={e => setName(e.currentTarget.value)} /><GhostPill type="submit">Register worker</GhostPill></form><ul class="entity-list">{workers()?.map((worker: Worker) => <li>{worker.name} ({worker.os}) · {worker.status}<GhostPill class="small" onClick={() => void heartbeat(worker.id)}>Heartbeat</GhostPill><GhostPill class="small" disabled={worker.suspended || worker.status !== "ONLINE"} onClick={() => void assign(worker.id)}>Assign next</GhostPill></li>) || <li class="hint">No workers registered.</li>}</ul>{/* An EMPTY picker is a control with nothing to pick and no way to know it:
      before, it rendered as a naked chevron on an empty pill. It only exists
      once there is a run to attach an artifact to. */}
 <div class="op-form"><PillSelect label="Run to attach to" disabled={!props.runs().length} value={runId() ?? ""} onChange={value => setRunId(value || null)}><option value="">{props.runs().length ? "Choose a run…" : "No runs to attach to"}</option><For each={props.runs()}>{run => <option value={run.id}>{run.job_id} · {run.status}</option>}</For></PillSelect><GhostPill class="small" disabled={!runId()} onClick={artifact}>Add artifact</GhostPill><GhostPill class="small" disabled={!runId()} onClick={report}>Add test report</GhostPill></div><p class="hint">Artifacts: <For each={artifacts() ?? []}>{a => <GhostPill class="small" onClick={() => void downloadArtifact(a.id, a.name)}>{a.name} ({a.size_bytes} B)</GhostPill>}</For>{!artifacts()?.length && "none"}; tests: {reports()?.map(r => `${r.test_name} ${r.status}`).join(", ") || "none"}</p></section>;
@@ -509,7 +521,6 @@ function Deployments(props: { projects: () => { id: string; name: string }[] | u
             <EmptyState
               title="No deploy targets yet"
               hint="A target is one place you deploy to — staging, production — and it carries that place's deployment history."
-              actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.pipelines-view input[aria-label="Target name"]')?.focus()}>Create a target</button>}
             />
           }>
             <ul>
@@ -525,7 +536,9 @@ function Deployments(props: { projects: () => { id: string; name: string }[] | u
           </Show>
         </aside>
 
-        <Show when={selected()} fallback={<EmptyState variant="no-match" title="No deploy target selected" hint="Pick a target on the left to schedule a deployment and see its history." />}>
+        <Show when={selected()} fallback={<Show when={targets()?.length}>
+          <EmptyState variant="no-match" title="No deploy target selected" hint="Pick a target on the left to schedule a deployment and see its history." />
+        </Show>}>
           {(target) => (
             <section class="target-detail">
               <header class="target-detail-head">
