@@ -114,7 +114,11 @@
   color: var(--text-muted);
 }
 .container-tabs .import-folder input {
-  min-width: 22ch;
+  /* The placeholder is 44 characters; at the old 22ch it was cut mid-word to
+     "path to a markdown / Conflu". The toolbar already wraps, so the field may
+     ask for the room it needs and drop to its own line rather than be clipped. */
+  flex: 1 1 40ch;
+  min-width: 40ch;
 }
 .container-tabs .import-summary {
   max-width: 40ch;
@@ -272,14 +276,31 @@
 .new-item-row {
   display: flex;
   gap: 0.3em;
+  /* The left column is narrow. Without wrapping, the title row's input, its type
+     select and its button all competed for ~247px and the input lost, collapsing
+     to 16px — a field too small to show a single character. Wrapping lets a row
+     become two lines instead of crushing one child to nothing. */
+  flex-wrap: wrap;
 }
 .new-item-row input {
-  flex: 1;
+  /* `flex: 1` alone let the input shrink past any usable size; the basis plus a
+     matching floor is what actually keeps it legible. */
+  flex: 1 1 9rem;
+  min-width: 9rem;
   background: var(--dk-field-bg);
   color: inherit;
   border: var(--dk-hairline) solid var(--dk-field-border);
   border-radius: var(--dk-radius-md);
   padding: 0.3em 0.5em;
+}
+.new-item-row select {
+  /* Sized to its longest option ("Text / Markdown"), which was being clipped to
+     "Text / Markdo". A select truncates silently, so it needs an explicit floor. */
+  flex: 1 1 auto;
+  min-width: 10.5rem;
+}
+.new-item-row button {
+  flex: 0 0 auto;
 }
 
 .documents-body > .resizer { grid-column: 2; }
