@@ -115,6 +115,15 @@ const PATHS = {
   folder: () => <path d="M4 6h5l2 2h9v11H4z" />,
   /* An uploaded file: a page with an arrow into it. */
   upload: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
+  /* Something still open, asking to be done. Deliberately NOT a tick: a tick on an
+     unfinished task reads as "already done" — the exact confusion this replaces. */
+  alert: () => (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4.5" />
+      <circle cx="12" cy="15.8" r="0.85" fill="currentColor" stroke="none" />
+    </>
+  ),
   trash: () => <path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,

@@ -93,6 +93,46 @@ export const dueTone = (due: string | null | undefined, today?: string, soonDays
 export const urgencyLabel = (urgency: Urgency): string =>
   urgency === "overdue" ? "Overdue" : urgency === "today" ? "Due today" : urgency === "soon" ? "Due soon" : "";
 
+/* ── HOW FAR AWAY IS THE DEADLINE ────────────────────────────────────────────
+ *
+ * `urgencyOf` answers "is this late or nearly late?" — a two-state question with a
+ * quiet default, which is right for a DATE element. A task's own mark asks a
+ * different question: how much room is left? That has three answers, and the mark
+ * carries one of them at all times, because an open task always stands somewhere on
+ * its runway.
+ *
+ * The bands are the product owner's, stated once here and nowhere else:
+ *   urgent — overdue, due today or due tomorrow
+ *   soon   — inside the coming week (2…7 days)
+ *   calm   — more than a week of room
+ *   none   — no deadline at all: a mark that coloured this would be inventing a
+ *            deadline nobody set.
+ *
+ * COLOUR: calm takes TEAL, not a separate green. This palette's "fine, carry on" is
+ * teal; a second green beside it would be two nearly identical colours meaning the
+ * same thing, which is how a colour vocabulary stops being readable.
+ */
+export type DeadlineBand = "none" | "calm" | "soon" | "urgent";
+
+/** Inclusive upper edge of `urgent`, in days from today. */
+export const URGENT_DAYS = 1;
+
+export const deadlineBand = (
+  due: string | null | undefined,
+  today: string = todayISO(),
+  soonDays: number = DEADLINE_SOON_DAYS,
+): DeadlineBand => {
+  if (!due) return "none";
+  const days = daysUntil(due, today);
+  if (days <= URGENT_DAYS) return "urgent";
+  return days <= soonDays ? "soon" : "calm";
+};
+
+/** Band -> colour, in the same vocabulary every other tone function speaks.
+ *  (`deadlineTone` was taken: it is Steering's banner contract, a different fact.) */
+export const bandTone = (band: DeadlineBand): Tone =>
+  band === "urgent" ? "red" : band === "soon" ? "amber" : band === "calm" ? "teal" : "";
+
 /**
  * STATUS -> colour. Deliberately takes only the status, so it is structurally
  * incapable of leaking a due date into a status pill — the defect this module fixes.

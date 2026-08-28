@@ -2,7 +2,8 @@ import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { personalApi, type Todo as TodoItem } from "../api/personal";
 import "../components/paper.css";
 import "./Todo.css";
-import PageHeader from "../components/PageHeader";
+import "./taskCards.css";
+import PageHeader, { Chip } from "../components/PageHeader";
 import SourceLink from "../components/SourceLink";
 import EmptyState from "../components/EmptyState";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -12,9 +13,9 @@ import TaskDrawer from "../components/TaskDrawer";
 import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
-import { todayISO, urgencyOf } from "../statusTone";
+import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
-import { MetricGrid, MetricTile } from "../components/blocks";
+import { Icon } from "../components/Icon";
 
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
@@ -31,6 +32,9 @@ export default function Todo() {
      tasks is the only surface that ever had them). Editing an existing task did NOT
      move: it still happens in place, in the row (`.task-card-editing`, below). */
   const [creating,setCreating]=createSignal(false); const [error,setError]=createSignal("");
+  /** Done is folded away by default — it is the part of the list you are finished
+   *  with, and it only ever grows. */
+  const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   /* The project-member read, the assignable-people list and the project list moved
      WITH the editor into components/TaskRowEdit.tsx — including the rule that a
@@ -70,8 +74,18 @@ export default function Todo() {
   const [menu,setMenu]=createSignal<{x:number;y:number;items:ContextMenuItem[]}|null>(null);
   const [pendingDelete,setPendingDelete]=createSignal<TodoItem|null>(null);
   const [deleting,setDeleting]=createSignal(false);
+  /* The row's old glyph buttons (+1d, +1w, → Ticket) are WORDS in this menu now.
+     Nothing was dropped: postponing and converting are still one click away, they
+     just no longer sit on every tile as unlabelled furniture. */
   const taskMenuItems=(todo:TodoItem):ContextMenuItem[]=>[
     { label:"Open", onSelect:()=>startEdit(todo) },
+    ...(todo.done?[]:[
+      { label:"Postpone by a day", onSelect:()=>void postpone(todo,1) },
+      { label:"Postpone by a week", onSelect:()=>void postpone(todo,7) },
+    ]),
+    ...(!todo.done&&todo.project_id&&todo.source_entity_type!=="issue"
+      ?[{ label:"Convert to ticket", onSelect:()=>void convert(todo) }]
+      :[]),
     ...(ownsTask(todo)?[{ label:"Delete task…", danger:true, onSelect:()=>setPendingDelete(todo) }]:[]),
   ];
   const openTaskMenu=(event:MouseEvent,todo:TodoItem)=>{ event.preventDefault(); event.stopPropagation(); setMenu({x:event.clientX,y:event.clientY,items:taskMenuItems(todo)}); };
@@ -130,39 +144,66 @@ export default function Todo() {
       </div>
     </div>
   </article>;
-  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}} onContextMenu={event=>openTaskMenu(event,todo)}>
-    <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={event=>startEdit(todo,(event.target as HTMLElement).closest(".task-note-hint")?"notes":"title")}>
-      <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
-      <Show when={todo.notes} fallback={<Show when={!todo.done}><p class="task-note-hint">Add a description…</p></Show>}>{notes=><p class="task-notes">{notes()}</p>}</Show>
-<Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
-        <div class="task-meta">
-          <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
-          <Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show>
-          <For each={todo.assignee_ids}>{id=><span class="task-tag assignee">{nameOf(id)}</span>}</For>
-        </div>
-      </Show>
-    </button>
-    {/* Outside the edit button on purpose: a link inside a button is not clickable
-        (and not valid), and the origin must stay reachable, not editable-by-accident. */}
-    <Show when={todo.source_entity_type}>{kind=><span class="task-meta task-source-row">
-      <Show when={kind()==="message"} fallback={<span class="task-tag source">{kind()}: {todo.source_entity_id}</span>}>
-        <SourceLink entityType={kind()} entityId={todo.source_entity_id!} />
-      </Show>
-    </span>}</Show>
-    <div class="task-row-actions">
-      <Show when={!todo.done}>
-        <button type="button" class="ghost small" title="Postpone by one day" aria-label={`Postpone ${todo.content} by a day`} onClick={()=>postpone(todo,1)}>+1d</button>
-        <button type="button" class="ghost small" title="Postpone by a week" aria-label={`Postpone ${todo.content} by a week`} onClick={()=>postpone(todo,7)}>+1w</button>
-        <Show when={todo.project_id&&todo.source_entity_type!=="issue"}>
-          <button type="button" class="ghost small" title="Convert to ticket" aria-label={`Convert ${todo.content} to a ticket`} onClick={()=>convert(todo)}>→ Ticket</button>
+  /** THE TASK TILE — Knowledge's card, in the vocabulary of work: the check is the
+   *  icon tile (the one thing you do without opening it), the name is bold, ONE quiet
+   *  meta line carries project · people · origin, and the due date is the only fact
+   *  that earns colour. Dragging it onto a project in the sidebar files it there. */
+  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={
+    <article
+      class="task-tile"
+      classList={{ done: todo.done }}
+      draggable={!todo.done}
+      onDragStart={event=>event.dataTransfer?.setData("application/x-gaia-task", JSON.stringify({ id: todo.id, title: todo.content }))}
+      onContextMenu={event=>openTaskMenu(event,todo)}
+    >
+      {/* THE MARK SAYS THE STATE, NOT THE ACT. A tick on an open task reads as
+          "already done"; an open task carries "!" and only a completed one wears the
+          tick. The button still toggles completion — its label says so. */}
+      <button
+        type="button"
+        class="task-tile-check"
+        classList={{ [todo.done?"":bandTone(deadlineBand(todo.due_date,today()))]: !todo.done }}
+        aria-label={`Mark ${todo.content} ${todo.done?"not done":"done"}`}
+        aria-pressed={todo.done}
+        onClick={()=>void complete(todo,!todo.done)}
+      >
+        <Icon name={todo.done?"check":"alert"} size={15} />
+      </button>
+      <button type="button" class="task-tile-body" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
+        <span class="task-tile-title">
+          <Show when={todo.content_kind==="markdown"} fallback={todo.content}>{markdownBody(todo.content)}</Show>
+        </span>
+        <Show when={todo.project_id||todo.assignee_ids.length||todo.notes||todo.source_entity_type}>
+          <span class="task-tile-meta">
+            <Show when={todo.project_id}>{id=><span>{projectName(id())}</span>}</Show>
+            <Show when={todo.project_id&&todo.assignee_ids.length}><span class="sep">·</span></Show>
+            <Show when={todo.assignee_ids.length}><span>{todo.assignee_ids.map(nameOf).join(", ")}</span></Show>
+            <Show when={todo.notes}>{notes=><><span class="sep">·</span><span>{notes().length>60?notes().slice(0,60)+"…":notes()}</span></>}</Show>
+          </span>
         </Show>
-      </Show>
-      {/* NO BARE ✕. Deleting asks first, and it asks from the two places a person
-          points at a task: this row's right-click menu, and the opened task. */}
-    </div>
-  </article>}>
-    {editRow(todo)}
+      </button>
+      <span class="task-tile-edge">
+        <Show when={todo.due_date}>{date=>{
+          const tone=()=>urgencyOf(date(),today(),7);
+          return <span class="task-due" classList={{ [tone()]: tone()!=="none" }}>{date()}</span>;
+        }}</Show>
+        {/* Outside the edit button on purpose: a link inside a button is neither
+            valid nor clickable, and the origin must stay reachable. */}
+        <Show when={todo.source_entity_type}>{kind=>
+          <Show when={kind()==="message"} fallback={<span class="task-due">{kind()}</span>}>
+            <SourceLink entityType={kind()} entityId={todo.source_entity_id!} />
+          </Show>
+        }</Show>
+      </span>
+      <button
+        class="task-tile-menu"
+        aria-label={`Actions for ${todo.content}`}
+        title="Actions"
+        onClick={event=>openTaskMenu(event,todo)}
+      >⋯</button>
+    </article>
+  }>
+    <div class="task-open">{editRow(todo)}</div>
   </Show>;
   return <section class="personal-view todo-view">
     <Show when={menu()}>{open=><ContextMenu x={open().x} y={open().y} items={open().items} onClose={()=>setMenu(null)}/>}</Show>
@@ -187,86 +228,91 @@ export default function Todo() {
         owner asked for it to be obvious), and the moment there is content the header
         takes it back. Two identical buttons on one screen is the defect this rule
         exists to prevent. */}
-    <PageHeader icon="check" title="My tasks" subline="Only your tasks — yours and what people put on you, across every project." actions={
-      <Show when={!showsEmptyPrimary()}>
-        <button type="button" class="primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
-      </Show>
-    }/>
+    {/* THE KNOWLEDGE SHAPE, in the vocabulary of work: header · one action row ·
+        a head that says what you are looking at and what you can do with it ·
+        sections of cards. The "At a glance" rail is GONE: four numbers in a box
+        beside the list restated what the list already shows, and the two figures
+        that carry a decision (how much is open, how much is late) now sit in the
+        header as chips — where a number belongs. */}
+    <PageHeader
+      icon="check"
+      title="My tasks"
+      subline="Only your tasks — yours and what people put on you, across every project."
+      chips={
+        <Show when={!todos.loading && !!(todos() ?? []).length}>
+          <Chip value={openCount()} label="open" />
+          <Show when={overdue().length}><Chip value={overdue().length} label="overdue" tone="red" /></Show>
+          <Show when={dueSoon().length}><Chip value={dueSoon().length} label="due in 7 days" tone="amber" /></Show>
+        </Show>
+      }
+    />
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
-    <div class="view-cols todo-cols">
-      <div class="view-main">
-        <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-        {/* NOTHING YET, for the whole surface: the same primary the header carries,
-            opening the same drawer. */}
-        <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
-          <EmptyState
-            title="No tasks yet"
-            hint="Your own list — personal to-dos, and anything assigned to you from a project."
-            actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
-          />
-        </Show>
-        {/* A SECTION WITH NOTHING IN IT IS NOT DRAWN. It used to render its heading and
-            a large dashed panel saying "Nothing due today." — so a person whose only
-            tasks were done met two empty boxes describing absence and offering nothing.
-            An empty section carries no information the count in the heading does not
-            already carry, and two of them carry it twice. */}
-        <Show when={!openCount() && !!(todos() ?? []).length}>
-          <EmptyState
-            title="Nothing open"
-            hint={doneList().length ? `Everything on your list is done — ${doneList().length} completed.` : undefined}
-            actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
-          />
-        </Show>
-        <Show when={todayList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
-            <For each={todayList()}>{todoRow}</For>
-          </section>
-        </Show>
-        <Show when={laterList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
-            <For each={laterList()}>{todoRow}</For>
-          </section>
-        </Show>
-        <Show when={somedayList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">No date<span class="rail-count">{somedayList().length}</span></h3>
-            <For each={somedayList()}>{todoRow}</For>
-          </section>
-        </Show>
-        <Show when={doneList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">Done<span class="rail-count">{doneList().length}</span></h3>
-            <For each={doneList()}>{todoRow}</For>
-          </section>
-        </Show>
-      </div>
-      <aside class="view-rail todo-rail">
-        <div class="rail-card">
-          <h3>At a glance</h3>
-          {/* ONE TILE (stage 11, defect 2): `.rail-metric` was a fourth tile shape.
-              Colour law: overdue is critical (red), not merely waiting (amber), and
-              "due in 7 days" IS the amber case. A count of 0 carries no tone at all —
-              MetricTile runs every tone through metricTone, so the hand-rolled
-              `metricClass` helper is no longer needed here. */}
-          <MetricGrid label="Tasks at a glance" class="pairs">
-            <MetricTile value={openTodos().length} label="Open" tone="teal" />
-            <MetricTile value={overdue().length} label="Overdue" tone="red" />
-            <MetricTile value={dueSoon().length} label="Due in 7 days" tone="amber" />
-            <MetricTile value={doneCount()} label="Done" />
-          </MetricGrid>
+
+    <Show when={!showsEmptyPrimary()}>
+      <nav class="documents-actionbar task-actionbar">
+        {/* The word alone. An icon here would only decorate: unlike an upload, there
+            is no second way to read "New task". */}
+        <button type="button" class="primary doc-action-primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
+        <button type="button" class="doc-action-secondary" onClick={()=>setShowDone(open=>!open)} aria-pressed={showDone()}>
+          {showDone() ? "Hide done" : `Show done${doneCount()?` (${doneCount()})`:""}`}
+        </button>
+      </nav>
+    </Show>
+
+    <div class="task-board">
+      <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
+      <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
+        <EmptyState
+          title="No tasks yet"
+          hint="Your own list — personal to-dos, and anything assigned to you from a project."
+          actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
+        />
+      </Show>
+      {/* A SECTION WITH NOTHING IN IT IS NOT DRAWN — an empty section carries no
+          information its own count does not already carry. */}
+      <Show when={!openCount() && !!(todos() ?? []).length}>
+        <EmptyState
+          title="Nothing open"
+          hint={doneList().length ? `Everything on your list is done — ${doneList().length} completed.` : undefined}
+          actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
+        />
+      </Show>
+
+      <Show when={openCount() > 0}>
+        <div class="task-board-head">
+          <span class="task-board-icon" aria-hidden="true"><Icon name="alert" size={24} /></span>
+          <div class="task-board-headtext">
+            <h2>Open work</h2>
+            <p>Open a task to edit it, or drag it onto a project in the sidebar to file it there.</p>
+          </div>
         </div>
-        {/* "Needs attention" was REMOVED. It listed the tasks due within seven days —
-            the same rows the list beside it already shows, restated in a narrower
-            column where the date had to break across lines. A panel that repeats its
-            neighbour is not a summary, it is an echo: it costs a column, it can
-            disagree with the list after an edit, and it tells a person nothing they
-            cannot see by looking left. The COUNT survives, in "At a glance" above,
-            where a number belongs. Nothing is unreachable: every task it named is a
-            row in the list. */}
-      </aside>
+      </Show>
+
+      <For each={[
+        { key: "today", label: "Today", rows: todayList() },
+        { key: "later", label: "Later", rows: laterList() },
+        { key: "someday", label: "No date", rows: somedayList() },
+      ]}>
+        {group => (
+          <Show when={group.rows.length}>
+            <p class="task-group-heading">{group.label}<span class="count">{group.rows.length}</span></p>
+            <div class="task-grid" aria-label={`${group.label} tasks`}>
+              <For each={group.rows}>{todoRow}</For>
+            </div>
+          </Show>
+        )}
+      </For>
+
+      {/* Done is folded away by default: it is the part of the list you are finished
+          with, and it grows forever. The count stays visible on the toggle. */}
+      <Show when={showDone() && doneList().length}>
+        <p class="task-group-heading">Done<span class="count">{doneList().length}</span></p>
+        <div class="task-grid" aria-label="Completed tasks">
+          <For each={doneList()}>{todoRow}</For>
+        </div>
+      </Show>
     </div>
+
     {/* THE SAME DRAWER the project and team surfaces open. `advanced` because this is
         the surface that has always carried the markdown switch and the source
         bookmark — the drawer does not grow fields anywhere they never existed. */}

@@ -11,7 +11,7 @@ import { personalApi } from "../api/personal";
 import { chatApi } from "../api/chat";
 import { currentUser, humanError, isWeb, profileId, profiles, reloadProfiles, setProjectId } from "../session";
 import { linkProps, navigate, type Route } from "../router";
-import { deadlineTone, metricTone } from "../statusTone";
+import { bandTone, deadlineBand, deadlineTone, metricTone } from "../statusTone";
 import "../components/paper.css";
 import "../components/WorkItemDrawer.css";
 import "./Projects.css";
@@ -332,7 +332,15 @@ export default function Projects() {
           <div class="project-card-head">
             {/* The same tile the Knowledge card carries, with the same glyph the rail
                 uses for Projects — the card and the way here wear one mark. */}
-            <span class="project-card-icon" aria-hidden="true"><Icon name="layers" size={20} /></span>
+            {/* AND IT SAYS HOW MUCH ROOM IS LEFT. The same three bands a task's mark
+                uses (statusTone.deadlineBand): teal beyond a week, amber inside it,
+                red today/tomorrow/past. A project with no deadline stays grey — the
+                mark never invents one. Archived work is finished and stays quiet. */}
+            <span
+              class="project-card-icon"
+              classList={{ [project.archived ? "" : bandTone(deadlineBand(project.deadline))]: !project.archived }}
+              aria-hidden="true"
+            ><Icon name="layers" size={20} /></span>
             <strong>{project.name}</strong>
             <code>{project.key}</code>
             {/* LAW: lead is PURELY INFORMATIONAL — a name on a row, read-only here,

@@ -9,6 +9,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
+import { personalApi } from "../api/personal";
 import { documentsApi } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
@@ -249,6 +250,22 @@ export default function SpaceShell(props: {
         archived: false,
       });
       setDropNote(`Shared “${document.title}” in ${channel.name ?? "the conversation"}`);
+      setTimeout(() => setDropNote(""), 4000);
+    } catch (reason) {
+      setChannelError(String(reason));
+    }
+  };
+
+  /** A task dropped on a project joins it — the same gesture as a document onto a
+   *  shelf. Only the task's OWNER may re-file it; the server refuses anyone else, and
+   *  the refusal is shown rather than swallowed. */
+  const fileTaskIntoProject = async (taskId: string, projectId: string, projectName: string) => {
+    try {
+      const mine = await personalApi.todos(actingProfileId() ?? "", true);
+      const task = mine.find((row) => row.id === taskId);
+      if (!task || task.project_id === projectId) return;
+      await personalApi.updateTodo({ ...task, project_id: projectId });
+      setDropNote(`“${task.content}” now belongs to ${projectName}`);
       setTimeout(() => setDropNote(""), 4000);
     } catch (reason) {
       setChannelError(String(reason));
@@ -532,6 +549,46 @@ export default function SpaceShell(props: {
                   class="side-link"
                   classList={{ active: route().projectId === project.id }}
                   {...navLink(() => ({ view: "Project Overview", projectId: project.id }))}
+                >
+                  <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
+                  {project.name}
+                </a>
+              )}
+            </For>
+            <Show when={!projectList().length}>
+              <div class="side-empty">No projects yet.</div>
+            </Show>
+          </div>
+        </Show>
+
+        {/* THE PROJECTS ARE WHERE WORK IS FILED. Tasks lists them for the same reason
+            Knowledge lists its libraries: to go there, and to have somewhere to drop
+            what you are carrying. */}
+        <Show when={mode() === "tasks"}>
+          <div class="section">
+            <div class="section-head"><span>Projects</span></div>
+            <For each={projectList()}>
+              {(project) => (
+                <a
+                  class="side-link"
+                  classList={{
+                    active: route().projectId === project.id,
+                    "drop-into": dropTarget() === `task-project:${project.id}`,
+                  }}
+                  onDragOver={(event) => {
+                    if (!carries(event, "application/x-gaia-task")) return;
+                    event.preventDefault();
+                    setDropTarget(`task-project:${project.id}`);
+                  }}
+                  onDragLeave={() => setDropTarget((current) => (current === `task-project:${project.id}` ? null : current))}
+                  onDrop={(event) => {
+                    const payload = readPayload<{ id: string; title: string }>(event, "application/x-gaia-task");
+                    setDropTarget(null);
+                    if (!payload) return;
+                    event.preventDefault();
+                    void fileTaskIntoProject(payload.id, project.id, project.name ?? "this project");
+                  }}
+                  {...navLink(() => ({ view: "Project Tasks", projectId: project.id }))}
                 >
                   <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
                   {project.name}

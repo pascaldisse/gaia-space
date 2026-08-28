@@ -428,6 +428,7 @@
 /* A drop target says YES before you let go — the same rule the library's shelves
    follow, so the gesture reads the same wherever it is used. */
 .space-chat-shell .channel.drop-into,
+.space-chat-shell .side-link.drop-into,
 .space-chat-shell .section-head.drop-into {
   outline: 2px dashed var(--teal, #00bfa6);
   outline-offset: -2px;

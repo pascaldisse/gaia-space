@@ -10,6 +10,8 @@ import {
   urgencyLabel,
   urgencyOf,
   urgencyTone,
+  deadlineBand,
+  bandTone,
 } from "./statusTone";
 
 const TODAY = "2030-01-10";
@@ -118,5 +120,32 @@ describe("date helpers", () => {
     expect(inDays(3, TODAY)).toBe("2030-01-13");
     expect(inDays(0, TODAY)).toBe(TODAY);
     expect(inDays(30, TODAY)).toBe("2030-02-09");
+  });
+});
+
+describe("the deadline band an open task's mark carries", () => {
+  const DAY = "2030-01-10";
+  it("is urgent when the deadline is past, today or tomorrow", () => {
+    expect(deadlineBand("2030-01-01", DAY)).toBe("urgent");
+    expect(deadlineBand("2030-01-10", DAY)).toBe("urgent");
+    expect(deadlineBand("2030-01-11", DAY)).toBe("urgent");
+  });
+  it("is soon from two days out to the end of the week", () => {
+    expect(deadlineBand("2030-01-12", DAY)).toBe("soon");
+    expect(deadlineBand("2030-01-13", DAY)).toBe("soon");
+    expect(deadlineBand("2030-01-17", DAY)).toBe("soon");
+  });
+  it("is calm with more than a week of room", () => {
+    expect(deadlineBand("2030-01-18", DAY)).toBe("calm");
+    expect(deadlineBand("2030-03-01", DAY)).toBe("calm");
+  });
+  it("colours nothing when nobody set a deadline", () => {
+    expect(deadlineBand(null, DAY)).toBe("none");
+    expect(bandTone(deadlineBand(null, DAY))).toBe("");
+  });
+  it("speaks the one colour vocabulary: red, amber, teal", () => {
+    expect(bandTone("urgent")).toBe("red");
+    expect(bandTone("soon")).toBe("amber");
+    expect(bandTone("calm")).toBe("teal");
   });
 });

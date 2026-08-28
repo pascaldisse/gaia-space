@@ -97,8 +97,8 @@ const rowOf = (host: HTMLElement, selector: string, title: string) =>
 
 describe("My tasks: the creator deletes, the assignee does not", () => {
   const openRow = async (host: HTMLElement, title: string) => {
-    const row = rowOf(host, ".task-card", title);
-    row.querySelector<HTMLButtonElement>(".task-body-edit")!.click();
+    const row = rowOf(host, ".task-tile", title);
+    row.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
     await settle();
   };
 
@@ -119,15 +119,18 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
 
   test("right-click offers Delete task… on mine only", async () => {
     const host = await mount(() => <Todo /> as any);
-    rightClick(rowOf(host, ".task-card", "Mine alone"));
+    rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Delete task…"]);
+    // The row's old glyph buttons are words in this menu now; only the DELETE entry
+    // is owner-gated, which is what this test is about.
+    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Delete task…"]);
     document.querySelector<HTMLButtonElement>(".context-menu button.context-item")!.blur();
     window.dispatchEvent(new Event("mousedown"));
     await settle();
-    rightClick(rowOf(host, ".task-card", "Theirs on me"));
+    rightClick(rowOf(host, ".task-tile", "Theirs on me"));
     await settle();
-    expect(menuEntries()).toEqual(["Open"]);
+    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Convert to ticket"]);
+    expect(menuEntries()).not.toContain("Delete task…");
   });
 
   test("cancelling deletes nothing", async () => {
@@ -157,7 +160,7 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
   test("a refused delete is shown on the surface, never swallowed", async () => {
     deleteFails = "delete_todo refused";
     const host = await mount(() => <Todo /> as any);
-    rightClick(rowOf(host, ".task-card", "Mine alone"));
+    rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
     menuEntry("Delete task…")!.click();
     await settle();
