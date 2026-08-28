@@ -171,3 +171,11 @@
   font-weight: 720;
   background: var(--blue);
 }
+
+/* "Attach to project" sits where the tab row would be, so the empty space explains
+   itself instead of just being empty. Structure unscoped; colour is themed below. */
+.cw-attach { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0 2px; }
+.cw-attach-lead { font-size: 13px; }
+.cw-attach-error { font-size: 12.5px; }
+.theme-space-light .cw-attach-lead { color: var(--muted); }
+.theme-space-light .cw-attach-error { color: var(--red-ink, var(--red)); }

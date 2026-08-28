@@ -1,10 +1,10 @@
-import { For, Show, createMemo, createResource, type JSX } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
-import { currentUser, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
+import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
 import { channelTabs, linkProps, navigate, route } from "../router";
-import { GhostPill } from "../components/controls";
+import { GhostPill, PillMenu } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import NotesLog from "../components/NotesLog";
 import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
@@ -59,7 +59,7 @@ export default function ChannelWorkspace(): JSX.Element {
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
 
-  const [channel] = createResource(channelId, (id) =>
+  const [channel, { refetch: refetchChannel }] = createResource(channelId, (id) =>
     id ? chatApi.getChannel(id) : Promise.resolve<Channel | null>(null),
   );
   void reloadProjects().catch(() => undefined);
@@ -107,6 +107,27 @@ export default function ChannelWorkspace(): JSX.Element {
   const goTab = (tab: TabKey) =>
     navigate({ view: "Chat", entityType: "channel", entityId: channelId(), tab });
   const tabs = () => TABS.filter((entry) => !entry.needsProject || !!project());
+
+  // A channel without a project shows no work tabs, because there would be nothing
+  // behind them. That is not a dead end though: binding it to a project is a real,
+  // reversible act, and it is the moment a conversation becomes a workspace.
+  // `update_channel` writes the whole row, so the CURRENT channel is patched — never
+  // a stale copy, or the name and description would travel back in time with it.
+  const [binding, setBinding] = createSignal(false);
+  const [bindError, setBindError] = createSignal("");
+  const attachToProject = async (projectId: string) => {
+    const current = channel();
+    if (!current || !projectId) return;
+    setBindError(""); setBinding(true);
+    try {
+      await chatApi.updateChannel({ ...current, project_id: projectId });
+      await refetchChannel();
+    } catch (reason) {
+      setBindError(humanError(reason));
+    } finally {
+      setBinding(false);
+    }
+  };
   const visibleTab = (): TabKey => (tabs().some((entry) => entry.key === tab()) ? tab() : "messages");
 
   /* What this host has already decided for its guests. `identityLocked` because the
@@ -148,7 +169,27 @@ export default function ChannelWorkspace(): JSX.Element {
           </div>
         </div>
 
-        {/* A channel without a project has no work surfaces: the row is not drawn. */}
+        {/* A channel without a project has no work surfaces: the row is not drawn.
+            In its place, the one act that would create them. */}
+        <Show when={!project() && channel()?.content_type !== "dm"}>
+          <div class="cw-attach">
+            <span class="cw-attach-lead">Not part of a project yet</span>
+            <PillMenu
+              label="Attach to project"
+              value=""
+              placeholder="Attach to project…"
+              disabled={binding() || !(projects() ?? []).length}
+              onChange={(id) => void attachToProject(id)}
+              options={[
+                { value: "", label: "Attach to project…", disabled: true },
+                ...(projects() ?? []).filter((item) => !item.archived).map((item) => ({
+                  value: item.id, label: item.name, sub: "Adds Overview, Tasks, Calendar, Files, Notes",
+                })),
+              ]}
+            />
+            <Show when={bindError()}><span class="cw-attach-error" role="alert">{bindError()}</span></Show>
+          </div>
+        </Show>
         <Show when={project()}>
           <nav class="cw-tabs" aria-label="Channel sections">
             <For each={tabs()}>

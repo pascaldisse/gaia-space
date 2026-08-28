@@ -2,7 +2,7 @@ import { For, Show, createResource, createSignal, onCleanup, onMount } from "sol
 import { chatApi, newId, type Channel, type ChannelContentType } from "../api/chat";
 import { authApi } from "../api/auth";
 import { actingProfileId } from "../chatIdentity";
-import { humanError, isWeb } from "../session";
+import { humanError, isWeb, projects } from "../session";
 import { PillMenu } from "./controls";
 import "./WorkItemDrawer.css";
 
@@ -25,6 +25,10 @@ export default function NewChannelDialog(props: {
   const [name, setName] = createSignal("");
   const [kind, setKind] = createSignal<ChannelContentType>("public");
   const [recipientId, setRecipientId] = createSignal("");
+  // A channel bound to a project becomes a WORKSPACE: it gains the Overview, Tasks,
+  // Calendar, Files and Notes tabs, because there is finally something behind them.
+  // Unbound stays the honest default — not every conversation is project work.
+  const [projectId, setProjectId] = createSignal(props.projectId ?? "");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let firstField!: HTMLInputElement;
@@ -62,7 +66,7 @@ export default function NewChannelDialog(props: {
       content_type: kind(),
       name: title,
       description: null,
-      project_id: props.projectId ?? null,
+      project_id: projectId() || null,
       archived: false,
     };
     try {
@@ -105,6 +109,19 @@ export default function NewChannelDialog(props: {
           <label class="wid-field"><span>Channel name</span>
             <input class="wid-input" ref={firstField} value={name()} placeholder="e.g. product" onInput={(event) => setName(event.currentTarget.value)} />
           </label>
+          <div class="wid-field"><span>Project</span>
+            <PillMenu
+              label="Project"
+              value={projectId()}
+              onChange={setProjectId}
+              options={[
+                { value: "", label: "No project", sub: "A plain conversation" },
+                ...(projects() ?? []).filter((project) => !project.archived).map((project) => ({
+                  value: project.id, label: project.name, sub: "Gains the work tabs",
+                })),
+              ]}
+            />
+          </div>
         </Show>
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">
