@@ -1,0 +1,224 @@
+/* The project workspace — one frame, one tab row (GAIA Space redesign, stage 19).
+
+   ── THE SCOPING LAW OF THIS FILE ──────────────────────────────────────────────
+   STRUCTURE IS NOT SCOPED. Grid, flex, min-height, overflow and spacing are written
+   plain, so this surface lays out identically in every theme. Scoping the geometry
+   under `.theme-space-light` is exactly what broke the grouped/flat dark layouts
+   three times in earlier lanes: the rules vanished, the panes collapsed, and the
+   defect only showed up on a theme nobody was looking at.
+
+   COLOUR IS SCOPED. Every paper/ink literal below sits under `.theme-space-light`,
+   or is read through a `--token` that both themes define. Nothing here can repaint
+   the dark theme.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── structure (both themes) ───────────────────────────────────────────────── */
+.project-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+.pw-header { padding: 18px 28px 0; }
+.pw-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 22px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pw-title { min-width: 0; }
+.pw-kicker {
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.pw-title h1 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 27px;
+  line-height: 1.12;
+  letter-spacing: -.045em;
+  font-weight: 720;
+}
+.pw-home { text-decoration: none; color: inherit; }
+.pw-key { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+.pw-lead { margin: 6px 0 0; font-size: 14px; }
+
+.pw-edge { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.pw-header-actions { display: flex; gap: 8px; }
+.pw-deadline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  text-decoration: none;
+}
+.pw-deadline em { font-style: normal; }
+
+/* THE tab row. One per project, and this is it. */
+.pw-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.pw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px 12px;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pw-tab-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.pw-body { min-height: 0; overflow: auto; }
+.pw-pad { padding: 0; min-height: 0; }
+.pw-guest { min-height: 0; }
+
+/* overview: the two foreground sections, stacked, generous */
+.pw-overview {
+  display: grid;
+  gap: 18px;
+  padding: 20px 28px 32px;
+  align-content: start;
+}
+.pw-card { border-radius: 14px; padding: 6px 20px 14px; }
+.pw-rows { list-style: none; margin: 0; padding: 0; }
+.pw-row { padding: 0; }
+.pw-row-link {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 4px;
+  text-decoration: none;
+  color: inherit;
+}
+.pw-row-main { min-width: 0; display: grid; gap: 3px; }
+.pw-row-main .paper-row-title,
+.pw-row-main .paper-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pw-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.pw-row-time { font-size: 13px; white-space: nowrap; }
+.pw-more { margin: 10px 0 0; font-size: 13px; }
+.pw-more a { text-decoration: none; }
+
+/* chats: the channel list is a LIST, the channel is an object inside this tab */
+.pw-chats {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+.pw-channel-list { padding: 14px 12px; overflow: auto; min-height: 0; }
+.pw-channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 14px;
+  color: inherit;
+}
+.pw-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-channel-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.pw-channel-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+.pw-channel-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+}
+.pw-channel-title { font-size: 15px; font-weight: 700; }
+
+.pw-dev { display: grid; gap: 18px; padding: 20px 28px 32px; align-content: start; }
+
+@media (max-width: 900px) {
+  .pw-chats { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .pw-channel-list { max-height: 180px; }
+}
+
+/* ── colour, light theme only ──────────────────────────────────────────────── */
+.theme-space-light .project-workspace { background: var(--wash); color: var(--ink); }
+.theme-space-light .pw-header { background: var(--paper); border-bottom: 1px solid var(--line); }
+.theme-space-light .pw-kicker { color: var(--muted); }
+.theme-space-light .pw-home:hover { color: var(--teal-ink, #0d6e63); }
+.theme-space-light .pw-key { color: var(--quiet, var(--muted)); }
+.theme-space-light .pw-lead { color: var(--muted); }
+.theme-space-light .pw-lead strong { color: var(--ink); }
+
+.theme-space-light .pw-deadline { border-color: var(--line); color: var(--muted); background: #fbfaf8; }
+.theme-space-light .pw-deadline time { color: var(--ink); font-weight: 650; }
+.theme-space-light .pw-deadline.soon { background: var(--amber-soft); border-color: transparent; color: var(--amber-ink); }
+.theme-space-light .pw-deadline.overdue { background: var(--red-soft); border-color: transparent; color: var(--red-ink); }
+.theme-space-light .pw-deadline.soon time,
+.theme-space-light .pw-deadline.overdue time { color: inherit; }
+
+.theme-space-light .pw-tab { color: var(--muted); }
+.theme-space-light .pw-tab:hover { color: var(--ink); }
+.theme-space-light .pw-tab.active { color: var(--ink); border-bottom-color: var(--teal, #00c2a8); }
+.theme-space-light .pw-tab-count { background: var(--teal-soft); color: var(--teal-ink, #0d6e63); }
+
+.theme-space-light .pw-overview,
+.theme-space-light .pw-dev { background: var(--wash); }
+.theme-space-light .pw-card { background: var(--paper); border: 1px solid var(--line); }
+.theme-space-light .pw-row + .pw-row { border-top: 1px solid var(--line); }
+.theme-space-light .pw-row-link:hover { background: var(--wash); }
+.theme-space-light .pw-row.unread .paper-row-title { font-weight: 700; }
+.theme-space-light .pw-avatar { background: var(--teal-soft); color: var(--teal-ink, #0d6e63); }
+.theme-space-light .pw-avatar.hash { background: #f1eef8; color: #5b4b8a; }
+.theme-space-light .pw-row-time { color: var(--quiet, var(--muted)); }
+.theme-space-light .pw-more a { color: var(--teal-ink, #0d6e63); }
+
+.theme-space-light .pw-chats { background: var(--wash); }
+.theme-space-light .pw-channel-list { background: var(--paper); border-right: 1px solid var(--line); }
+.theme-space-light .pw-channel { color: var(--muted); }
+.theme-space-light .pw-channel:hover { background: var(--wash); color: var(--ink); }
+.theme-space-light .pw-channel.active { background: var(--teal-soft); color: var(--teal-ink, #0d6e63); }
+.theme-space-light .pw-channel.unread .pw-channel-name { font-weight: 700; color: var(--ink); }
+.theme-space-light .pw-channel-count { background: var(--teal-soft); color: var(--teal-ink, #0d6e63); }
+.theme-space-light .pw-channel-tools { background: var(--paper); border-bottom: 1px solid var(--line); }
+.theme-space-light .pw-channel-title { color: var(--ink); }

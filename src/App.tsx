@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switch, type Component } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switch, type Component, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import "./App.css";
 import "./spaceTheme.css";
@@ -31,7 +31,7 @@ import TeamTasks from "./views/TeamTasks";
 import Steering from "./views/Steering";
 import ProjectHome from "./views/ProjectHome";
 import ProjectSettings from "./views/ProjectSettings";
-import { ProjectContext } from "./components/ProjectContext";
+import ProjectWorkspace from "./views/ProjectWorkspace";
 import Packages from "./views/Packages";
 import Pipelines from "./views/Pipelines";
 import Members from "./views/Members";
@@ -71,6 +71,17 @@ const teamTasksView:View={name:"Team Tasks",icon:"check",component:TeamTasks};
 const projectOverviewView:View={name:"Project Overview",icon:"home",component:ProjectHome};
 const projectSteeringView:View={name:"Project Steering",icon:"target",component:Steering};
 const projectSettingsView:View={name:"Project Settings",icon:"settings",component:ProjectSettings};
+/* THE PROJECT WORKSPACE. Its body is drawn by the frame itself (it owns the five
+   tabs), so the registry entry only has to exist: `current()` must resolve the view
+   name, and the router must know the slug. Rendering nothing here is the honest
+   statement that this view has no content OUTSIDE its frame. */
+const projectWorkspaceView:View={name:"Project Workspace",icon:"layers",component:()=>null};
+/* ONE FRAME FOR EVERY PROJECT ADDRESS. Any route carrying a project renders inside
+   ProjectWorkspace: its own five tabs, and Steering / Settings / a single ticket as
+   guests under the SAME tab row. That is what removes the double system — there is
+   no longer a `ProjectContext` drawing a second, six-entry row above all of them. */
+const projectFramed=()=>!!route().projectId;
+const projectFrame=(body:()=>JSX.Element)=><Show when={projectFramed()} fallback={body()}><ProjectWorkspace>{body()}</ProjectWorkspace></Show>;
 
 export default function App() {
   const active=()=>activeView()||defaultView();
@@ -84,11 +95,11 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     if(isWeb()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
     return list;
   };
-  const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView];
+  const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
-    registerViews([...personalViews,...workspaceViews,usersView,leadsView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView]);
+    registerViews([...personalViews,...workspaceViews,usersView,leadsView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView]);
     setRoutePending(isWeb()&&!authChecked());
     initRouter(isWeb()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth();
@@ -99,7 +110,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
   });
   createEffect(()=>{
     setRoutePending(isWeb()&&!authChecked());
-    setAvailableViews([...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
+    setAvailableViews([...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
   const nav=(view:View)=><a class="topnav-item" title={viewLabel(view.name)} aria-label={viewLabel(view.name)} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{viewLabel(view.name)}</span></a>;
@@ -116,7 +127,13 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
         {/* A channel URL with a tab is the channel WORKSPACE: the same Chat view, wrapped
             in its header/tabs/rail. Without a tab (and in every other layout) the plain
             Chat view keeps rendering, unchanged. */}
-        <Show when={route().entityType==="channel"&&route().tab} fallback={<Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show>}><ChannelWorkspace/></Show>
+        {/* A project address wins over a channel one: `/projects/<id>/chats/<cid>` is a
+            channel SELECTED INSIDE the project, so the project frame draws it. A bare
+            `/channel/<id>/<tab>` is still the channel workspace — which no longer draws
+            project tabs of its own (see ChannelWorkspace.tsx). */}
+        <Show when={projectFramed()} fallback={<Show when={route().entityType==="channel"&&route().tab} fallback={<Dynamic component={current().component}/>}><ChannelWorkspace/></Show>}>
+          <ProjectWorkspace><Dynamic component={current().component}/></ProjectWorkspace>
+        </Show>
         <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </SpaceShell>
     </Match>
@@ -141,7 +158,7 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
         <Show when={navLayout()==="grouped"&&(activeGroup()?.views.length??0)>1}>
           <nav class="subnav" aria-label="Section navigation"><For each={activeGroup()!.views}>{subNav}</For></nav>
         </Show>
-        <main class="workspace"><Show when={route().projectId || (route().view === "Projects" && route().entityId)} fallback={<Dynamic component={current().component}/>}><ProjectContext><Dynamic component={current().component}/></ProjectContext></Show></main>
+        <main class="workspace">{projectFrame(()=><Dynamic component={current().component}/>)}</main>
         <Goto open={gotoOpen()||fullTextOpen()} fullText={fullTextOpen()} onClose={()=>{setGotoOpen(false);setFullTextOpen(false)}} onNavigate={(kind,id)=>linkEntity(kind,id)}/>
       </div>
     </Match>
