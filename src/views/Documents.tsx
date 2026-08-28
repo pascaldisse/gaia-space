@@ -6,8 +6,10 @@ import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import ConfirmDialog from "../components/ConfirmDialog";
+import PromptDialog from "../components/PromptDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { Icon } from "../components/Icon";
-import { useDeepLink, linkEntity, linkProps, route } from "../router";
+import { useDeepLink, linkEntity, linkProps, navigate, route } from "../router";
 import {
   documentsApi,
   newId,
@@ -416,17 +418,21 @@ const [showArchived, setShowArchived] = createSignal(false);
       fail(e);
     }
   }
+  /** Renaming is ASKED, not typed into the card: turning a tidy shelf into a bare
+   *  input with a ✓ beside it was the "old text field" showing through the new one. */
   const [renamingFolderId, setRenamingFolderId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal("");
   function startRenameFolder(f: DocumentFolder) {
     setRenamingFolderId(f.id);
     setRenameValue(f.name);
   }
-  async function saveRenameFolder(f: DocumentFolder) {
+  async function saveRenameFolder() {
+    const id = renamingFolderId();
+    const target = id ? safeFolders().find((f) => f.id === id) : null;
     const name = renameValue().trim();
-    if (!name) return;
+    if (!target || !name) return;
     try {
-      await documentsApi.updateDocumentFolder({ ...f, name });
+      await documentsApi.updateDocumentFolder({ ...target, name });
       setRenamingFolderId(null);
       await refetchFolders();
     } catch (e) {
@@ -460,6 +466,37 @@ const [showArchived, setShowArchived] = createSignal(false);
       setPendingDelete(null);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  /** EVERY ACT A CARD HAS, IN ONE MENU. Right-click opens it where the click was;
+   *  the card's ⋯ button opens the same list for anyone not reaching for a right
+   *  mouse button. Words, not glyphs — the ✕ that archived was read as a delete. */
+  const [cardMenu, setCardMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const folderMenu = (folder: DocumentFolder): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => setSelectedFolderId(folder.id) },
+    { label: "Rename…", onSelect: () => startRenameFolder(folder) },
+    { label: folder.archived ? "Restore" : "Archive", onSelect: () => void toggleFolderArchived(folder) },
+    { label: "Delete folder…", danger: true, onSelect: () => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name }) },
+  ];
+  const documentMenu = (document: Document): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => navigate(docRoute(document.id)) },
+    { label: document.archived ? "Restore" : "Archive", onSelect: () => void archiveDocumentRow(document) },
+    { label: "Delete document…", danger: true, onSelect: () => setPendingDelete({ kind: "document", id: document.id, name: document.title }) },
+  ];
+  const openCardMenu = (event: MouseEvent, items: ContextMenuItem[]) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setCardMenu({ x: event.clientX, y: event.clientY, items });
+  };
+
+  /** The row's own archive, so the menu works on a card that is not open. */
+  async function archiveDocumentRow(doc: Document) {
+    try {
+      await documentsApi.archiveDocument(doc.id, !doc.archived);
+      await refetchDocuments();
+    } catch (e) {
+      fail(e);
     }
   }
 
@@ -1547,6 +1584,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                               classList={{ archived: folder.archived, "drop-into": dropTargetId() === folder.id }}
                               draggable={renamingFolderId() !== folder.id}
                               onDragStart={(event) => event.dataTransfer?.setData("text/plain", `folder:${folder.id}`)}
+                              onContextMenu={(event) => openCardMenu(event, folderMenu(folder))}
                               onDragOver={(event) => {
                                 if (!isInternalDrag(event)) return;
                                 event.preventDefault();
@@ -1563,53 +1601,21 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                                 void fileInto(payload, folder.id);
                               }}
                             >
-                              <Show
-                                when={renamingFolderId() === folder.id}
-                                fallback={
-                                  <button class="documents-shelf-open folder-name" onClick={() => setSelectedFolderId(folder.id)}>
-                                    <span class="documents-shelf-icon" aria-hidden="true"><Icon name="folder" size={20} /></span>
-                                    <span class="documents-library-card-copy">
-                                      <strong>{folder.name}</strong>
-                                      <small>{shelfSubline(folder.id)}</small>
-                                    </span>
-                                  </button>
-                                }
+                              <button class="documents-shelf-open folder-name" onClick={() => setSelectedFolderId(folder.id)}>
+                                <span class="documents-shelf-icon" aria-hidden="true"><Icon name="folder" size={20} /></span>
+                                <span class="documents-library-card-copy">
+                                  <strong>{folder.name}</strong>
+                                  <small>{shelfSubline(folder.id)}</small>
+                                </span>
+                              </button>
+                              <button
+                                class="card-menu-button"
+                                aria-label={`Actions for ${folder.name}`}
+                                title="Actions"
+                                onClick={(event) => openCardMenu(event, folderMenu(folder))}
                               >
-                                <input
-                                  class="folder-rename-input"
-                                  value={renameValue()}
-                                  onInput={(e) => setRenameValue(e.currentTarget.value)}
-                                  onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(folder)}
-                                />
-                                <button class="ghost small" onClick={() => saveRenameFolder(folder)}>✓</button>
-                              </Show>
-                              {/* Shelf upkeep stays reachable but quiet: on hover or focus only. */}
-                              {/* MOVING IS DRAGGING. The shelf is grabbable and takes drops,
-                                  so the old "move…" dropdown was a second way to do the same
-                                  act — and the uglier one, hanging out of the tile on hover.
-                                  What is left is what a drag cannot say: a new name, and
-                                  putting the shelf away. */}
-                              <span class="folder-actions">
-                                <button class="shelf-action" title="Rename" aria-label={`Rename ${folder.name}`} onClick={() => startRenameFolder(folder)}>
-                                  <Icon name="edit" size={14} />
-                                </button>
-                                <button
-                                  class="shelf-action"
-                                  title={folder.archived ? "Restore" : "Archive"}
-                                  aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`}
-                                  onClick={() => toggleFolderArchived(folder)}
-                                >
-                                  <Icon name={folder.archived ? "enter" : "close"} size={14} />
-                                </button>
-                                <button
-                                  class="shelf-action danger"
-                                  title="Delete"
-                                  aria-label={`Delete ${folder.name}`}
-                                  onClick={() => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name })}
-                                >
-                                  <Icon name="trash" size={14} />
-                                </button>
-                              </span>
+                                ⋯
+                              </button>
                             </div>
                           )}
                         </For>
@@ -1621,19 +1627,30 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                       <div class="documents-library-grid" aria-label={`${libraryTitle()} library`}>
                         <For each={libraryDocuments()}>
                           {(document) => (
-                            <a
-                              class="documents-library-card"
-                              classList={{ archived: document.archived }}
-                              draggable={true}
-                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `document:${document.id}`)}
-                              {...linkProps(docRoute(document.id))}
-                            >
-                              <span class="documents-library-type" aria-hidden="true">
-                                <Icon name={document.doc_type === "file" ? "upload" : "doc"} size={16} />
-                              </span>
-                              <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
-                              <span class="documents-library-open" aria-hidden="true">→</span>
-                            </a>
+                            <div class="documents-library-card-row">
+                              <a
+                                class="documents-library-card"
+                                classList={{ archived: document.archived }}
+                                draggable={true}
+                                onDragStart={(event) => event.dataTransfer?.setData("text/plain", `document:${document.id}`)}
+                                onContextMenu={(event) => openCardMenu(event, documentMenu(document))}
+                                {...linkProps(docRoute(document.id))}
+                              >
+                                <span class="documents-library-type" aria-hidden="true">
+                                  <Icon name={document.doc_type === "file" ? "upload" : "doc"} size={16} />
+                                </span>
+                                <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
+                                <span class="documents-library-open" aria-hidden="true">→</span>
+                              </a>
+                              <button
+                                class="card-menu-button"
+                                aria-label={`Actions for ${document.title}`}
+                                title="Actions"
+                                onClick={(event) => openCardMenu(event, documentMenu(document))}
+                              >
+                                ⋯
+                              </button>
+                            </div>
                           )}
                         </For>
                       </div>
@@ -1841,6 +1858,21 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </aside>
         </Show>
       </div>
+
+      <Show when={cardMenu()}>
+        {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setCardMenu(null)} />}
+      </Show>
+
+      <PromptDialog
+        open={!!renamingFolderId()}
+        title="Rename folder"
+        label="Folder name"
+        value={renameValue()}
+        setValue={setRenameValue}
+        confirmLabel="Save name"
+        onConfirm={() => void saveRenameFolder()}
+        onCancel={() => setRenamingFolderId(null)}
+      />
 
       <ConfirmDialog
         open={!!pendingDelete()}

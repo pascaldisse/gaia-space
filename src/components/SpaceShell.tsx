@@ -5,6 +5,8 @@ import "./SpaceShell.css";
 import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
 import NewChannelDialog from "./NewChannelDialog";
+import ConfirmDialog from "./ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { documentsApi } from "../api/documents";
@@ -174,6 +176,40 @@ export default function SpaceShell(props: {
   // The header names the real organization. Order of truth: the organization record,
   // then the connected workspace, and only then the product name as a last resort — a
   // failing/absent org read must not rename somebody's workspace.
+  /* ── ACTS ON A CONVERSATION, WHERE THE CONVERSATION IS LISTED ────────────────
+     Deleting was only offered inside the channel; the list is where people point at
+     a channel, so the same act is on its right-click menu — and it still asks. */
+  const [channelMenu, setChannelMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [pendingChannel, setPendingChannel] = createSignal<ChannelSummary | null>(null);
+  const [deletingChannel, setDeletingChannel] = createSignal(false);
+  const [channelError, setChannelError] = createSignal("");
+  const channelItems = (channel: ChannelSummary): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => navigate({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }) },
+    { label: "Delete conversation…", danger: true, onSelect: () => setPendingChannel(channel) },
+  ];
+  const openChannelMenu = (event: MouseEvent, channel: ChannelSummary) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setChannelMenu({ x: event.clientX, y: event.clientY, items: channelItems(channel) });
+  };
+  const deleteChannel = async () => {
+    const channel = pendingChannel();
+    if (!channel) return;
+    setDeletingChannel(true);
+    setChannelError("");
+    try {
+      await chatApi.deleteChannel(channel.id, actingProfileId() ?? "");
+      setPendingChannel(null);
+      // Standing in a channel that no longer exists is not a place: leave it.
+      if (activeChannelId() === channel.id) navigate({ view: "Chat" });
+    } catch (reason) {
+      setChannelError(String(reason));
+      setPendingChannel(null);
+    } finally {
+      setDeletingChannel(false);
+    }
+  };
+
   const [organization] = createResource(() => platformApi.organization().catch(() => undefined));
 
   /** Knowledge's objects: the organization's books (kb container roots) and, beside them,
@@ -321,6 +357,26 @@ export default function SpaceShell(props: {
 
   return (
     <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar() }}>
+      <Show when={channelMenu()}>
+        {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
+      </Show>
+      <ConfirmDialog
+        open={!!pendingChannel()}
+        title="Delete conversation?"
+        body={
+          <>
+            <strong>#{pendingChannel()?.name ?? "this channel"}</strong> is deleted for everyone, with every
+            message, file and note in it. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete conversation"
+        busy={deletingChannel()}
+        onConfirm={() => void deleteChannel()}
+        onCancel={() => setPendingChannel(null)}
+      />
+      <Show when={channelError()}>
+        <p class="space-shell-error" role="alert">{channelError()}</p>
+      </Show>
       <aside class="rail" aria-label="Main navigation">
         <div class="mark" aria-hidden="true">G</div>
         <For each={RAIL}>{railItem}</For>
@@ -511,6 +567,7 @@ export default function SpaceShell(props: {
                   <a
                     class="channel"
                     classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+                    onContextMenu={(event) => openChannelMenu(event, channel)}
                     {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                   >
                     <span class="hash" aria-hidden="true">#</span>
@@ -530,6 +587,7 @@ export default function SpaceShell(props: {
                 <a
                   class="channel"
                   classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+                  onContextMenu={(event) => openChannelMenu(event, channel)}
                   {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                 >
                   <span class="hash" aria-hidden="true">@</span>

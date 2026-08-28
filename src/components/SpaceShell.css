@@ -416,3 +416,11 @@
 /* Home owns no objects, so it gets no sidebar and the page takes the width back.
    Structure only — never scoped to a theme, or the dark shells lose the column. */
 .space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
+
+/* A failed delete must be visible somewhere that survives the channel disappearing. */
+.space-chat-shell .space-shell-error {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 95; margin: 0; padding: 8px 14px;
+  border: 1px solid var(--danger, #c2384a); border-radius: 10px;
+  background: var(--paper, #fff); color: var(--danger, #c2384a); font-size: 0.9rem;
+}

@@ -289,6 +289,100 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     expect(deleted[0]).toMatchObject({ id: "d1" });
   });
 
+  // EVERY ACT A CARD HAS IS IN ONE MENU — right-click, or the card's own ⋯ for anyone
+  // without a right mouse button. Words, never unlabelled glyphs: the ✕ that archived
+  // was read as a delete, which is exactly the mistake a menu cannot make.
+  test("right-clicking a document offers its acts, and delete still asks", async () => {
+    setProfileId("me");
+    const deleted: unknown[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "delete_document") {
+        deleted.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_document_folders: [folder({ id: "f1", name: "Specs" })],
+        list_documents: [{ id: "d1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "text", title: "Loose note", body: "", version: 1, archived: false, created_by: "me" }],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+    // Route state is process-global: land on the library, not on a document another
+    // test left open.
+    registerViews(["Documents"]);
+    navigate({ view: "Documents", containerType: "my-docs", containerId: "me" });
+    await settle();
+
+    const card = host.querySelector("a.documents-library-card") as HTMLElement;
+    card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 40 }));
+    await settle();
+
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu).not.toBeNull();
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent)).toEqual([
+      "Open", "Archive", "Delete document…",
+    ]);
+
+    (([...menu.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent === "Delete document…")) as HTMLButtonElement).click();
+    await settle();
+
+    // The menu closed and asked; it did not delete.
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(deleted.length).toBe(0);
+    const dialog = document.querySelector('[role="alertdialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain("Loose note");
+    (dialog.querySelector("button.confirm-danger") as HTMLButtonElement).click();
+    await settle();
+    expect(deleted.length).toBe(1);
+  });
+
+  // A shelf carries no unlabelled glyph row any more: its acts are in the same menu,
+  // and renaming is ASKED in a dialog instead of turning the tile into a bare input.
+  test("a shelf offers rename in a dialog, not a field inside the card", async () => {
+    setProfileId("me");
+    const renamed: Record<string, any>[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "update_document_folder") {
+        renamed.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_document_folders: [folder({ id: "f1", name: "Specs" })],
+        list_documents: [],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+
+    const shelf = host.querySelector(".documents-shelf") as HTMLElement;
+    // No glyph row: the pencil, the ✕ and the bin are gone from the card itself.
+    expect(shelf.querySelectorAll("button.shelf-action").length).toBe(0);
+
+    (shelf.querySelector("button.card-menu-button") as HTMLButtonElement).click();
+    await settle();
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent)).toEqual([
+      "Open", "Rename…", "Archive", "Delete folder…",
+    ]);
+
+    (([...menu.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent === "Rename…")) as HTMLButtonElement).click();
+    await settle();
+
+    const prompt = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(prompt).not.toBeNull();
+    const field = prompt.querySelector("input.confirm-input") as HTMLInputElement;
+    expect(field.value).toBe("Specs");
+    field.value = "Specifications";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    (prompt.querySelector("button.confirm-primary") as HTMLButtonElement).click();
+    await settle();
+
+    expect(renamed.length).toBe(1);
+    expect(renamed[0].folder).toMatchObject({ id: "f1", name: "Specifications" });
+  });
+
   // The source (My Documents / organization book / project library) is chosen in the
   // shell's Knowledge sidebar, so this page shows no tabs and no picker.
   test("the source picker belongs to the shell, not to the page", async () => {

@@ -521,16 +521,32 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
   display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
   border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
 }
-.documents-shelf .folder-actions { padding-right: var(--dk-space-md); gap: 0.15rem; }
-.shelf-action {
-  display: grid; place-items: center; width: 1.75rem; height: 1.75rem; padding: 0;
+/* ONE ⋯ PER CARD, and the same list on right-click. It replaces the three unlabelled
+   glyphs (pencil / ✕ / bin) that used to hang off a shelf: two of them were read as
+   something they were not. */
+.card-menu-button {
+  /* ABSOLUTE ON PURPOSE. A hover-only button that still occupies width squeezes the
+     text beside it — that is how "Empty shelf" became "Empty …". It floats over the
+     card's own padding instead. */
+  position: absolute; top: 50%; right: var(--dk-space-sm); transform: translateY(-50%);
+  display: grid; place-items: center; width: 1.9rem; height: 1.9rem;
   border: var(--dk-hairline) solid transparent; border-radius: var(--dk-radius-sm);
-  background: none; color: var(--text-muted); cursor: pointer;
+  background: none; color: var(--text-muted); font-size: 1.05rem; line-height: 1; cursor: pointer;
+  opacity: 0;
 }
-.shelf-action:hover { border-color: var(--surface-border); background: var(--surface); color: var(--accent-text); }
-/* Red is reserved for the irreversible act, and only on hover: a delete button that
-   glows all day is a delete button somebody eventually hits. */
-.shelf-action.danger:hover { color: var(--danger, #c2384a); border-color: color-mix(in srgb, var(--danger, #c2384a) 45%, transparent); }
+.documents-shelf:hover .card-menu-button,
+.documents-shelf:focus-within .card-menu-button,
+.documents-library-card-row:hover .card-menu-button,
+.documents-library-card-row:focus-within .card-menu-button,
+.card-menu-button:focus-visible { opacity: 1; }
+.card-menu-button:hover { border-color: var(--surface-border); background: var(--surface); color: var(--accent-text); }
+.documents-library-card-row { position: relative; display: flex; align-items: center; min-width: 0; }
+.documents-library-card-row > .documents-library-card { flex: 1; min-width: 0; }
+/* Room for the floating ⋯ so it never sits on the row's own arrow. */
+.documents-library-card-row:hover > .documents-library-card,
+.documents-library-card-row:focus-within > .documents-library-card { padding-right: 2.6rem; }
+.documents-shelf:hover .documents-shelf-open,
+.documents-shelf:focus-within .documents-shelf-open { padding-right: 2.6rem; }
 .editor-toolbar .ghost.danger:hover { color: var(--danger, #c2384a); }
 .documents-shelf:hover .folder-actions,
 .documents-shelf:focus-within .folder-actions { display: flex; opacity: 1; }
