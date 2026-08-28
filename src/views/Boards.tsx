@@ -190,6 +190,7 @@ const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All
 return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
     <PageHeader
       kicker={projectName(projectId())}
+      icon="columns"
       title="Ticket boards"
       subline={embedded() ? undefined : "Columns map ticket statuses"}
       actions={embedded() ? undefined : <ProjectPicker labelHidden onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />}

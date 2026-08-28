@@ -9,6 +9,7 @@ import {
   Show,
 } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { profileId } from "../session";
@@ -563,6 +564,7 @@ async function removeExternalIssueLink(id: string) {
           ONE ACTION, ONE PLACE: while the list is empty its empty state carries
           "Open merge request", so the header does not draw the same act twice. */}
       <PageHeader
+        icon="review"
         title="Pull requests"
         subline="Merge requests on real repository branches"
         chips={<Chip value={openCount()} label="open" />}
@@ -626,25 +628,32 @@ async function removeExternalIssueLink(id: string) {
             when={visibleReviews().length}
             fallback={<EmptyState variant="no-match" title="No merge requests match this filter." actions={<GhostPill onClick={() => setQuickFilter("all")}>Show all</GhostPill>} />}
           >
-            <ul>
+            {/* THE KNOWLEDGE CARD in one column (design rollout). A merge request has a
+                title and one quiet line — its number and the two branches. Those were
+                three stacked spans; they are one meta line now, and the state keeps its
+                pill because it is the one fact you scan for. */}
+            <ul class="dev-card-list">
               <For each={visibleReviews()}>
                 {(r) => (
                   <li classList={{ active: r.id === selectedId() }}>
                     <a
-                      class="row-link"
+                      class="row-link dev-card"
                       {...linkProps({
                         view: "Code Reviews",
                         entityType: "review",
                         entityId: r.id,
                       })}
                     >
-                      <span class="num">#{r.number}</span>
-                      <strong>{r.title}</strong>
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="review" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong>{r.title}</strong>
+                        <small>
+                          <span class="num">#{r.number}</span>{" · "}
+                          <span class="branches">{r.source_branch} → {r.target_branch}</span>
+                        </small>
+                      </span>
                       <span class={`state state-${r.state.toLowerCase()}`}>
                         {r.state}
-                      </span>
-                      <span class="branches">
-                        {r.source_branch} → {r.target_branch}
                       </span>
                     </a>
                   </li>

@@ -4,8 +4,10 @@ import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
 import EmptyState from "../components/EmptyState";
+import { Icon } from "../components/Icon";
 import { GhostPill, IconButton, PillSelect } from "../components/controls";
 import "./operatorForm.css";
+import "./devCards.css";
 import "./DevEnvironments.css";
 
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -72,7 +74,9 @@ const [poolTarget, setPoolTarget] = createSignal(0);
          is a control in the readout's place, so the project picker moved to the
          action line, where every other view keeps it. */}
       <PageHeader
+        icon="repo"
         title="Dev environments"
+        subline="Cloud workspaces for this project: start one, let it hibernate, claim one from standby."
         actions={<>
           <PillSelect label="Project" value={projectId()} onChange={setProjectId}>
             <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
@@ -152,11 +156,16 @@ const [poolTarget, setPoolTarget] = createSignal(0);
         <button class="primary" type="submit">Create environment</button>
       </form>
 
-      <ul class="devenv-list">
+      {/* THE KNOWLEDGE CARD, not a naked row (design rollout). An environment has a
+          NAME and one quiet line of facts about it — exactly the shape the library
+          card carries — so it wears the same card, from the same tokens. The row's
+          own acts keep the place the arrow would have, because this card DOES things
+          instead of opening a page. */}
+      <ul class="devenv-list dev-card-grid">
         {/* ONE ACTION, ONE PLACE: the band above IS "create an environment", so
             this state names the absence and does not draw that act again. */}
         <For each={envs()} fallback={
-          <li class="devenv-empty">
+          <li class="devenv-empty devenv-empty-full">
             <EmptyState
               title="No dev environments in this project"
               hint="An environment is a running workspace with your IDE attached. It hibernates on its own when it goes quiet."
@@ -165,15 +174,21 @@ const [poolTarget, setPoolTarget] = createSignal(0);
         }>
           {(env) => (
             <li>
-              <strong>{env.name}</strong>
-              <span class={`devenv-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
-              <span class="hint">
-                {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
-                {minutesAgo(env.last_activity_at).toFixed(0)}m
-              </span>
-              <Show when={env.persisted_home}>
-                <span class="hint">preserved: {env.persisted_home} + {env.persisted_worktree}</span>
-              </Show>
+              <div class="dev-card">
+                <span class="dev-card-icon" aria-hidden="true"><Icon name="repo" size={20} /></span>
+                <span class="dev-card-copy">
+                  <strong>{env.name}</strong>
+                  {/* ONE meta line. `preserved: …` used to be a second one; it is a
+                      fact about a hibernated environment, so it joins this line
+                      rather than starting a paragraph. */}
+                  <small>
+                    {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
+                    {minutesAgo(env.last_activity_at).toFixed(0)}m
+                    <Show when={env.persisted_home}> · preserved {env.persisted_home} + {env.persisted_worktree}</Show>
+                  </small>
+                </span>
+                <span class={`devenv-state dev-card-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
+                <span class="dev-card-actions">
               <GhostPill class="small" onClick={() => run(() => devenvApi.touch(env.id))}>
                 Activity
               </GhostPill>
@@ -192,6 +207,8 @@ const [poolTarget, setPoolTarget] = createSignal(0);
               <IconButton label={`Delete ${env.name}`} onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
                 ×
               </IconButton>
+                </span>
+              </div>
             </li>
           )}
         </For>

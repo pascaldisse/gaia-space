@@ -9,7 +9,9 @@
 .tab-switch button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 
 .pipelines-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.pipelines-view button { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+/* `:not(.dev-card)` because a card that happens to be a <button> is a CARD: this
+   blanket rule would otherwise repaint the script list's frame and padding. */
+.pipelines-view button:not(.dev-card) { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
 .pipelines-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .pipelines-view button.ghost { background: transparent; }
 .pipelines-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
@@ -44,9 +46,8 @@
 .script-more-menu, .target-more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #0e1626; border: 1px solid var(--surface-border); border-radius: 6px; min-width: 150px; }
 
 .automation-grid, .deployments-grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
-.scripts-list ul, .targets-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.scripts-list li, .targets-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.scripts-list li.active, .targets-list li.active { border-color: var(--accent); background: var(--accent-soft); }
+/* Both lists are Knowledge's card in one column now (devCards.css) — frame,
+   padding, radius, hover and the chosen state all live there. */
 
 .script-detail, .target-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .script-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

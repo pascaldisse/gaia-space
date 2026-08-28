@@ -6,7 +6,7 @@ import IssueDetail from "./IssueDetail";
 import IssueCreateDrawer from "../components/IssueCreateDrawer";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
-import PageHeader, { Chip } from "../components/PageHeader";
+import PageHeader, { Chip, useEmbedded } from "../components/PageHeader";
 import { ControlRow, GhostPill, PillMenu, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
@@ -30,6 +30,11 @@ import { dueTone, priorityTone, statusTone, todayISO } from "../statusTone";
  * ordering fix). Passing them in is the only way to get header-then-pills without
  * forking the header out of here. */
 export default function Issues(props: { filterTagName?: string; sections?: JSX.Element; title?: string } = {}) {
+  /* ICON + SUBLINE (design rollout). The glyph is the rail's own `target`, so the page
+     wears the mark you clicked to get here. The subline is dropped when a host has
+     already named this surface — in the project workspace it would be the second
+     answer to a question nobody asked twice. */
+  const embedded = useEmbedded();
   const projectId = sessionProject;
   const [query, setQuery] = createSignal("");
   const [statusFilter, setStatusFilter] = createSignal("");
@@ -151,7 +156,9 @@ const createStatus = async () => {
         The host passes its own name. */}
     <PageHeader
       kicker={projectName(projectId())}
+      icon="target"
       title={props.title ?? "Tickets"}
+      subline={embedded() ? undefined : "Tracked work in this project — every bug, feature and chore with a status."}
       chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="tickets" /></Show>}
       actions={<>
         {/* The picker's VALUE is its label now — the word "Project" above it was the

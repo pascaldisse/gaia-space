@@ -4,7 +4,9 @@ import PageHeader from "../components/PageHeader";
 import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
 import EmptyState from "../components/EmptyState";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import "./devCards.css";
 import "./Packages.css";
 import "./operatorForm.css";
 
@@ -176,7 +178,7 @@ async function togglePinned(v: PackageVersion) {
 
   return (
     <section class="packages-view">
-      <PageHeader title="Packages" subline="Publish and browse package versions" />
+      <PageHeader icon="package" title="Packages" subline="Publish and browse package versions" />
 
       <Show when={error()}>
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>
@@ -216,13 +218,28 @@ async function togglePinned(v: PackageVersion) {
       <div class="packages-body">
         <aside class="repos-list">
           <Show when={repos()?.length}>
-            <ul>
+            {/* THE KNOWLEDGE CARD in one column (design rollout): a repository has a
+                name and one quiet line of facts (its format, its mode), which is the
+                library card's shape exactly. Format and mode used to be two loose
+                spans stacked under the name — three lines saying one thing. */}
+            <ul class="dev-card-list">
               <For each={repos()}>
                 {(r) => (
-                  <li classList={{ active: r.id === selectedId(), archived: r.archived }} onClick={() => setSelectedId(r.id)}>
-                    <strong>{r.name}</strong>
-                    <span class="fmt">{r.format}</span>
-                    <span class="mode">{r.mode}</span>
+                  <li classList={{ active: r.id === selectedId() }}>
+                    <button
+                      type="button"
+                      class="dev-card"
+                      classList={{ archived: r.archived }}
+                      aria-pressed={r.id === selectedId()}
+                      onClick={() => setSelectedId(r.id)}
+                    >
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="package" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong>{r.name}</strong>
+                        <small>{formatLabel(r.format)} · {modeLabel(r.mode)}{r.archived ? " · archived" : ""}</small>
+                      </span>
+                      <span class="dev-card-open" aria-hidden="true"><Icon name="chevron-right" size={16} /></span>
+                    </button>
                   </li>
                 )}
               </For>

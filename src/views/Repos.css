@@ -102,6 +102,25 @@
    that should claim the rail's full control height. */
 .sidebar .repo-list .icon-button { min-height: 22px; width: 22px; padding: 0; }
 
+/* ── The repository list is Knowledge's card now (devCards.css) ────────────
+   App.css styles `.repo-list li` as a bare flex line with its own hover; the
+   <li> is only a slot for the card here, so those five declarations are undone
+   in one place instead of the card fighting them on every property. The card's
+   own frame, padding, radius and hover come from devCards.css — nothing about
+   the geometry is restated. */
+.repos-view .repo-list li { display: block; padding: 0; background: none; border-radius: var(--dk-radius-lg); }
+.repos-view .repo-list li:hover { background: none; }
+.repos-view .repo-list li.active { background: none; color: inherit; }
+/* The name+path is the way INTO the repository, so it is the pressable part and
+   fills the card; the forget-button keeps the far edge. `font` metrics are named
+   one by one — the repo forbids `font: inherit`, and no --btn-* token is touched. */
+.repos-view .repo-open {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: var(--dk-space-md);
+  padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: inherit; font-weight: inherit; line-height: inherit;
+}
+
 /* The centre pane's head is one line: name, branch, path. The branch chip used
    to wrap to three lines inside a narrow pane and push the path out of sight. */
 .repos-panes .topbar { flex-wrap: nowrap; }

@@ -1,6 +1,8 @@
 import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
+import { Icon } from "../components/Icon";
+import "./devCards.css";
 import { createStore, produce } from "solid-js/store";
 import { api } from "../api";
 import { currentUser } from "../session";
@@ -58,7 +60,7 @@ export default function Pipelines() {
 
   return (
     <section class="pipelines-view">
-      <PageHeader title="Pipelines" subline="Config-as-code automation, triggered manually" />
+      <PageHeader icon="pipeline" title="Pipelines" subline="Config-as-code automation, triggered manually" />
       {/* Automation | Deployments are SECTIONS of this page, not a second header.
           A <header> under a PageHeader is two headers on one screen; the same
           switch is section pills in Development, so it is section pills here. */}
@@ -288,12 +290,20 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
               hint="A script is a file in a repository. Adding one here registers it so its jobs can be run."
             />
           }>
-            <ul>
+            {/* THE KNOWLEDGE CARD in one column (design rollout): a script has a path
+                and one quiet line — the repository it lives in. */}
+            <ul class="dev-card-list">
               <For each={scripts()}>
                 {(s) => (
-                  <li classList={{ active: s.id === selectedId() }} onClick={() => setSelectedId(s.id)}>
-                    <strong>{s.path}</strong>
-                    <span class="hint">{s.repository ?? "no repo"}</span>
+                  <li classList={{ active: s.id === selectedId() }}>
+                    <button type="button" class="dev-card" aria-pressed={s.id === selectedId()} onClick={() => setSelectedId(s.id)}>
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="pipeline" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong>{s.path}</strong>
+                        <small>{s.repository ?? "no repo"}</small>
+                      </span>
+                      <span class="dev-card-open" aria-hidden="true"><Icon name="chevron-right" size={16} /></span>
+                    </button>
                   </li>
                 )}
               </For>
@@ -523,12 +533,18 @@ function Deployments(props: { projects: () => { id: string; name: string }[] | u
               hint="A target is one place you deploy to — staging, production — and it carries that place's deployment history."
             />
           }>
-            <ul>
+            <ul class="dev-card-list">
               <For each={targets()}>
                 {(t) => (
-                  <li classList={{ active: t.id === selectedId() }} onClick={() => setSelectedId(t.id)}>
-                    <strong>{t.name}</strong>
-                    <code>{t.target_key}</code>
+                  <li classList={{ active: t.id === selectedId() }}>
+                    <button type="button" class="dev-card" aria-pressed={t.id === selectedId()} onClick={() => setSelectedId(t.id)}>
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="pipeline" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong>{t.name}</strong>
+                        <small><code>{t.target_key}</code></small>
+                      </span>
+                      <span class="dev-card-open" aria-hidden="true"><Icon name="chevron-right" size={16} /></span>
+                    </button>
                   </li>
                 )}
               </For>

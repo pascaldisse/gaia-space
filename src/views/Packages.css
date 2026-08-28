@@ -10,7 +10,10 @@
 .packages-body { padding-bottom: 60px; }
 
 .packages-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.packages-view button { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+/* `:not(.dev-card)` because a card that happens to be a <button> is a CARD: this
+   blanket rule would otherwise repaint its frame, its radius and its padding and
+   the repository list would silently leave the one raster. */
+.packages-view button:not(.dev-card) { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
 .packages-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .packages-view button.ghost { background: transparent; }
 .packages-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
@@ -26,10 +29,9 @@
 
 .packages-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
 .repos-list .section-label { margin-bottom: 8px; }
-.repos-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.repos-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.repos-list li.active { border-color: var(--accent); background: var(--accent-soft); }
-.repos-list li.archived { opacity: 0.55; }
+/* The repository list is Knowledge's card in one column now (devCards.css):
+   the frame, the padding, the radius and the hover all live there, so nothing
+   about the row's geometry is restated here. */
 .repo-meta { color: var(--text-dim); font-size: 11px; }
 .repos-list li.active .repo-meta { color: #8fdccb; }
 .tag { color: var(--text-dim); font-size: 10px; border: 1px solid var(--surface-border); border-radius: 4px; padding: 0 5px; }

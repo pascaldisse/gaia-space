@@ -18,9 +18,9 @@
    them. Creation lives in `NewReviewDrawer`, styled by WorkItemDrawer.css. */
 
 .reviews-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
-.reviews-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.reviews-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.reviews-list li.active { border-color: var(--accent); background: var(--accent-soft); }
+/* The merge-request list is Knowledge's card in one column (devCards.css). The
+   frame that used to live on the <li> lives on the card itself, so the row and a
+   document row are the same object. */
 .reviews-list .section-label { margin-bottom: 8px; }
 .review-row-top { display: flex; align-items: center; gap: 8px; }
 .review-row-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -105,11 +105,6 @@
    Colour only. Every size, grid and position above stays unscoped so the dark
    grouped/flat layouts keep their geometry. */
 .theme-space-light .reviews-view { background: var(--wash); color: var(--ink); }
-.theme-space-light .reviews-list li {
-  border: 1px solid var(--line); border-radius: 14px; background: var(--paper);
-}
-.theme-space-light .reviews-list li:hover { background: var(--wash); }
-.theme-space-light .reviews-list li.active { background: var(--teal-soft); border-color: transparent; }
 .theme-space-light .reviews-list .num,
 .theme-space-light .reviews-list .branches { color: var(--muted); }
 .theme-space-light .review-detail > section {

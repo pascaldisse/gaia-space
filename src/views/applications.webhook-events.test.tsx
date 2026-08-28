@@ -16,7 +16,10 @@ const mount = async () => {
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(() => <Applications /> as any, host);
   await settle();
-  host.querySelector(".apps-list li")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  // The application row is a CARD whose pressable part is a real <button> now
+  // (design rollout): same act, same one click — an address change, not a
+  // relaxation. Clicking the <li> would click the card's padding.
+  host.querySelector(".apps-list li .dev-card")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
   return host;
 };

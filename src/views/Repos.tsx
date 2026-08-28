@@ -7,7 +7,9 @@ import "../App.css";
 import "./Repos.css";
 import EmptyState from "../components/EmptyState";
 import { GhostPill, IconButton } from "../components/controls";
+import { Icon } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
+import "./devCards.css";
 import { UI_LOCALE } from "../calendar";
 
 /* THE PAGE FRAME, restored (stage 11).
@@ -122,6 +124,7 @@ export default function App() {
       {/* ONE ACTION, ONE PLACE: while nothing is registered, the empty state
           below carries "Open a repository…" and the header does not. */}
       <PageHeader
+        icon="repo"
         title="Repositories"
         subline="Local git checkouts registered on this machine"
         chips={<Show when={hasRepos()}><Chip value={repos()!.length} label="open" /></Show>}
@@ -150,24 +153,40 @@ export default function App() {
       <aside class="sidebar">
         <div class="section-label">Repositories</div>
         <Show when={hasRepos()}>
-          <ul class="repo-list">
+          {/* THE KNOWLEDGE CARD in one column (design rollout). A registered checkout
+              has a name and one quiet line — the path it lives at, which is the only
+              thing that tells two same-named clones apart. It used to be a bare row
+              with the path shown nowhere in the list at all. */}
+          <ul class="repo-list dev-card-list">
             <For each={repos()}>
               {(r) => (
-                <li
-                  classList={{ active: r.path === active() }}
-                  onClick={() => {
-                    setActive(r.path);
-                    setSelected(null);
-                  }}
-                >
-                  <span class="repo-name">{r.name}</span>
-                  <IconButton
-                    class="small"
-                    label={`Forget ${r.name}`}
-                    onClick={(e: MouseEvent) => removeRepo(r.path, e)}
-                  >
-                    ×
-                  </IconButton>
+                <li classList={{ active: r.path === active() }}>
+                  <div class="dev-card">
+                    <button
+                      type="button"
+                      class="repo-open"
+                      aria-pressed={r.path === active()}
+                      onClick={() => {
+                        setActive(r.path);
+                        setSelected(null);
+                      }}
+                    >
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="repo" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong class="repo-name">{r.name}</strong>
+                        <small>{r.path}</small>
+                      </span>
+                    </button>
+                    <span class="dev-card-actions">
+                      <IconButton
+                        class="small"
+                        label={`Forget ${r.name}`}
+                        onClick={(e: MouseEvent) => removeRepo(r.path, e)}
+                      >
+                        ×
+                      </IconButton>
+                    </span>
+                  </div>
                 </li>
               )}
             </For>

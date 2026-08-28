@@ -3,7 +3,9 @@ import { appHttpApi, applicationsApi, type AppDispatch, type AppInstall, type Ap
 import { platformApi } from "../api/platform";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
+import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect } from "../components/controls";
+import "./devCards.css";
 import "./Applications.css";
 import "./operatorForm.css";
 
@@ -80,6 +82,7 @@ const saveBot=async()=>{try{if(!selectedId())return;await applicationsApi.saveCh
   return (
     <section class="apps-view">
       <PageHeader
+        icon="org"
         title="Applications"
         subline="Integrations, webhooks, bots and OAuth clients"
       />
@@ -110,11 +113,20 @@ const saveBot=async()=>{try{if(!selectedId())return;await applicationsApi.saveCh
               actions={<button class="primary" type="button" onClick={()=>document.querySelector<HTMLInputElement>('.apps-view input[aria-label="Application name"]')?.focus()}>Register an application</button>}
             />
           </Show>
-          <ul class="apps-list">
+          {/* THE KNOWLEDGE CARD in one column (design rollout): a registered
+              application has a name and one quiet line — what kind it is and
+              whether it is connected. */}
+          <ul class="apps-list dev-card-list">
             <For each={apps()}>{app=>
-              <li classList={{active:selectedId()===app.id}} onClick={()=>setSelected(app)}>
-                <strong>{app.name}</strong>
-                <span>{app.application_type} · {app.connection_status}</span>
+              <li classList={{active:selectedId()===app.id}}>
+                <button type="button" class="dev-card" aria-pressed={selectedId()===app.id} onClick={()=>setSelected(app)}>
+                  <span class="dev-card-icon" aria-hidden="true"><Icon name="org" size={20} /></span>
+                  <span class="dev-card-copy">
+                    <strong>{app.name}</strong>
+                    <small>{appTypeLabel(app.application_type)} · {app.connection_status}</small>
+                  </span>
+                  <span class="dev-card-open" aria-hidden="true"><Icon name="chevron-right" size={16} /></span>
+                </button>
               </li>
             }</For>
           </ul>
@@ -133,12 +145,19 @@ const saveBot=async()=>{try{if(!selectedId())return;await applicationsApi.saveCh
           <Show when={projectId() && !devfiles.loading && !(devfiles()??[]).length}>
             <EmptyState title="No devfile in this project" hint="A devfile describes the workspace a dev environment starts from." />
           </Show>
-          <ul class="apps-list">
+          <ul class="apps-list dev-card-list">
             <For each={devfiles()}>{file=>
               <li>
-                <strong>{file.path}</strong>
-                <span>{file.generated?"generated":"repo metadata"}</span>
-                <GhostPill onClick={()=>applicationsApi.deleteDevfile(file.id).then(reloadDevfiles)}>Remove</GhostPill>
+                <div class="dev-card">
+                  <span class="dev-card-icon" aria-hidden="true"><Icon name="doc" size={20} /></span>
+                  <span class="dev-card-copy">
+                    <strong>{file.path}</strong>
+                    <small>{file.generated?"generated":"repo metadata"}</small>
+                  </span>
+                  <span class="dev-card-actions">
+                    <GhostPill onClick={()=>applicationsApi.deleteDevfile(file.id).then(reloadDevfiles)}>Remove</GhostPill>
+                  </span>
+                </div>
               </li>
             }</For>
           </ul>
