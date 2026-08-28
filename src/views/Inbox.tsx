@@ -13,6 +13,7 @@ import { entityView, linkProps } from "../router";
 import { humanError, profileId } from "../session";
 import "./Inbox.css";
 import { UI_LOCALE } from "../calendar";
+import { MetricGrid, MetricTile } from "../components/blocks";
 
 // Inbox — the human notification feed for the active profile. Same store the
 // Overview summarises, surfaced as a first-class destination: read/unread
@@ -274,16 +275,14 @@ const unread = createMemo(() => visible().filter((item) => !item.read_at));
       <h3>
         <Icon name="inbox" size={13} /> Inbox summary
       </h3>
-      <div class="rail-metrics">
-        <div class="rail-metric accent">
-          <span class="rail-num">{unreadAll().length}</span>
-          <span class="rail-lbl">Unread</span>
-        </div>
-        <div class="rail-metric">
-          <span class="rail-num">{everything().length}</span>
-          <span class="rail-lbl">Total</span>
-        </div>
-      </div>
+      {/* ONE TILE (stage 11, defect 2), and the zero rule with it: `.rail-metric
+          .accent` painted the unread figure teal whether or not there was
+          anything unread. `tone="teal"` goes through metricTone, so an empty
+          inbox reads as an empty inbox. */}
+      <MetricGrid label="Inbox at a glance" class="pairs">
+        <MetricTile value={unreadAll().length} label="Unread" tone="teal" />
+        <MetricTile value={everything().length} label="Total" />
+      </MetricGrid>
       <Show when={unreadAll().length}>
         <div class="rail-actions">
           <button class="primary" onClick={markAllRead}>

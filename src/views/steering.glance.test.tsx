@@ -88,7 +88,7 @@ describe("project at a glance inside Steering", () => {
     await reloadProjects().catch(() => undefined);
     const host = await mount();
 
-    const stats = [...host.querySelectorAll("a.ph-stat")].map((n) => [n.textContent, n.getAttribute("href")]);
+    const stats = [...host.querySelectorAll("a.metric-tile")].map((n) => [n.textContent, n.getAttribute("href")]);
     expect(stats).toEqual([
       ["1Open tickets", "/issues"],
       ["1Boards", "/boards"],
@@ -107,7 +107,7 @@ describe("project at a glance inside Steering", () => {
     reply = (cmd) => (cmd === "list_documents" ? new Error("not authorized") : cmd === "list_projects" ? [project()] : []);
     const host = await mount();
     expect(host.querySelector('.error[role="alert"]')?.textContent).toContain("Could not load the project overview");
-    expect(host.querySelector("a.ph-stat")).toBeNull();
+    expect(host.querySelector("a.metric-tile")).toBeNull();
   });
 
   test("a project carrying a deadline shows the banner with its urgency", async () => {

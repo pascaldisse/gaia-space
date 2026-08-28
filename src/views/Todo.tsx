@@ -8,18 +8,17 @@ import { AssigneeControl, DueDateControl, ProjectControl } from "../components/T
 import EmptyState from "../components/EmptyState";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
-import { metricTone, todayISO, urgencyOf, type Tone } from "../statusTone";
+import { todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
+import { MetricGrid, MetricTile } from "../components/blocks";
 
 const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
 type MemberLookup = { ids?: string[]; failed?: string };
-/* The rail's three coloured numbers used to be hard-coded classes. Tone comes from
-   the shared law now, and `metricTone` withholds it from a zero: "0 Overdue" in red
-   is a warning about nothing. */
-const METRIC_CLASS: Record<Tone, string> = { "": "", teal: "accent", amber: "warn", red: "critical", done: "" };
-const metricClass = (value: number, tone: Tone) => ("rail-metric " + METRIC_CLASS[metricTone(value, tone)]).trim();
+/* The rail's coloured numbers used to be hard-coded classes, then a local
+   `metricClass` helper. Both are gone: the shared MetricTile applies `metricTone`
+   itself, so "0 Overdue" cannot be red no matter what a caller passes. */
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
   const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
@@ -234,15 +233,17 @@ export default function Todo() {
       <aside class="view-rail todo-rail">
         <div class="rail-card">
           <h3>At a glance</h3>
-          <div class="rail-metrics">
-            <div class={metricClass(openTodos().length,"teal")}><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
-            {/* Colour law: overdue is critical (red), not merely waiting (amber), and
-                "due in 7 days" IS the amber case — they were the wrong way round.
-                A count of 0 carries no tone at all. */}
-            <div class={metricClass(overdue().length,"red")}><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
-            <div class={metricClass(dueSoon().length,"amber")}><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
-            <div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div>
-          </div>
+          {/* ONE TILE (stage 11, defect 2): `.rail-metric` was a fourth tile shape.
+              Colour law: overdue is critical (red), not merely waiting (amber), and
+              "due in 7 days" IS the amber case. A count of 0 carries no tone at all —
+              MetricTile runs every tone through metricTone, so the hand-rolled
+              `metricClass` helper is no longer needed here. */}
+          <MetricGrid label="Tasks at a glance" class="pairs">
+            <MetricTile value={openTodos().length} label="Open" tone="teal" />
+            <MetricTile value={overdue().length} label="Overdue" tone="red" />
+            <MetricTile value={dueSoon().length} label="Due in 7 days" tone="amber" />
+            <MetricTile value={doneCount()} label="Done" />
+          </MetricGrid>
         </div>
         <div class="rail-card">
           <h3>Needs attention<span class="rail-count">{attention().length}</span></h3>

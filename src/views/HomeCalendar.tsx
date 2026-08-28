@@ -6,6 +6,7 @@ import { profileId } from "../session";
 import { linkProps, toSlug, type Route } from "../router";
 import { dateKey, itemsOnDay, meetingIdOf, monthCells, startOfLocalDay } from "../calendar";
 import { type Tone, urgencyLabel, urgencyOf, urgencyTone } from "../statusTone";
+import { MetricGrid, MetricTile } from "../components/blocks";
 import "./HomeCalendar.css";
 
 /** Home = one calm calendar. The month is the whole surface; the right column
@@ -241,11 +242,18 @@ export default function HomeCalendar() {
               <div class="agenda-sub">A small overview, not a second dashboard</div>
             </div>
           </div>
-          <div class="compact-stats">
-            <div class="compact-stat"><strong>{todos().length}</strong><span>total</span></div>
-            <div class="compact-stat"><strong>{todosToday().length}</strong><span>today</span></div>
-            <div class="compact-stat" classList={{ critical: todosCritical().length > 0 }}><strong>{todosCritical().length}</strong><span>critical</span></div>
-          </div>
+          {/* THE REFERENCE TILE, NOW SHARED (stage 11, defect 2). This block was
+              `.compact-stat`, the calmest tile in the app and therefore the one
+              every other view should have been using. It is the shared
+              MetricTile now — same hairline, same figure, same muted label — so
+              Projects, Time off and the rails cannot drift from it again.
+              `critical` was already zero-aware by hand; `tone="red"` says the
+              same thing through the one rule (metricTone) that owns it. */}
+          <MetricGrid label="My tasks at a glance" class="compact-stats">
+            <MetricTile value={todos().length} label="total" />
+            <MetricTile value={todosToday().length} label="today" />
+            <MetricTile value={todosCritical().length} label="critical" tone="red" />
+          </MetricGrid>
           <Show when={dashboard.loading}><p class="hint">Loading tasks…</p></Show>
           <Show when={!dashboard.loading && !highlighted().length}><p class="empty-state">No open tasks with a date.</p></Show>
           <For each={highlighted()}>{todo => {

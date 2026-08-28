@@ -8,6 +8,7 @@ import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { requestWorkIntent } from "./workIntent";
 import "./ProjectHome.css";
+import { MetricGrid, MetricTile } from "../components/blocks";
 
 /** Project overview is deliberately derived: cards and dashboard share the same project id.
  *  Usable two ways — as the routed "Project Overview" view (project read off the route) and
@@ -41,12 +42,13 @@ export default function ProjectHome(props: { project?: Project }) {
   return <section class="ph-view project-home" aria-label={`${project()?.name ?? "Project"} dashboard`}>
     <PageHeader kicker={project()?.name ?? "Project unavailable"} title="Project overview" actions={<button class="ghost small" onClick={() => void refetch()}>Refresh</button>} />
     <Show when={project()} fallback={<p class="ph-empty" role="alert">This project does not exist or is unavailable.</p>}>{value => <>
-      <Show when={dashboard()} fallback={<p class="hint">Loading project dashboard…</p>}>{data => <div class="ph-stats">
-        <div class="ph-stat"><span class="ph-stat-num">{data()!.open_issues}</span><span class="ph-stat-label">Open tickets</span></div>
-        <div class="ph-stat"><span class="ph-stat-num">{data()!.open_todos}</span><span class="ph-stat-label">Open tasks</span></div>
-        <div class="ph-stat"><span class="ph-stat-num">{data()!.member_count}</span><span class="ph-stat-label">Members</span></div>
-        <div class="ph-stat"><span class="ph-stat-num sm">{data()!.deadline ?? "—"}</span><span class="ph-stat-label">Deadline</span></div>
-      </div>}</Show>
+      {/* ONE TILE (stage 11, defect 2): `.ph-stat` was this view's own shape. */}
+      <Show when={dashboard()} fallback={<p class="hint">Loading project dashboard…</p>}>{data => <MetricGrid label="Project at a glance" class="ph-stats">
+        <MetricTile value={data()!.open_issues} label="Open tickets" tone="teal" />
+        <MetricTile value={data()!.open_todos} label="Open tasks" tone="teal" />
+        <MetricTile value={data()!.member_count} label="Members" />
+        <MetricTile small value={data()!.deadline ?? "—"} label="Deadline" />
+      </MetricGrid>}</Show>
 
       {/* LAW: the project lead is PURELY INFORMATIONAL. It names one main responsible
           person and grants NOTHING: no wider read, no exclusive write, no gated control.

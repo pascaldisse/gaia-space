@@ -14,6 +14,7 @@ import { projectName } from "../orgScope";
 import { DEADLINE_SOON_DAYS, deadlineTone, urgencyOf } from "../statusTone";
 import "./Steering.css";
 import "./ProjectHome.css";
+import { MetricTile } from "../components/blocks";
 type Work={id:string;title:string;kind:"Ticket"|"Task";due:string|null;unassigned?:boolean;number?:number};
 const date=()=>new Date().toISOString().slice(0,10);
 // A deadline is a date, never a timestamp: the tone and the human note are computed
@@ -63,9 +64,9 @@ export default function Steering(){
  // session's active project, so desktop (which has no URL) lands in the same place.
  const stat=(label:string,value:number|undefined,target:Route)=>{
   const props=linkProps(target);
-  return <a class="ph-stat" href={props.href} onClick={event=>{props.onClick(event);setProjectId(project());}}>
-   <span class="ph-stat-num">{value??"—"}</span><span class="ph-stat-label">{label}</span>
-  </a>;
+  /* ONE TILE (stage 11, defect 2): this was `.ph-stat`, a shape shared with
+     ProjectHome and nowhere else. MetricTile carries the link form. */
+  return <MetricTile value={value??"—"} label={label} href={props.href} onClick={(event:MouseEvent)=>{props.onClick(event as MouseEvent&{currentTarget:HTMLAnchorElement});setProjectId(project());}}/>;
  };
  const rows=(items:Work[])=><ul><For each={items.slice(0,6)}>{item=><li><b>{item.kind}</b> <Show when={item.number}>{n=><span>#{n()} </span>}</Show><a {...linkProps(item.kind==="Ticket"?{view:"Issues",entityType:"issue",entityId:item.id,projectId:project()}:{view:"Project Tasks",projectId:project()})}>{item.title}</a><Show when={item.due}>{d=><time> {d()}</time>}</Show></li>}</For></ul>;
  const work=()=>data()??[];

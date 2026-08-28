@@ -277,31 +277,16 @@
 .home-cal .tag.red { background: var(--red-soft); color: var(--red-ink); border-color: transparent; }
 
 /* ── task tiles ─────────────────────────────────────────────────────────── */
-.home-cal .compact-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.home-cal .compact-stat {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px;
-  background: var(--wash);
-}
-.home-cal .compact-stat strong {
-  display: block;
-  font-size: 20px;
-  letter-spacing: -.04em;
-  line-height: 1.1;
-}
-.home-cal .compact-stat span { color: var(--muted); font-size: 12px; }
-/* Only a non-zero critical count is allowed to shout. */
-.home-cal .compact-stat.critical {
-  border-color: transparent;
-  background: var(--red-soft);
-}
-.home-cal .compact-stat.critical strong { color: var(--red-ink); }
+/* The tiles themselves are the shared MetricTile (components/blocks.css); what
+   stays here is only how many of them fit on the rail and how the figure sizes
+   down to Home's quieter 20px. */
+.home-cal .compact-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.home-cal .compact-stats .metric-tile { padding: 10px; border-radius: 12px; background: var(--wash); }
+.home-cal .compact-stats .metric-tile-num { font-size: 20px; }
+.home-cal .compact-stats .metric-tile-lbl { font-size: 12px; }
+/* Only a non-zero critical count is allowed to shout — MetricTile's metricTone
+   guarantees the class is absent at 0, so this cannot fire on an empty day. */
+.home-cal .compact-stats .metric-tile.red { border-color: transparent; background: var(--red-soft); }
 
 /* ── narrow ─────────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
