@@ -200,20 +200,22 @@ async function togglePinned(v: PackageVersion) {
         <button class="primary">Create repository</button>
       </form>
 
+      {/* ONE ACTION, ONE PLACE, operator-tool form: the creation band above is
+          permanently visible and "Create repository" is the act, so this state
+          names the absence and does not draw that act again — and it is a page
+          lead, not a card wedged into the 240px list column with its title
+          broken across two lines. */}
+      <Show when={repos()?.length} fallback={
+        <div class="packages-lead">
+          <EmptyState
+            title="No package repositories yet"
+            hint="A repository holds published versions of one package format."
+          />
+        </div>
+      }>
       <div class="packages-body">
         <aside class="repos-list">
-          {/* ONE ACTION, ONE PLACE, operator-tool form: the creation band is on
-              the surface, permanently visible, and "Create repository" is the
-              act. Drawing "Create a repository" a second time here — as a
-              primary that only moved the caret into that band's first field —
-              was the same act twice on one screen. The state names the absence;
-              the form performs the act. */}
-          <Show when={repos()?.length} fallback={
-            <EmptyState
-              title="No package repositories yet"
-              hint="A repository holds published versions of one package format."
-            />
-          }>
+          <Show when={repos()?.length}>
             <ul>
               <For each={repos()}>
                 {(r) => (
@@ -407,6 +409,7 @@ async function togglePinned(v: PackageVersion) {
           )}
         </Show>
       </div>
+      </Show>
     </section>
   );
 }

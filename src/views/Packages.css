@@ -73,3 +73,6 @@
 .detail-list dt { font-weight: 600; opacity: 0.75; }
 .detail-list dd { margin: 0; }
 .detail-list ul { margin: 0; padding-left: 1rem; }
+
+/* NOTHING YET is a page lead, not a card in the narrow list column. */
+.packages-lead { padding: 0 30px 60px; max-width: 560px; }
