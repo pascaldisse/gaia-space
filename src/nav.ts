@@ -61,3 +61,9 @@ export function visibleGroups(available: string[]): NavGroup[] {
 }
 
 export const groupOfView = (groups: NavGroup[], view: string) => groups.find(group => group.views.includes(view));
+
+/** View names are ROUTING KEYS (router.ts, buildPath, deep links) and must not move.
+ *  When the product's word differs from the key, it is mapped here — the nav shows the
+ *  product's word, the URL keeps the app's own name. */
+const VIEW_LABELS: Record<string, string> = { Issues: "Tickets" };
+export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;

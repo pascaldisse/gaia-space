@@ -77,11 +77,11 @@ describe("portfolio summary and open-issue counts", () => {
     expect(calls.filter((c) => c.cmd === "list_issue_statuses")).toHaveLength(1);
 
     const cards = [...host.querySelectorAll(".project-card .pf-open")].map((n) => n.textContent);
-    expect(cards).toEqual(["2 open issues", "1 open issues"]);
+    expect(cards).toEqual(["2 open tickets", "1 open tickets"]);
 
     const metrics = [...host.querySelectorAll(".pf-metric")].map((n) => n.textContent);
     expect(metrics[0]).toContain("2Active projects");
-    expect(metrics[1]).toContain("3Open issues");
+    expect(metrics[1]).toContain("3Open tickets");
     expect(metrics[2]).toContain("1Carrying a deadline");
     expect(metrics[3]).toContain("2030-01-02");
     expect(metrics[3]).toContain("Next: Borea");
@@ -97,7 +97,7 @@ describe("portfolio summary and open-issue counts", () => {
     };
     const host = await mount();
     const alert = host.querySelector('.error[role="alert"]');
-    expect(alert?.textContent).toContain("Open-issue counts are unavailable");
+    expect(alert?.textContent).toContain("Open-ticket counts are unavailable");
     expect(host.querySelector(".project-card .pf-open")).toBeNull();
   });
 });

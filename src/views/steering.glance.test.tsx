@@ -90,7 +90,7 @@ describe("project at a glance inside Steering", () => {
 
     const stats = [...host.querySelectorAll("a.ph-stat")].map((n) => [n.textContent, n.getAttribute("href")]);
     expect(stats).toEqual([
-      ["1Open issues", "/issues"],
+      ["1Open tickets", "/issues"],
       ["1Boards", "/boards"],
       ["1Channels", "/chat"],
       ["1Documents", "/documents"],

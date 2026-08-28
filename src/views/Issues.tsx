@@ -118,7 +118,7 @@ const csv = [
 ...rows.map(issue => [issue.number, issue.title, issue.description, statusName(issue.status_id), issue.due_date, issue.priority, issue.assignee_ids.join("; ")]),
 ].map(row => row.map(csvCell).join(",")).join("\r\n");
 const href = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
-const link = document.createElement("a"); link.href = href; link.download = "issues.csv"; link.click(); URL.revokeObjectURL(href);
+const link = document.createElement("a"); link.href = href; link.download = "tickets.csv"; link.click(); URL.revokeObjectURL(href);
 };
 const createStatus = async () => {
     const name = prompt("Status name")?.trim();
@@ -136,8 +136,8 @@ const createStatus = async () => {
   return <section class="planning-view">
     <PageHeader
       kicker={projectName(projectId())}
-      title="Issues"
-      chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="issues" /></Show>}
+      title="Tickets"
+      chips={<Show when={issues()?.length}><Chip value={issues()!.length} label="tickets" /></Show>}
       actions={<>
         <ProjectPicker />
         {/* Header region is the PageHeader lane's; these two entries are only ADDED to
@@ -146,7 +146,7 @@ const createStatus = async () => {
         <button type="button" class="ghost" onClick={() => setStatusEditorOpen(open => !open)} aria-expanded={statusEditorOpen()}>Statuses</button>
         <button type="button" class="ghost" disabled={!issues()?.length} onClick={exportCsv}>Export CSV</button>
         <a class="ghost" {...linkProps({ view: "Boards", projectId: projectId() })}>Open board</a>
-        <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New issue</button>
+        <button type="button" class="primary" disabled={!projectId()} onClick={() => setDrawerOpen(true)}>New ticket</button>
       </>}
     />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
@@ -167,8 +167,8 @@ const createStatus = async () => {
     </Show>
     <div class="issue-layout" classList={{ "with-detail": !!selected() }}>
       <main class="issue-list-pane">
-        <div class="filter-row" aria-label="Issue filters">
-          <input aria-label="Search issues" placeholder="Search title or description" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
+        <div class="filter-row" aria-label="Ticket filters">
+          <input aria-label="Search tickets" placeholder="Search title or description" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
           <select aria-label="Filter by status" value={statusFilter()} onChange={event => setStatusFilter(event.currentTarget.value)}><option value="">All statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
           <Show when={!props.filterTagName}>
             <select aria-label="Filter by tag" value={tagFilter()} disabled={!projectId()} onChange={event => setTagFilter(event.currentTarget.value)}><option value="">All tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
@@ -180,11 +180,11 @@ const createStatus = async () => {
         <Show when={pinnedTagMissing()}>
           {/* Honest: no such tag in this project, so there is no list to show — not
               "every issue" pretending to be the bug list. */}
-          <p class="empty-state">This project has no “{props.filterTagName}” tag yet. Tag an issue to build this list.</p>
+          <p class="empty-state">This project has no “{props.filterTagName}” tag yet. Tag a ticket to build this list.</p>
         </Show>
         <Show when={!pinnedTagMissing()}>
-        <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
-        <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
+        <Show when={issues.loading}><p class="hint">Loading tickets…</p></Show>
+        <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No tickets match these filters.</p></Show>
         <ul class="issue-list paper-list"><For each={issues()}>{issue => <li classList={{ active: selected()?.id === issue.id }}>
           {/* Title line, then a muted meta line, then at most one status pill —
               the same three-part shape every list surface uses now. */}
@@ -208,7 +208,7 @@ const createStatus = async () => {
           whole width, instead of an empty column asking to be filled. */}
       <Show when={selected()}>
         {issue => <aside class="issue-detail">
-          <button type="button" class="ghost issue-detail-close" aria-label="Close issue detail" onClick={() => { setSelected(undefined); navigate({ view: route().view, projectId: route().projectId }, undefined, undefined, true); }}>×</button>
+          <button type="button" class="ghost issue-detail-close" aria-label="Close ticket detail" onClick={() => { setSelected(undefined); navigate({ view: route().view, projectId: route().projectId }, undefined, undefined, true); }}>×</button>
           <IssueDetail issueId={issue().id} statuses={statuses()} onChanged={() => { void reloadIssues(); void reloadTags(); }} />
         </aside>}
       </Show>

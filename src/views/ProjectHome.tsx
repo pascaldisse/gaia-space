@@ -26,7 +26,7 @@ export default function ProjectHome(props: { project?: Project }) {
     <PageHeader kicker={project()?.name ?? "Project unavailable"} title="Project overview" actions={<button class="ghost small" onClick={() => void refetch()}>Refresh</button>} />
     <Show when={project()} fallback={<p class="ph-empty" role="alert">This project does not exist or is unavailable.</p>}>{value => <>
       <Show when={dashboard()} fallback={<p class="hint">Loading project dashboard…</p>}>{data => <div class="ph-stats">
-        <div class="ph-stat"><span class="ph-stat-num">{data()!.open_issues}</span><span class="ph-stat-label">Open issues</span></div>
+        <div class="ph-stat"><span class="ph-stat-num">{data()!.open_issues}</span><span class="ph-stat-label">Open tickets</span></div>
         <div class="ph-stat"><span class="ph-stat-num">{data()!.open_todos}</span><span class="ph-stat-label">Open tasks</span></div>
         <div class="ph-stat"><span class="ph-stat-num">{data()!.member_count}</span><span class="ph-stat-label">Members</span></div>
         <div class="ph-stat"><span class="ph-stat-num sm">{data()!.deadline ?? "—"}</span><span class="ph-stat-label">Deadline</span></div>

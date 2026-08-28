@@ -43,7 +43,7 @@ export default function IssueCreateDrawer(props: {
     event.preventDefault();
     const heading = title().trim();
     if (!props.projectId) { setError("Pick a project first."); return; }
-    if (!heading) { setError("Enter an issue title."); return; }
+    if (!heading) { setError("Enter a ticket title."); return; }
     setError(""); setBusy(true);
     try {
       const issue = await planningApi.createIssue({
@@ -64,18 +64,18 @@ export default function IssueCreateDrawer(props: {
     <div class="wid-backdrop" onClick={close} aria-hidden="true" />
     <aside class="wid-panel" role="dialog" aria-modal="true" aria-labelledby="icd-heading">
       <header class="wid-head">
-        <h2 id="icd-heading">New issue</h2>
+        <h2 id="icd-heading">New ticket</h2>
         <p>Tracked work: a bug, a feature or an improvement.</p>
       </header>
       <form class="wid-form" onSubmit={submit}>
         <label class="wid-field"><span>Title</span>
-          <input class="wid-input" ref={firstField} aria-label="Issue title" value={title()} placeholder="What needs doing?" onInput={(event) => setTitle(event.currentTarget.value)} />
+          <input class="wid-input" ref={firstField} aria-label="Ticket title" value={title()} placeholder="What needs doing?" onInput={(event) => setTitle(event.currentTarget.value)} />
         </label>
         <label class="wid-field"><span>Description</span>
-          <textarea class="wid-input" aria-label="Issue description" value={description()} placeholder="Context, steps, acceptance" onInput={(event) => setDescription(event.currentTarget.value)} />
+          <textarea class="wid-input" aria-label="Ticket description" value={description()} placeholder="Context, steps, acceptance" onInput={(event) => setDescription(event.currentTarget.value)} />
         </label>
         <label class="wid-field"><span>Status</span>
-          <select class="wid-input" aria-label="Issue status" value={statusId()} onChange={(event) => setStatusId(event.currentTarget.value)}>
+          <select class="wid-input" aria-label="Ticket status" value={statusId()} onChange={(event) => setStatusId(event.currentTarget.value)}>
             <option value="">No status</option>
             <For each={props.statuses}>{(status) => <option value={status.id}>{status.name}</option>}</For>
           </select>
@@ -87,7 +87,7 @@ export default function IssueCreateDrawer(props: {
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">
           <button type="button" class="wid-btn" onClick={close} disabled={busy()}>Cancel</button>
-          <button type="submit" class="wid-btn wid-primary" disabled={busy() || !title().trim()}>{busy() ? "Creating…" : "Create issue"}</button>
+          <button type="submit" class="wid-btn wid-primary" disabled={busy() || !title().trim()}>{busy() ? "Creating…" : "Create ticket"}</button>
         </footer>
       </form>
     </aside>

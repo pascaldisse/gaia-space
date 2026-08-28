@@ -52,7 +52,7 @@ describe("marketplace and external tracker registration", () => {
     listingName.value = "Issue bridge"; listingName.dispatchEvent(new Event("input", { bubbles: true }));
     listingVendor.value = "Acme"; listingVendor.dispatchEvent(new Event("input", { bubbles: true }));
     Array.from(host.querySelectorAll("button")).find(button => button.textContent === "+ Listing")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Link external issue tracker")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Link external ticket tracker")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
     const listing = calls.find(call => call.command === "save_marketplace_app")!.args.value;
     expect(listing.name).toBe("Issue bridge"); expect(listing.vendor).toBe("Acme");

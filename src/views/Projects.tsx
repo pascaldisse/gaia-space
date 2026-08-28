@@ -201,11 +201,11 @@ export default function Projects() {
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
   return <section class="resource-view projects-view"><PageHeader title="Projects" subline="Owned workspaces and their deadlines" chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>} /><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
-    <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-issue counts are unavailable: {reason()}</p>}</Show>
+    <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
     <Show when={live().length}>
       <div class="pf-summary">
         <div class="pf-metric"><span class="pf-metric-num">{live().length}</span><span class="pf-metric-lbl">Active projects</span></div>
-        <div class="pf-metric"><span class="pf-metric-num">{countsFailed() ? "—" : openTotal()}</span><span class="pf-metric-lbl">Open issues</span></div>
+        <div class="pf-metric"><span class="pf-metric-num">{countsFailed() ? "—" : openTotal()}</span><span class="pf-metric-lbl">Open tickets</span></div>
         <div class="pf-metric"><span class="pf-metric-num">{withDeadline()}</span><span class="pf-metric-lbl">Carrying a deadline</span></div>
         <Show when={nextDeadline()} fallback={<div class="pf-metric"><span class="pf-metric-num">—</span><span class="pf-metric-lbl">Next deadline</span></div>}>{next=>{
           const target=()=>({view:"Projects",entityType:"project",entityId:next().id});
@@ -232,7 +232,7 @@ export default function Projects() {
         <div class="project-card-head"><strong>{project.name}</strong><code>{project.key}</code><Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Project lead (informational)">Lead: {leadName(lead())}</span>}</Show></div>
         <Show when={project.description}><p>{project.description}</p></Show>
         <Show when={!counts.loading && !countsFailed()}>
-          <p class="pf-open"><b>{openCount(project.id)}</b> open issues</p>
+          <p class="pf-open"><b>{openCount(project.id)}</b> open tickets</p>
         </Show>
         <div class="project-card-foot">
           <div class="project-deadline">

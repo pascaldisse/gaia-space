@@ -74,7 +74,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   const createIssue = async (event: SubmitEvent) => {
     event.preventDefault();
     const project_id = selectedProject(); const values = issueForm();
-    if (!project_id || !values.title.trim()) { setError("Pick a project and enter an issue title."); return; }
+    if (!project_id || !values.title.trim()) { setError("Pick a project and enter a ticket title."); return; }
     setError("");
     try {
       const issue = await planningApi.createIssue({
@@ -107,21 +107,21 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   });
 
   return <section class="planning-view project-tasks-view">
-    <PageHeader kicker={project()?.name} title="Work" subline="Shared tasks and tracked issues" actions={
+    <PageHeader kicker={project()?.name} title="Work" subline="Shared tasks and tracked tickets" actions={
       <div class="planning-actions">
         <ProjectPicker value={selectedProject()} onChange={id => { setProjectId(id); navigate({ view: "Project Tasks", projectId: id }); }} />
         <button type="button" class="primary" onClick={() => { setPane({ kind: "new-task" }); setError(""); }}>Add task</button>
-        <button type="button" class="ghost" onClick={() => { setPane({ kind: "new-issue" }); setError(""); }}>Add issue</button>
+        <button type="button" class="ghost" onClick={() => { setPane({ kind: "new-issue" }); setError(""); }}>Add ticket</button>
         <a class="primary" {...linkProps(board())} onClick={openBoard}>Open board</a>
       </div>
     } />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
-    <Show when={issues.error}><p class="planning-error" role="alert">Could not load issues: {String(issues.error)}</p></Show>
+    <Show when={issues.error}><p class="planning-error" role="alert">Could not load tickets: {String(issues.error)}</p></Show>
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>
     <div class="issue-layout project-issue-layout">
       <main class="issue-list-pane">
-        <div class="filter-row" aria-label="Issue filters">
-          <input aria-label="Search issues" placeholder="Search tasks and issues" value={text()} onInput={event => setText(event.currentTarget.value)} />
+        <div class="filter-row" aria-label="Ticket filters">
+          <input aria-label="Search tickets" placeholder="Search tasks and tickets" value={text()} onInput={event => setText(event.currentTarget.value)} />
           <ProfilePicker label="Assignee" value={assigneeId()} onChange={setAssigneeId} allowAll />
         </div>
         <section class="project-work-group" aria-labelledby="project-task-heading">
@@ -141,13 +141,13 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
           </ul>
         </section>
         <section class="project-work-group" aria-labelledby="project-issue-heading">
-          <h2 id="project-issue-heading">Issues <small>{issues()?.length ?? 0}</small></h2>
-          <div class="filter-row project-issue-filters" aria-label="Issue-only filters">
-            <select aria-label="Filter by status" value={statusId()} onChange={event => setStatusId(event.currentTarget.value)}><option value="">All issue statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
-            <select aria-label="Filter by tag" value={tagId()} onChange={event => setTagId(event.currentTarget.value)}><option value="">All issue tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
+          <h2 id="project-issue-heading">Tickets <small>{issues()?.length ?? 0}</small></h2>
+          <div class="filter-row project-issue-filters" aria-label="Ticket-only filters">
+            <select aria-label="Filter by status" value={statusId()} onChange={event => setStatusId(event.currentTarget.value)}><option value="">All ticket statuses</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select>
+            <select aria-label="Filter by tag" value={tagId()} onChange={event => setTagId(event.currentTarget.value)}><option value="">All ticket tags</option><For each={tags()}>{tag => <option value={tag.id}>{tag.name}</option>}</For></select>
           </div>
-          <Show when={issues.loading}><p class="hint">Loading issues…</p></Show>
-          <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No issues match these filters.</p></Show>
+          <Show when={issues.loading}><p class="hint">Loading tickets…</p></Show>
+          <Show when={!issues.loading && !issues()?.length}><p class="empty-state">No tickets match these filters.</p></Show>
           <ul class="issue-list">
             <For each={issues()}>{issue => <li classList={{ active: pane()?.kind === "issue" && (pane() as { item?: Issue }).item?.id === issue.id }}>
               <button type="button" class="issue-row" onClick={() => setPane({ kind: "issue", item: issue })}>
@@ -161,11 +161,11 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         </section>
       </main>
       <aside class="issue-detail project-issue-detail">
-        <Show when={pane()} fallback={<p class="hint pad">Select work to view it, or add a task or issue.</p>}>{current => <>
+        <Show when={pane()} fallback={<p class="hint pad">Select work to view it, or add a task or ticket.</p>}>{current => <>
           <Show when={current().kind === "issue" ? (current() as { kind: "issue"; item: Issue }).item : undefined}>{value => <IssueDetail issueId={value().id} statuses={statuses()} onChanged={() => void reloadIssues()} />}</Show>
           <Show when={current().kind === "task" ? (current() as { kind: "task"; item: Todo }).item : undefined}>{value => <section class="project-task-detail"><span class="idp-number">Project task</span><h2>{value().content}</h2><Show when={value().notes}><p>{value().notes}</p></Show><dl><dt>Created by</dt><dd>{nameOf(value().profile_id)}</dd><dt>Due</dt><dd>{value().due_date ?? "No due date"}</dd><dt>Status</dt><dd>{value().done ? "Done" : "Open"}</dd><dt>Assignees</dt><dd>{value().assignee_ids.length ? value().assignee_ids.map(nameOf).join(", ") : "Nobody"}</dd></dl><p class="hint">The task owner can edit full task details in My tasks.</p></section>}</Show>
           <Show when={current().kind === "new-task"}><form class="new-issue project-work-form" onSubmit={createTask}><h2>New project task</h2><input autofocus aria-label="Task title" placeholder="What needs doing?" value={taskForm().content} onInput={event => setTaskForm({ ...taskForm(), content: event.currentTarget.value })} /><textarea aria-label="Task notes" placeholder="Notes" value={taskForm().notes} onInput={event => setTaskForm({ ...taskForm(), notes: event.currentTarget.value })} /><input aria-label="Task due date" type="date" value={taskForm().due_date} onInput={event => setTaskForm({ ...taskForm(), due_date: event.currentTarget.value })} /><PeopleChooser selected={taskForm().assignee_ids} people={people()} toggle={toggleTaskPerson} /><button class="primary" disabled={!taskForm().content.trim()}>Add task</button></form></Show>
-          <Show when={current().kind === "new-issue"}><form class="new-issue project-work-form" onSubmit={createIssue}><h2>New issue</h2><input autofocus aria-label="Issue title" placeholder="Title" value={issueForm().title} onInput={event => setIssueForm({ ...issueForm(), title: event.currentTarget.value })} /><textarea aria-label="Issue description" placeholder="Description" value={issueForm().description} onInput={event => setIssueForm({ ...issueForm(), description: event.currentTarget.value })} /><select aria-label="Issue status" value={issueForm().status_id} onChange={event => setIssueForm({ ...issueForm(), status_id: event.currentTarget.value })}><option value="">No status</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select><select aria-label="Issue priority" value={issueForm().priority} onChange={event => setIssueForm({ ...issueForm(), priority: event.currentTarget.value })}><option value="">No priority</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><input aria-label="Issue due date" type="date" value={issueForm().due_date} onInput={event => setIssueForm({ ...issueForm(), due_date: event.currentTarget.value })} /><PeopleChooser selected={issueForm().assignee_ids} people={people()} toggle={toggleIssuePerson} /><button class="primary" disabled={!issueForm().title.trim()}>Create issue</button></form></Show>
+          <Show when={current().kind === "new-issue"}><form class="new-issue project-work-form" onSubmit={createIssue}><h2>New ticket</h2><input autofocus aria-label="Ticket title" placeholder="Title" value={issueForm().title} onInput={event => setIssueForm({ ...issueForm(), title: event.currentTarget.value })} /><textarea aria-label="Ticket description" placeholder="Description" value={issueForm().description} onInput={event => setIssueForm({ ...issueForm(), description: event.currentTarget.value })} /><select aria-label="Ticket status" value={issueForm().status_id} onChange={event => setIssueForm({ ...issueForm(), status_id: event.currentTarget.value })}><option value="">No status</option><For each={statuses()}>{status => <option value={status.id}>{status.name}</option>}</For></select><select aria-label="Ticket priority" value={issueForm().priority} onChange={event => setIssueForm({ ...issueForm(), priority: event.currentTarget.value })}><option value="">No priority</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><input aria-label="Ticket due date" type="date" value={issueForm().due_date} onInput={event => setIssueForm({ ...issueForm(), due_date: event.currentTarget.value })} /><PeopleChooser selected={issueForm().assignee_ids} people={people()} toggle={toggleIssuePerson} /><button class="primary" disabled={!issueForm().title.trim()}>Create ticket</button></form></Show>
         </>}</Show>
       </aside>
     </div>

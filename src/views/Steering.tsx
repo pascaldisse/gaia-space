@@ -11,7 +11,7 @@ import PageHeader from "../components/PageHeader";
 import { projectName } from "../orgScope";
 import "./Steering.css";
 import "./ProjectHome.css";
-type Work={id:string;title:string;kind:"Issue"|"Task";due:string|null;unassigned?:boolean;number?:number};
+type Work={id:string;title:string;kind:"Ticket"|"Task";due:string|null;unassigned?:boolean;number?:number};
 const date=()=>new Date().toISOString().slice(0,10);
 // A deadline is a date, never a timestamp: the tone and the human note are computed
 // from `YYYY-MM-DD` strings only, so no timezone can move the day.
@@ -26,7 +26,7 @@ export function deadlineTone(deadline: string, today = date(), soonDays = DEADLI
 }
 export default function Steering(){
  const project=()=>route().projectId??"";
- const [data]=createResource(()=>[project(),profileId()] as const,async ([id,profile])=>{if(!id||!profile)throw Error("Project context is unavailable.");const [issues,statuses,todos]=await Promise.all([planningApi.issues({project_id:id}),planningApi.statuses(id),personalApi.projectTodos(id,profile,true)]);const closed=new Set(statuses.filter(s=>s.resolved).map(s=>s.id));return [...issues.filter(i=>!i.archived&&!closed.has(i.status_id??"")).map(i=>({id:i.id,title:i.title,kind:"Issue" as const,due:i.due_date,unassigned:!i.assignee_id,number:i.number})),...todos.filter(t=>!t.done).map(t=>({id:t.id,title:t.content,kind:"Task" as const,due:t.due_date}))]});
+ const [data]=createResource(()=>[project(),profileId()] as const,async ([id,profile])=>{if(!id||!profile)throw Error("Project context is unavailable.");const [issues,statuses,todos]=await Promise.all([planningApi.issues({project_id:id}),planningApi.statuses(id),personalApi.projectTodos(id,profile,true)]);const closed=new Set(statuses.filter(s=>s.resolved).map(s=>s.id));return [...issues.filter(i=>!i.archived&&!closed.has(i.status_id??"")).map(i=>({id:i.id,title:i.title,kind:"Ticket" as const,due:i.due_date,unassigned:!i.assignee_id,number:i.number})),...todos.filter(t=>!t.done).map(t=>({id:t.id,title:t.content,kind:"Task" as const,due:t.due_date}))]});
  // The project at a glance: how much of each surface this project actually holds.
  // Every number comes from an existing list command filtered by project — no new
  // server surface, and a refusal is carried as a value so it reaches the screen as
@@ -70,7 +70,7 @@ export default function Steering(){
    <span class="ph-stat-num">{value??"—"}</span><span class="ph-stat-label">{label}</span>
   </a>;
  };
- const rows=(items:Work[])=><ul><For each={items.slice(0,6)}>{item=><li><b>{item.kind}</b> <Show when={item.number}>{n=><span>#{n()} </span>}</Show><a {...linkProps(item.kind==="Issue"?{view:"Issues",entityType:"issue",entityId:item.id,projectId:project()}:{view:"Project Tasks",projectId:project()})}>{item.title}</a><Show when={item.due}>{d=><time> {d()}</time>}</Show></li>}</For></ul>;
+ const rows=(items:Work[])=><ul><For each={items.slice(0,6)}>{item=><li><b>{item.kind}</b> <Show when={item.number}>{n=><span>#{n()} </span>}</Show><a {...linkProps(item.kind==="Ticket"?{view:"Issues",entityType:"issue",entityId:item.id,projectId:project()}:{view:"Project Tasks",projectId:project()})}>{item.title}</a><Show when={item.due}>{d=><time> {d()}</time>}</Show></li>}</For></ul>;
  const work=()=>data()??[]; const bucket=(label:string,items:Work[])=><section class="steering-bucket"><h2>{label} <small>{items.length}</small></h2><Show when={items.length} fallback={<p>All clear.</p>}>{rows(items)}</Show></section>;
  return <section class="resource-view"><PageHeader kicker={projectName(project())} title="Steering" subline="Work requiring attention" />
   <Show when={deadline()}>{info=>
@@ -82,7 +82,7 @@ export default function Steering(){
   <Show when={glanceFailed()}>{reason=><p class="error" role="alert">Could not load the project overview: {reason()}</p>}</Show>
   <Show when={counts()}>{value=>
    <div class="ph-stats">
-    {stat("Open issues",value().issues,{view:"Issues",projectId:project()})}
+    {stat("Open tickets",value().issues,{view:"Issues",projectId:project()})}
     {stat("Boards",value().boards,{view:"Boards",projectId:project()})}
     {stat("Channels",value().channels,{view:"Chat",projectId:project()})}
     {stat("Documents",value().documents,{view:"Documents",projectId:project()})}

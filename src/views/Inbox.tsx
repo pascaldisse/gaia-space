@@ -28,7 +28,7 @@ const CATEGORIES: Record<string, Category> = {
   chat: { key: "chat", label: "Messages", icon: "chat", tone: "mention" },
   comment: { key: "comment", label: "Comments", icon: "chat", tone: "mention" },
 spacebox: { key: "spacebox", label: "#Spacebox", icon: "inbox", tone: "updates" },
-  issue: { key: "issue", label: "Issues", icon: "check", tone: "issue" },
+  issue: { key: "issue", label: "Tickets", icon: "check", tone: "issue" },
   task: { key: "task", label: "Tasks", icon: "check", tone: "issue" },
   todo: { key: "todo", label: "Tasks", icon: "check", tone: "issue" },
   review: { key: "review", label: "Code reviews", icon: "review", tone: "review" },

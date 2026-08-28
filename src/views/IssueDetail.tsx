@@ -100,8 +100,8 @@ const transferIssue = async () => { const current = issue(), target = targetProj
     {/* A read that fails must SAY so — a permanent "Loading…" is a lie the panel
         told for as long as the command was missing. */}
     <Show when={issue()} fallback={detail.error
-      ? <p class="planning-error" role="alert">This issue could not be loaded: {humanError(detail.error)}</p>
-      : <p class="hint pad">Loading issue…</p>}>{item =>
+      ? <p class="planning-error" role="alert">This ticket could not be loaded: {humanError(detail.error)}</p>
+      : <p class="hint pad">Loading ticket…</p>}>{item =>
       <>
         <header class="idp-head">
           <Show when={trail().length}><button class="ghost idp-back" onClick={back}>← {trail()[trail().length - 1].label}</button></Show>
@@ -110,7 +110,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
             <button class="ghost" onClick={() => openTransfer("clone")}>Clone…</button>
 <button class="ghost" onClick={() => openTransfer("move")}>Move…</button>
 <button class="ghost" onClick={async () => { try { await planningApi.archiveIssue(item().id, !item().archived); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } }}>{item().archived ? "Restore" : "Archive"}</button>
-            <Show when={props.onClose}><button class="ghost" aria-label="Close issue" onClick={() => props.onClose?.()}>×</button></Show>
+            <Show when={props.onClose}><button class="ghost" aria-label="Close ticket" onClick={() => props.onClose?.()}>×</button></Show>
           </div>
         </header>
 
@@ -180,7 +180,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
           </div>
         </section>
 
-        <section class="idp-section"><h3>Tracker links</h3><Show when={detail()?.tracker_links?.length} fallback={<p class="hint">No linked issues, merge requests, or external trackers.</p>}><ul class="idp-attachments"><For each={detail()?.tracker_links}>{link=><li class="idp-attachment-row"><strong>{link.target_kind}</strong><Show when={link.url} fallback={<button type="button" class="ghost" onClick={()=>openTrackerLink(link)}>{link.title||link.target_id}</button>}>{url=><a href={url()} target="_blank" rel="noreferrer">{link.title||url()}</a>}</Show><button type="button" onClick={()=>void removeTrackerLink(link)}>Remove</button></li>}</For></ul></Show><div class="inline-form"><select aria-label="Tracker link type" value={linkKind()} onChange={e=>setLinkKind(e.currentTarget.value as TrackerLink["target_kind"])}><option value="EXTERNAL">External URL</option><option value="ISSUE">Issue ID</option><option value="REVIEW">Merge request ID</option></select><input aria-label="Tracker link target" placeholder={linkKind()==="EXTERNAL"?"https://tracker.example/PROJ-1":"Record ID"} value={linkTarget()} onInput={e=>setLinkTarget(e.currentTarget.value)}/><input aria-label="Tracker link title" placeholder="Label (optional)" value={linkTitle()} onInput={e=>setLinkTitle(e.currentTarget.value)}/><button type="button" onClick={addTrackerLink}>Link</button></div></section>
+        <section class="idp-section"><h3>Tracker links</h3><Show when={detail()?.tracker_links?.length} fallback={<p class="hint">No linked tickets, merge requests, or external trackers.</p>}><ul class="idp-attachments"><For each={detail()?.tracker_links}>{link=><li class="idp-attachment-row"><strong>{link.target_kind}</strong><Show when={link.url} fallback={<button type="button" class="ghost" onClick={()=>openTrackerLink(link)}>{link.title||link.target_id}</button>}>{url=><a href={url()} target="_blank" rel="noreferrer">{link.title||url()}</a>}</Show><button type="button" onClick={()=>void removeTrackerLink(link)}>Remove</button></li>}</For></ul></Show><div class="inline-form"><select aria-label="Tracker link type" value={linkKind()} onChange={e=>setLinkKind(e.currentTarget.value as TrackerLink["target_kind"])}><option value="EXTERNAL">External URL</option><option value="ISSUE">Ticket ID</option><option value="REVIEW">Merge request ID</option></select><input aria-label="Tracker link target" placeholder={linkKind()==="EXTERNAL"?"https://tracker.example/PROJ-1":"Record ID"} value={linkTarget()} onInput={e=>setLinkTarget(e.currentTarget.value)}/><input aria-label="Tracker link title" placeholder="Label (optional)" value={linkTitle()} onInput={e=>setLinkTitle(e.currentTarget.value)}/><button type="button" onClick={addTrackerLink}>Link</button></div></section>
         <section class="idp-section">
           <h3>To-do lists</h3>
           <For each={detail()?.checklists}>{list => <ChecklistBlock list={list} />}</For>
@@ -223,7 +223,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
         </section>
 
         <p class="idp-owner">Assigned to {assignees().length ? assignees().map(nameOf).join(", ") : "nobody"}</p>
-<Show when={transfer()}>{action => <div class="issue-transfer-backdrop" role="presentation" onClick={() => setTransfer(undefined)}><section class="issue-transfer-dialog" role="dialog" aria-modal="true" aria-label={`${action()} issue`} onClick={event => event.stopPropagation()}><h3>{action() === "clone" ? "Clone issue" : "Move issue"}</h3><label>Destination project<select value={targetProjectId()} onChange={event => setTargetProjectId(event.currentTarget.value)}><For each={(projects() ?? []).filter(project => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></label><div class="planning-actions"><button type="button" class="ghost" onClick={() => setTransfer(undefined)}>Cancel</button><button type="button" class="primary" disabled={!targetProjectId() || targetProjectId() === item().project_id} onClick={() => void transferIssue()}>{action() === "clone" ? "Clone" : "Move"}</button></div></section></div>}</Show>
+<Show when={transfer()}>{action => <div class="issue-transfer-backdrop" role="presentation" onClick={() => setTransfer(undefined)}><section class="issue-transfer-dialog" role="dialog" aria-modal="true" aria-label={`${action()} ticket`} onClick={event => event.stopPropagation()}><h3>{action() === "clone" ? "Clone ticket" : "Move ticket"}</h3><label>Destination project<select value={targetProjectId()} onChange={event => setTargetProjectId(event.currentTarget.value)}><For each={(projects() ?? []).filter(project => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></label><div class="planning-actions"><button type="button" class="ghost" onClick={() => setTransfer(undefined)}>Cancel</button><button type="button" class="primary" disabled={!targetProjectId() || targetProjectId() === item().project_id} onClick={() => void transferIssue()}>{action() === "clone" ? "Clone" : "Move"}</button></div></section></div>}</Show>
       </>
     }</Show>
   </aside>;

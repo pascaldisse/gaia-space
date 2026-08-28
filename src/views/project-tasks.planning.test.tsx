@@ -123,8 +123,8 @@ test("project work can add a project task without pretending it is an issue", as
   await until(() => host.textContent?.includes("Ship the fix") === true);
   expect(calls.some(call => call.command === "create_issue")).toBe(false);
 
-  ([...host.querySelectorAll("button")].find(button => button.textContent === "Add issue") as HTMLButtonElement).click();
-  const issueTitle = host.querySelector('input[aria-label="Issue title"]') as HTMLInputElement;
+  ([...host.querySelectorAll("button")].find(button => button.textContent === "Add ticket") as HTMLButtonElement).click();
+  const issueTitle = host.querySelector('input[aria-label="Ticket title"]') as HTMLInputElement;
   issueTitle.value = "Track the fix";
   issueTitle.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "Track the fix" }));
   (host.querySelector("form.project-work-form") as HTMLFormElement).dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));

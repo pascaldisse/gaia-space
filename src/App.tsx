@@ -50,7 +50,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { isMobileSetup } from "./mobile";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
-import { defaultView, groupOfView, navLayout, visibleGroups, type NavGroup } from "./nav";
+import { defaultView, groupOfView, navLayout, viewLabel, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
 // Chat-first destinations. They are ordinary registered views: reachable from every nav
@@ -100,11 +100,11 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     setAvailableViews([...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,settingsView].map(v=>v.name));
   });
   createEffect(()=>{ active(); setMenuOpen(false); });
-  const nav=(view:View)=><a class="topnav-item" title={view.name} aria-label={view.name} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{view.name}</span></a>;
+  const nav=(view:View)=><a class="topnav-item" title={viewLabel(view.name)} aria-label={viewLabel(view.name)} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{viewLabel(view.name)}</span></a>;
   const groups=()=>visibleGroups(views().map(view=>view.name));
   const activeGroup=()=>groupOfView(groups(),active());
   const groupNav=(group:NavGroup)=><a class="topnav-item" title={group.label} aria-label={group.label} classList={{active:activeGroup()?.id===group.id}} {...linkProps({view:group.views[0]})}><span class="nav-icon" aria-hidden="true"><Icon name={group.icon} size={18} /></span><span class="topnav-label">{group.label}</span></a>;
-  const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{name}</a>;
+  const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{viewLabel(name)}</a>;
   return <Switch>
     <Match when={isMobileSetup()}><ServerConnect/></Match>
     <Match when={isWeb()&&!authChecked()}><div class="space-shell-loading"/></Match>

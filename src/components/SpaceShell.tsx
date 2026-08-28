@@ -10,6 +10,7 @@ import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { linkEntity, linkProps, route } from "../router";
+import { viewLabel } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -180,7 +181,7 @@ export default function SpaceShell(props: {
                 onClick={() => setMoreOpen(false)}
               >
                 <span class="side-icon" aria-hidden="true"><Icon name={view.icon} size={16} /></span>
-                {view.name}
+                {viewLabel(view.name)}
               </a>
             )}
           </For>

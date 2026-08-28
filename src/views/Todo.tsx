@@ -91,7 +91,7 @@ export default function Todo() {
   const doneList=()=>todos()?.filter(todo=>todo.done)??[];
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
-  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into an issue."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const editRow=(todo:TodoItem)=><article class="task-card task-card-editing">
     <div class="task-body">
       <input class="composer-title" autofocus aria-label="Task title" value={editForm().content} onInput={e=>setEditForm({...editForm(),content:e.currentTarget.value})} onKeyDown={e=>{ if(e.key==="Escape") cancelEdit(); }}/>
@@ -135,7 +135,7 @@ export default function Todo() {
         <button type="button" class="ghost small" title="Postpone by one day" aria-label={`Postpone ${todo.content} by a day`} onClick={()=>postpone(todo,1)}>+1d</button>
         <button type="button" class="ghost small" title="Postpone by a week" aria-label={`Postpone ${todo.content} by a week`} onClick={()=>postpone(todo,7)}>+1w</button>
         <Show when={todo.project_id&&todo.source_entity_type!=="issue"}>
-          <button type="button" class="ghost small" title="Convert to issue" aria-label={`Convert ${todo.content} to an issue`} onClick={()=>convert(todo)}>→ Issue</button>
+          <button type="button" class="ghost small" title="Convert to ticket" aria-label={`Convert ${todo.content} to a ticket`} onClick={()=>convert(todo)}>→ Ticket</button>
         </Show>
       </Show>
       <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>

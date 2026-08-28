@@ -85,7 +85,7 @@ const [swimlaneGroup, setSwimlaneGroup] = createSignal<"none" | "assignee" | "cr
   };
   const removeColumn = async (column: BoardColumn) => {
     setMenu(undefined);
-    if (!confirm(`Delete the column "${column.name}"? Its issues stay in the project.`)) return;
+    if (!confirm(`Delete the column "${column.name}"? Its tickets stay in the project.`)) return;
     try { await planningApi.deleteColumn(column.id); reloadColumns(); } catch (reason) { setError(humanError(reason)); }
   };
   const renameColumn = async (column: BoardColumn) => {
@@ -162,7 +162,7 @@ const toggleSelected = (id: string, checked: boolean) => setSelectedIssueIds(ids
 const clearSelection = () => setSelectedIssueIds([]);
 const bulkMove = async () => { const b = board(); const columnId = bulkColumnId(); if (!b || !columnId || !selected().length) return; try { await planningApi.bulkMove({ board_id: b.id, issue_ids: selected(), column_id: columnId, sprint_id: sprintId() ?? null, swimlane_id: activeSwimlane() ?? null }); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
 const bulkSprint = async () => { const b = board(); if (!b || !selected().length) return; try { await planningApi.bulkSprint(b.id, selected(), bulkSprintId() || null); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
-const bulkRemove = async () => { const b = board(); if (!b || !selected().length || !confirm(`Remove ${selected().length} selected issue(s) from this board?`)) return; try { await planningApi.bulkRemove(b.id, selected()); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
+const bulkRemove = async () => { const b = board(); if (!b || !selected().length || !confirm(`Remove ${selected().length} selected ticket(s) from this board?`)) return; try { await planningApi.bulkRemove(b.id, selected()); clearSelection(); await reloadIssues(); } catch (reason) { setError(humanError(reason)); } };
 const addSwimlane = async () => {
   const b = board(); const name = newSwimlane().trim(); if (!b || !name) return;
   try { const lane = await planningApi.saveSwimlane({ board_id: b.id, sprint_id: sprintId() ?? null, name, is_default: !(swimlanes()?.length) }); setNewSwimlane(""); setPanel(undefined); await reloadSwimlanes(); if (lane?.id) setActiveSwimlane(lane.id); }
@@ -173,9 +173,9 @@ const addSprint = async () => {
   try { const s = await planningApi.createSprint({ board_id: b.id, name, starts_on: null, ends_on: null, description: null }); setNewSprint(""); setPanel(undefined); setSprintId(s.id); reloadSprints(); }
   catch (reason) { setError(humanError(reason)); }
 };
-const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All issues";
+const sprintName = () => sprints()?.find(s => s.id === sprintId())?.name ?? "All tickets";
 return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={event => { if (event.key === "Escape") dismiss(); }}>
-    <PageHeader kicker={projectName(projectId())} title="Issue boards" subline="Columns map issue statuses" actions={<ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
+    <PageHeader kicker={projectName(projectId())} title="Ticket boards" subline="Columns map ticket statuses" actions={<ProjectPicker onChange={id => { setProjectId(id); setBoard(undefined); setSprintId(undefined); }} />} />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
 
     {/* Tier 1 — which board. Tabs carry the whole switch; creation is a popover. */}
@@ -206,7 +206,7 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
         <div class="chip-group">
           <label class="chip chip-select" title={sprintName()}><span>Sprint</span>
             <select aria-label="Sprint" value={sprintId() ?? ""} onChange={e => setSprintId(e.currentTarget.value || undefined)}>
-              <option value="">All issues</option>
+              <option value="">All tickets</option>
               <For each={sprints()}>{s => <option value={s.id}>{s.name} · {s.state}</option>}</For>
             </select>
           </label>
@@ -257,16 +257,16 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
     </Show>
 
     <Show when={board()} fallback={<p class="hint pad">Create a board to start — it comes with columns ready to use.</p>}>{b => <>
-      <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected issues"><strong>{selected().length} selected</strong>
-        <select aria-label="Move selected issues to column" value={bulkColumnId()} onChange={e => setBulkColumnId(e.currentTarget.value)}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></select><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
-        <select aria-label="Assign selected issues to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
+      <Show when={selected().length}><div class="board-bulk-actions" aria-label="Bulk edit selected tickets"><strong>{selected().length} selected</strong>
+        <select aria-label="Move selected tickets to column" value={bulkColumnId()} onChange={e => setBulkColumnId(e.currentTarget.value)}><option value="">Move to column…</option><For each={columns()}>{column => <option value={column.id}>{column.name}</option>}</For></select><button disabled={!bulkColumnId()} onClick={() => void bulkMove()}>Move selected</button>
+        <select aria-label="Assign selected tickets to sprint" value={bulkSprintId()} onChange={e => setBulkSprintId(e.currentTarget.value)}><option value="">Board backlog</option><For each={sprints()}>{sprint => <option value={sprint.id}>{sprint.name}</option>}</For></select><button onClick={() => void bulkSprint()}>Set sprint</button>
         <button class="danger" onClick={() => void bulkRemove()}>Remove from board</button><button class="ghost" onClick={clearSelection}>Clear</button>
       </div></Show>
       <div class="board-split" classList={{ "with-rail": showBacklog() || !!openIssue() }}>
         <div class="board-canvas">
-        <Show when={laneGroups().length} fallback={<p class="hint pad">No issues in this board.</p>}>
+        <Show when={laneGroups().length} fallback={<p class="hint pad">No tickets in this board.</p>}>
 <For each={laneGroups()}>{lane => <section class="swimlane-row">
-<Show when={swimlaneGroup() !== "none"}><header><strong>{lane.name}</strong><small>{lane.laneIssues.length} issues</small></header></Show>
+<Show when={swimlaneGroup() !== "none"}><header><strong>{lane.name}</strong><small>{lane.laneIssues.length} tickets</small></header></Show>
 <div class="kanban">
           <For each={columns()}>{column =>
             <section classList={{ "board-column": true, "column-dragging": dragColumn() === column.id }} onContextMenu={event => { event.preventDefault(); setMenu({ column, x: event.clientX, y: event.clientY }); }}>
@@ -282,12 +282,12 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
                   <button class="column-move" aria-label={`Move ${column.name} left`} title="Move column left" disabled={(columns() ?? [])[0]?.id === column.id} onClick={event => { event.stopPropagation(); void shiftColumn(column, -1); }}>‹</button>
                   <button class="column-move" aria-label={`Move ${column.name} right`} title="Move column right" disabled={lastColumnId() === column.id} onClick={event => { event.stopPropagation(); void shiftColumn(column, 1); }}>›</button>
                 </div>
-                <button class="column-plus" aria-label={`Add issue to ${column.name}`} title="Add issue" onClick={() => { setComposeIn(column.id); setCardTitle(""); }}>+</button>
+                <button class="column-plus" aria-label={`Add ticket to ${column.name}`} title="Add ticket" onClick={() => { setComposeIn(column.id); setCardTitle(""); }}>+</button>
               </header>
 
               <Show when={composeIn() === column.id}>
                 <form class="column-compose" onSubmit={e => { e.preventDefault(); void addCard(column); }}>
-                  <input autofocus placeholder="Issue title" value={cardTitle()} onInput={e => setCardTitle(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Escape") setComposeIn(undefined); }} />
+                  <input autofocus placeholder="Ticket title" value={cardTitle()} onInput={e => setCardTitle(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Escape") setComposeIn(undefined); }} />
                   <div class="column-compose-actions"><button class="primary" disabled={!cardTitle().trim()}>Add</button><button type="button" class="ghost" onClick={() => setComposeIn(undefined)}>Cancel</button></div>
                 </form>
               </Show>
@@ -300,7 +300,7 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
                   <IssueCard issue={issue} statuses={statuses()} fields={cardSettings()?.fields ?? []} active={openIssue() === issue.id} selected={selectedIssueIds().includes(issue.id)} onSelect={checked => toggleSelected(issue.id, checked)} onOpen={() => setOpenIssue(issue.id)}
                     targets={columns()?.filter(c => c.id !== column.id) ?? []} onMove={target => move(issue.id, target)} />
                 }</For>
-                <Show when={!cardsOf(column, lane.laneIssues).length}><p class="column-empty">No issues</p></Show>
+                <Show when={!cardsOf(column, lane.laneIssues).length}><p class="column-empty">No tickets</p></Show>
               </div>
             </section>
           }</For>
@@ -364,7 +364,7 @@ function IssueCard(props: { issue: Issue; statuses?: Status[]; fields: string[];
       draggable={true}
       onDragStart={event => { event.dataTransfer?.setData("text/issue-id", props.issue.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }}
       onClick={() => props.onOpen()} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onOpen(); } }}>
-    <div class="card-top"><input aria-label={`Select issue #${props.issue.number}`} type="checkbox" checked={props.selected} onClick={event => event.stopPropagation()} onChange={event => props.onSelect(event.currentTarget.checked)} /><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
+    <div class="card-top"><input aria-label={`Select ticket #${props.issue.number}`} type="checkbox" checked={props.selected} onClick={event => event.stopPropagation()} onChange={event => props.onSelect(event.currentTarget.checked)} /><span class="issue-number">#{props.issue.number}</span><Show when={status()}>{s => <span class="card-status" style={{ background: s().color }} title={s().name} />}</Show></div>
     <strong class="card-title">{props.issue.title}</strong>
     <div class="card-meta">
       <Show when={props.fields.includes("priority") && props.issue.priority}>{p => <span class={`task-tag prio prio-${p().toLowerCase()}`}>{p()}</span>}</Show>
@@ -387,7 +387,7 @@ function Backlog(props: { boardId: string; columns: BoardColumn[]; sprintId?: st
   return <>
     <Show when={selected().length}><button disabled={!props.columns.length} onClick={() => void add(selected())}>Add {selected().length} selected to board</button></Show>
     <Show when={!items()?.length}><p class="hint">Nothing in the backlog.</p></Show>
-    <For each={items()}>{issue => <div class="backlog-row"><input aria-label={`Select backlog issue #${issue.number}`} type="checkbox" checked={selected().includes(issue.id)} onChange={event => toggle(issue.id, event.currentTarget.checked)} /><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => void add([issue.id])}>Add to board</button></div>}</For>
+    <For each={items()}>{issue => <div class="backlog-row"><input aria-label={`Select backlog ticket #${issue.number}`} type="checkbox" checked={selected().includes(issue.id)} onChange={event => toggle(issue.id, event.currentTarget.checked)} /><span class="issue-number">#{issue.number}</span><strong>{issue.title}</strong><button disabled={!props.columns.length} onClick={() => void add([issue.id])}>Add to board</button></div>}</For>
   </>;
 }
 
@@ -401,7 +401,7 @@ const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.loca
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
 <label class="chip chip-select"><span>Rows</span> <select value={axis()} onChange={e => setAxis(e.currentTarget.value as "assignee" | "priority")}><option value="assignee">Assignee</option><option value="priority">Priority</option></select></label>
-<Show when={props.issues.length} fallback={<p class="hint">No board issues for this matrix.</p>}>
+<Show when={props.issues.length} fallback={<p class="hint">No board tickets for this matrix.</p>}>
 <table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
 </Show>
 </section>;
