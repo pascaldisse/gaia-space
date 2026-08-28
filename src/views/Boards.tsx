@@ -6,6 +6,7 @@ import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import PageHeader, { useEmbedded } from "../components/PageHeader";
 import { GhostPill, PillSelect } from "../components/controls";
+import { Disclosure } from "../components/blocks";
 import EmptyState from "../components/EmptyState";
 import { linkProps } from "../router";
 import { projectName } from "../orgScope";
@@ -379,10 +380,11 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
 
       </div>
 
-      <details class="board-report">
-        <summary>Matrix report</summary>
+      {/* ONE DISCLOSURE IDIOM (stage 11, defect 5): sentence case, one hairline,
+          one chevron — the same block the Access panel below it uses. */}
+      <Disclosure class="board-report" title="Matrix report">
         <BoardMatrix issues={issues() ?? []} columns={columns() ?? []} statuses={statuses()} />
-      </details>
+      </Disclosure>
     </>}</Show>
   </section>;
 }
