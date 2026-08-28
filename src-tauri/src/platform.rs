@@ -1556,6 +1556,168 @@ pub fn update_project_on(c: &Connection, project: Project) -> Result<()> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// Delete a project with everything that only exists because of it. Same shape as
+/// `chat::delete_channel`: authorization first, then one transaction, then a cascade
+/// that is written out table by table instead of trusting `ON DELETE CASCADE` (several
+/// of these tables predate the cascade clauses, and the guarantee must not depend on
+/// the `foreign_keys` pragma of whichever connection calls us).
+///
+/// The door is the same owner-or-admin rule `update_project`/`set_project_deadline`
+/// already use: the profile in `projects.created_by`, or an account/superadmin admin.
+/// Rows that carry their own meaning are not followed — a channel outlives the project
+/// it was filed under, so its `project_id` is cleared, never its conversation deleted.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_project(id: String, actor_id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    delete_project_on(&mut c, &id, &actor_id)
+}
+pub fn delete_project_on(c: &mut Connection, id: &str, actor_id: &str) -> Result<()> {
+    let owner: Option<Option<String>> = c
+        .query_row("SELECT created_by FROM projects WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let owner = owner.ok_or_else(|| "Project not found".to_string())?;
+    if owner.as_deref() != Some(actor_id) && !is_admin_on(c, actor_id)? {
+        return Err("only the project owner or an admin can delete this project".into());
+    }
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    // Pointers from rows that stand on their own: cleared, not followed.
+    for clause in PROJECT_CLEARED {
+        tx.execute(clause, [id]).map_err(|e| e.to_string())?;
+    }
+    for clause in PROJECT_SCOPED {
+        // A `TREE` entry is self-referencing (folders inside folders, subtasks inside
+        // subtasks): a parent row may only go once no child points at it, so the same
+        // statement runs until it stops removing rows — deepest level first.
+        match clause.strip_prefix("TREE ") {
+            Some(tree) => loop {
+                let removed = tx
+                    .execute(&format!("DELETE FROM {tree}"), [id])
+                    .map_err(|e| e.to_string())?;
+                if removed == 0 {
+                    break;
+                }
+            },
+            None => {
+                tx.execute(&format!("DELETE FROM {clause}"), [id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+/// Other domains keep their row; only their pointer at this project (or at a document
+/// that goes with it) is cleared. A blog post is a published article, a channel is a
+/// conversation — neither stops existing because the project does.
+const PROJECT_CLEARED: &[&str] = &[
+    "UPDATE channels SET project_id=NULL WHERE project_id=?1",
+    "UPDATE blog_posts SET project_id=NULL WHERE project_id=?1",
+    "UPDATE blog_posts SET draft_id=NULL WHERE draft_id IN \
+     (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "UPDATE channel_notes SET attachment_document_id=NULL WHERE attachment_document_id IN \
+     (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+];
+/// Every table that holds a row *because of* this project, deepest first. The last
+/// entry is the project itself; the self-referencing trees above have already been
+/// emptied by the time the parent tables are reached.
+const PROJECT_SCOPED: &[&str] = &[
+    // A gone entity must not leave a claim on anyone's attention behind.
+    "notifications WHERE (entity_type='project' AND entity_id=?1) \
+     OR (entity_type='issue' AND entity_id IN (SELECT id FROM issues WHERE project_id=?1)) \
+     OR (entity_type='todo' AND entity_id IN (SELECT id FROM todos WHERE project_id=?1)) \
+     OR (entity_type='document' AND entity_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1))",
+    // Documents of the project, then the folders they were filed in.
+    "doc_versions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_permissions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_favorites WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_files WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_discussions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_imports WHERE container_type='project' AND container_id=?1",
+    "documents WHERE container_type='project' AND container_id=?1",
+    "document_folder_permissions WHERE folder_id IN (SELECT id FROM document_folders WHERE container_type='project' AND container_id=?1)",
+    "kb_book_owners WHERE book_id IN (SELECT id FROM document_folders WHERE container_type='project' AND container_id=?1)",
+    "TREE document_folders WHERE container_type='project' AND container_id=?1 \
+     AND NOT EXISTS(SELECT 1 FROM document_folders child WHERE child.parent_id=document_folders.id)",
+    // Issue tracker: attachments of an issue, then the issues, then their statuses.
+    "TREE checklist_items WHERE checklist_id IN (SELECT ck.id FROM checklists ck JOIN issues i ON i.id=ck.issue_id WHERE i.project_id=?1) \
+     AND NOT EXISTS(SELECT 1 FROM checklist_items child WHERE child.parent_id=checklist_items.id)",
+    "checklists WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_activities WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_assignees WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_attachments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
+     OR linked_issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_tags WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
+     OR tag_id IN (SELECT id FROM planning_tags WHERE project_id=?1)",
+    "issue_tracker_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "time_tracking_entries WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "cf_values WHERE entity_id=?1 OR entity_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    // Boards before the issues they place, statuses before the issues that hold them.
+    "issue_board_positions WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1) \
+     OR issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "board_card_settings WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "swimlanes WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "sprints WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "column_statuses WHERE column_id IN (SELECT id FROM board_columns WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)) \
+     OR status_id IN (SELECT id FROM issue_statuses WHERE project_id=?1)",
+    "board_columns WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "boards WHERE project_id=?1",
+    "issues WHERE project_id=?1",
+    "issue_statuses WHERE project_id=?1",
+    "TREE planning_tags WHERE project_id=?1 \
+     AND NOT EXISTS(SELECT 1 FROM planning_tags child WHERE child.parent_id=planning_tags.id)",
+    // Tasks of the project.
+    "todo_assignees WHERE todo_id IN (SELECT id FROM todos WHERE project_id=?1)",
+    "todos WHERE project_id=?1",
+    // Code review.
+    "review_discussions WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_external_checks WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_external_issue_links WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_file_states WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_merge_preferences WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_participants WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "safe_merge_runs WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_stack_items WHERE stack_id IN (SELECT id FROM review_stacks WHERE project_id=?1) \
+     OR review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "reviews WHERE project_id=?1",
+    "review_stacks WHERE project_id=?1",
+    "review_merge_policies WHERE project_id=?1",
+    "quality_gate_rules WHERE project_id=?1",
+    "protected_branch_rules WHERE project_id=?1",
+    // Pipelines and deployments.
+    "job_artifacts WHERE job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "test_reports WHERE job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "deployments WHERE target_id IN (SELECT id FROM deploy_targets WHERE project_id=?1) \
+     OR job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "job_runs WHERE job_id IN (SELECT j.id FROM jobs j JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "jobs WHERE script_id IN (SELECT id FROM pipeline_scripts WHERE project_id=?1)",
+    "pipeline_scripts WHERE project_id=?1",
+    "deploy_targets WHERE project_id=?1",
+    // Package registry.
+    "package_vulnerabilities WHERE package_version_id IN (SELECT pv.id FROM package_versions pv \
+     JOIN package_repositories pr ON pr.id=pv.repository_id WHERE pr.project_id=?1)",
+    "package_versions WHERE repository_id IN (SELECT id FROM package_repositories WHERE project_id=?1)",
+    "package_repository_acl WHERE repository_id IN (SELECT id FROM package_repositories WHERE project_id=?1)",
+    "package_repositories WHERE project_id=?1",
+    // Development environments and generated files.
+    "dev_environments WHERE project_id=?1",
+    "dev_environment_pool_policies WHERE project_id=?1",
+    "devfiles WHERE project_id=?1",
+    // Membership, roles and invitations into the project.
+    "channel_notes WHERE project_id=?1",
+    "invitations WHERE project_id=?1",
+    "role_assignments WHERE scope_type='project' AND scope_id=?1",
+    "project_team_roles WHERE project_id=?1",
+    "project_roles WHERE project_id=?1",
+    "project_members WHERE project_id=?1",
+    "projects WHERE id=?1",
+];
 /// A blank string is "no lead", not a profile id: the column stays NULL or holds a real id.
 fn normalized_lead(lead_id: Option<String>) -> Option<String> {
     lead_id
@@ -3452,5 +3614,146 @@ mod tests {
             assign_project_team_role_on(&c, "pr", "team-b", &role.id).unwrap_err(),
             "Project role is archived"
         );
+    }
+}
+
+
+#[cfg(test)]
+mod delete_project_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let c = db::open_in_memory().unwrap();
+        db::migrate(&c).unwrap();
+        c
+    }
+
+    /// Seeds one project with a row in each domain that only exists because of it,
+    /// plus two rows that stand on their own (a channel and a blog post).
+    fn seed(c: &Connection) {
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('own','own','Owner',1),('other','other','Other',1),('boss','boss','Boss',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','boss','x','Boss','boss','admin',1,1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','own',0,1),('keep','Other','KEEP','other',0,1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','other'),('keep','own')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO project_roles(id,project_id,name,role_kind,archived) VALUES('role','pr','Dev','member',0)", []).unwrap();
+        c.execute("INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')", []).unwrap();
+        c.execute("INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)", []).unwrap();
+        c.execute("INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')", []).unwrap();
+        c.execute("INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,status_id) VALUES('is','pr',1,'Issue','st')", []).unwrap();
+        c.execute("INSERT INTO issue_comments(id,issue_id,author_id,body,created_at) VALUES('ic','is','own','Comment',1)", []).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')", []).unwrap();
+        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('sub','project','pr','root','Sub',0)", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES('doc','project','pr','sub','text','Spec','own')", []).unwrap();
+        c.execute("INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')", []).unwrap();
+        c.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('rv','pr',1,'MR','Opened','Review')", []).unwrap();
+        c.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')", []).unwrap();
+        c.execute("INSERT INTO devfiles(id,project_id,path,name,content) VALUES('df','pr','.space/dev.yaml','Dev','x')", []).unwrap();
+        c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','issue.created','Issue','issue','is',1)", []).unwrap();
+        // Rows that carry their own meaning: the conversation and the article survive.
+        c.execute("INSERT INTO channels(id,content_type,name,project_id) VALUES('ch','public','general','pr')", []).unwrap();
+        c.execute("INSERT INTO blog_posts(id,draft_id,title,body,author_id,project_id) VALUES('bp','doc','Post','Body','own','pr')", []).unwrap();
+    }
+
+    fn count(c: &Connection, sql: &str) -> i64 {
+        c.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    /// The owner deletes; every row that only existed because of the project goes with
+    /// it in one transaction, while the channel and the blog post keep their identity
+    /// and merely lose the pointer.
+    #[test]
+    fn the_owner_deletes_a_project_with_everything_that_only_belonged_to_it() {
+        let mut c = conn();
+        db::enforce_foreign_keys(&c).unwrap();
+        seed(&c);
+
+        delete_project_on(&mut c, "pr", "own").unwrap();
+
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='pr'"), 0);
+        for probe in [
+            "SELECT count(*) FROM project_members WHERE project_id='pr'",
+            "SELECT count(*) FROM project_roles WHERE project_id='pr'",
+            "SELECT count(*) FROM boards WHERE project_id='pr'",
+            "SELECT count(*) FROM board_columns WHERE board_id='bo'",
+            "SELECT count(*) FROM column_statuses WHERE column_id='col'",
+            "SELECT count(*) FROM issues WHERE project_id='pr'",
+            "SELECT count(*) FROM issue_comments WHERE issue_id='is'",
+            "SELECT count(*) FROM issue_statuses WHERE project_id='pr'",
+            "SELECT count(*) FROM todos WHERE project_id='pr'",
+            "SELECT count(*) FROM todo_assignees WHERE todo_id='td'",
+            "SELECT count(*) FROM document_folders WHERE container_type='project' AND container_id='pr'",
+            "SELECT count(*) FROM documents WHERE container_type='project' AND container_id='pr'",
+            "SELECT count(*) FROM doc_versions WHERE document_id='doc'",
+            "SELECT count(*) FROM reviews WHERE project_id='pr'",
+            "SELECT count(*) FROM pipeline_scripts WHERE project_id='pr'",
+            "SELECT count(*) FROM devfiles WHERE project_id='pr'",
+            "SELECT count(*) FROM notifications WHERE entity_id='is'",
+        ] {
+            assert_eq!(count(&c, probe), 0, "left behind: {probe}");
+        }
+
+        // The conversation outlives the project it was filed under.
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"),
+            1
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM blog_posts WHERE id='bp' AND project_id IS NULL AND draft_id IS NULL"),
+            1
+        );
+        // A second project is untouched.
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='keep'"), 1);
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM project_members WHERE project_id='keep'"),
+            1
+        );
+    }
+
+    /// A member who is not the owner is refused, and the refusal changes nothing at all.
+    #[test]
+    fn a_stranger_is_refused_and_the_project_is_untouched() {
+        let mut c = conn();
+        seed(&c);
+        let before = count(
+            &c,
+            "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+             + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
+        );
+
+        let refused = delete_project_on(&mut c, "pr", "other").unwrap_err();
+        assert!(refused.contains("owner or an admin"), "{refused}");
+        assert_eq!(
+            count(
+                &c,
+                "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+                 + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
+            ),
+            before,
+            "a refused delete must not touch a single row"
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"),
+            1
+        );
+    }
+
+    /// An admin has the same break-glass path as everywhere else; an unknown id is a
+    /// plain not-found, never a half-executed cascade.
+    #[test]
+    fn an_admin_may_delete_and_a_missing_project_is_not_found() {
+        let mut c = conn();
+        seed(&c);
+        assert_eq!(
+            delete_project_on(&mut c, "ghost", "own").unwrap_err(),
+            "Project not found"
+        );
+        delete_project_on(&mut c, "pr", "boss").unwrap();
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='pr'"), 0);
     }
 }

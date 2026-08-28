@@ -281,6 +281,7 @@ pub fn run() {
             platform::get_project,
             platform::create_project,
             platform::update_project,
+            platform::delete_project,
             platform::is_admin,
             issues::list_issues,
             // Desktop lost the issue detail pane: the command carries its
@@ -488,6 +489,7 @@ pub fn run() {
             documents::publish_document,
             documents::get_public_document,
             documents::list_book_access,
+            documents::list_book_owners,
             documents::search_book_documents,
             documents::update_book_access,
             documents::list_document_folders,

@@ -686,9 +686,56 @@ pub fn archive_document(id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 
+/// Who may destroy a document. Deletion is the one act that cannot be taken back, so
+/// it is bound to ownership, never to write access: a personal document belongs to its
+/// own container, a project document to its author or the project owner, and a book
+/// page in the organization library to a book *owner* — an editor writes, an owner
+/// destroys. Admins keep the break-glass path they have everywhere else.
+pub(crate) fn document_deletable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    actor_id: &str,
+) -> Result<bool> {
+    if actor_id.trim().is_empty() {
+        return Ok(false);
+    }
+    if crate::platform::is_admin_on(c, actor_id)? {
+        return Ok(true);
+    }
+    c.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND ({DOCUMENT_OWNER_WRITE_SCOPE} \
+             OR (d.container_type='my-docs' AND d.container_id=?1)))"
+        ),
+        rusqlite::params![actor_id, false, id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn document_deletable_by(id: &str, actor_id: &str) -> Result<bool> {
+    document_deletable_by_on(&db::conn()?, id, actor_id)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_document(id: String) -> Result<()> {
+pub fn delete_document(id: String, actor_id: String) -> Result<()> {
     let mut c = db::conn()?;
+    delete_document_on(&mut c, &id, &actor_id)
+}
+fn delete_document_on(c: &mut rusqlite::Connection, id: &str, actor_id: &str) -> Result<()> {
+    let exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1)",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("Document not found".into());
+    }
+    if !document_deletable_by_on(c, id, actor_id)? {
+        return Err("only the owner of this document can delete it".into());
+    }
     let tx = c.transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM doc_versions WHERE document_id=?1", [&id])
         .map_err(|e| e.to_string())?;
@@ -1122,6 +1169,25 @@ pub fn book_writable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Resu
     // a first owner/grant is recorded; newly created books always have an owner row.
     c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND f.container_type='kb' AND f.parent_id IS NULL AND ({FOLDER_WRITE_SCOPE} OR (NOT EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id) AND NOT EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id))))"), rusqlite::params![profile_id, false, book_id], |row| row.get(0)).map_err(|e| e.to_string())
 }
+/// The owners of one library book, so a reader can *see* who may delete in it instead
+/// of discovering the rule by being refused. Names only — no grants, no book contents.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_book_owners(book_id: String) -> Result<Vec<String>> {
+    list_book_owners_on(&db::conn()?, &book_id)
+}
+pub(crate) fn list_book_owners_on(c: &rusqlite::Connection, book_id: &str) -> Result<Vec<String>> {
+    let mut s = c
+        .prepare("SELECT profile_id FROM kb_book_owners WHERE book_id=?1 ORDER BY profile_id")
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([book_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_book_access(book_id: String) -> Result<Vec<DocumentAccessRecipient>> {
     let c = db::conn()?;
@@ -1510,10 +1576,39 @@ pub fn update_document_folder(folder: DocumentFolder) -> Result<()> {
 /// first (or move the content), which keeps the deletion a decision about the folder
 /// alone. Archived children still count as content; they are hidden, not gone.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_document_folder(id: String) -> Result<()> {
-    delete_document_folder_on(&db::conn()?, &id)
+pub fn delete_document_folder(id: String, actor_id: String) -> Result<()> {
+    delete_document_folder_on(&db::conn()?, &id, &actor_id)
 }
-fn delete_document_folder_on(c: &rusqlite::Connection, id: &str) -> Result<()> {
+/// Same ownership rule as a document, read off the folder's container: your own
+/// `my-docs` shelf, the owner of the project the folder belongs to, or an owner of the
+/// book (a folder that *is* a book root is checked against its own owner rows).
+pub(crate) fn document_folder_deletable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    actor_id: &str,
+) -> Result<bool> {
+    if actor_id.trim().is_empty() {
+        return Ok(false);
+    }
+    if crate::platform::is_admin_on(c, actor_id)? {
+        return Ok(true);
+    }
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?2 AND ( \
+           (f.container_type='my-docs' AND f.container_id=?1) \
+           OR (f.container_type='project' AND f.container_id IS NOT NULL \
+               AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND p.created_by=?1)) \
+           OR (f.container_type='kb' AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) \
+               OR EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id AND bo.profile_id=?1)))))",
+        rusqlite::params![actor_id, id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+pub fn document_folder_deletable_by(id: &str, actor_id: &str) -> Result<bool> {
+    document_folder_deletable_by_on(&db::conn()?, id, actor_id)
+}
+fn delete_document_folder_on(c: &rusqlite::Connection, id: &str, actor_id: &str) -> Result<()> {
     let exists: bool = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM document_folders WHERE id=?1)",
@@ -1523,6 +1618,9 @@ fn delete_document_folder_on(c: &rusqlite::Connection, id: &str) -> Result<()> {
         .map_err(|e| e.to_string())?;
     if !exists {
         return Err("Folder not found".into());
+    }
+    if !document_folder_deletable_by_on(c, id, actor_id)? {
+        return Err("only the owner of this folder can delete it".into());
     }
     let occupied: bool = c
         .query_row(
@@ -2471,13 +2569,13 @@ mod tests {
     fn a_folder_is_deleted_only_when_it_is_empty() {
         let c = test_conn();
         c.execute(
-            "INSERT INTO document_folders(id,container_type,parent_id,name,archived) VALUES('f-empty','my-docs',NULL,'Empty',0),('f-full','my-docs',NULL,'Full',0),('f-parent','my-docs',NULL,'Parent',0),('f-child','my-docs','f-parent','Child',0)",
+            "INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('f-empty','my-docs','ada',NULL,'Empty',0),('f-full','my-docs','ada',NULL,'Full',0),('f-parent','my-docs','ada',NULL,'Parent',0),('f-child','my-docs','ada','f-parent','Child',0)",
             [],
         )
         .unwrap();
         c.execute("INSERT INTO documents(id,container_type,folder_id,doc_type,title,archived) VALUES('d-in','my-docs','f-full','text','Inside',1)", []).unwrap();
 
-        delete_document_folder_on(&c, "f-empty").unwrap();
+        delete_document_folder_on(&c, "f-empty", "ada").unwrap();
         let empty_gone: i64 = c
             .query_row(
                 "SELECT count(*) FROM document_folders WHERE id='f-empty'",
@@ -2488,17 +2586,17 @@ mod tests {
         assert_eq!(empty_gone, 0);
 
         assert_eq!(
-            delete_document_folder_on(&c, "f-full").unwrap_err(),
+            delete_document_folder_on(&c, "f-full", "ada").unwrap_err(),
             "Folder is not empty",
             "an archived document is still content"
         );
         assert_eq!(
-            delete_document_folder_on(&c, "f-parent").unwrap_err(),
+            delete_document_folder_on(&c, "f-parent", "ada").unwrap_err(),
             "Folder is not empty",
             "a subfolder is content too"
         );
         assert_eq!(
-            delete_document_folder_on(&c, "f-ghost").unwrap_err(),
+            delete_document_folder_on(&c, "f-ghost", "ada").unwrap_err(),
             "Folder not found"
         );
         let survivors: i64 = c
@@ -2881,5 +2979,100 @@ mod tests {
         assert_eq!(mime_for("thing.weird"), "application/octet-stream");
         assert_eq!(mime_for("page.html"), "text/html");
         assert_eq!(mime_for("IMAGE.JPG"), "image/jpeg");
+    }
+
+    /// Deletion follows OWNERSHIP, not write access. Your own shelf is yours; a project
+    /// document answers to its author and the project owner; and in the organization
+    /// library only a book owner may destroy — an editor writes, an owner deletes.
+    #[test]
+    fn deleting_a_document_asks_who_owns_it_not_who_may_write_it() {
+        let mut c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1),('cid','cid','Cid',1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Project','PR','ada',1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('book','kb',NULL,NULL,'Handbook',0)", []).unwrap();
+        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')", []).unwrap();
+        c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES \
+                   ('mine','my-docs','ada',NULL,'text','Private','ada'), \
+                   ('proj','project','pr','root','text','Spec','bea'), \
+                   ('page','kb','book',NULL,'text','Chapter','bea')", []).unwrap();
+
+        // Personal: only the container's own person.
+        assert!(delete_document_on(&mut c, "mine", "bea").is_err());
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM documents WHERE id='mine'"),
+            1,
+            "a refused delete leaves the document"
+        );
+        // Organization library: the editor writes but must not destroy; the owner may.
+        let refused = delete_document_on(&mut c, "page", "cid").unwrap_err();
+        assert_eq!(refused, "only the owner of this document can delete it");
+        assert!(
+            document_writable_by_on(&c, "page", "bea"),
+            "the editor still has write access"
+        );
+        delete_document_on(&mut c, "page", "ada").unwrap();
+        // Project: the author and the project owner both qualify, a plain member does not.
+        assert!(delete_document_on(&mut c, "proj", "cid").is_err());
+        delete_document_on(&mut c, "proj", "ada").unwrap();
+        delete_document_on(&mut c, "mine", "ada").unwrap();
+        assert_eq!(count(&c, "SELECT count(*) FROM documents"), 0);
+        assert_eq!(
+            delete_document_on(&mut c, "ghost", "ada").unwrap_err(),
+            "Document not found"
+        );
+    }
+
+    /// The same rule for the container: an empty folder still only goes for its owner.
+    #[test]
+    fn deleting_a_folder_asks_the_same_owner_question() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Project','PR','ada',1)", []).unwrap();
+        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES \
+                   ('mine','my-docs','ada',NULL,'Shelf',0),('sub','project','pr',NULL,'Notes',0),('book','kb',NULL,NULL,'Handbook',0)", []).unwrap();
+        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')", []).unwrap();
+        c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
+
+        for (folder, stranger) in [("mine", "bea"), ("sub", "bea"), ("book", "bea")] {
+            let refused = delete_document_folder_on(&c, folder, stranger).unwrap_err();
+            assert_eq!(refused, "only the owner of this folder can delete it");
+        }
+        assert_eq!(count(&c, "SELECT count(*) FROM document_folders"), 3);
+        for folder in ["mine", "sub", "book"] {
+            delete_document_folder_on(&c, folder, "ada").unwrap();
+        }
+        assert_eq!(count(&c, "SELECT count(*) FROM document_folders"), 0);
+    }
+
+    /// The library shows the owner rule instead of letting people discover it by refusal.
+    #[test]
+    fn list_book_owners_names_exactly_the_owners_of_that_book() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1)", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('book','kb',NULL,NULL,'Handbook',0),('other','kb',NULL,NULL,'Other',0)", []).unwrap();
+        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada'),('other','bea')", []).unwrap();
+        c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
+
+        assert_eq!(
+            list_book_owners_on(&c, "book").unwrap(),
+            vec!["ada".to_string()],
+            "owners only — never an editor, and never another book's owner"
+        );
+        assert!(list_book_owners_on(&c, "no-such-book").unwrap().is_empty());
+    }
+
+    fn count(c: &rusqlite::Connection, sql: &str) -> i64 {
+        c.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+    fn document_writable_by_on(c: &rusqlite::Connection, id: &str, profile_id: &str) -> bool {
+        c.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})", document_write_scope()),
+            rusqlite::params![profile_id, false, id],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 }

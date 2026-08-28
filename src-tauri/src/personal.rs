@@ -498,11 +498,38 @@ pub(crate) fn list_team_todos_on(
     Ok(todos)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_todo(id: String) -> Result<()> {
+pub fn delete_todo(id: String, actor_id: String) -> Result<()> {
     let mut c = db::conn()?;
-    delete_todo_on(&mut c, id)
+    delete_todo_on(&mut c, id, &actor_id)
 }
-fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
+/// Who may destroy a task: the person who wrote it, the owner of the project it hangs
+/// in, or an admin — and nobody else. Being *assigned* a shared task is a claim on
+/// your attention, not ownership of the row: an assignee completes or unassigns, but a
+/// task somebody else created never disappears out from under them.
+fn delete_todo_on(c: &mut Connection, id: String, actor_id: &str) -> Result<()> {
+    let row: Option<(String, Option<String>)> = err(c
+        .query_row(
+            "SELECT profile_id,project_id FROM todos WHERE id=?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional())?;
+    let (creator, project_id) = row.ok_or_else(|| "Todo not found".to_string())?;
+    if creator != actor_id {
+        let project_owned = match project_id.as_deref() {
+            Some(project) => err(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND created_by=?2)",
+                params![project, actor_id],
+                |r| r.get::<_, bool>(0),
+            ))?,
+            None => false,
+        };
+        if !project_owned && !crate::platform::is_admin_on(c, actor_id)? {
+            return Err(
+                "only the author, the project owner or an admin can delete this todo".into(),
+            );
+        }
+    }
     let tx = err(c.transaction())?;
     err(tx.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [&id]))?;
     if err(tx.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 {
@@ -2245,7 +2272,7 @@ mod tests {
             .unwrap(),
             2
         );
-        delete_todo_on(&mut c, "t1".into()).unwrap();
+        delete_todo_on(&mut c, "t1".into(), "p").unwrap();
         assert_eq!(
             c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees", [], |r| r.get(0))
                 .unwrap(),
@@ -2908,6 +2935,46 @@ mod tests {
             "one-off meetings are unchanged: {items:?}"
         );
     }
+    /// Deletion is an owner's act. The author may destroy their own task and the owner
+    /// of the project it hangs in may clear it out, but the person it was ASSIGNED to
+    /// only carries it — a shared task never disappears under its author's hands.
+    #[test]
+    fn only_the_author_the_project_owner_or_an_admin_deletes_a_todo() {
+        let mut c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('boss','boss','Boss',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','boss','x','Boss','boss','admin',1,1)", []).unwrap();
+        create_todo_on(&mut c, todo_input("shared", "q", &["r"])).unwrap();
+
+        // The assignee is refused, and the refusal leaves the task and its junction rows.
+        let refused = delete_todo_on(&mut c, "shared".into(), "r").unwrap_err();
+        assert!(refused.contains("author, the project owner or an admin"), "{refused}");
+        assert!(todo_on(&c, "shared").unwrap().is_some());
+        assert_eq!(
+            c.query_row::<i64, _, _>(
+                "SELECT count(*) FROM todo_assignees WHERE todo_id='shared'",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            1,
+            "a refused delete must not touch a single row"
+        );
+        // An unrelated profile is refused for the same reason.
+        assert!(delete_todo_on(&mut c, "shared".into(), "boss-impostor").is_err());
+        // The project owner ('p' created the project) may clear it out.
+        delete_todo_on(&mut c, "shared".into(), "p").unwrap();
+        assert!(todo_on(&c, "shared").unwrap().is_none());
+
+        // The author of a task deletes their own; an admin keeps the break-glass path.
+        create_todo_on(&mut c, todo_input("mine", "q", &[])).unwrap();
+        delete_todo_on(&mut c, "mine".into(), "q").unwrap();
+        create_todo_on(&mut c, todo_input("theirs", "q", &[])).unwrap();
+        delete_todo_on(&mut c, "theirs".into(), "boss").unwrap();
+        assert_eq!(
+            delete_todo_on(&mut c, "ghost".into(), "p").unwrap_err(),
+            "Todo not found"
+        );
+    }
 }
 
 /// Ranked content-search payload. Kept distinct from `GotoResult`: Goto is quick
@@ -3173,4 +3240,5 @@ mod dashboard_preference_tests {
             "Vacation"
         );
     }
+
 }

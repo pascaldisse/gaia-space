@@ -2378,6 +2378,21 @@ fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
         .flatten()
         .is_some_and(|owner| owner == profile_id)
 }
+/// A task filed in a project answers to that project's owner as well as its author.
+fn todo_project_owned_by(profile_id: &str, todo_id: &str) -> bool {
+    db::conn()
+        .ok()
+        .and_then(|c| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM todos t JOIN projects p ON p.id=t.project_id \
+                 WHERE t.id=?1 AND p.created_by=?2)",
+                rusqlite::params![todo_id, profile_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .ok()
+        })
+        .unwrap_or(false)
+}
 fn calendar_feed_owned_by(profile_id: &str, feed_id: &str) -> bool {
     calendar_feeds::feed_owner(feed_id)
         .ok()
@@ -2452,6 +2467,9 @@ enum CommandPolicy {
     TodoRead,
     TodoCreate,
     TodoOwnerWrite,
+    /// Deleting a task: author, project owner or admin. The library owns the rule; the
+    /// gate only binds `actor_id` to the session identity.
+    TodoOwnerDelete,
     TodoCompletionWrite,
     /// The channel Notes & Decisions log. Read and write share one posture: the session
     /// identity is rebound onto the request (`bind_session_identity` already covers
@@ -2463,6 +2481,9 @@ enum CommandPolicy {
     NotificationWrite,
     ProjectCreate,
     ProjectWrite,
+    /// Destroying a project: owner or admin only, and the acting identity is bound to
+    /// the session so nobody deletes under another person's name.
+    ProjectDelete,
     ProjectRead,
     ProjectMemberWrite,
     PipelineScriptWrite,
@@ -2480,6 +2501,10 @@ enum CommandPolicy {
     DocumentRead,
     DocumentWrite,
     DocumentOwnerWrite,
+    /// Deleting a document/folder: ownership, not write access, and the session decides
+    /// who is acting.
+    DocumentOwnerDelete,
+    DocumentFolderDelete,
     DocumentAccessWrite,
     DocumentFolderCreate,
     DocumentFolderReadList,
@@ -2514,6 +2539,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
+        "delete_project" => CommandPolicy::ProjectDelete,
         "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
@@ -2538,9 +2564,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
             CommandPolicy::ProjectTodoRead
         }
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "delete_todo" | "postpone_todo" | "convert_todo_to_issue" => {
+        "update_todo" | "postpone_todo" | "convert_todo_to_issue" => {
             CommandPolicy::TodoOwnerWrite
         }
+        "delete_todo" => CommandPolicy::TodoOwnerDelete,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
         "list_channel_notes" => CommandPolicy::ChannelNoteRead,
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
@@ -2570,7 +2597,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
+        "archive_document" => CommandPolicy::DocumentOwnerWrite,
+        "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
@@ -2679,6 +2707,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
         "search_book_documents" => CommandPolicy::BookRead,
         "list_book_access" | "update_book_access" => CommandPolicy::BookManage,
+        "list_book_owners" => CommandPolicy::BookRead,
         "list_channels_with_meta"
         | "list_unread_threads"
         | "list_checklist_items"
@@ -2807,7 +2836,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "dependency_overview" => CommandPolicy::PackageRepositoryRead,
         "move_issue_on_board" | "remove_channel_member" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
-        "move_document_folder" | "delete_document_folder" => CommandPolicy::DocumentFolderWrite,
+        "move_document_folder" => CommandPolicy::DocumentFolderWrite,
+        "delete_document_folder" => CommandPolicy::DocumentFolderDelete,
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
@@ -3274,6 +3304,23 @@ fn authorize_command(
             }
             Ok(())
         }
+        CommandPolicy::ProjectDelete => {
+            // Same owner-or-admin door as every other project write, and the acting
+            // identity comes from the session: the body may name an `actor_id`, it is
+            // overwritten before the library re-checks the very same rule.
+            let project_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let owner = project_owner(&project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the project owner or an admin can delete this project",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
+        }
         CommandPolicy::ProjectWrite => {
             let (project_id, _) =
                 project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -3731,6 +3778,22 @@ fn authorize_command(
             }
             Ok(())
         }
+        CommandPolicy::TodoOwnerDelete => {
+            // Author, project owner or admin — the library holds the rule, so the gate
+            // only refuses an unknown id and binds who is acting to the session.
+            let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if user.role != "GlobalAdmin"
+                && !todo_owned_by(&user.profile_id, &todo_id)
+                && !todo_project_owned_by(&user.profile_id, &todo_id)
+            {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the author, the project owner or an admin can delete this todo",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
+        }
         CommandPolicy::TodoCompletionWrite => {
             let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             if user.role == "GlobalAdmin" || todo_owned_by(&user.profile_id, &todo_id) {
@@ -3896,6 +3959,30 @@ fn authorize_command(
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document owner access denied"))
             }
+        }
+        CommandPolicy::DocumentOwnerDelete => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if !documents::document_deletable_by(&id, &user.profile_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(StatusCode::FORBIDDEN, "document owner access denied"));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::DocumentFolderDelete => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if !documents::document_folder_deletable_by(&id, &user.profile_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "document folder owner access denied",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
         }
         CommandPolicy::DocumentAccessWrite => {
             let id = document_id(body, name)
@@ -5210,7 +5297,7 @@ async fn cmd(
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
     "archive_document" => documents::archive_document(id: String, archived: bool),
-    "delete_document" => documents::delete_document(id: String),
+    "delete_document" => documents::delete_document(id: String, actor_id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
     "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
@@ -5286,7 +5373,7 @@ async fn cmd(
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
     "delete_swimlane" => issues::delete_swimlane(id: String),
     "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
-    "delete_todo" => personal::delete_todo(id: String),
+    "delete_todo" => personal::delete_todo(id: String, actor_id: String),
     "list_channel_notes" => channel_notes::list_channel_notes(channel_id: String, profile_id: String),
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
     "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
@@ -5366,6 +5453,7 @@ async fn cmd(
     "import_document_folder" => documents::import_document_folder(request: documents::DocumentImportRequest),
     "search_book_documents" => documents::search_book_documents(book_id: String, query: String),
     "list_book_access" => documents::list_book_access(book_id: String),
+    "list_book_owners" => documents::list_book_owners(book_id: String),
     "update_book_access" => documents::update_book_access(book_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "save_channel_subscription" => channel_feeds::save_channel_subscription(value: channel_feeds::ChannelSubscription),
     "list_channel_subscriptions" => channel_feeds::list_channel_subscriptions(profile_id: String),
@@ -5482,7 +5570,7 @@ async fn cmd(
     "mark_notification_read" => personal::mark_notification_read(id: String),
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
-    "delete_document_folder" => documents::delete_document_folder(id: String),
+    "delete_document_folder" => documents::delete_document_folder(id: String, actor_id: String),
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
@@ -5564,6 +5652,7 @@ async fn cmd(
     "update_pipeline_script" => pipelines::update_pipeline_script(script: pipelines::PipelineScript),
     "update_profile" => platform::update_profile(profile: platform::Profile),
     "update_project" => platform::update_project(project: platform::Project),
+    "delete_project" => platform::delete_project(id: String, actor_id: String),
     "set_project_deadline" => platform::set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>),
     "update_project_deadline" => platform::update_project_deadline(project_id: String, expected_deadline: Option<String>, deadline: Option<String>, actor_profile_id: Option<String>),
     "set_project_lead" => platform::set_project_lead(project_id: String, lead_id: Option<String>, actor_profile_id: Option<String>),
