@@ -239,8 +239,10 @@ export default function SpaceShell(props: {
         </Show>
 
         <Show when={!isWeb() && actingPeople().length > 1}>
+          {/* The value is the label: "Acting as" is a caption above a boxed field,
+              the one idiom this shell asks every view to drop. It survives for
+              assistive tech only. */}
           <label class="side-acting">
-            <span>Acting as</span>
             <select
               aria-label="Acting as"
               value={chatActing()}
