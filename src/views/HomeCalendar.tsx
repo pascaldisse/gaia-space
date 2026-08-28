@@ -1,12 +1,13 @@
 import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi, type CalendarItem, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { chatApi, type ChannelSummary, type MentionView } from "../api/chat";
+import { chatApi } from "../api/chat";
 import { profileId } from "../session";
 import { linkProps, toSlug, type Route } from "../router";
 import { dateKey, itemsOnDay, meetingIdOf, monthCells, startOfLocalDay } from "../calendar";
 import { type Tone, urgencyLabel, urgencyOf, urgencyTone } from "../statusTone";
 import { MetricGrid, MetricTile } from "../components/blocks";
+import { attentionCount, attentionLoading, needsYou } from "../attention";
 import "./HomeCalendar.css";
 
 /** Home = one calm calendar. The month is the whole surface; the right column
@@ -103,10 +104,9 @@ export default function HomeCalendar() {
     const found = projects()?.find(project => project.id === id);
     return found ? `#${toSlug(found.name)}` : undefined;
   };
-  const channelLabel = (id: string) => {
-    const found = channels()?.find(channel => channel.id === id);
-    return found?.name ? `#${found.name}` : "Direct message";
-  };
+  // The two chat resources stay for ONE reason: they are how this page still
+  // knows chat is unreachable. The worklist itself comes from attention.ts,
+  // which degrades a dead source to empty rather than to a lie.
 
   const cells = createMemo(() => monthCells(cursor()));
   const dayHasSomething = (day: Date) => itemsOnDay(feed(), day).length > 0 || todos().some(todo => todo.due_date === dateKey(day));
@@ -115,16 +115,17 @@ export default function HomeCalendar() {
   const dayMeetings = createMemo(() => dayItems().filter(item => item.kind === "meeting"));
   const dayTodos = createMemo(() => todos().filter(todo => todo.due_date === dateKey(selectedDay())));
 
-  // "Needs an answer" is not "unread": a mention names you, an unread DM is a person
-  // waiting. A busy public channel is neither, and is deliberately not listed.
-  const waitingMentions = createMemo<MentionView[]>(() => (mentions.error ? [] : mentions() ?? []).filter(mention => !mention.read));
-  const waitingDms = createMemo<ChannelSummary[]>(() => (channels.error ? [] : channels() ?? []).filter(channel => channel.content_type === "dm" && channel.unread_count > 0 && !channel.archived));
-  const openMessages = createMemo(() => waitingMentions().length + waitingDms().length);
-  // Day-scoped version of the same inbox, so the day summary stays about that day.
+  // THE ONE DEFINITION, READ NOT REBUILT (stage 12). This card used to count
+  // unread mentions + unread DMs, while the rail badge summed unread over ALL
+  // channels: two rules, one product, and a badge that said 2 while this card
+  // said nothing. Both now read `src/attention.ts`, so they cannot disagree —
+  // and no rule of Home's own may ever come back here.
+  const waiting = createMemo(() => needsYou());
+  const openMessages = attentionCount;
+  // Day-scoped version of the same worklist, so the day summary stays about that day.
   const openMessagesOnDay = createMemo(() => {
     const key = dateKey(selectedDay());
-    return waitingMentions().filter(mention => dateKey(new Date(mention.created_at * 1000)) === key).length
-      + waitingDms().filter(channel => channel.last_message_at !== null && dateKey(new Date(channel.last_message_at * 1000)) === key).length;
+    return waiting().filter(item => item.at > 0 && dateKey(new Date(item.at * 1000)) === key).length;
   });
 
   const todosToday = createMemo(() => todos().filter(todo => todo.due_date === dateKey(today)));
@@ -170,7 +171,7 @@ export default function HomeCalendar() {
 
     <Show when={items.error}><p class="planning-error" role="alert">Dates could not be loaded: {String(items.error)}</p></Show>
     <Show when={dashboard.error}><p class="planning-error" role="alert">Tasks could not be loaded: {String(dashboard.error)}</p></Show>
-    <Show when={channels.error || mentions.error}><p class="planning-error" role="alert">Open messages could not be loaded.</p></Show>
+    <Show when={channels.error || mentions.error}><p class="planning-error" role="alert">Some of what needs you could not be loaded.</p></Show>
     <Show when={!profileId()}><p class="hint">Your profile is still loading; the calendar appears as soon as it is ready.</p></Show>
 
     <div class="premium-home">
@@ -262,22 +263,26 @@ export default function HomeCalendar() {
           }}</For>
         </section>
 
-        <section class="agenda-card" aria-label="Open messages">
+        {/* RENAMED, because "Open messages" stopped being honest: this now
+            covers mentions, DMs, entity channels, assigned work and review
+            requests — everything the badge counts. Home stays a GLANCE: the
+            first few rows and a link out, never the Activity view. */}
+        <section class="agenda-card" aria-label="Needs you">
           <div class="agenda-head">
             <div>
-              <div class="agenda-title">Open messages</div>
-              <div class="agenda-sub">Only things that need an answer</div>
+              <div class="agenda-title">Needs you</div>
+              <div class="agenda-sub">Everything waiting on you, in one count</div>
             </div>
             <Show when={openMessages() > 0}><span class="tag teal">{openMessages()}</span></Show>
           </div>
-          <Show when={mentions.loading || channels.loading}><p class="hint">Loading messages…</p></Show>
-          <Show when={!mentions.loading && !channels.loading && !openMessages()}><p class="empty-state">Nothing is waiting for you.</p></Show>
-          <For each={waitingMentions().slice(0, 4)}>{mention =>
-            <Row title={mention.text.trim().slice(0, 80) || "Mention"} sub={mention.channel_name ? `#${mention.channel_name}` : channelLabel(mention.channel_id)} label="Reply" tone="teal" to={{ view: "Chat", entityType: "channel", entityId: mention.channel_id }} />
+          <Show when={attentionLoading() && !waiting().length}><p class="hint">Loading…</p></Show>
+          <Show when={!attentionLoading() && !openMessages()}><p class="empty-state">Nothing is waiting for you.</p></Show>
+          <For each={waiting().slice(0, 5)}>{item =>
+            <Row title={item.title} sub={item.detail} label={item.action} tone={item.tone} to={item.route} />
           }</For>
-          <For each={waitingDms().slice(0, 4)}>{channel =>
-            <Row title={channel.name ?? "Direct message"} sub={`${channel.unread_count} unread`} label="Waiting" tone="amber" to={{ view: "Chat", entityType: "channel", entityId: channel.id }} />
-          }</For>
+          <Show when={waiting().length > 5}>
+            <a class="home-more" {...linkProps({ view: "Inbox" })}>All {openMessages()} in the Inbox</a>
+          </Show>
         </section>
       </div>
     </div>

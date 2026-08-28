@@ -296,3 +296,8 @@
   .home-cal .title-row { flex-wrap: wrap; }
   .home-cal .header-metrics { justify-content: flex-start; }
 }
+
+/* "Needs you" is a GLANCE: the first few rows, then one quiet way out to the
+   Activity view. Structure unscoped — the tokens carry both themes. */
+.home-more { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--text-dim); text-decoration: none; }
+.home-more:hover { color: var(--text-strong); }
