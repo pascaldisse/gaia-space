@@ -60,7 +60,6 @@ export default function Todo() {
   const overdue=()=>openTodos().filter(todo=>urgencyOf(todo.due_date,today(),7)==="overdue");
   const dueSoon=()=>openTodos().filter(todo=>["today","soon"].includes(urgencyOf(todo.due_date,today(),7)));
   const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
-  const attention=()=>[...overdue(),...dueSoon()].sort((a,b)=>(a.due_date??"").localeCompare(b.due_date??"")).slice(0,5);
   // Today = due today or already overdue (an overdue task IS today's work); Later = a
   // future due date; No date = never scheduled. Every open task lands in exactly one.
   const todayList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<=today());
@@ -204,14 +203,14 @@ export default function Todo() {
             <MetricTile value={doneCount()} label="Done" />
           </MetricGrid>
         </div>
-        <div class="rail-card">
-          <h3>Needs attention<span class="rail-count">{attention().length}</span></h3>
-          <Show when={attention().length} fallback={<p class="rail-empty">Nothing due in the next seven days.</p>}>
-            <div class="rail-rows">
-              <For each={attention()}>{todo=><div class="rail-item"><span class="rail-item-title">{todo.content}</span><span class="rail-item-sub">Due {todo.due_date}</span></div>}</For>
-            </div>
-          </Show>
-        </div>
+        {/* "Needs attention" was REMOVED. It listed the tasks due within seven days —
+            the same rows the list beside it already shows, restated in a narrower
+            column where the date had to break across lines. A panel that repeats its
+            neighbour is not a summary, it is an echo: it costs a column, it can
+            disagree with the list after an edit, and it tells a person nothing they
+            cannot see by looking left. The COUNT survives, in "At a glance" above,
+            where a number belongs. Nothing is unreachable: every task it named is a
+            row in the list. */}
       </aside>
     </div>
     {/* THE SAME DRAWER the project and team surfaces open. `advanced` because this is
