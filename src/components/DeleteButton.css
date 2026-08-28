@@ -7,16 +7,20 @@
 .delete-button.delete-button {
   --del-danger: var(--danger, #c2384a);
   --del-danger-dark: #a12b3b;
-  min-height: 34px;
-  padding: 0 14px;
+  /* THE BUTTON RULE (spaceTheme.css): size, weight, height and radius come from
+     the tokens, never from this file and never from `font: inherit`. */
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
   border: 1px solid var(--del-danger);
-  border-radius: 10px;
+  border-radius: var(--btn-radius, 11px);
   /* Red at rest, not on hover: the act is recognised before it is read. The fill is
      a wash rather than solid, so the page's own primary (teal) keeps the lead. */
   background: color-mix(in srgb, var(--del-danger) 10%, transparent);
   color: var(--del-danger);
-  font: inherit;
-  font-weight: 650;
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  line-height: 1;
   cursor: pointer;
 }
 .delete-button.delete-button:hover { background: var(--del-danger); color: #fff; border-color: var(--del-danger); }

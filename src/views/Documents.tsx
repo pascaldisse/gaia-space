@@ -1294,7 +1294,43 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
          shell owns the one "Acting as" control; this was the second one, and on the
          standalone route it was the last bare select left here. The acting profile
          is still switchable — in the shell — and this view follows it. */}
-      <PageHeader title="Knowledge" subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"} />
+      {/* THE PAGE'S OWN DELETE SITS IN THE PAGE HEADER, TOP RIGHT — the same place
+          the conversation keeps it. It names what is open (the document you are
+          reading, or the shelf you are standing in) and it is absent for anyone who
+          does not own the library, rather than present and refusing. */}
+      <PageHeader
+        title="Knowledge"
+        subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"}
+        actions={
+<Show when={selectedDocument() ?? levelFolder()}>
+      <span class="documents-delete-slot">
+        <Show
+          when={selectedDocument()}
+          fallback={
+            <DeleteButton
+              label={`Delete folder ${levelFolder()?.name ?? ""}`}
+              canDelete={ownsContainer()}
+              deniedReason={`Only the owner of ${containerName()} can delete this`}
+              onRequest={() => {
+                const folder = levelFolder();
+                if (folder) setPendingDelete({ kind: "folder", id: folder.id, name: folder.name });
+              }}
+            />
+          }
+        >
+          {(doc) => (
+            <DeleteButton
+              label={`Delete document ${doc().title}`}
+              canDelete={canDeleteDocument(doc())}
+              deniedReason={`Only the owner of ${containerName()} can delete this`}
+              onRequest={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
+            />
+          )}
+        </Show>
+      </span>
+    </Show>
+        }
+      />
 
       <nav class="container-tabs">
         {/* Every scope control below is wrapped, not disabled: see `embedded`. */}
@@ -1389,38 +1425,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
             </Show>
         </div>
-
-        {/* THE ONE DELETE, WHERE EVERY SURFACE PUTS IT: top right, beside the thing's
-            own facts. It names what is open — the document you are reading, or the
-            shelf you are standing in — and it is absent for anyone who does not own
-            the library, rather than present and refusing. */}
-        <Show when={selectedDocument() ?? levelFolder()}>
-          <span class="documents-delete-slot">
-            <Show
-              when={selectedDocument()}
-              fallback={
-                <DeleteButton
-                  label={`Delete folder ${levelFolder()?.name ?? ""}`}
-                  canDelete={ownsContainer()}
-                  deniedReason={`Only the owner of ${containerName()} can delete this`}
-                  onRequest={() => {
-                    const folder = levelFolder();
-                    if (folder) setPendingDelete({ kind: "folder", id: folder.id, name: folder.name });
-                  }}
-                />
-              }
-            >
-              {(doc) => (
-                <DeleteButton
-                  label={`Delete document ${doc().title}`}
-                  canDelete={canDeleteDocument(doc())}
-                  deniedReason={`Only the owner of ${containerName()} can delete this`}
-                  onRequest={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
-                />
-              )}
-            </Show>
-          </span>
-        </Show>
 
         {/* A filter, not a scope: it survives the embedded mount. */}
         <label class="show-archived">

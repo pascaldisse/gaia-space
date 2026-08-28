@@ -126,10 +126,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The delete button ends the action row; "show archived" follows it, so the row reads
-   left-to-right as: make things · end this thing · change what you see. */
-.container-tabs .documents-delete-slot { margin-left: auto; display: inline-flex; align-items: center; }
-.container-tabs .documents-delete-slot + .show-archived { margin-left: var(--dk-space-xl); }
+/* The delete lives in the page header now (same place as the conversation's), so the
+   slot only has to hold it there. */
+.documents-delete-slot { display: inline-flex; align-items: center; }
 .container-tabs .show-archived {
   margin-left: auto;
   display: flex;
@@ -287,10 +286,15 @@
 }
 .doc-action-primary,
 .doc-action-secondary { flex: 1 1 100%; justify-content: center; text-align: center; }
+/* THE BUTTON RULE (spaceTheme.css): one size, one weight, one height, one radius
+   for every act-button in the application. */
 .doc-action-primary {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 2.2em; padding: 0.45em 0.9em;
-  border-radius: var(--dk-radius-md); cursor: pointer; font-weight: 600;
+  min-height: var(--btn-height, 37px); padding: 0 var(--btn-pad-x, 12px);
+  border-radius: var(--btn-radius, 11px); cursor: pointer;
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
 }
 .doc-action-icon { display: none; }
 .doc-action-copy { display: grid; gap: 0.1em; text-align: left; }
@@ -306,11 +310,7 @@
 }
 .documents-actionbar .doc-action-primary,
 .documents-actionbar .doc-action-secondary { flex: 0 0 auto; }
-.documents-actionbar .doc-action-primary {
-  gap: var(--dk-space-sm);
-  min-height: 2.4em;
-  padding: 0.4em 0.9em;
-}
+.documents-actionbar .doc-action-primary { gap: var(--dk-space-sm); }
 .documents-actionbar .doc-action-icon {
   display: grid; place-items: center; flex: 0 0 auto;
   width: 1.5em; height: 1.5em; border-radius: var(--dk-radius-sm);
@@ -318,7 +318,20 @@
   color: var(--accent-text); font-size: 1em; line-height: 1;
 }
 .documents-actionbar .doc-action-copy small { display: none; }
-.documents-actionbar .doc-action-tertiary { flex: 0 0 auto; padding: 0.2em 0.4em; }
+/* The quiet third acts are buttons too: same type, same height, so a row of four
+   reads as one row and not as two ranks of furniture. */
+.documents-actionbar .doc-action-tertiary {
+  flex: 0 0 auto;
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: var(--dk-hairline) solid var(--dk-field-border);
+  border-radius: var(--btn-radius, 11px);
+  background: var(--dk-field-bg);
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  text-decoration: none; opacity: 1; color: inherit;
+}
 .documents-actionbar .import-library-panel { flex: 1 1 100%; max-width: 32rem; }
 
 /* The project tab is a place to gather shared material, not a narrow legacy
@@ -361,11 +374,14 @@
    text in the light shell, which is how "New document" stopped reading as clickable. */
 .doc-action-secondary {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 2.2em; padding: 0.45em 0.9em;
+  min-height: var(--btn-height, 37px); padding: 0 var(--btn-pad-x, 12px);
   border: var(--dk-hairline) solid var(--dk-field-border);
-  border-radius: var(--dk-radius-md);
+  border-radius: var(--btn-radius, 11px);
   background: var(--dk-field-bg);
-  color: inherit; font-weight: 600; cursor: pointer;
+  color: inherit; cursor: pointer;
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
 }
 .doc-action-tertiary {
   flex: 1 1 100%;

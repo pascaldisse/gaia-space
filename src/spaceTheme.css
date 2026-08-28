@@ -130,6 +130,21 @@
   --ctl-font-weight: 500;
   --ctl-line: 1.35;
 
+  /* ── THE BUTTON RULE (one place, whole application) ───────────────────────
+     Every button that carries an ACT — primary, secondary, delete, the pills in
+     an action bar — is the same size, weight, height and radius, wherever it
+     sits. A component must never restate these as literals and must never write
+     `font: inherit`: inheriting means the button takes the size of whatever page
+     it landed on, which is exactly how the chat's Delete ended up at 15px beside
+     13px neighbours. Values come from the prototype's `.btn`.
+     Icon cells and bare text affordances are NOT act-buttons and keep their own
+     size — the rule is about the chunky ones. */
+  --btn-font-size: 13px;
+  --btn-font-weight: 650;
+  --btn-height: 37px;
+  --btn-radius: 11px;
+  --btn-pad-x: 12px;
+
   /* ── TYPOGRAPHY ──────────────────────────────────────────────────────────
      The prototype has no brand face at all: one system stack, and the voice
      comes from size/weight/tracking. Poppins-for-headings is the single

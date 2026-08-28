@@ -59,12 +59,14 @@
 .confirm-root .confirm-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .confirm-root .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* THE BUTTON RULE (spaceTheme.css). */
 .confirm-root .confirm-actions button {
-  min-height: 2.3em;
-  padding: 0.45em 0.95em;
-  border-radius: 10px;
-  font: inherit;
-  font-weight: 650;
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border-radius: var(--btn-radius, 11px);
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
   cursor: pointer;
 }
 .confirm-root .confirm-cancel {
