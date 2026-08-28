@@ -1,6 +1,9 @@
 import { createEffect, createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { platformApi, type CfDefinition, type CfType, type RoleAssignment } from "../api/platform";
+import { Disclosure } from "../components/blocks";
+import { PillSelect } from "../components/controls";
+import EmptyState from "../components/EmptyState";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { navigate, route } from "../router";
@@ -168,6 +171,110 @@ function ProjectCustomFields(props: { projectId: string; canManage: boolean }) {
   </section>;
 }
 
+/* ── ACCESS: PROJECT ROLES AND TEAM BINDINGS ─────────────────────────────────
+   MOVED HERE from views/Projects.tsx (stage 19). It was a `Disclosure` stacked at the
+   bottom of the ALL-PROJECTS page, under an embedded board — administration of ONE
+   project, rendered on the list of every project. Its home is the project's own
+   settings, beside "Members and project roles", which is the same subject.
+   The component is unchanged; only its address is. */
+// Project roles: the per-project half of the role model (V92). A role is either
+// minted from an organization template (inheriting its name+kind) or named here;
+// a team binding gives a whole team that role. Every refusal the server can raise
+// (foreign project, archived role, missing right) lands in this panel's own error
+// line, so it can never be mistaken for a failure of the project card above it.
+function ProjectRoles(props: { projectId: string }) {
+  const [panelError, setPanelError] = createSignal("");
+  const [templates] = createResource(platformApi.projectRoleTemplates);
+  const [teams] = createResource(platformApi.teams);
+  const [roles, rolesResource] = createResource(() => props.projectId, id => platformApi.projectRoles(id));
+  const [bindings, bindingsResource] = createResource(() => props.projectId, id => platformApi.projectTeamRoles(id));
+  const [templateId, setTemplateId] = createSignal("");
+  const [roleName, setRoleName] = createSignal("");
+  const [teamId, setTeamId] = createSignal("");
+  const [bindRoleId, setBindRoleId] = createSignal("");
+  const liveRoles = createMemo(() => (roles() ?? []).filter(role => !role.archived));
+  const liveTemplates = createMemo(() => (templates() ?? []).filter(template => !template.archived));
+  const roleName_ = (id: string) => (roles() ?? []).find(role => role.id === id)?.name ?? id;
+  const teamName = (id: string) => (teams() ?? []).find(team => team.id === id)?.name ?? id;
+  const guard = async (work: () => Promise<unknown>) => {
+    setPanelError("");
+    try { await work(); } catch (reason) { setPanelError(humanError(reason)); }
+  };
+  const addRole = (event: SubmitEvent) => {
+    event.preventDefault();
+    // Name is optional only when a template supplies one — the same rule the server keeps.
+    void guard(async () => {
+      const template = templateId() || null;
+      const name = roleName().trim();
+      if (!template && !name) throw new Error("Pick a template or name the role.");
+      await platformApi.createProjectRole({ project_id: props.projectId, template_id: template, name: name || null });
+      setRoleName(""); setTemplateId("");
+      await rolesResource.refetch();
+    });
+  };
+  const bind = (event: SubmitEvent) => {
+    event.preventDefault();
+    void guard(async () => {
+      if (!teamId() || !bindRoleId()) throw new Error("Pick a team and a role.");
+      await platformApi.assignProjectTeamRole(props.projectId, teamId(), bindRoleId());
+      await bindingsResource.refetch();
+    });
+  };
+  // Access is administration, not daily work: it stays folded away under the board
+  // and says in its own summary how much is configured, so nobody opens it to look.
+  return <Disclosure
+    class="project-access"
+    title="Access"
+    meta={`${liveRoles().length} roles · ${(bindings() ?? []).length} team bindings`}
+  >
+    <section class="project-roles">
+    <h3>Roles</h3>
+    <Show when={panelError()}><p class="error" role="alert">{panelError()}</p></Show>
+    <form class="project-role-form" onSubmit={addRole}>
+      {/* L4: the resting option says what the control is for, so the caption above
+          it was a second copy of the same word. */}
+      <PillSelect label="Role template" value={templateId()} onChange={setTemplateId}>
+        <option value="">No template (name it below)</option>
+        <For each={liveTemplates()}>{template=><option value={template.id}>{template.name} ({template.role_kind})</option>}</For>
+      </PillSelect>
+      <input placeholder="Role name (optional with a template)" aria-label="Project role name" value={roleName()} onInput={e=>setRoleName(e.currentTarget.value)}/>
+      <button class="primary">Add role</button>
+    </form>
+    {/* The "Add role" form is directly above: the line points at it instead of
+        drawing a second button for the same command. */}
+    <Show when={!roles()?.length}><EmptyState title="No project roles yet" hint="Add one above — from a template, or with a name of your own." /></Show>
+    <ul class="project-role-list"><For each={roles()}>{role=>
+      <li classList={{ archived: role.archived }}>
+        <strong>{role.name}</strong> <code>{role.role_kind}</code>
+        <Show when={role.template_id}><span class="hint"> from template</span></Show>
+        <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.archiveProjectRole(role.id, !role.archived); await rolesResource.refetch(); })}>
+          {role.archived ? "Restore" : "Archive"}
+        </button>
+      </li>
+    }</For></ul>
+    <h3>Team bindings</h3>
+    <form class="project-role-form" onSubmit={bind}>
+      <PillSelect label="Team" value={teamId()} onChange={setTeamId}>
+        <option value="">Select a team</option>
+        <For each={(teams() ?? []).filter(team=>!team.archived)}>{team=><option value={team.id}>{team.name}</option>}</For>
+      </PillSelect>
+      <PillSelect label="Project role" value={bindRoleId()} onChange={setBindRoleId}>
+        <option value="">Select a role</option>
+        <For each={liveRoles()}>{role=><option value={role.id}>{role.name}</option>}</For>
+      </PillSelect>
+      <button class="primary">Bind team</button>
+    </form>
+    <Show when={!bindings()?.length}><EmptyState title="No team carries a role in this project yet" hint="Bind a team to a role with the form above." /></Show>
+    <ul class="project-role-list"><For each={bindings()}>{binding=>
+      <li>
+        <strong>{teamName(binding.team_id)}</strong> → {roleName_(binding.project_role_id)}
+        <button class="ghost" onClick={()=>void guard(async()=>{ await platformApi.removeProjectTeamRole(binding.project_id, binding.team_id, binding.project_role_id); await bindingsResource.refetch(); })}>Remove</button>
+      </li>
+    }</For></ul>
+    </section>
+  </Disclosure>;
+}
+
 export default function ProjectSettings() {
   const id = () => route().projectId ?? "";
   const project = createMemo(() => projects()?.find(item => item.id === id()));
@@ -202,6 +309,7 @@ export default function ProjectSettings() {
     <Show when={!project()}><p class="ps-empty" role="alert">This project does not exist or is unavailable.</p></Show>
     <Show when={project()}><Show when={error()}><p class="ps-error" role="alert">{error()}</p></Show><Show when={!canManage()}><p class="ps-notice" role="status">Only the project owner or an administrator can change these settings.</p></Show>
       <div class="ps-grid"><section class="ps-panel"><div class="ps-panel-head"><h2>General</h2></div><form onSubmit={save}><label class="ps-field"><span>Project name</span><input disabled={!canManage()} value={name()} onInput={event => setName(event.currentTarget.value)} /></label><label class="ps-field"><span>Description <em>optional</em></span><textarea disabled={!canManage()} value={description()} onInput={event => setDescription(event.currentTarget.value)} /></label><label class="ps-field"><span>Deadline <em>optional</em></span><input disabled={!canManage()} type="date" value={deadline()} onInput={event => setDeadline(event.currentTarget.value)} /></label><Show when={canManage()}><div class="ps-actions"><button class="primary" disabled={busy()}>Save changes</button></div></Show></form></section><section class="ps-panel"><div class="ps-panel-head"><h2>Project identity</h2></div><p class="ps-hint">The key is permanent and identifies this project in ticket links and integrations.</p><div class="ps-refrow"><div><span class="ps-reflabel">Project key</span><code class="ps-refid">{project()!.key}</code></div></div><div class="ps-refrow"><div><span class="ps-reflabel">Project ID</span><code class="ps-refid">{project()!.id}</code></div></div></section><ProjectLead projectId={id()} leadId={project()!.lead_id} canManage={canManage()} actor={actor()} /><ProjectMembers projectId={id()} owner={project()!.created_by} canManage={canManage()} /><ProjectCustomFields projectId={id()} canManage={canManage()} /></div>
+      <ProjectRoles projectId={id()} />
       <Show when={canManage()}><section class="ps-danger"><div class="ps-danger-head"><h2>Archive project</h2></div><div class="ps-danger-row"><p><strong>Archive {project()!.name}</strong>It disappears from active project lists. Project data remains available for restoration.</p><Show when={confirmArchive()} fallback={<button type="button" class="danger-outline" onClick={() => setConfirmArchive(true)}>Archive project</button>}><div class="ps-confirm"><span>Archive this project?</span><button type="button" class="danger" disabled={busy()} onClick={() => void archive()}>Confirm archive</button><button type="button" disabled={busy()} onClick={() => setConfirmArchive(false)}>Cancel</button></div></Show></div></section></Show>
     </Show>
   </section>;
