@@ -320,9 +320,11 @@
    away on genuinely tiny windows. */
 @media (max-width: 1180px) {
   .space-chat-shell { grid-template-columns: 68px 248px minmax(0, 1fr); }
+  .space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
 }
 @media (max-width: 980px) {
   .space-chat-shell { grid-template-columns: 68px 210px minmax(0, 1fr); }
+  .space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
 }
 @media (max-width: 720px) {
   .space-chat-shell { grid-template-columns: 68px minmax(0, 1fr); }
@@ -391,3 +393,7 @@
 }
 .space-chat-shell .side-acting select:hover { border-color: rgba(255,255,255,.22); }
 .space-chat-shell .side-acting select:focus-visible { outline: none; border-color: var(--teal, #00bfa6); }
+
+/* Home owns no objects, so it gets no sidebar and the page takes the width back.
+   Structure only — never scoped to a theme, or the dark shells lose the column. */
+.space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }

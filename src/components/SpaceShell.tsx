@@ -47,14 +47,14 @@ type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean
  *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
  *  of that mode's filters). Nothing lost — both are one click from their own mode. */
 const MODE_LINKS: Record<RailMode, SideEntry[]> = {
-  home: [
-    { label: "Today", view: "Home", icon: "home", strong: true },
-    { label: "Dashboard", view: "Dashboard", icon: "grid" },
-    { label: "Schedule", view: "Calendar", icon: "calendar" },
-    { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
-    { label: "My tasks", view: "To-Do", icon: "check" },
-    { label: "Activity", view: "Inbox", icon: "inbox", badge: "mentions" },
-  ],
+  // Home has NO sidebar. The rule for this shell is that the sidebar lists the
+  // OBJECTS of the current mode — channels under Chats, projects under Tasks. Home
+  // is one page and owns no objects, so its sidebar could only list DESTINATIONS,
+  // and every one of them (Dashboard, Calendar, Meetings, To-Do, Inbox) is another
+  // rail mode's landing. That is the rail printed twice, one column to the right.
+  // An empty list here is not a gap: it is the honest answer, and Home gets the
+  // width back.
+  home: [],
   chats: [{ label: "Threads", view: "Chat", icon: "chat", strong: true, badge: "chat" }],
   activity: [
     { label: "All", view: "Inbox", icon: "inbox", strong: true },
@@ -158,6 +158,11 @@ export default function SpaceShell(props: {
   /** THE derivation: the rail mode is a pure function of the live route, computed on every
    *  render and stored nowhere. Deep links therefore cannot arrive with the wrong sidebar. */
   const mode = createMemo<RailMode>(() => railModeOfRoute(route()));
+  // A mode with no objects of its own gets no column at all. Home is that mode:
+  // it is one page, so anything listed beside it could only be another mode's
+  // landing — the rail printed twice. Chats keeps its column even when the entry
+  // list is short, because the channels below it ARE its objects.
+  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || mode() === "chats");
 
   /** Named channels grouped by owning project; project-less channels land in a final section.
    *  DMs/threads carry no name and are not part of the project channel list. */
@@ -254,7 +259,7 @@ export default function SpaceShell(props: {
   );
 
   return (
-    <div class="space-chat-shell theme-space-light">
+    <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar() }}>
       <aside class="rail" aria-label="Main navigation">
         <div class="mark" aria-hidden="true">G</div>
         <For each={RAIL}>{railItem}</For>
@@ -300,6 +305,7 @@ export default function SpaceShell(props: {
         </nav>
       </Show>
 
+      <Show when={hasSidebar()}>
       <aside class="space-sidebar" aria-label={`${MODE_TITLE[mode()]} navigation`}>
         <div class="workspace-name">
           <strong>{workspaceName()}</strong>
@@ -429,6 +435,7 @@ export default function SpaceShell(props: {
           </label>
         </Show>
       </aside>
+      </Show>
 
       <Show when={newChannelFor() !== undefined}>
         <NewChannelDialog
