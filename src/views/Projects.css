@@ -12,7 +12,10 @@
 .project-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
 .project-card-foot label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
 .project-card .row-actions { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
-.project-card .row-actions a { color: var(--accent-text, var(--accent)); }
+/* Tasks / Calendar / Archive are GhostPills now (controls.tsx). They must not be
+   re-inked here: Archive is not an action colour, and a pill that keeps the old
+   accent ink reads as a link wearing a button's shape. */
+.project-card .row-actions .ghost-pill { font-size: 12.5px; }
 
 /* Deadline control: the editable field, the clear button and the write's own status live
    together, so the feedback is where the action was. Non-owners get the value as text. */
@@ -27,7 +30,7 @@
 .project-open-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
 .project-open-head h2 { display: flex; align-items: baseline; gap: 9px; margin: 0; font-size: 18px; }
 .project-open-head code { color: var(--text-faint); font-size: 12px; }
-.project-open-head a { color: var(--accent-text, var(--accent)); font-size: 13px; }
+.project-open-head .ghost-pill { font-size: 13px; }
 /* the embedded board must not re-declare the page frame */
 .project-open .planning-view { height: auto; padding: 0; max-width: none; }
 .project-open .planning-head { display: none; }
@@ -122,7 +125,7 @@
 .theme-space-light .project-deadline,
 .theme-space-light .project-deadline .deadline-readonly { color: var(--muted); font-size: 12.5px; }
 .theme-space-light .project-deadline .deadline-readonly span { color: var(--ink); font-weight: 680; }
-.theme-space-light .project-card .row-actions a { color: var(--teal-dark); font-weight: 620; }
+
 
 .theme-space-light .project-lead-chip {
   padding: 3px 9px;

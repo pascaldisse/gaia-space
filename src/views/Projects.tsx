@@ -1,12 +1,14 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import PageHeader, { Chip } from "../components/PageHeader";
+import PageHeader, { Chip, EmbeddedScopeProvider } from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
+import { GhostPill, PillSelect } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { currentUser, humanError, isWeb, profileId, profiles, projectId as sessionProject, reloadProfiles, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import Boards from "./Boards";
 import "../components/paper.css";
+import "../components/WorkItemDrawer.css";
 import "./Projects.css";
 import "./Portfolio.css";
 
@@ -70,10 +72,12 @@ function ProjectRoles(props: { projectId: string }) {
     <h3>Roles</h3>
     <Show when={panelError()}><p class="error" role="alert">{panelError()}</p></Show>
     <form class="project-role-form" onSubmit={addRole}>
-      <label>Template <select value={templateId()} onChange={e=>setTemplateId(e.currentTarget.value)}>
-        <option value="">None (name it below)</option>
+      {/* L4: the resting option says what the control is for, so the caption above
+          it was a second copy of the same word. */}
+      <PillSelect label="Role template" value={templateId()} onChange={setTemplateId}>
+        <option value="">No template (name it below)</option>
         <For each={liveTemplates()}>{template=><option value={template.id}>{template.name} ({template.role_kind})</option>}</For>
-      </select></label>
+      </PillSelect>
       <input placeholder="Role name (optional with a template)" aria-label="Project role name" value={roleName()} onInput={e=>setRoleName(e.currentTarget.value)}/>
       <button class="primary">Add role</button>
     </form>
@@ -91,14 +95,14 @@ function ProjectRoles(props: { projectId: string }) {
     }</For></ul>
     <h3>Team bindings</h3>
     <form class="project-role-form" onSubmit={bind}>
-      <label>Team <select value={teamId()} onChange={e=>setTeamId(e.currentTarget.value)}>
+      <PillSelect label="Team" value={teamId()} onChange={setTeamId}>
         <option value="">Select a team</option>
         <For each={(teams() ?? []).filter(team=>!team.archived)}>{team=><option value={team.id}>{team.name}</option>}</For>
-      </select></label>
-      <label>Role <select value={bindRoleId()} onChange={e=>setBindRoleId(e.currentTarget.value)}>
+      </PillSelect>
+      <PillSelect label="Project role" value={bindRoleId()} onChange={setBindRoleId}>
         <option value="">Select a role</option>
         <For each={liveRoles()}>{role=><option value={role.id}>{role.name}</option>}</For>
-      </select></label>
+      </PillSelect>
       <button class="primary">Bind team</button>
     </form>
     <Show when={!bindings()?.length}><EmptyState title="No team carries a role in this project yet" hint="Bind a team to a role with the form above." /></Show>
@@ -117,6 +121,10 @@ export default function Projects() {
   // shows its boards (whose cards are its issues). No separate Issues/Boards tabs.
   const [form, setForm] = createSignal(empty()); const [error, setError] = createSignal("");
   const [keyTouched, setKeyTouched] = createSignal(false);
+  /* L3: creating a project is an ACT, not a permanent band across the top of the
+     list. The four fields live in a drawer behind the header primary; the surface
+     shows the projects, which is what the page is for. */
+  const [createOpen, setCreateOpen] = createSignal(false);
   const [items, { refetch }] = createResource(platformApi.projects);
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   const leadName = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
@@ -164,7 +172,7 @@ export default function Projects() {
       await platformApi.createProject({ id, name:input.name.trim(), key:input.key.trim().toUpperCase(), description:input.description.trim() || null, deadline:input.deadline || null, archived:false }, owner);
       // A freshly created project opens where its work begins, and the selection
       // follows so desktop (which has no URL) lands on the same project.
-      setForm(empty()); setKeyTouched(false); await refetch(); setProjectId(id); navigate({ view: "Project Steering", projectId: id });
+      setForm(empty()); setKeyTouched(false); setCreateOpen(false); await refetch(); setProjectId(id); navigate({ view: "Project Steering", projectId: id });
     } catch (reason) { setError(humanError(reason)); }
   };
   const update = async (project: Project, patch: Partial<Project>) => { try { await platformApi.updateProject({ ...project, ...patch }); await refetch(); } catch (reason) { setError(humanError(reason)); } };
@@ -203,13 +211,33 @@ export default function Projects() {
       setDeadlineState({ ...deadlineState(), [project.id]: { status: "failed", message: humanError(reason) } });
     }
   };
-  const focusProjectForm = () => {
-    const field = document.querySelector<HTMLInputElement>(".projects-view .project-form input[aria-label='Project name']");
-    field?.focus(); field?.scrollIntoView({ block: "center" });
-  };
   const openId = () => route().entityId || sessionProject();
   const openProject = () => items()?.find(p => p.id === openId());
-  return <section class="resource-view projects-view"><PageHeader title="Projects" subline="Owned workspaces and their deadlines" chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>} /><Show when={error()}><p class="error" role="alert">{error()}</p></Show><form class="project-form" onSubmit={save}><input placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/><input placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/><input placeholder="Description (optional)" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/><input type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/><button class="primary">Create project</button></form>
+  return <section class="resource-view projects-view">
+    <PageHeader
+      title="Projects"
+      subline="Owned workspaces and their deadlines"
+      chips={<Show when={live().length}><Chip value={live().length} label="active" /></Show>}
+      actions={<button type="button" class="primary" onClick={()=>setCreateOpen(true)}>New project</button>}
+    />
+    <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
+    <Show when={createOpen()}>
+      <div class="wid-root">
+        <div class="wid-backdrop" aria-hidden="true" onClick={()=>setCreateOpen(false)} />
+        <aside class="wid-panel" role="dialog" aria-modal="true" aria-label="New project" onKeyDown={event=>{ if(event.key==="Escape") setCreateOpen(false); }}>
+          <header class="wid-head"><h2>New project</h2><p>A project carries the tickets, boards, tasks and documents of one piece of work.</p></header>
+          {/* Captions belong INSIDE a drawer (audit §3.3): here they are the only
+              thing that says what an empty field wants. */}
+          <form class="wid-form project-form" onSubmit={save}>
+            <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e=>{const name=e.currentTarget.value;setForm({...form(),name,key:keyTouched()?form().key:deriveKey(name)});}}/></label>
+            <label class="wid-field"><span>Key</span><input class="wid-input" placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e=>{setKeyTouched(true);setForm({...form(),key:e.currentTarget.value.toUpperCase()});}}/></label>
+            <label class="wid-field"><span>Description <em>optional</em></span><input class="wid-input" placeholder="What this project is" aria-label="Project description" value={form().description} onInput={e=>setForm({...form(),description:e.currentTarget.value})}/></label>
+            <label class="wid-field"><span>Deadline <em>optional</em></span><input class="wid-input" type="date" aria-label="Project deadline" value={form().deadline} onInput={e=>setForm({...form(),deadline:e.currentTarget.value})}/></label>
+            <footer class="wid-actions"><button type="button" class="wid-btn" onClick={()=>setCreateOpen(false)}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
+          </form>
+        </aside>
+      </div>
+    </Show>
     <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
     <Show when={live().length}>
       <div class="pf-summary">
@@ -225,13 +253,13 @@ export default function Projects() {
       </div>
     </Show>
     {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty
-        result can only be an empty workspace. The create form is the block
-        directly above, so the primary focuses it rather than repeating it. */}
+        result can only be an empty workspace — the only honest offer is creation,
+        and it opens the same drawer the header primary opens. */}
     <Show when={!items.loading && !items()?.length}>
       <EmptyState
         title="No projects yet"
         hint="A project carries the tickets, boards, tasks and documents of one piece of work."
-        actions={<button type="button" class="primary" onClick={focusProjectForm}>New project</button>}
+        actions={<button type="button" class="primary" onClick={()=>setCreateOpen(true)}>New project</button>}
       />
     </Show>
     <ul class="project-cards"><For each={items()}>{project=>{
@@ -280,14 +308,21 @@ export default function Projects() {
             <Show when={deadlineStatus(project.id)?.status === "saved"}><span class="hint" role="status">Deadline saved</span></Show>
             <Show when={deadlineStatus(project.id)?.status === "failed"}><span class="error" role="alert">{deadlineStatus(project.id)?.message}</span></Show>
           </div>
-          <div class="row-actions"><a {...linkProps({view:"Project Tasks",projectId:project.id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project.id})}>Calendar</a><button class="ghost" onClick={()=>void update(project,{archived:!project.archived})}>{project.archived ? "Restore" : "Archive"}</button></div>
+          {/* L4: three bare teal text links were not readable as buttons, and
+              Archive must never wear the action colour. All three are ghost pills. */}
+          <div class="row-actions"><GhostPill {...linkProps({view:"Project Tasks",projectId:project.id})}>Tasks</GhostPill><GhostPill {...linkProps({view:"Calendar",projectId:project.id})}>Calendar</GhostPill><GhostPill onClick={()=>void update(project,{archived:!project.archived})}>{project.archived ? "Restore" : "Archive"}</GhostPill></div>
         </div>
       </li>;
     }}</For></ul>
     <Show when={route().entityId && !openProject()}><p class="error" role="alert">This project does not exist or is unavailable.</p></Show><Show when={openProject()}>{project=>
       <section class="project-open">
-        <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><a {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</a><a {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</a></header>
-        <Boards/>
+        <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><GhostPill {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</GhostPill><GhostPill {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</GhostPill></header>
+        {/* THE DOUBLE HEADING (audit §3.5): the panel above has just named this
+            project, so the board mounted under it is a GUEST — no second h1, no
+            picker for a scope this surface already decided. */}
+        <EmbeddedScopeProvider scope={{ host: project().name, projectId: project().id }}>
+          <Boards/>
+        </EmbeddedScopeProvider>
         <ProjectRoles projectId={project().id}/>
       </section>
     }</Show>
