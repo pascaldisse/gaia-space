@@ -245,8 +245,54 @@
    text with CSS: a label removed visually but left in the DOM still takes part
    in the layout and still gets read twice by a screen reader. */
 
-/* Header actions are a control row without the card. */
+/* ── THE HEADER-EDGE RULE (stage 11) ───────────────────────────────────────
+
+   THE COMPLAINT: `Jannes` (filled, no border) · `All locations` (filled, no
+   border) · `View options` (white WITH border) · `New meeting` (teal). Four
+   adjacent controls, four silhouettes, and the eye cannot tell which of them
+   is the important one.
+
+   THE RULE, and it is now the app-wide convention:
+
+     On a HEADER or TOOLBAR lane — a lane with no card behind it — every
+     control wears ONE silhouette: `--pillctl-h` high, `--pillctl-r` round,
+     TRANSPARENT fill, a 1px `--line` hairline at rest, `--wash-2` on hover.
+     Filters and secondary actions are indistinguishable in shape, because
+     they are equal in rank.
+
+     Colour appears exactly twice on such a lane:
+       · the PRIMARY, filled teal — at most one, always last;
+       · the ACTIVE member of a switcher, teal-soft.
+     Nothing else may be filled.
+
+   The soft `--wash-2` resting fill is NOT abolished — it stays where it was
+   always right: INSIDE a paper card (`.control-row`), where the card already
+   supplies the footprint and a hairline would be a box inside a box. On a bare
+   lane nothing supplies it, so the hairline does. */
 .theme-space-light .pgh-actions :is(.ghost-pill, .pill-select, .icon-button) { min-height: var(--pillctl-h); }
+.theme-space-light :is(.pgh-actions, .header-edge) :is(.pill-select, .quiet-search) {
+  border-color: var(--line);
+  background: transparent;
+}
+.theme-space-light :is(.pgh-actions, .header-edge) :is(.pill-select, .quiet-search):hover {
+  border-color: var(--line-strong);
+  background: var(--wash-2);
+}
+.theme-space-light :is(.pgh-actions, .header-edge) .icon-button {
+  border-color: var(--line);
+  background: transparent;
+}
+.theme-space-light :is(.pgh-actions, .header-edge) .icon-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--wash-2);
+}
+/* The primary keeps its fill and its teal — it is the one thing the rule
+   allows to be loud — but joins the shared height/radius so the lane does not
+   step up at the end. */
+.theme-space-light .pgh-actions :is(button.primary, .primary) {
+  min-height: var(--pillctl-h);
+  border-radius: var(--pillctl-r);
+}
 
 /* ── two placement corrections, from reading the screenshot ────────────────
 

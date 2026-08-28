@@ -229,14 +229,20 @@ return <section class="calendar-view">
 </ViewOptions>
 <button class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
 </>}/>
-<div class="calendar-controls cal-toolbar">
+{/* ONE CLUSTER, not two orphans (stage 11, defect 1). The switcher chooses the
+    SHAPE of the period and the navigation chooses WHICH period — two halves of
+    one question, so they sit on one lane separated by a hairline instead of
+    being flung to opposite edges. `header-edge` opts the lane into the
+    header-edge rule in controls.css: one silhouette, teal only for the active
+    member. */}
+<div class="calendar-controls cal-toolbar header-edge">
 <div class="cal-viewtoggle" role="group" aria-label="Calendar range">
 <button classList={{active:view()==="month"}} aria-pressed={view()==="month"} onClick={()=>setView("month")}>Month</button>
 <button classList={{active:view()==="week"}} aria-pressed={view()==="week"} onClick={()=>setView("week")}>Week</button>
 <button classList={{active:view()==="day"}} aria-pressed={view()==="day"} onClick={()=>{setView("day");setCursor(selectedDay());}}>Day</button>
 <button classList={{active:view()==="schedule"}} aria-pressed={view()==="schedule"} onClick={()=>setView("schedule")}>Schedule</button>
 </div>
-<span class="cal-toolbar-gap"/>
+<span class="cal-toolbar-div" aria-hidden="true"/>
 <div class="cal-nav">
 <button class="icon-button" type="button" aria-label="Previous range" title="Previous range" onClick={()=>shift(-1)}><span aria-hidden="true">‹</span></button>
 <strong>{cursor().toLocaleDateString(UI_LOCALE,{month:"long",year:"numeric"})}</strong>

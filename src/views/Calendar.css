@@ -89,6 +89,9 @@
    positions, so the dark theme lost its layout. Sizes live here.) */
 .cal-toolbar{flex-wrap:wrap}
 .cal-toolbar-gap{flex:1 1 auto;min-width:0}
+/* The seam between the two halves of ONE control cluster (view shape | which
+   period). Structure, so both themes get the same lane. */
+.cal-toolbar-div{flex:none;align-self:center;width:1px;height:20px;background:var(--surface-border)}
 .cal-nav{display:inline-flex;align-items:center;gap:var(--cal-space-sm)}
 .cal-viewopts{position:relative;display:inline-flex}
 /* A popover is one of the few new elements that needs a SURFACE in every theme
@@ -229,18 +232,23 @@
   border: 0;
   background: transparent;
 }
+.theme-space-light .cal-toolbar-div { background: var(--line); }
+/* HEADER-EDGE RULE (controls.css): on a lane without a card, a control at rest
+   is transparent with a hairline. The switcher used to be the only filled thing
+   on this lane and read as four pressed buttons; now only the CHOSEN one is
+   filled, which is what "active" is supposed to mean. */
 .theme-space-light .cal-viewtoggle button {
   min-height: var(--pillctl-h);
   padding: 0 var(--pillctl-pad-x);
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--pillctl-r);
-  background: var(--wash-2);
+  background: transparent;
   color: var(--muted);
   font-family: var(--font-body);
   font-size: var(--pillctl-font);
   font-weight: var(--pillctl-weight);
 }
-.theme-space-light .cal-viewtoggle button:hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .cal-viewtoggle button:hover { background: var(--wash-2); border-color: var(--line-strong); color: var(--ink); }
 .theme-space-light .cal-viewtoggle button.active { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
 .theme-space-light .cal-viewtoggle button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .theme-space-light .cal-nav { gap: 8px; }
