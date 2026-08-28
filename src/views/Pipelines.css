@@ -46,6 +46,11 @@
 .jobs-editor, .runs-section { border: 1px solid var(--surface-border); border-radius: 8px; padding: 12px 14px; background: var(--surface); }
 .jobs-editor h3, .runs-section h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
 .jobs-editor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+/* The standing "n/max" hint at the steps box. Quiet while the count is legal; red
+   only once the limit is passed, which is a genuine block — the server refuses the
+   save — and so is the one thing here the colour law lets be red. */
+.steps-count { margin: 0; font-size: 12px; color: var(--text-muted); }
+.steps-count.over, .jobs-editor h3.over { color: var(--status-danger-ink); font-weight: 600; }
 .runs-section h3 { margin-bottom: 8px; }
 .job-card { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: #0e1626; display: flex; flex-direction: column; gap: 6px; }
 .job-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

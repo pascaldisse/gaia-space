@@ -18,6 +18,7 @@ import {
   editableJob,
   MAX_JOBS_PER_SCRIPT,
   MAX_STEPS_PER_JOB,
+  stepCount,
   DEFAULT_JOB_TIMEOUT_SECS,
   TRIGGER_EVENT_TYPES,
   type TriggerEvent,
@@ -305,7 +306,7 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
               </div>
 
               <section class="jobs-editor">
-                <h3>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
+                <h3 classList={{ over: jobs.length > MAX_JOBS_PER_SCRIPT }}>Jobs ({jobs.length}/{MAX_JOBS_PER_SCRIPT}) — always run in parallel, no dependency graph</h3>
                 <For each={jobs}>
                   {(job, i) => (
                     <div class="job-card">
@@ -333,6 +334,14 @@ function Automation(props: { projects: () => { id: string; name: string }[] | un
                         value={job.stepsText}
                         onInput={(e) => updateJob(i(), { stepsText: e.currentTarget.value })}
                       />
+                      {/* The steps limit used to live only in the placeholder, which
+                          disappears at the first keystroke — it vanished exactly when
+                          the count started to matter. It is a standing hint now, worded
+                          like the jobs heading and read from the same constant the
+                          validator uses, so the two can never disagree. */}
+                      <p class="hint steps-count" classList={{ over: stepCount(job.stepsText) > MAX_STEPS_PER_JOB }}>
+                        Steps: {stepCount(job.stepsText)}/{MAX_STEPS_PER_JOB} per job
+                      </p>
                     </div>
                   )}
                 </For>

@@ -165,6 +165,12 @@ export type EditableJob = {
 /** Editor → wire. Emits the singular-`script` shape the server accepts; one step per line.
  * A line whose command still matches a loaded container step is re-emitted as that container
  * step (image and env intact); only genuinely new lines become Shell steps. */
+/** How many steps a job's text actually becomes: blank lines are not steps.
+ * The editor's "n/MAX_STEPS_PER_JOB" hint counts with this, so the number a user
+ * is shown is the number the validator will judge — never a second opinion. */
+export const stepCount = (stepsText: string): number =>
+  stepsText.split("\n").map((s) => s.trim()).filter(Boolean).length;
+
 export function serializeJob(job: EditableJob): ScriptJobDef {
   const pending = (job.containerSteps ?? []).filter((step) => step.type === "Container").slice();
   const steps: StepDef[] = job.stepsText.split("\n").map((s) => s.trim()).filter(Boolean).map((script) => {
