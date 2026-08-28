@@ -7,17 +7,21 @@ import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import SourceLink from "../components/SourceLink";
 import { Disclosure, MetricGrid, MetricTile, SectionHeading } from "../components/blocks";
-import { linkProps } from "../router";
+import { linkProps, navigate, route } from "../router";
 import { humanError, profileId } from "../session";
 import { UI_LOCALE } from "../calendar";
 import {
+  ACTIVITY_FILTERS,
+  asActivityFilter,
   attentionCount,
   attentionLoading,
   attentionSources,
+  filterAttention,
   isOrganisationEvent,
   needsYou,
   organisation,
   refreshAttention,
+  type ActivityFilter,
   type AttentionItem,
   type AttentionKind,
   type OrganisationEvent,
@@ -51,6 +55,14 @@ const KINDS: Record<AttentionKind, Category> = {
   notification: { key: "notification", label: "Updates", icon: "inbox", tone: "updates" },
 };
 
+/** The filter row is the SAME set the Activity sidebar lists, and it lives in the
+ *  ROUTE (`/inbox/<filter>`), not in a signal here: the sidebar can highlight it, a
+ *  deep link arrives filtered, back/forward stay honest. Meaning (filter -> kinds)
+ *  belongs to attention.ts; only the icon is presentation. */
+const FILTER_ICON: Record<ActivityFilter, IconName> = {
+  all: "inbox", mentions: "chat", messages: "chat", assigned: "check", reviews: "review", updates: "inbox",
+};
+
 /** Icons for the organisation feed, by event domain. News is not work, so it
  *  never borrows the worklist's accent tones. */
 const FEED_ICON = (verb: string): IconName =>
@@ -78,19 +90,25 @@ const relativeTime = (seconds: number) => {
 const timestamp = (seconds: number) => (seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "");
 
 export default function Inbox() {
-  const [kind, setKind] = createSignal<"all" | AttentionKind>("all");
   const [error, setError] = createSignal("");
+
+  /** THE filter: read from the route, unknown degrades to All. */
+  const filter = createMemo<ActivityFilter>(() => asActivityFilter(route().view === "Inbox" ? route().tab : undefined));
+  const showFilter = (next: ActivityFilter) =>
+    navigate(next === "all" ? { view: "Inbox" } : { view: "Inbox", tab: next });
 
   const worklist = createMemo(() => needsYou());
   const feed = createMemo(() => organisation());
-  const visible = createMemo(() => worklist().filter((item) => kind() === "all" || item.kind === kind()));
+  const visible = createMemo(() => filterAttention(worklist(), filter()));
 
-  /** The kinds actually present become filters — nothing else. */
-  const kindTally = createMemo(() => {
-    const tally = new Map<AttentionKind, number>();
-    for (const item of worklist()) tally.set(item.kind, (tally.get(item.kind) ?? 0) + 1);
-    return [...tally.entries()].sort((a, b) => b[1] - a[1]);
-  });
+  /** Every filter with its own count, from the one source. A filter with nothing in
+   *  it right now is still offered while it is the active one — otherwise the pill
+   *  you just clicked would vanish under you. */
+  const filterTally = createMemo(() =>
+    ACTIVITY_FILTERS.map((entry) => ({ ...entry, count: filterAttention(worklist(), entry.id).length })).filter(
+      (entry) => entry.id === "all" || entry.count > 0 || entry.id === filter(),
+    ),
+  );
 
   /** The notification store, read straight from the shared snapshot: this view
    *  keeps its archive and its subscription editor without a second fetch. */
@@ -346,22 +364,20 @@ export default function Inbox() {
                 title="Needs you"
                 meta={attentionCount() ? `${attentionCount()} waiting` : "nothing waiting"}
               />
-              <Show when={kindTally().length > 1}>
+              <Show when={filterTally().length > 1}>
                 <div class="inbox-filters">
-                  <div class="inbox-cats">
-                    <button classList={{ on: kind() === "all" }} aria-pressed={kind() === "all"} onClick={() => setKind("all")}>
-                      All<em>{worklist().length}</em>
-                    </button>
-                    <For each={kindTally()}>
-                      {([entry, count]) => (
+                  <div class="inbox-cats" role="navigation" aria-label="Worklist filters">
+                    <For each={filterTally()}>
+                      {(entry) => (
                         <button
-                          classList={{ on: kind() === entry }}
-                          aria-pressed={kind() === entry}
-                          onClick={() => setKind(kind() === entry ? "all" : entry)}
+                          data-filter={entry.id}
+                          classList={{ on: filter() === entry.id }}
+                          aria-pressed={filter() === entry.id}
+                          onClick={() => showFilter(entry.id)}
                         >
-                          <Icon name={KINDS[entry].icon} size={13} />
-                          {KINDS[entry].label}
-                          <em>{count}</em>
+                          <Icon name={FILTER_ICON[entry.id]} size={13} />
+                          {entry.label}
+                          <em classList={{ zero: entry.count === 0 }}>{entry.count}</em>
                         </button>
                       )}
                     </For>
@@ -376,7 +392,7 @@ export default function Inbox() {
                      onboarding, no button that leaves the page. A filter that
                      hides everything is a different fact and can be cleared. */
                   <Show
-                    when={kind() !== "all"}
+                    when={filter() !== "all"}
                     fallback={
                       <div class="inbox-clear">
                         <span class="inbox-clear-ic">
@@ -388,8 +404,9 @@ export default function Inbox() {
                   >
                     <EmptyState
                       variant="no-match"
-                      title="Nothing of that kind is waiting."
-                      actions={<GhostPill onClick={() => setKind("all")}>Clear filter</GhostPill>}
+                      title="This filter matches nothing."
+                      hint="Other things may still be waiting for you."
+                      actions={<GhostPill onClick={() => showFilter("all")}>Show all</GhostPill>}
                     />
                   </Show>
                 }
@@ -400,7 +417,10 @@ export default function Inbox() {
               </Show>
             </section>
 
-            {/* ── STREAM 2 ── the feed. No count, no clearing, never merged above. */}
+            {/* ── STREAM 2 ── the feed. No count, no clearing, never merged above — and
+                NOT narrowed by the worklist's filters: those select kinds of WORK, and
+                the feed is news, which has no kind and makes no claim on anybody. It
+                stays whole under every filter. */}
             <section class="inbox-org" aria-label="Organisation">
               <SectionHeading title="Organisation" meta="What your colleagues did" />
               <Show

@@ -9,7 +9,7 @@ import { actingProfileId as chatActingProfileId, setActingProfileId } from "../c
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
-import { attentionCount, setAttentionProfile } from "../attention";
+import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, route, type Route } from "../router";
 import { railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
@@ -38,10 +38,13 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 
-/** `provisional` = the entry has no route of its own YET (Activity's filters land on the
- *  Inbox until Lane 1's two-stream Activity view ships). It navigates, but it never claims
- *  to be the selected object — two lit pills for one URL is a lie. */
-type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; provisional?: boolean; badge?: "chat" | "mentions" };
+/** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
+ *  NARROW the current pane instead of moving: Activity's worklist filters, which live in
+ *  the route (`/inbox/<filter>`) so exactly one of them can read as active, a deep link
+ *  arrives filtered, and back/forward tell the truth.
+ *  They used to be destinations wearing the costume of filters — Assigned went to Team
+ *  Tasks, Reviews to Code Reviews, Mentions was `provisional` and went nowhere. */
+type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; filter?: ActivityFilter; badge?: "chat" | "mentions" };
 
 /** Per-mode sidebar links. Threads and Mentions are no longer permanent global entries:
  *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
@@ -61,11 +64,16 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // backed by `list_unread_threads`) and therefore in Activity, the rail badge and Home.
   // Do not restore a destination here; add to the worklist rule instead.
   chats: [],
+  // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
+  // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
+  // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
   activity: [
-    { label: "All", view: "Inbox", icon: "inbox", strong: true },
-    { label: "Mentions", view: "Inbox", icon: "chat", provisional: true, badge: "mentions" },
-    { label: "Assigned", view: "Team Tasks", icon: "check" },
-    { label: "Reviews", view: "Code Reviews", icon: "review" },
+    { label: "All", view: "Inbox", icon: "inbox", strong: true, filter: "all" },
+    { label: "Mentions", view: "Inbox", icon: "chat", filter: "mentions" },
+    { label: "Messages", view: "Inbox", icon: "chat", filter: "messages" },
+    { label: "Assigned", view: "Inbox", icon: "check", filter: "assigned" },
+    { label: "Reviews", view: "Inbox", icon: "review", filter: "reviews" },
+    { label: "Updates", view: "Inbox", icon: "inbox", filter: "updates" },
   ],
   tasks: [
     { label: "My tasks", view: "To-Do", icon: "check", strong: true },
@@ -240,6 +248,17 @@ export default function SpaceShell(props: {
   const sideEntries = () =>
     MODE_LINKS[mode()].filter((entry) => isViewAvailable(entry.view) && matches(entry.label));
 
+  /** The active Activity filter, read from the ROUTE (unknown -> All). */
+  const activityFilter = (): ActivityFilter => asActivityFilter(route().tab);
+  /** A filter entry is active when the route's filter is its own; every other entry is
+   *  active when its view is the open one. Exactly one entry lights either way. */
+  const entryActive = (entry: SideEntry) =>
+    entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : props.active === entry.view;
+  /** A filter's own count, from the same source as the badge. A count of 0 is drawn
+   *  without tone (`metricTone`'s rule) rather than hidden — the filter is still real. */
+  const entryCount = (entry: SideEntry) =>
+    entry.filter ? attentionFilterCount(entry.filter) : badgeOf(entry.badge);
+
   const railItem = (entry: (typeof RAIL)[number]) => (
     <a
       class="rail-item"
@@ -258,13 +277,18 @@ export default function SpaceShell(props: {
   const sideLink = (entry: SideEntry) => (
     <a
       class="side-link"
-      aria-current={!entry.provisional && props.active === entry.view ? "page" : undefined}
-      classList={{ active: !entry.provisional && props.active === entry.view }}
-      {...navLink(() => ({ view: entry.view }))}
+      data-filter={entry.filter}
+      aria-current={entryActive(entry) ? "page" : undefined}
+      classList={{ active: entryActive(entry) }}
+      {...navLink(() => (entry.filter && entry.filter !== "all"
+        ? { view: entry.view, tab: entry.filter }
+        : { view: entry.view }))}
     >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
       {entry.strong ? <strong>{entry.label}</strong> : entry.label}
-      <Show when={badgeOf(entry.badge) > 0}><span class="count">{badgeOf(entry.badge)}</span></Show>
+      <Show when={entry.filter || entryCount(entry) > 0}>
+        <span class="count" classList={{ zero: entryCount(entry) === 0 }}>{entryCount(entry)}</span>
+      </Show>
     </a>
   );
 

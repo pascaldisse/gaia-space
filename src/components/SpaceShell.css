@@ -238,6 +238,13 @@
   font-size: 11px;
   font-weight: 760;
 }
+/* A count of 0 carries NO tone (statusTone.ts::metricTone): a filter with nothing
+   behind it right now is still a real filter, it just makes no claim. */
+.space-chat-shell .side-link .count.zero {
+  background: transparent;
+  color: rgba(255, 255, 255, .38);
+  font-weight: 600;
+}
 .space-chat-shell .side-icon { display: grid; place-items: center; width: 16px; color: inherit; }
 .space-chat-shell .section {
   margin-top: 18px;
