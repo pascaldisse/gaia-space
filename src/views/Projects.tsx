@@ -1,5 +1,6 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import PageHeader, { Chip, EmbeddedScopeProvider } from "../components/PageHeader";
+import { Disclosure, MetricGrid, MetricTile, SectionHeading } from "../components/blocks";
 import EmptyState from "../components/EmptyState";
 import { GhostPill, PillSelect } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
@@ -65,9 +66,11 @@ function ProjectRoles(props: { projectId: string }) {
   };
   // Access is administration, not daily work: it stays folded away under the board
   // and says in its own summary how much is configured, so nobody opens it to look.
-  return <details class="project-access">
-    <summary><span>Access</span><small>{liveRoles().length} roles · {(bindings() ?? []).length} team bindings</small></summary>
-    <div class="project-access-body">
+  return <Disclosure
+    class="project-access"
+    title="Access"
+    meta={`${liveRoles().length} roles · ${(bindings() ?? []).length} team bindings`}
+  >
     <section class="project-roles">
     <h3>Roles</h3>
     <Show when={panelError()}><p class="error" role="alert">{panelError()}</p></Show>
@@ -113,8 +116,7 @@ function ProjectRoles(props: { projectId: string }) {
       </li>
     }</For></ul>
     </section>
-    </div>
-  </details>;
+  </Disclosure>;
 }
 export default function Projects() {
   // One destination: the project list IS the entry point, and an opened project
@@ -239,18 +241,27 @@ export default function Projects() {
       </div>
     </Show>
     <Show when={countsFailed()}>{reason=><p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
+    {/* ONE TILE FOR THE WHOLE APP (stage 11, defect 2). These four were
+        `.pf-metric`, a shape invented here and nowhere else; they are now the
+        shared MetricTile, which is Home's calm tile. Tone runs through
+        `metricTone`, so `0 Carrying a deadline` and the `—` placeholder are
+        quiet by construction — a zero is not an alarm. */}
     <Show when={live().length}>
-      <div class="pf-summary">
-        <div class="pf-metric"><span class="pf-metric-num">{live().length}</span><span class="pf-metric-lbl">Active projects</span></div>
-        <div class="pf-metric"><span class="pf-metric-num">{countsFailed() ? "—" : openTotal()}</span><span class="pf-metric-lbl">Open tickets</span></div>
-        <div class="pf-metric"><span class="pf-metric-num">{withDeadline()}</span><span class="pf-metric-lbl">Carrying a deadline</span></div>
-        <Show when={nextDeadline()} fallback={<div class="pf-metric"><span class="pf-metric-num">—</span><span class="pf-metric-lbl">Next deadline</span></div>}>{next=>{
+      <MetricGrid label="Portfolio at a glance">
+        <MetricTile value={live().length} label="Active projects" />
+        <MetricTile value={countsFailed() ? "—" : openTotal()} label="Open tickets" tone="teal" />
+        <MetricTile value={withDeadline()} label="Carrying a deadline" />
+        <Show when={nextDeadline()} fallback={<MetricTile value="—" label="Next deadline" small />}>{next=>{
           const target=()=>({view:"Projects",entityType:"project",entityId:next().id});
-          return <a class="pf-metric pf-metric-link" href={linkProps(target()).href} onClick={event=>{linkProps(target()).onClick(event);setProjectId(next().id);}}>
-            <span class="pf-metric-num sm">{next().deadline}</span><span class="pf-metric-lbl">Next: {next().name}</span>
-          </a>;
+          return <MetricTile
+            small
+            value={next().deadline}
+            label={`Next: ${next().name}`}
+            href={linkProps(target()).href}
+            onClick={(event: MouseEvent)=>{linkProps(target()).onClick(event as MouseEvent & { currentTarget: HTMLAnchorElement });setProjectId(next().id);}}
+          />;
         }}</Show>
-      </div>
+      </MetricGrid>
     </Show>
     {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty
         result can only be an empty workspace — the only honest offer is creation,
@@ -282,8 +293,12 @@ export default function Projects() {
         <Show when={!counts.loading && !countsFailed()}>
           <p class="pf-open"><b>{openCount(project.id)}</b> open tickets</p>
         </Show>
-        <div class="project-card-foot">
-          <div class="project-deadline">
+        {/* A FACT IS NOT AN ACTION (stage 11, defect 4). `Deadline none` used to
+            sit in the same row as Tasks / Calendar / Archive, so a read-only
+            statement looked as clickable as the three buttons beside it. It is
+            now a quiet meta line of its own, ABOVE the actions; only where the
+            session may actually move the deadline is there a control here. */}
+        <div class="project-deadline">
             <Show
               when={mayEditDeadline(project)}
               fallback={<p class="deadline-readonly">Deadline <span>{project.deadline ?? "none"}</span></p>}
@@ -307,16 +322,29 @@ export default function Projects() {
             <Show when={deadlineStatus(project.id)?.status === "saving"}><span class="hint" role="status">Saving deadline…</span></Show>
             <Show when={deadlineStatus(project.id)?.status === "saved"}><span class="hint" role="status">Deadline saved</span></Show>
             <Show when={deadlineStatus(project.id)?.status === "failed"}><span class="error" role="alert">{deadlineStatus(project.id)?.message}</span></Show>
-          </div>
+        </div>
+        <div class="project-card-foot">
           {/* L4: three bare teal text links were not readable as buttons, and
-              Archive must never wear the action colour. All three are ghost pills. */}
+              Archive must never wear the action colour. All three are ghost pills
+              — and since stage 11 they carry the resting hairline every action row
+              off a control row gets (controls.css §1b), so they are visibly
+              pressable inside the card instead of reading as bare text. */}
           <div class="row-actions"><GhostPill {...linkProps({view:"Project Tasks",projectId:project.id})}>Tasks</GhostPill><GhostPill {...linkProps({view:"Calendar",projectId:project.id})}>Calendar</GhostPill><GhostPill onClick={()=>void update(project,{archived:!project.archived})}>{project.archived ? "Restore" : "Archive"}</GhostPill></div>
         </div>
       </li>;
     }}</For></ul>
     <Show when={route().entityId && !openProject()}><p class="error" role="alert">This project does not exist or is unavailable.</p></Show><Show when={openProject()}>{project=>
       <section class="project-open">
-        <header class="project-open-head"><h2>{project().name}<code>{project().key}</code></h2><GhostPill {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</GhostPill><GhostPill {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</GhostPill></header>
+        {/* A SECTION, NOT A SECOND PAGE (stage 11, defect 5). This band carried a
+            27px title and an action edge halfway down the page, so the view read
+            as two pages stacked. It is the shared SectionHeading now: h2 at
+            section size, the key as quiet meta, the two links as an action group
+            on the right. Exactly one h1 on the view, and it is still `Projects`. */}
+        <SectionHeading
+          title={project().name}
+          meta={project().key}
+          actions={<><GhostPill {...linkProps({view:"Project Tasks",projectId:project().id})}>Tasks</GhostPill><GhostPill {...linkProps({view:"Calendar",projectId:project().id})}>Calendar</GhostPill></>}
+        />
         {/* THE DOUBLE HEADING (audit §3.5): the panel above has just named this
             project, so the board mounted under it is a GUEST — no second h1, no
             picker for a scope this surface already decided. */}

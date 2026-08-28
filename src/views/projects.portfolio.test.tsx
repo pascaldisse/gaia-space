@@ -79,7 +79,7 @@ describe("portfolio summary and open-issue counts", () => {
     const cards = [...host.querySelectorAll(".project-card .pf-open")].map((n) => n.textContent);
     expect(cards).toEqual(["2 open tickets", "1 open tickets"]);
 
-    const metrics = [...host.querySelectorAll(".pf-metric")].map((n) => n.textContent);
+    const metrics = [...host.querySelectorAll(".metric-tile")].map((n) => n.textContent);
     expect(metrics[0]).toContain("2Active projects");
     expect(metrics[1]).toContain("3Open tickets");
     expect(metrics[2]).toContain("1Carrying a deadline");

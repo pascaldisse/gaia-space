@@ -303,7 +303,6 @@
 .theme-space-light .run-log { background: var(--paper); }
 
 /* ── views/Portfolio.css ── */
-.theme-space-light .pf-metric-lbl { color: var(--muted); }
 .theme-space-light .pf-empty { border: 1px dashed var(--line); color: var(--muted); }
 .theme-space-light .pf-field { color: var(--muted); }
 

@@ -11,7 +11,11 @@
 .project-card > p { margin: 0; color: var(--text-muted); font-size: 13px; }
 .project-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
 .project-card-foot label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-faint); }
-.project-card .row-actions { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.project-card .row-actions { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+/* The deadline is a FACT and gets its own quiet line above the actions; the foot
+   holds nothing but buttons, so nothing in a row of buttons is unclickable. */
+.project-card .project-deadline { margin-top: 2px; }
+.project-card-foot { justify-content: flex-start; }
 /* Tasks / Calendar / Archive are GhostPills now (controls.tsx). They must not be
    re-inked here: Archive is not an action colour, and a pill that keeps the old
    accent ink reads as a link wearing a button's shape. */
@@ -27,21 +31,12 @@
 
 /* Opened project: the board surface lives inside the project, not in a sibling tab. */
 .project-open { margin-top: 26px; border-top: 1px solid var(--surface-border); padding-top: 18px; }
-.project-open-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
-.project-open-head h2 { display: flex; align-items: baseline; gap: 9px; margin: 0; font-size: 18px; }
-.project-open-head code { color: var(--text-faint); font-size: 12px; }
-.project-open-head .ghost-pill { font-size: 13px; }
 /* the embedded board must not re-declare the page frame */
 .project-open .planning-view { height: auto; padding: 0; max-width: none; }
 .project-open .planning-head { display: none; }
-/* Access panel: administration folded away beneath the work it governs. */
-.project-access { margin-top: 22px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-control); }
-.project-access > summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; list-style: none; padding: 12px 15px; font-family: var(--font-head); font-size: 12.5px; font-weight: 600; letter-spacing: .03em; color: var(--text-faint); }
-.project-access > summary::-webkit-details-marker { display: none; }
-.project-access > summary::before { content: "\25B8"; color: var(--text-dim); transition: transform .12s ease; }
-.project-access[open] > summary::before { transform: rotate(90deg); }
-.project-access > summary small { color: var(--text-dim); font-weight: 500; letter-spacing: 0; }
-.project-access-body { padding: 0 15px 16px; }
+/* Access panel: administration folded away beneath the work it governs. Its
+   frame, its chevron and its sentence case now come from the shared Disclosure
+   (components/blocks.css) — what stays here is only what is inside it. */
 .project-roles h3 { margin: 10px 0 8px; font-size: 13px; color: var(--text-strong); }
 .project-roles h3:first-child { margin-top: 0; }
 /* one form row per creation, labels above fields — never a naked control strip */
@@ -79,19 +74,6 @@
 }
 .theme-space-light .project-form > input { flex: 1 1 180px; min-width: 0; }
 .theme-space-light .project-form > input[type=date] { flex: 0 0 auto; }
-
-/* Summary tiles read like Home's compact stats: quiet, small, countable. */
-.theme-space-light .pf-summary { gap: 10px; }
-.theme-space-light .pf-metric {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--paper);
-  padding: 14px 16px;
-}
-.theme-space-light .pf-metric-num { font-size: 22px; font-weight: 720; letter-spacing: -.04em; line-height: 1.1; color: var(--ink); }
-.theme-space-light .pf-metric-num.sm { font-size: 16px; }
-.theme-space-light .pf-metric-lbl { color: var(--muted); font-size: 12.5px; }
-.theme-space-light a.pf-metric-link:hover { background: var(--wash); border-color: var(--line-strong); }
 
 /* ── cards ────────────────────────────────────────────────────────────────── */
 .theme-space-light .project-cards { gap: 14px; }
@@ -139,16 +121,7 @@
 
 /* ── opened project / access ──────────────────────────────────────────────── */
 .theme-space-light .project-open { border-top: 1px solid var(--line); }
-.theme-space-light .project-open-head h2 { font-size: 21px; font-weight: 720; letter-spacing: -.04em; }
-.theme-space-light .project-open-head code { color: var(--quiet); }
-.theme-space-light .project-access {
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--paper);
-  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
-}
-.theme-space-light .project-access > summary { color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
-.theme-space-light .project-role-list li {
+.theme-space-light .theme-space-light .theme-space-light .theme-space-light .theme-space-light .project-role-list li {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--wash);

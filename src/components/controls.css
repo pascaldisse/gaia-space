@@ -306,6 +306,18 @@
 .theme-space-light .pgh-actions > .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); background: var(--wash-2); }
 .theme-space-light .pgh-actions > .ghost-pill:disabled { border-color: var(--line); }
 
+/* 1b. THE SAME CONCESSION, EVERY ACTION ROW (stage 11, defect 4). A project
+      card ended `Deadline none · Tasks · Calendar · Archive` and the last three
+      READ AS BARE TEXT although they had been GhostPills since stage 9: inside
+      a card there is a surface, but there is no CONTROL ROW to supply the
+      footprint, so the pills were invisible. Wherever an action row names
+      itself — the header edge, a section heading, a card's `.row-actions` — the
+      ghost pill wears the resting hairline. In a `.control-row` it still does
+      not, because there the row itself is the footprint. */
+.theme-space-light :is(.section-heading-actions, .row-actions) > .ghost-pill { border-color: var(--line); }
+.theme-space-light :is(.section-heading-actions, .row-actions) > .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); background: var(--wash-2); }
+.theme-space-light .control-row .ghost-pill { border-color: transparent; }
+
 /* 2. A control row nested inside a paper card was drawing a second frame around
       the first — the "boxes inside boxes" the redesign is removing, in
       miniature. Inside a card the row keeps its rhythm and gives up its border;
