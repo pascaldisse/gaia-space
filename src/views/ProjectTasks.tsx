@@ -1,6 +1,9 @@
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { personalApi, type Todo } from "../api/personal";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
 import { ProfilePicker } from "../components/Pickers";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
@@ -108,6 +111,43 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
      assignee (TodoCompletionWrite). The row offers each write exactly where it is
      granted. */
   const owns = (task: Todo) => task.profile_id === profileId();
+  /* DELETING A SHARED TASK. This is everybody's list, so most rows here belong to
+     someone else: only the CREATOR may end a task (the server's TodoOwnerWrite says
+     the same), and the person it was assigned to may not clear their list by
+     deleting somebody else's work. Non-owners get no button and a reason.
+     Two doors, one question: the row's right-click menu and the opened task's own
+     facts — neither deletes on click. */
+  const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [pendingDelete, setPendingDelete] = createSignal<Todo | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  const taskMenuItems = (task: Todo): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => editTask(task) },
+    ...(owns(task) ? [{ label: "Delete task…", danger: true, onSelect: () => setPendingDelete(task) }] : []),
+  ];
+  const openTaskMenu = (event: MouseEvent, task: Todo) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, items: taskMenuItems(task) });
+  };
+  const deleteTask = async () => {
+    const task = pendingDelete();
+    if (!task) return;
+    setError("");
+    setDeleting(true);
+    try {
+      await personalApi.deleteTodo(task.id, profileId());
+      setPendingDelete(null);
+      if (editingId() === task.id) setEditingId(null);
+      await reloadTasks();
+      void reloadDashboard();
+    } catch (reason) {
+      // This surface's one error line. A refusal is never swallowed.
+      setError(humanError(reason));
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
   const mayComplete = (task: Todo) => owns(task) || task.assignee_ids.includes(profileId());
   const complete = async (task: Todo, done: boolean) => {
     try { await personalApi.setTodoCompletion(task.id, done); await reloadTasks(); void reloadDashboard(); }
@@ -172,7 +212,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
               {/* THE ROW IS ITS OWN EDITOR. It opens in place, inside this same <li>,
                   so the list neither reorders nor loses the reader's place. */}
               <Show when={editingId() === task.id} fallback={
-              <div class="task-row project-task-row" classList={{ done: task.done }}>
+              <div class="task-row project-task-row" classList={{ done: task.done }} onContextMenu={event => openTaskMenu(event, task)}>
                 <input type="checkbox" class="task-row-check" aria-label={`Mark ${task.content} done`}
                   disabled={!mayComplete(task)}
                   checked={task.done} onChange={event => complete(task, event.currentTarget.checked)} />
@@ -195,6 +235,15 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
                     onCancel={() => closeEdit(task.id)}
                     onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
                     onError={setError} />
+                  {/* The opened task's own facts carry the one act that removes them
+                      all — at rest, in the same red it wears everywhere else. */}
+                  <div class="task-danger-row">
+                    <DeleteButton
+                      label={`Delete ${task.content}`}
+                      canDelete={owns(task)}
+                      deniedReason="Only the owner can delete this"
+                      onRequest={() => setPendingDelete(task)} />
+                  </div>
                 </div>
               </Show>
             </li>;
@@ -202,6 +251,17 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         </ul>
       </Show>
     </section>
+    <Show when={menu()}>
+      {value => <ContextMenu x={value().x} y={value().y} items={value().items} onClose={() => setMenu(null)} />}
+    </Show>
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete task?"
+      body={<><strong>{pendingDelete()?.content}</strong> is deleted for this project, with its description, due date and assignees. This cannot be undone.</>}
+      confirmLabel="Delete task"
+      busy={deleting()}
+      onConfirm={() => void deleteTask()}
+      onCancel={() => setPendingDelete(null)} />
     <Show when={creating()}><TaskDrawer
       projectId={selectedProject()}
       authorId={profileId()}

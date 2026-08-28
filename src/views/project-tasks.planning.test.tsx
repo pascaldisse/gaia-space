@@ -298,3 +298,77 @@ test("focus goes into the editor on open and back to the row on close", async ()
   await until(() => document.activeElement === host.querySelector('.task-row-main[data-task-row="t1"]'));
   expect((document.activeElement as HTMLElement).getAttribute("data-task-row")).toBe("t1");
 });
+
+// THIS LIST IS EVERYBODY'S, so most rows belong to someone else. Only the creator may
+// end a task: the person it was assigned to must not be able to clear their own list
+// by deleting another person's work. The rule is SHOWN — no button, and a reason —
+// rather than discovered by a refused click.
+test("a project task deletes for its creator only, and always asks first", async () => {
+  setProfileId("pa");
+  serve({
+    list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
+    list_profiles: [
+      { id: "pa", username: "alice", display_name: "Alice", archived: false },
+      { id: "pb", username: "bob", display_name: "Bob", archived: false },
+    ],
+    list_project_member_ids: ["pa", "pb"],
+    // Bob's task, assigned to Alice — the shared case.
+    list_project_todos: [sharedTask],
+    project_dashboard_aggregate: { project_id: "p1", open_issues: 0, open_todos: 1, member_count: 2, deadline: null },
+    delete_todo: null,
+  });
+  registerViews(["Dashboard", "Project Tasks", "Boards", "Issues"]); setAvailableViews(null);
+  navigate({ view: "Project Tasks", projectId: "p1" });
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <ProjectTasks />, host);
+  await until(() => !!host.querySelector(".project-task-row"));
+
+  // Assigned, not owned: the menu offers no delete at all.
+  const row = host.querySelector(".project-task-row") as HTMLElement;
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 30, clientY: 30 }));
+  await until(() => !!document.querySelector('[role="menu"]'));
+  const menu = document.querySelector('[role="menu"]') as HTMLElement;
+  expect([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(["Open"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+  // Opened, it says why instead of showing a button that would be refused.
+  (host.querySelector(".project-task-row .task-row-main") as HTMLButtonElement).click();
+  await until(() => !!host.querySelector(".task-row-editing"));
+  expect(host.querySelector("button.delete-button")).toBeNull();
+  expect(host.textContent).toContain("Only the owner can delete this");
+  expect(calls.some(call => call.command === "delete_todo")).toBe(false);
+});
+
+// The creator's own row: the red button is there, it opens the question, and only
+// answering it sends the command.
+test("the creator's own project task deletes through the question, never on click", async () => {
+  setProfileId("pb");
+  serve({
+    list_projects: [{ id: "p1", name: "Orbital", key: "ORB", archived: false }],
+    list_profiles: [{ id: "pb", username: "bob", display_name: "Bob", archived: false }],
+    list_project_member_ids: ["pb"],
+    list_project_todos: [sharedTask],
+    project_dashboard_aggregate: { project_id: "p1", open_issues: 0, open_todos: 1, member_count: 1, deadline: null },
+    delete_todo: null,
+  });
+  registerViews(["Dashboard", "Project Tasks", "Boards", "Issues"]); setAvailableViews(null);
+  navigate({ view: "Project Tasks", projectId: "p1" });
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <ProjectTasks />, host);
+  await until(() => !!host.querySelector(".project-task-row"));
+
+  (host.querySelector(".project-task-row .task-row-main") as HTMLButtonElement).click();
+  await until(() => !!host.querySelector(".task-row-editing"));
+  const button = host.querySelector("button.delete-button") as HTMLButtonElement;
+  expect(button).not.toBeNull();
+
+  button.click();
+  await until(() => !!document.querySelector('[role="alertdialog"]'));
+  // Asking is not doing.
+  expect(calls.some(call => call.command === "delete_todo")).toBe(false);
+  const dialog = document.querySelector('[role="alertdialog"]') as HTMLElement;
+  expect(dialog.textContent).toContain("Review somebody else's work");
+  (dialog.querySelector("button.confirm-danger") as HTMLButtonElement).click();
+  await until(() => calls.some(call => call.command === "delete_todo"));
+  expect(calls.find(call => call.command === "delete_todo")!.body).toMatchObject({ id: "t1", actorId: "pb" });
+});
