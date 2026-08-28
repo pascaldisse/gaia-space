@@ -234,12 +234,13 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 /* A title with nothing under it says the task is thin. Offer the line instead of
    demanding it: the hint appears on hover, costs nothing, and one click writes it. */
 .theme-space-light .task-body-edit .task-notes:empty { display: none; }
+/* Always drawn, never loud. An invitation that only exists while the pointer is on
+   it is not an invitation — and worse, an invisible line still HELD its row, so a
+   task with no description showed a gap where nothing was. */
 .theme-space-light .task-card .task-note-hint {
-  margin: 2px 0 0; font-size: 12px; color: var(--quiet); opacity: 0;
-  transition: opacity .12s ease;
+  margin: 2px 0 0; font-size: 12px; color: var(--quiet);
 }
-.theme-space-light .task-card:hover .task-note-hint,
-.theme-space-light .task-card:focus-within .task-note-hint { opacity: 1; }
+.theme-space-light .task-card:hover .task-note-hint { color: var(--muted); }
 
 /* Actions belong to the row, so they arrive with it and leave with it. Delete is
    destructive: it never sits ready under an idle pointer. */

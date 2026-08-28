@@ -127,9 +127,9 @@ export default function TaskDrawer(props: {
           <input class="wid-input" ref={firstField} aria-label="Task title" value={form().content}
             placeholder="What needs doing?" onInput={event => patch({ content: event.currentTarget.value })} />
         </label>
-        <label class="wid-field"><span>Notes</span>
-          <textarea class="wid-input" aria-label="Task notes" value={form().notes}
-            placeholder="Context, links, hand-over notes" onInput={event => patch({ notes: event.currentTarget.value })} />
+        <label class="wid-field"><span>Description</span>
+          <textarea class="wid-input" aria-label="Task description" value={form().notes}
+            placeholder="A line on what this is about" onInput={event => patch({ notes: event.currentTarget.value })} />
         </label>
         {/* The project is a fact on a project surface, a question everywhere else. */}
         <Show when={!props.projectId}>

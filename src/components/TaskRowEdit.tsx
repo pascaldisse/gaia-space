@@ -185,8 +185,13 @@ export default function TaskRowEdit(props: {
           <button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={() => toggleAssignee(id)}>×</button>
         </li>}</For></ul>
       </Show>
-      <label class="todo-field todo-field-notes"><span class="field-label">Notes</span>
-        <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task notes" placeholder="Context, links, hand-over notes"
+      {/* Called DESCRIPTION, because that is what the row invites you to add. It was
+          labelled "Notes" while the affordance said "add a short description" — one
+          thing under two names, so the field was looked straight at and not
+          recognised. The wire name stays `notes`; only the word a person reads
+          changed. */}
+      <label class="todo-field todo-field-notes"><span class="field-label">Description</span>
+        <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task description" placeholder="A line on what this is about"
           value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
       </label>
       <Show when={props.advanced}>
