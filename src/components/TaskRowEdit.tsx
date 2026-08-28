@@ -52,6 +52,10 @@ export default function TaskRowEdit(props: {
   fixedProject?: boolean;
   /** The markdown switch and the source bookmark: My tasks only, where they exist. */
   advanced?: boolean;
+  /** Which field the editor opens ON. An affordance that says "add a description"
+   *  must land the caret in the description — otherwise it promises one thing and
+   *  delivers a form focused on something else, which reads as "it does not work". */
+  focusField?: "title" | "notes";
   /** Owner (or admin): may write every field. */
   canEdit: boolean;
   /** Owner or assignee: may tick it done. */
@@ -75,6 +79,7 @@ export default function TaskRowEdit(props: {
   });
   const [busy, setBusy] = createSignal(false);
   let firstField!: HTMLInputElement;
+  let notesField!: HTMLTextAreaElement;
 
   // A refused member read is carried as a value: the editor must say the list could
   // not be loaded, never quietly offer "nobody" as if the project were empty.
@@ -104,7 +109,10 @@ export default function TaskRowEdit(props: {
 
   // FOCUS GOES IN ON OPEN and — the host's half of the bargain — back to the row on
   // close, so a keyboard never loses its place in the list.
-  onMount(() => { firstField?.focus(); firstField?.select?.(); });
+  onMount(() => {
+    if (props.focusField === "notes" && notesField) { notesField.focus(); return; }
+    firstField?.focus(); firstField?.select?.();
+  });
   // ESCAPE CLOSES WITHOUT SAVING, from anywhere inside the editor, and is caught here
   // rather than on one field: a person who tabbed to the notes still means "get out".
   const onKeyDown = (event: KeyboardEvent) => {
@@ -178,7 +186,7 @@ export default function TaskRowEdit(props: {
         </li>}</For></ul>
       </Show>
       <label class="todo-field todo-field-notes"><span class="field-label">Notes</span>
-        <textarea class="composer-notes" rows="3" aria-label="Task notes" placeholder="Context, links, hand-over notes"
+        <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task notes" placeholder="Context, links, hand-over notes"
           value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
       </label>
       <Show when={props.advanced}>

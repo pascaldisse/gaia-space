@@ -45,9 +45,12 @@ export default function Todo() {
      This surface keeps what is its own: which row is open, and where the focus goes
      when it closes. */
   const [editingId,setEditingId]=createSignal<string|null>(null);
+  /** Which field the row editor opens on. Clicking the "add a description" hint
+   *  must land the caret in the description, not in the title. */
+  const [editIntent,setEditIntent]=createSignal<"title"|"notes">("title");
   // FOCUS RETURNS TO THE ROW ON CLOSE. Not to the element that opened it: closing
   // follows a re-read that replaces that button. The row is found again by task id.
-  const startEdit=(todo:TodoItem)=>{ setEditingId(todo.id); setError(""); };
+  const startEdit=(todo:TodoItem,field:"title"|"notes"="title")=>{ setEditIntent(field); setEditingId(todo.id); setError(""); };
   const closeEdit=(id:string)=>{ setEditingId(null); focusTaskRow(id); };
 
   const today=todayISO;
@@ -78,7 +81,7 @@ export default function Todo() {
           source bookmark, so it is the one that asks for them (`advanced`).
           This is the caller's OWN list, so the caller owns every row in it — the
           server's owner rule (TodoOwnerWrite) is satisfied by construction here. */}
-      <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)}
+      <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)} focusField={editIntent()}
         onCancel={()=>closeEdit(todo.id)}
         onSaved={()=>{ closeEdit(todo.id); refetch(); }}
         onError={setError}/>
@@ -86,7 +89,7 @@ export default function Todo() {
   </article>;
   const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
     <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
+    <button type="button" class="task-body task-body-edit" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={event=>startEdit(todo,(event.target as HTMLElement).closest(".task-note-hint")?"notes":"title")}>
       <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
       <Show when={todo.notes} fallback={<p class="task-note-hint">Add a short description…</p>}>{notes=><p class="task-notes">{notes()}</p>}</Show>
 <Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>

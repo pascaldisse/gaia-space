@@ -212,7 +212,11 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
       putting delete one stray click from a title.                               */
 .theme-space-light .task-list { max-width: 880px; }
 .theme-space-light .task-card {
-  align-items: center;
+  /* NOT centre: the body grows downwards (title, description, tags), so centring
+     drops the checkbox to the middle of a tall row and it reads as belonging to
+     the line BELOW the title. It aligns to the first line, which is the line it
+     is about. (Regression introduced with the row-affordance pass.) */
+  align-items: start;
   gap: 12px;
   padding-inline: 12px;
   border-radius: 10px;
@@ -222,6 +226,8 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 .theme-space-light .task-card:hover { background: var(--wash-2); }
 /* Keyboard focus lands on the row's own button; show it on the ROW. */
 .theme-space-light .task-card:focus-within { background: var(--wash-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* The checkbox sits on the title's optical line, not on the row's midpoint. */
+.theme-space-light .task-card > .task-check { margin-top: 2px; }
 .theme-space-light button.task-body-edit:focus-visible { outline: none; }
 .theme-space-light button.task-body-edit:hover .task-title { color: var(--ink); }
 
