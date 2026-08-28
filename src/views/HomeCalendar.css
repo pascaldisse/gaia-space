@@ -226,6 +226,7 @@
 }
 
 /* ── rows ───────────────────────────────────────────────────────────────── */
+.home-cal .clean-row.timeless { grid-template-columns: 1fr auto; }
 .home-cal .clean-row {
   display: grid;
   grid-template-columns: 58px 1fr auto;

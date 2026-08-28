@@ -60,9 +60,13 @@ const itemState = (item: CalendarItem, today: Date): { label: string; tone: Tone
   return { label: item.kind === "blog" ? "Blog" : "Date", tone: "" };
 };
 
+/** One row for two kinds of thing. A calendar item leads with its TIME; a task has
+ *  none, and a 58px column reserved for a time that will never come is why a task
+ *  title started in the middle of the card. The column exists only when it is
+ *  filled — same row, one lane fewer. */
 function Row(props: { time?: string; title: string; sub?: string; label: string; tone?: Tone; to: Route }): JSX.Element {
-  return <a class="clean-row" {...linkProps(props.to)}>
-    <div class="clean-time">{props.time ?? ""}</div>
+  return <a class="clean-row" classList={{ timeless: !props.time }} {...linkProps(props.to)}>
+    <Show when={props.time}>{time => <div class="clean-time">{time()}</div>}</Show>
     <div class="clean-body">
       <div class="clean-title">{props.title}</div>
       <Show when={props.sub}><div class="clean-sub">{props.sub}</div></Show>
@@ -94,7 +98,14 @@ export default function HomeCalendar() {
   const feed = (): CalendarItem[] => {
     if (items.error) return [];
     const all = items() ?? [];
-    return options()?.show_todos === false ? all.filter(item => item.kind !== "task") : all;
+    // `options` can REFUSE, and reading a failed resource re-throws into whatever
+    // computation touches it — which kills that computation and freezes whatever it
+    // had already rendered. That is why "Loading dates…" stood forever while the day
+    // card underneath it showed real counts: the loading line's owner was dead, not
+    // the data. A preference that could not be read is not a reason to stop drawing
+    // a calendar, so it degrades to the default (show everything).
+    const prefs = options.error ? undefined : options();
+    return prefs?.show_todos === false ? all.filter(item => item.kind !== "task") : all;
   };
   const todos = (): Todo[] => (dashboard.error ? [] : dashboard()?.open_todos ?? []);
   const loading = () => items.loading || dashboard.loading;
