@@ -276,3 +276,55 @@ test("quick create offers a meeting, a task and a deadline form on the chosen da
     expect(calls.some((c) => c.cmd === "create_meeting")).toBe(false);
   });
 });
+
+// A MEETING HAPPENS ON SOMEBODY ELSE'S SERVICE. The calendar's detail pane edits the
+// same external link the Meetings list edits, and shows the same way in — one control,
+// shared (views/Meetings.tsx `JoinLink`), so the act cannot drift into two behaviours.
+// Nothing is drawn without a valid link: a Join that leads nowhere is worse than none.
+describe("the calendar's meeting detail carries the way into the meeting", () => {
+  const meetingAt = (url: string | null) => {
+    const start = Math.floor(Date.now() / 1000) + 3600;
+    return {
+      id: "m-link", title: "Design review", description: null, starts_at: start, ends_at: start + 1800,
+      rrule: null, location: null, organizer_id: "pa", channel_id: null, visibility: "participants",
+      modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null,
+      join_url: null, meeting_url: url, video_status: "scheduled", video_started_at: null, video_ended_at: null,
+      video_ended_by: null, source_entity_type: null, source_entity_id: null,
+    };
+  };
+
+  const openDetail = async (url: string | null) => {
+    stubFetch();
+    setProfileId("pa");
+    const meeting = meetingAt(url);
+    replies = {
+      list_meetings: { ok: true, value: [meeting] },
+      calendar_aggregate: { ok: true, value: [{
+        id: meeting.id, source_id: meeting.id, kind: "meeting", title: meeting.title,
+        starts_at: meeting.starts_at, ends_at: meeting.ends_at, project_id: null, calendar_id: null,
+        date: dateKey(new Date(meeting.starts_at * 1000)),
+      }] },
+    };
+    const host = mount();
+    await settle();
+    const entry = [...host.querySelectorAll("button, a")].find((element) => element.textContent?.includes("Design review")) as HTMLElement;
+    entry?.click();
+    await settle();
+    return host;
+  };
+
+  test("the link is editable, and Join appears only once there is one", async () => {
+    let host = await openDetail(null);
+    const field = host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement;
+    expect(field).not.toBeNull();
+    expect(field.value).toBe("");
+    // No link, no way in — and no button pretending there is one.
+    expect([...host.querySelectorAll("button, a")].some((element) => element.textContent?.trim() === "Join")).toBe(false);
+    unmount(host);
+
+    host = await openDetail("https://meet.google.com/abc-defg-hij");
+    expect((host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement).value)
+      .toBe("https://meet.google.com/abc-defg-hij");
+    expect([...host.querySelectorAll("button, a")].some((element) => element.textContent?.trim() === "Join")).toBe(true);
+  });
+});

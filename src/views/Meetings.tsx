@@ -58,7 +58,7 @@ const newForm = (): MeetingForm => {
  *  default browser (`tauri-plugin-opener`). In the web build a link is already a
  *  link and needs no plugin. Anything without a valid link renders NOTHING here:
  *  a Join button that leads nowhere is worse than no button. */
-function JoinLink(props: { meeting: Meeting; class?: string; onError: (message: string) => void }) {
+export function JoinLink(props: { meeting: Meeting; class?: string; onError: (message: string) => void }) {
   const url = () => props.meeting.meeting_url!.trim();
   return <Show when={hasMeetingLink(props.meeting)}>
     <Show

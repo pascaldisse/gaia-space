@@ -128,7 +128,7 @@ export default function WorkItemDrawer(props: {
           rrule: null, location: null, organizer_id: profileId() || null,
           channel_id: resolved()?.channel_id ?? props.source.channel_id ?? null,
           visibility: "participants", modification_preference: "organizer-only", archived: false,
-          video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled",
+          video_provider: null, video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled",
           video_started_at: null, video_ended_at: null, video_ended_by: null, ...anchor(),
         });
         for (const person of everyone()) await meetingsApi.invite(id, person);

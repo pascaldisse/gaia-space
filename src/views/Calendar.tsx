@@ -10,6 +10,7 @@ import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
 import { GhostPill, PillMenu } from "../components/controls";
 import SourceLink from "../components/SourceLink";
+import { JoinLink } from "./Meetings";
 import DateField from "../components/DateField";
 import DateTimeField from "../components/DateTimeField";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
@@ -161,7 +162,7 @@ const f=form(); const invalid=meetingDraftError(f);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
 const channel_id = await meetingsApi.attachChannel(meeting.id);
 const created = { ...meeting, channel_id };
@@ -376,6 +377,11 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <div class="cal-field"><span>Start</span><DateTimeField label="Start" value={localInput(item().starts_at)} onChange={value=>setDraft({...item(),starts_at:epoch(value)})} clearable={false}/></div>
 <div class="cal-field"><span>End</span><DateTimeField label="End" value={localInput(item().ends_at)} onChange={value=>setDraft({...item(),ends_at:epoch(value)})} clearable={false}/></div>
 <label>Location<input value={item().location??""} onInput={e=>setDraft({...item(),location:e.currentTarget.value||null})}/></label>
+{/* A MEETING HAPPENS ON SOMEBODY ELSE'S SERVICE. The link is edited here and the
+    way in sits beside it — the same control the Meetings list uses, so the act
+    cannot drift into two behaviours. Nothing is drawn without a valid link. */}
+<label>Meeting link<input placeholder="https://meet.google.com/…" aria-label="Meeting link" value={item().meeting_url??""} onInput={e=>setDraft({...item(),meeting_url:e.currentTarget.value||null})}/></label>
+<JoinLink meeting={item()} onError={setError}/>
 <label>Visibility<select value={item().visibility} onChange={e=>setDraft({...item(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={item().modification_preference} onChange={e=>setDraft({...item(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <label>Repeat<input value={item().rrule??""} onInput={e=>setDraft({...item(),rrule:e.currentTarget.value||null})}/></label>
