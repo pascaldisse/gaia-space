@@ -4,6 +4,7 @@ import EmptyState from "../components/EmptyState";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { Icon } from "../components/Icon";
+import DateField from "../components/DateField";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { personalApi } from "../api/personal";
@@ -339,7 +340,7 @@ export default function Projects() {
             <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => { const name = e.currentTarget.value; setForm({ ...form(), name, key: keyTouched() ? form().key : deriveKey(name) }); }} /></label>
             <label class="wid-field"><span>Key</span><input class="wid-input" placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e => { setKeyTouched(true); setForm({ ...form(), key: e.currentTarget.value.toUpperCase() }); }} /></label>
             <label class="wid-field"><span>Description <em>optional</em></span><input class="wid-input" placeholder="What this project is" aria-label="Project description" value={form().description} onInput={e => setForm({ ...form(), description: e.currentTarget.value })} /></label>
-            <label class="wid-field"><span>Deadline <em>optional</em></span><input class="wid-input" type="date" aria-label="Project deadline" value={form().deadline} onInput={e => setForm({ ...form(), deadline: e.currentTarget.value })} /></label>
+            <div class="wid-field"><span>Deadline <em>optional</em></span><DateField label="Project deadline" value={form().deadline} onChange={value => setForm({ ...form(), deadline: value })} /></div>
             <footer class="wid-actions"><button type="button" class="wid-btn" onClick={() => setCreateOpen(false)}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
           </form>
         </aside>
@@ -450,21 +451,15 @@ export default function Projects() {
             stays where the control was, even after it closes. */}
         <div class="project-deadline">
           <Show when={mayEditDeadline(project) && editingDeadline() === project.id}>
-            <label>Deadline <input
-              type="date"
-              aria-label={`Deadline for ${project.name}`}
+            {/* One control, the product's own: picking a day writes it, and the
+                popover's own Clear removes it — the separate Clear button beside the
+                field was a second way to say the same thing. */}
+            <DateField
+              label={`Deadline for ${project.name}`}
               value={project.deadline ?? ""}
               disabled={deadlineStatus(project.id)?.status === "saving"}
-              onChange={e => void writeDeadline(project, e.currentTarget.value || null)}
-            /></label>
-            <Show when={project.deadline}>
-              <button
-                class="ghost"
-                aria-label={`Clear deadline for ${project.name}`}
-                disabled={deadlineStatus(project.id)?.status === "saving"}
-                onClick={() => void writeDeadline(project, null)}
-              >Clear</button>
-            </Show>
+              onChange={value => void writeDeadline(project, value || null)}
+            />
             <button class="ghost" type="button" onClick={() => setEditingDeadline(null)}>Done</button>
           </Show>
           <Show when={deadlineStatus(project.id)?.status === "saving"}><span class="hint" role="status">Saving deadline…</span></Show>

@@ -1,3 +1,4 @@
+import DateField from "./DateField";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { personalApi, type Todo, type TodoContentKind } from "../api/personal";
 import { PillSelect } from "./controls";
@@ -140,10 +141,9 @@ export default function TaskDrawer(props: {
             </PillSelect>
           </div>
         </Show>
-        <label class="wid-field"><span>Due date</span>
-          <input class="wid-input" type="date" aria-label="Task due date" value={form().due_date}
-            onInput={event => patch({ due_date: event.currentTarget.value })} />
-        </label>
+        <div class="wid-field"><span>Due date</span>
+          <DateField label="Task due date" value={form().due_date} onChange={value => patch({ due_date: value })} />
+        </div>
         <fieldset class="wid-field task-drawer-people"><legend>Assignees</legend>
           <Show when={form().project_id} fallback={<p class="wid-hint">Give the task a project before assigning people to it.</p>}>
             <Show when={!membersFailed()} fallback={<p class="wid-error" role="alert">The project's members could not be loaded: {membersFailed()}</p>}>

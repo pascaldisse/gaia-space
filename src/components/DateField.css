@@ -1,0 +1,89 @@
+/* Self-scoped with local fallbacks like the other shared controls: the field reads
+   the same in the light chat-first shell and on the dark theme, and the popover is
+   rendered in a portal, so it must carry its own tokens rather than inherit them
+   from wherever it happened to be opened. */
+.date-field { display: inline-flex; min-width: 0; }
+
+.date-trigger {
+  /* THE BUTTON RULE (spaceTheme.css): one height, one type size, everywhere. */
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: 1px solid var(--ctl-border, var(--line, #e5ddd3));
+  border-radius: var(--pillctl-r, 999px);
+  background: var(--ctl-bg, var(--paper, #fff));
+  color: var(--ink, var(--text-strong, #1f2328));
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  line-height: 1;
+  cursor: pointer;
+}
+.date-trigger:hover { border-color: var(--accent, var(--teal, #00bfa6)); }
+.date-trigger:focus-visible { outline: 2px solid var(--accent, var(--teal, #00bfa6)); outline-offset: 2px; }
+.date-trigger:disabled { opacity: 0.55; cursor: not-allowed; }
+/* No date yet is a quiet state, not an error. */
+.date-trigger.empty { color: var(--muted, var(--text-muted, #68717d)); font-weight: 550; }
+.date-trigger-icon { width: 15px; height: 15px; flex: 0 0 auto; opacity: 0.7; }
+
+.date-pop {
+  --dp-ink: var(--ink, #1f2328);
+  --dp-muted: var(--muted, #68717d);
+  --dp-paper: var(--paper, #ffffff);
+  --dp-line: var(--line, #e5ddd3);
+  --dp-teal: var(--teal, #00bfa6);
+  --dp-teal-soft: var(--teal-soft, #dcf7f2);
+  position: fixed;
+  z-index: 95; /* above drawers; a date is chosen ON TOP of the form that asked */
+  width: 286px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--dp-line);
+  border-radius: 14px;
+  background: var(--dp-paper);
+  color: var(--dp-ink);
+  box-shadow: 0 18px 44px rgba(31, 35, 40, 0.22);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.date-pop * { box-sizing: border-box; }
+
+.date-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.date-pop-head strong { font-size: 13.5px; font-weight: 700; }
+.date-nav {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid transparent; border-radius: 9px; background: none;
+  color: var(--dp-muted); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.date-nav:hover { border-color: var(--dp-line); color: var(--dp-ink); }
+
+.date-weekdays, .date-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.date-weekdays span { text-align: center; color: var(--dp-muted); font-size: 11px; font-weight: 700; }
+.date-grid { outline: none; }
+.date-grid:focus-visible { outline: 2px solid var(--dp-teal); outline-offset: 3px; border-radius: 8px; }
+
+.date-day {
+  height: 32px; padding: 0;
+  border: 1px solid transparent; border-radius: 9px;
+  background: none; color: inherit;
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1;
+  cursor: pointer;
+}
+.date-day:hover { background: color-mix(in srgb, var(--dp-line) 45%, transparent); }
+.date-day.muted { color: var(--dp-muted); opacity: 0.55; }
+/* Today is a fact and gets an outline; the CHOSEN day is the filled one. Two
+   different statements, two different marks — never one blended into the other. */
+.date-day.today { border-color: var(--dp-teal); }
+.date-day.active { background: color-mix(in srgb, var(--dp-teal) 14%, transparent); }
+.date-day.selected { background: var(--dp-teal); color: #04302a; border-color: var(--dp-teal); }
+
+.date-pop-foot { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.date-quick {
+  min-height: 30px; padding: 0 12px;
+  border: 1px solid var(--dp-line); border-radius: 9px;
+  background: var(--dp-paper); color: inherit;
+  font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer;
+}
+.date-quick:hover { border-color: var(--dp-teal); }
+.date-clear { margin-left: auto; color: var(--dp-muted); }
+.date-clear:hover { color: var(--danger, #c2384a); border-color: color-mix(in srgb, var(--danger, #c2384a) 45%, transparent); }

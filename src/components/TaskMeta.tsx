@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal, createUniqueId, onCleanup, onMount
 import type { JSX } from "solid-js";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
+import DateField from "./DateField";
 import "./TaskMeta.css";
 import { UI_LOCALE } from "../calendar";
 
@@ -128,10 +129,10 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
                 onMouseDown={event => { event.preventDefault(); props.onChange(iso); close(); }}>{label}</button>}
             </For>
           </div>
-          <label class="tm-date-field">
-            <span class="tm-date-caption">Pick a date</span>
-            <input type="date" aria-label="Due date" value={props.value} onInput={event => props.onChange(event.currentTarget.value)} />
-          </label>
+          {/* The product's own month grid, not the operating system's (DateField). */}
+          <div class="tm-date-field">
+            <DateField label="Due date" value={props.value} onChange={value => { props.onChange(value); if (value) close(); }} placeholder="Pick a date" />
+          </div>
           <Show when={props.value}>
             <button type="button" class="tm-clear" onMouseDown={event => { event.preventDefault(); props.onChange(""); close(); }}>Clear due date</button>
           </Show>
