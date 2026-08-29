@@ -61,7 +61,9 @@ const mount = async () => {
 };
 
 describe("portfolio summary and open-issue counts", () => {
-  test("a key is derived from the name and stops following once typed by hand", () => {
+  // Nobody types a key any more (it is not a question in the drawer); the name alone
+  // produces it, and uniqueness is settled by uniqueKey (projects.members.test.tsx).
+  test("a key is derived from the name", () => {
     expect(deriveKey("Marketing site redesign")).toBe("MARKE");
     expect(deriveKey("a-b c!d")).toBe("ABCD");
     expect(deriveKey("")).toBe("");

@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
+import { PillMenu } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { personalApi } from "../api/personal";
@@ -44,12 +45,31 @@ import "./Portfolio.css";
  *  of the page. */
 
 const newId = () => `project-${crypto.randomUUID()}`;
-const empty = () => ({ name: "", key: "", description: "", deadline: "" });
-// The key follows the name until somebody edits the key by hand; from then on the
-// field is theirs. Length is a parameter, not a magic number scattered in the view.
+const empty = () => ({ name: "", description: "", deadline: "" });
+/** ── THE KEY IS A FACT, NOT A QUESTION ────────────────────────────────────────
+ *  Nothing in the product identifies anything BY the key: a ticket reads `#42`
+ *  (Issues.tsx, IssueDetail.tsx), never `DEMO-42`. The key only decorated a card and
+ *  padded a picker label. But the column is `TEXT NOT NULL UNIQUE`, so it cannot
+ *  simply go: it is DERIVED from the name at creation, and the operator may still
+ *  edit it in Project settings, where it is a real operator field.
+ *  Length is a parameter, not a magic number scattered in the view. */
 export const KEY_LENGTH = 5;
 export const deriveKey = (name: string, length = KEY_LENGTH) =>
   name.replace(/[^a-zA-Z0-9]/g, "").slice(0, length).toUpperCase();
+/** UNIQUE OR THE INSERT IS REFUSED. Two projects may share a name, so the derived key
+ *  is counted up (`ORBITAL`, `ORBITAL2`, …) against the keys that ACTUALLY EXIST —
+ *  read, never guessed. A name with no letters or digits at all still needs a key,
+ *  hence the fallback. */
+export const FALLBACK_KEY = "PROJ";
+export const uniqueKey = (name: string, taken: Iterable<string>) => {
+  const used = new Set(Array.from(taken, value => value.toUpperCase()));
+  const base = deriveKey(name) || FALLBACK_KEY;
+  if (!used.has(base)) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${base}${suffix}`;
+    if (!used.has(candidate)) return candidate;
+  }
+};
 
 /** A CARD MUST ALWAYS FIT IN THE WINDOW (the owner's rule, verbatim). A description is
  *  free text and there is no length the server refuses, so the card refuses instead:
@@ -69,10 +89,16 @@ export const shortDescription = (text: string | null | undefined, max = DESCRIPT
   return `${(boundary > max / 2 ? cut.slice(0, boundary) : cut).trimEnd()}\u2026`;
 };
 
+/** WHO IS ON THE PROJECT, decided while the project is being decided. One entry per
+ *  chosen person; `roleId` is empty until somebody picks a role, and stays empty when
+ *  the workspace has no roles to pick (the role menu is then not drawn at all — an
+ *  empty menu is a promise the workspace cannot keep). */
+type MemberDraft = { id: string; roleId: string };
+
 export default function Projects() {
   const [form, setForm] = createSignal(empty());
+  const [draftMembers, setDraftMembers] = createSignal<MemberDraft[]>([]);
   const [error, setError] = createSignal("");
-  const [keyTouched, setKeyTouched] = createSignal(false);
   /* Creating a project is an ACT, not a permanent band across the top of the list.
      The four fields live in a drawer behind the header primary. */
   const [createOpen, setCreateOpen] = createSignal(false);
@@ -86,6 +112,22 @@ export default function Projects() {
     return person?.display_name || person?.username || id;
   };
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
+  /* The SAME roles ProjectSettings' member panel offers, assigned with the SAME command
+     (create_role_assignment, scope "project"). Two surfaces, one vocabulary. */
+  const [orgRoles] = createResource(platformApi.roles);
+  const assignableRoles = () => (orgRoles() ?? []).filter(role => !role.archived);
+  const personName = (id: string) => {
+    const person = profiles()?.find(item => item.id === id);
+    return person?.display_name || person?.username || id;
+  };
+  /* "You are in the project by creating it": the creator is a member already and is
+     never offered — the same rule the meeting drawer's participant field keeps. */
+  const invitable = () => (profiles() ?? []).filter(person => !person.archived && person.id !== (actingProfileId() || ""));
+  const addableMembers = () => invitable().filter(person => !draftMembers().some(member => member.id === person.id));
+  const addMember = (id: string) => { if (id && !draftMembers().some(member => member.id === id)) setDraftMembers([...draftMembers(), { id, roleId: "" }]); };
+  const removeMember = (id: string) => setDraftMembers(draftMembers().filter(member => member.id !== id));
+  const setMemberRole = (id: string, roleId: string) => setDraftMembers(draftMembers().map(member => member.id === id ? { ...member, roleId } : member));
+  const closeCreate = () => { setCreateOpen(false); setDraftMembers([]); };
 
   // ── the health signals ────────────────────────────────────────────────────
   // Every figure for EVERY row comes from ONE read, grouped client-side. A per-card
@@ -175,17 +217,42 @@ export default function Projects() {
   const save = async (event: SubmitEvent) => {
     event.preventDefault(); const input = form();
     try {
-      if (!input.name.trim() || !input.key.trim()) throw new Error("Project name and key are required.");
+      if (!input.name.trim()) throw new Error("A project needs a name.");
+      // The keys in hand may be stale (another person created a project a minute ago),
+      // so the uniqueness check reads the list again and only falls back to the
+      // loaded one if that read is unavailable.
+      const existing = await platformApi.projects().catch(() => items() ?? []);
+      const key = uniqueKey(input.name, existing.map(project => project.key));
       // Owner: web lets the session mint it; desktop has no session, so the locally
       // selected profile is the only identity there — send it or the row is ownerless.
       const owner = isWeb() ? null : (profileId() || null);
       if (!isWeb() && !owner) throw new Error("Select a profile before creating a project.");
       const id = newId();
-      await platformApi.createProject({ id, name: input.name.trim(), key: input.key.trim().toUpperCase(), description: input.description.trim() || null, deadline: input.deadline || null, archived: false }, owner);
+      await platformApi.createProject({ id, name: input.name.trim(), key, description: input.description.trim() || null, deadline: input.deadline || null, archived: false }, owner);
+      /* MEMBERSHIP IS WRITTEN AFTER THE PROJECT EXISTS: both commands need a project
+         id, which only create_project mints. A refused membership or role must never
+         be reported as a failed creation — the project IS there — so every refusal is
+         collected by name and said out loud instead. */
+      const failures: string[] = [];
+      for (const member of draftMembers()) {
+        try {
+          await personalApi.addProjectMember(id, member.id);
+          if (member.roleId)
+            await platformApi.createAssignment({ role_id: member.roleId, profile_id: member.id, scope_type: "project", scope_id: id });
+        } catch (reason) { failures.push(`${personName(member.id)}: ${humanError(reason)}`); }
+      }
+      setForm(empty()); setDraftMembers([]); setCreateOpen(false);
+      await refetch();
+      if (failures.length) {
+        // The project stands; the list stays put so the reason can be read and fixed
+        // in the project's settings.
+        setError(`Project created, but not everybody could be added — ${failures.join("; ")}`);
+        return;
+      }
+      setError("");
       // A fresh project opens in its own workspace, and the selection follows so
       // desktop (which has no URL) lands on the same project.
-      setForm(empty()); setKeyTouched(false); setCreateOpen(false);
-      await refetch(); setProjectId(id); navigate(openRoute(id));
+      setProjectId(id); navigate(openRoute(id));
     } catch (reason) { setError(humanError(reason)); }
   };
   const update = async (project: Project, patch: Partial<Project>) => {
@@ -331,17 +398,57 @@ export default function Projects() {
     <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
     <Show when={createOpen()}>
       <div class="wid-root">
-        <div class="wid-backdrop" aria-hidden="true" onClick={() => setCreateOpen(false)} />
-        <aside class="wid-panel" role="dialog" aria-modal="true" aria-label="New project" onKeyDown={event => { if (event.key === "Escape") setCreateOpen(false); }}>
+        <div class="wid-backdrop" aria-hidden="true" onClick={closeCreate} />
+        <aside class="wid-panel" role="dialog" aria-modal="true" aria-label="New project" onKeyDown={event => { if (event.key === "Escape") closeCreate(); }}>
           <header class="wid-head"><h2>New project</h2><p>A project carries the tickets, boards, tasks and documents of one piece of work.</p></header>
           {/* Captions belong INSIDE a drawer: here they are the only thing that says
               what an empty field wants. */}
           <form class="wid-form project-form" onSubmit={save}>
-            <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => { const name = e.currentTarget.value; setForm({ ...form(), name, key: keyTouched() ? form().key : deriveKey(name) }); }} /></label>
-            <label class="wid-field"><span>Key</span><input class="wid-input" placeholder="KEY" aria-label="Project key" maxlength="10" value={form().key} onInput={e => { setKeyTouched(true); setForm({ ...form(), key: e.currentTarget.value.toUpperCase() }); }} /></label>
+            <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => setForm({ ...form(), name: e.currentTarget.value })} /></label>
+            {/* NO KEY FIELD: nobody is asked for an identifier the product never shows.
+                It is derived from the name (unique against the projects that exist) and
+                stays editable in Project settings, where it is an operator's field. */}
             <label class="wid-field"><span>Description <em>optional</em></span><input class="wid-input" placeholder="What this project is" aria-label="Project description" value={form().description} onInput={e => setForm({ ...form(), description: e.currentTarget.value })} /></label>
             <div class="wid-field"><span>Deadline <em>optional</em></span><DateField label="Project deadline" value={form().deadline} onChange={value => setForm({ ...form(), deadline: value })} /></div>
-            <footer class="wid-actions"><button type="button" class="wid-btn" onClick={() => setCreateOpen(false)}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
+            {/* MEMBERS, in the order a person decides: what the project is, then who is
+                on it, then Create. Chosen exactly the way a meeting's participants are
+                chosen — one menu, one pill per person, × to take them off again. The
+                role beside each pill is the SAME vocabulary and the SAME command the
+                project's settings use, so both surfaces can never disagree. */}
+            <div class="wid-field project-members-field">
+              <span>Members <em>optional</em></span>
+              <PillMenu
+                label="Add project member"
+                value=""
+                placeholder={invitable().length ? "Add someone…" : "No other profiles yet"}
+                disabled={!addableMembers().length}
+                options={addableMembers().map(person => ({ value: person.id, label: person.display_name || person.username }))}
+                onChange={addMember}
+              />
+              <Show when={draftMembers().length}>
+                <ul class="project-members" aria-label="Project members">
+                  <For each={draftMembers()}>{member =>
+                    <li class="project-member">
+                      <span class="project-member-name">{personName(member.id)}</span>
+                      {/* NO ROLE MENU WITHOUT ROLES: an empty menu, or an invented
+                          "Member" role, would both be a lie about this workspace. */}
+                      <Show when={assignableRoles().length}>
+                        <PillMenu
+                          label={`Role for ${personName(member.id)}`}
+                          value={member.roleId}
+                          placeholder="No role"
+                          options={[{ value: "", label: "No role" }, ...assignableRoles().map(role => ({ value: role.id, label: role.name }))]}
+                          onChange={roleId => setMemberRole(member.id, roleId)}
+                        />
+                      </Show>
+                      <button type="button" class="project-member-remove" aria-label={`Remove ${personName(member.id)}`} onClick={() => removeMember(member.id)}>×</button>
+                    </li>
+                  }</For>
+                </ul>
+              </Show>
+              <span class="project-members-hint">You are on this project because you create it.</span>
+            </div>
+            <footer class="wid-actions"><button type="button" class="wid-btn" onClick={closeCreate}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
           </form>
         </aside>
       </div>
@@ -390,8 +497,9 @@ export default function Projects() {
               classList={{ [project.archived ? "" : bandTone(deadlineBand(project.deadline))]: !project.archived }}
               aria-hidden="true"
             ><Icon name="layers" size={20} /></span>
+            {/* THE KEY IS NOT ON THE CARD: it answered no question anybody asked.
+                It remains searchable (visibleProjects) and editable in settings. */}
             <strong>{project.name}</strong>
-            <code>{project.key}</code>
             {/* LAW: lead is PURELY INFORMATIONAL — a name on a row, read-only here,
                 gating nothing. Editing it lives in Project settings. */}
             <Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Who is responsible for this project (informational)">Responsible: {leadName(lead())}</span>}</Show>

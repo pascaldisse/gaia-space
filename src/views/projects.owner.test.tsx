@@ -49,9 +49,9 @@ const createProjectThrough = async () => {
   expect(open).toBeTruthy();
   open.click();
   await settle();
-  const [name, key] = Array.from(host.querySelectorAll<HTMLInputElement>(".project-form input"));
+  // No key field any more: the key is derived from the name (see uniqueKey).
+  const [name] = Array.from(host.querySelectorAll<HTMLInputElement>(".project-form input"));
   name.value = "Local project"; name.dispatchEvent(new Event("input", { bubbles: true }));
-  key.value = "loc"; key.dispatchEvent(new Event("input", { bubbles: true }));
   host.querySelector("form.project-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await settle();
   const created = calls.find((c) => c.cmd === "create_project");
