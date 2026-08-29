@@ -141,16 +141,23 @@ describe("informational-lead law", () => {
     expect(rows).toEqual(["Atlas theirs", "Atlas mine"]);
     /* MOVED (stage 20): the assignee checkboxes used to live in the detail pane's
        inline form (`.project-work-people`). That form is gone — creation is the shared
-       TaskDrawer now — so the SAME fact is asserted one address further on, against
-       the drawer's people list (`.wid-people`). The law under test is untouched: a
-       plain member opens creation and may tick every member of the project, the lead
-       included. */
+       TaskDrawer now.
+       ADDRESS ONLY AGAIN (2026-08-29, one-form pass): the drawer no longer draws a
+       field list of its own — it renders THE task editor (TaskRowEdit) in create mode,
+       so assignees are picked in the same Assignee control an EDIT uses, a popover of
+       options, not a `.wid-people` checkbox list. The law under test is untouched and
+       is asserted on the new address: a plain member opens creation and is offered
+       every member of the project, the lead included, with nothing disabled. */
     /* ADDRESS ONLY (task-card pass): the header's actions area is gone — the primary
        lives in the surface's ONE action row (`.task-actionbar`), as on My tasks. */
     host.querySelector<HTMLButtonElement>(".task-actionbar .doc-action-primary")!.click();
     await settle();
-    const others = Array.from(host.querySelectorAll<HTMLInputElement>(".wid-people input[type=checkbox]"));
-    expect(others.length).toBe(2);
-    expect(others.every(box => !box.disabled)).toBe(true);
+    const assignee = [...host.querySelectorAll<HTMLButtonElement>(".wid-panel .tm-trigger")]
+      .find(button => button.querySelector(".tm-label")?.textContent === "Assignee")!;
+    expect(assignee.disabled).toBe(false);
+    assignee.click();
+    await settle();
+    const others = Array.from(host.querySelectorAll(".wid-panel .tm-menu [role=option]"));
+    expect(others.map(node => node.querySelector(".tm-opt-name")?.textContent)).toEqual(["Me", "Other Person"]);
   });
 });

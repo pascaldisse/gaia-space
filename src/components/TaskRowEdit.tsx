@@ -48,8 +48,35 @@ export function focusTaskRow(id: string, tries = 12): void {
   queueMicrotask(attempt);
 }
 
+/**
+ * ── ONE FORM FOR BOTH ACTS (product owner, 2026-08-29) ──────────────────────
+ *
+ *   *"Warum öffnet sich nicht eine Ansicht wie wenn ich einen Task BEARBEITE?"*
+ *
+ * WHY THIS COMPONENT IS THE SHARED CORE, and not a third "TaskForm" beside it:
+ * creating and editing a task ask for THE SAME FACTS. The drawer had its own field
+ * list — fewer fields, another order, another look — and the two lists drifted apart
+ * exactly as two lists do. So the editor that already carried the full list became the
+ * ONE list, and the drawer became what it really is: a shell (backdrop, panel, header)
+ * around it. Reuse rather than extraction, because extraction would have left two
+ * callers of a core plus two host components — one more place for a field to be
+ * forgotten. There is now exactly ONE JSX field list for tasks in this codebase.
+ *
+ * WHAT THE MODE MAY CHANGE — only what the acts themselves differ in:
+ *   create → no Done toggle, no Delete, no source anchor to keep; primary "Create task"
+ *   edit   → Done, Delete (handed in by the host), read-only form for non-owners; "Save"
+ * Everything else — fields, their order, their controls, their stylesheet — is shared
+ * by construction, because it is literally the same markup.
+ */
 export default function TaskRowEdit(props: {
+  /** "edit" changes a task that exists (update_todo); "create" writes a new one
+   *  (create_todo) from a blank draft (see `blankTask`). Default: edit. */
+  mode?: "edit" | "create";
   task: Todo;
+  /** Extra class on the form root, so a host (the drawer) can address it. */
+  formClass?: string;
+  /** Rendered just above the row of buttons — the host's error line. */
+  errorSlot?: JSX.Element;
   /** The surface fixes the project (project Tasks tab): no chooser is drawn. */
   fixedProject?: boolean;
   /** The markdown switch and the source bookmark: My tasks only, where they exist. */
@@ -86,8 +113,10 @@ export default function TaskRowEdit(props: {
     done: props.task.done,
   });
   const [busy, setBusy] = createSignal(false);
+  const creating = () => props.mode === "create";
   let firstField!: HTMLInputElement;
   let notesField!: HTMLTextAreaElement;
+  let root!: HTMLFormElement;
 
   // A refused member read is carried as a value: the editor must say the list could
   // not be loaded, never quietly offer "nobody" as if the project were empty.
@@ -124,22 +153,24 @@ export default function TaskRowEdit(props: {
   // ESCAPE CLOSES WITHOUT SAVING, from anywhere inside the editor, and is caught here
   // rather than on one field: a person who tabbed to the notes still means "get out".
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (!busy()) props.onCancel(); }
+    // An open meta popover owns Escape first: closing the whole form under a person who
+    // only wanted to dismiss the date picker loses everything they typed.
+    if (event.key === "Escape" && !root?.querySelector(".tm-menu")) {
+      event.preventDefault(); event.stopPropagation(); if (!busy()) props.onCancel();
+    }
   };
 
   const save = async () => {
     const values = form();
     if (busy()) return;
     if (!values.content.trim()) { props.onError("Task content cannot be empty."); return; }
+    if (creating() && !props.task.profile_id) { props.onError("Your account profile is still loading."); return; }
     if (Boolean(values.source_entity_type) !== Boolean(values.source_entity_id)) {
       props.onError("Source type and source ID must be supplied together."); return;
     }
     setBusy(true);
     try {
-      // The original is spread FIRST: identity and every field this form does not show
-      // (id, profile_id, and the source anchor where it is not offered) survive intact.
-      const saved = await personalApi.updateTodo({
-        ...props.task,
+      const written = {
         content: values.content.trim(),
         notes: values.notes.trim() || null,
         due_date: values.due_date || null,
@@ -147,6 +178,19 @@ export default function TaskRowEdit(props: {
         assignee_ids: values.assignee_ids,
         content_kind: values.content_kind,
         category: values.category || null,
+      };
+      if (creating()) {
+        // `props.task` is the blank draft: it carries who the author is and any project
+        // the surface already decided. Identity is the server's to mint, so no id goes out.
+        const { id: _drop, ...draft } = props.task;
+        props.onSaved(await personalApi.createTodo({ ...draft, ...written, done: false }));
+        return;
+      }
+      // The original is spread FIRST: identity and every field this form does not show
+      // (id, profile_id, and the source anchor where it is not offered) survive intact.
+      const saved = await personalApi.updateTodo({
+        ...props.task,
+        ...written,
         done: values.done,
         ...(props.advanced
           ? { source_entity_type: values.source_entity_type || null, source_entity_id: values.source_entity_id || null }
@@ -168,8 +212,11 @@ export default function TaskRowEdit(props: {
     finally { setBusy(false); }
   };
 
-  return <div class="task-edit" onKeyDown={onKeyDown}>
-    <input class="composer-title" ref={firstField} aria-label="Task title" value={form().content}
+  return <form class="task-edit" classList={{ [props.formClass ?? ""]: Boolean(props.formClass) }}
+    ref={root} onKeyDown={onKeyDown}
+    onSubmit={event => { event.preventDefault(); if (props.canEdit) void save(); }}>
+    <input class="composer-title" ref={firstField} aria-label="Task title"
+      placeholder={creating() ? "What needs doing?" : undefined} value={form().content}
       readOnly={!props.canEdit} disabled={!props.canEdit}
       onInput={event => patch({ content: event.currentTarget.value })}
       /* ENTER ON THE TITLE SAVES: the one-key exit for the change people actually
@@ -179,11 +226,25 @@ export default function TaskRowEdit(props: {
     <Show when={props.canEdit} fallback={
       <p class="task-edit-readonly" role="note">Only {props.ownerName} can change this task{props.canComplete ? " — you can still tick it done." : "."}</p>
     }>
+      {/* FIELD ORDER IS THE ORDER A PERSON DECIDES IN (product owner, 2026-08-29):
+          title · description · due date · project · assignees · category. What the work
+          IS comes first, WHEN it is due next, WHERE it lives and WHO carries it after,
+          and the optional kind last. The description was below the meta row before,
+          which put three choosers between a task's name and what it is about. */}
+      <div class="todo-field todo-field-notes">
+        <div class="task-edit-field-head">
+          <span class="field-label">Description</span>
+        </div>
+        <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task description" placeholder="A line on what this is about"
+          value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
+      </div>
       <div class="composer-meta tm-row">
+        <DueDateControl value={form().due_date} onChange={iso => patch({ due_date: iso })} />
+        {/* THE CONTEXT IS INHERITED, NEVER ASKED: on a project surface the project is a
+            fact (`fixedProject`), so no chooser is drawn — in either mode. */}
         <Show when={!props.fixedProject}>
           <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject} />
         </Show>
-        <DueDateControl value={form().due_date} onChange={iso => patch({ due_date: iso })} />
         <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee} nameOf={nameOf}
           disabled={!form().project_id} disabledReason="Select a project before assigning members"
           emptyNote={membersFailed() ? `The project's members could not be loaded: ${membersFailed()}` : "This project has no members available for assignment."} />
@@ -212,13 +273,6 @@ export default function TaskRowEdit(props: {
           still saved, and the tile still renders a title stored as markdown as
           markdown — so tasks written before today keep reading exactly as they did.
           Only the way to CHANGE it has been withdrawn. */}
-      <div class="todo-field todo-field-notes">
-        <div class="task-edit-field-head">
-          <span class="field-label" id={`desc-${props.task.id}`}>Description</span>
-        </div>
-        <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task description" placeholder="A line on what this is about"
-          value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
-      </div>
       {/* The source anchor is NOT hand-editable, and it never should have been.
             It is set by the act that creates the work — "Create task" on a message
             writes it — and it is READ back as a link on the row (SourceLink). Two raw
@@ -231,6 +285,7 @@ export default function TaskRowEdit(props: {
         the state of the work, the act that destroys it, then leave-or-keep. Done was a
         loose checkbox floating above the buttons and Delete hung in a strip BELOW the
         card, outside its border — three decisions in three unrelated places. */}
+    {props.errorSlot}
     <div class="composer-actions task-edit-actions">
       {/* A BARE CHECKBOX IS NOT A PEER OF Save AND Delete. Ticking a task off is one of
           the two things anybody comes to this editor to do, and it sat here as the
@@ -254,8 +309,20 @@ export default function TaskRowEdit(props: {
       <span class="task-edit-spacer" />
       <button type="button" class="ghost" onClick={() => props.onCancel()} disabled={busy()}>Cancel</button>
       <Show when={props.canEdit}>
-        <button type="button" class="primary composer-submit" onClick={() => void save()} disabled={busy() || !form().content.trim()}>Save</button>
+        {/* type=submit, so the host's <form> gesture and this button are one act. */}
+        <button type="submit" class="primary composer-submit" disabled={busy() || !form().content.trim()}>
+          {creating() ? (busy() ? "Creating…" : "Create task") : "Save"}
+        </button>
       </Show>
     </div>
-  </div>;
+  </form>;
 }
+
+/** The blank a create opens on: everything the form does not ask for, decided by the
+ *  surface. It is a `Todo` so the ONE form can read it without a second shape. */
+export const blankTask = (authorId: string, projectId?: string): Todo => ({
+  id: "", profile_id: authorId, content: "", notes: "", due_date: null,
+  project_id: projectId || null, done: false,
+  source_entity_type: null, source_entity_id: null,
+  assignee_ids: [], content_kind: "text", category: null,
+});
