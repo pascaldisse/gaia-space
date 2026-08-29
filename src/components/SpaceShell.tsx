@@ -6,6 +6,7 @@ import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
 import NewChannelDialog from "./NewChannelDialog";
 import ConfirmDialog from "./ConfirmDialog";
+import PromptDialog from "./PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
@@ -184,8 +185,45 @@ export default function SpaceShell(props: {
   const [pendingChannel, setPendingChannel] = createSignal<ChannelSummary | null>(null);
   const [deletingChannel, setDeletingChannel] = createSignal(false);
   const [channelError, setChannelError] = createSignal("");
+  /* RENAMING A CONVERSATION. A channel's name is the only thing most people ever
+     see of it, and until now it could be set once (at creation) and never corrected.
+     It is asked in the same dialog a folder rename uses — the tile/row itself never
+     turns into a bare input. Only NAMED channels: a direct message has no name of
+     its own, it is the people in it. */
+  const [renamingChannel, setRenamingChannel] = createSignal<ChannelSummary | null>(null);
+  const [channelName, setChannelName] = createSignal("");
+  const [renamingBusy, setRenamingBusy] = createSignal(false);
+  const startRenameChannel = (channel: ChannelSummary) => {
+    setChannelName(channel.name ?? "");
+    setRenamingChannel(channel);
+  };
+  const saveChannelName = async () => {
+    const summary = renamingChannel();
+    const name = channelName().trim();
+    if (!summary || !name || name === summary.name) {
+      setRenamingChannel(null);
+      return;
+    }
+    setRenamingBusy(true);
+    setChannelError("");
+    try {
+      const channel = await chatApi.getChannel(summary.id);
+      if (!channel) throw new Error("Channel not found");
+      await chatApi.updateChannel({ ...channel, name });
+      await refetchChannels();
+      setRenamingChannel(null);
+    } catch (reason) {
+      // A refusal (no right to manage this channel) is shown, never swallowed.
+      setChannelError(String(reason));
+      setRenamingChannel(null);
+    } finally {
+      setRenamingBusy(false);
+    }
+  };
+
   const channelItems = (channel: ChannelSummary): ContextMenuItem[] => [
     { label: "Open", onSelect: () => navigate({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }) },
+    ...(channel.name ? [{ label: "Rename…", onSelect: () => startRenameChannel(channel) }] : []),
     { label: "Delete conversation…", danger: true, onSelect: () => setPendingChannel(channel) },
   ];
   const openChannelMenu = (event: MouseEvent, channel: ChannelSummary) => {
@@ -435,6 +473,18 @@ export default function SpaceShell(props: {
       <Show when={channelMenu()}>
         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
       </Show>
+      <PromptDialog
+        open={!!renamingChannel()}
+        title="Rename conversation"
+        label="Channel name"
+        value={channelName()}
+        setValue={setChannelName}
+        confirmLabel="Save name"
+        busy={renamingBusy()}
+        onConfirm={() => void saveChannelName()}
+        onCancel={() => setRenamingChannel(null)}
+      />
+
       <ConfirmDialog
         open={!!pendingChannel()}
         title="Delete conversation?"

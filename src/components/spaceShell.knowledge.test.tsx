@@ -193,3 +193,82 @@ describe("what the sidebar accepts", () => {
     expect((updates[0].channel as Record<string, unknown>).project_id).toBe("p1");
   });
 });
+
+// A CHANNEL'S NAME IS THE ONLY THING MOST PEOPLE SEE OF IT, and until now it could be
+// set once and never corrected. Renaming is ASKED in the shared dialog — the row never
+// becomes a bare input — and a direct message is not offered it: a DM has no name of
+// its own, it is the people in it.
+describe("renaming a conversation", () => {
+  const serveChannels = (updates: Record<string, any>[]) => {
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "update_channel") {
+        updates.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_channels_with_meta: [
+          { id: "c1", name: "genral", project_id: null, unread_count: 0, archived: false, last_message_at: 2, content_type: "text" },
+          { id: "dm1", name: null, project_id: null, unread_count: 0, archived: false, last_message_at: 1, content_type: "dm" },
+        ],
+        get_channel: { id: "c1", name: "genral", project_id: null, archived: false, content_type: "text" },
+        list_projects: [],
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+  };
+
+  const mountShell = async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    registerViews(["Chat", "Documents", "Projects"]);
+    setAvailableViews(null);
+    window.history.replaceState({}, "", "/chat");
+    dispose = render(
+      () => (
+        <SpaceShell views={[{ name: "Chat", icon: "chat" }]} active="Chat" onOpenSearch={() => {}}>
+          <div />
+        </SpaceShell>
+      ),
+      host,
+    );
+    navigate({ view: "Chat" });
+    await settle();
+    return host;
+  };
+
+  test("the row's menu renames it through the dialog, and a DM is not offered it", async () => {
+    setProfileId("me");
+    const updates: Record<string, any>[] = [];
+    serveChannels(updates);
+    const host = await mountShell();
+
+    const row = [...host.querySelectorAll(".channel")].find((a) => a.textContent?.includes("genral")) as HTMLElement;
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 }));
+    await settle();
+    const entries = () => [...document.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent);
+    expect(entries()).toEqual(["Open", "Rename…", "Delete conversation…"]);
+
+    ([...document.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent === "Rename…") as HTMLButtonElement).click();
+    await settle();
+
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    const field = dialog.querySelector("input.confirm-input") as HTMLInputElement;
+    // The current name is offered for correction, not an empty box.
+    expect(field.value).toBe("genral");
+    field.value = "general";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    (dialog.querySelector("button.confirm-primary") as HTMLButtonElement).click();
+    await settle();
+
+    expect(updates.length).toBe(1);
+    expect((updates[0].channel as Record<string, unknown>).name).toBe("general");
+    expect((updates[0].channel as Record<string, unknown>).id).toBe("c1");
+
+    // A direct message carries no name of its own.
+    const dm = [...host.querySelectorAll(".channel")].find((a) => !a.textContent?.includes("genral")) as HTMLElement;
+    dm.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 }));
+    await settle();
+    expect(entries()).not.toContain("Rename…");
+  });
+});
