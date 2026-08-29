@@ -551,3 +551,18 @@
   letter-spacing: normal;
   text-transform: none;
 }
+
+
+/* WHO IS COMING, in the day composer. Same shape as the meeting drawer's list: a
+   column of real checkboxes, scrollable when the organisation grows, so choosing
+   people never pushes the create button off the panel. */
+.cal-people-field { display: grid; gap: 6px; border: 0; padding: 0; margin: 0; }
+.cal-people-field legend { padding: 0; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.cal-people {
+  display: grid; gap: 2px; max-height: 168px; overflow: auto;
+  padding: 6px; border: 1px solid var(--line, #e5ddd3); border-radius: 11px;
+  background: var(--paper, #fff);
+}
+.cal-person { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; font-size: 13px; }
+.cal-person:hover { background: var(--wash, #faf8f4); }
+.cal-person input { margin: 0; }

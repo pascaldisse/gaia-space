@@ -328,3 +328,75 @@ describe("the calendar's meeting detail carries the way into the meeting", () =>
     expect([...host.querySelectorAll("button, a")].some((element) => element.textContent?.trim() === "Join")).toBe(true);
   });
 });
+
+// WHO IS COMING IS ASKED WHILE THE MEETING IS BEING MADE. The day composer could set
+// a time, a place and who may SEE the meeting, but never who is IN it — the people had
+// to be added afterwards, in another view. They are gathered here and invited the
+// moment the meeting exists, because the invite command needs an id create() mints.
+describe("the day composer invites people", () => {
+  const openComposer = async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = {
+      calendar_aggregate: { ok: true, value: [] },
+      list_profiles: { ok: true, value: [
+        { id: "pa", username: "alice", display_name: "Alice", email: null, archived: false },
+        { id: "pb", username: "bob", display_name: "Bob", email: null, archived: false },
+        { id: "pc", username: "carol", display_name: "Carol", email: null, archived: false },
+      ] },
+      create_meeting: { ok: true, value: null },
+      attach_meeting_channel: { ok: true, value: "channel-1" },
+      invite_meeting_participant: { ok: true, value: null },
+    };
+    const host = mount();
+    await settle();
+    (host.querySelector(".cal-side-add") as HTMLButtonElement).click();
+    await settle();
+    return host;
+  };
+
+  test("other people are offered, the organizer is not, and each one is invited on create", async () => {
+    const host = await openComposer();
+    const people = [...host.querySelectorAll(".cal-person")].map((label) => label.textContent?.trim());
+    // The acting profile is the organizer; inviting yourself is not a choice.
+    expect(people).toEqual(["Bob", "Carol"]);
+
+    const boxes = host.querySelectorAll<HTMLInputElement>(".cal-person input");
+    boxes[0].click();
+    boxes[1].click();
+    await settle();
+    expect(host.querySelector(".cal-people-field .hint")?.textContent).toContain("2 invited");
+
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    (host.querySelector('form[aria-label="New meeting"]') as HTMLFormElement)
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+
+    const invites = calls.filter((entry) => entry.cmd === "invite_meeting_participant");
+    expect(invites.length).toBe(2);
+    expect(invites.map((entry) => (entry.args as Record<string, unknown>).profileId).sort()).toEqual(["pb", "pc"]);
+    // The meeting is made first: an invite needs the id create() mints.
+    expect(calls.findIndex((entry) => entry.cmd === "create_meeting"))
+      .toBeLessThan(calls.findIndex((entry) => entry.cmd === "invite_meeting_participant"));
+  });
+
+  test("a link that is not a web address stops the create, and says why", async () => {
+    const host = await openComposer();
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    const link = host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement;
+    link.value = "meet.google.com/bad";
+    link.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    (host.querySelector('form[aria-label="New meeting"]') as HTMLFormElement)
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(host.querySelector(".calendar-error")?.textContent).toContain("http");
+    expect(calls.some((entry) => entry.cmd === "create_meeting")).toBe(false);
+  });
+});

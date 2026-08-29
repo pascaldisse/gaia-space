@@ -2,7 +2,7 @@ import { createMemo, createResource, createSignal, createUniqueId, onCleanup, on
 import { personalApi, type CalendarItem } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { calendarsApi } from "../api/calendar-feeds";
-import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import { meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import CallPanel from "./CallPanel";
 import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
@@ -89,7 +89,7 @@ const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
 const [selected,setSelected] = createSignal<CalendarItem>();
 const [composerDay,setComposerDay] = createSignal<Date>();
 const [quickKind,setQuickKind] = createSignal<QuickKind>("meeting");
-const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"", visibility:"participants" as Meeting["visibility"], modification_preference:"organizer-only" as Meeting["modification_preference"] });
+const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"", meeting_url:"", visibility:"participants" as Meeting["visibility"], modification_preference:"organizer-only" as Meeting["modification_preference"] });
 const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
@@ -99,6 +99,18 @@ const [targetLocation,setTargetLocation] = createSignal("");
 const [notice,setNotice] = createSignal("");
 const [viewOptionsOpen,setViewOptionsOpen] = createSignal(false);
 const [invitee,setInvitee] = createSignal("");
+/* ── WHO IS COMING, ASKED WHILE THE MEETING IS BEING MADE ────────────────────
+   The day composer could set a time, a place and who may SEE the meeting, but
+   never who is IN it — the invite command needs a meeting id, so the drawer in
+   Meetings collected people and invited them after create. This form did not
+   collect anybody at all. It does now, the same way: names are gathered here and
+   invited the moment the meeting exists. `visibility` is untouched — who may see
+   it and who is coming are two facts, and neither explains the other. */
+const [quickInvitees,setQuickInvitees] = createSignal<string[]>([]);
+const [people] = createResource(() => platformApi.profiles().catch(() => []));
+const invitable = () => (people() ?? []).filter(person => !person.archived && person.id !== (profileId() || ""));
+const personName = (person:{display_name?:string|null;username?:string|null;id:string}) => person.display_name || person.username || person.id;
+const toggleQuickInvitee = (id:string) => setQuickInvitees(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
@@ -148,7 +160,8 @@ const locationOptions = createMemo(() => [...new Set((meetings() ?? []).map(meet
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
 const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setSelected(undefined); setDraft(undefined); setSelectedDay(day); setComposerDay(day); setQuickKind(kind); setNotice("");
-  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"", visibility:"participants", modification_preference:"organizer-only" });
+  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"", meeting_url:"", visibility:"participants", modification_preference:"organizer-only" });
+  setQuickInvitees([]);
   setTaskForm({ title:"", day:dateKey(day) });
   setDeadlineForm({ project_id:"", day:dateKey(day) });
 };
@@ -158,13 +171,24 @@ const create = async (event:SubmitEvent) => {
 event.preventDefault();
 setError(""); setNotice("");
 try {
-const f=form(); const invalid=meetingDraftError(f);
+const f=form(); const invalid=meetingDraftError(f) || meetingLinkError(f.meeting_url);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
+const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:f.meeting_url.trim()||null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
 const channel_id = await meetingsApi.attachChannel(meeting.id);
+/* The invite needs the id create() just minted. A refusal is reported and does not
+   pretend the meeting failed — it exists, and it says who could not be added. */
+const invited:string[] = [];
+const refused:string[] = [];
+for (const id of quickInvitees()) {
+  try { await meetingsApi.invite(meeting.id, id); invited.push(id); }
+  catch { refused.push(id); }
+}
+setQuickInvitees([]);
+if (invited.length) setNotice(`Meeting created and ${invited.length} person(s) invited.`);
+if (refused.length) setError(`Could not invite ${refused.length} person(s); open the meeting to try again.`);
 const created = { ...meeting, channel_id };
 setComposerDay(undefined); setDraft(created); setSelected({id:created.id,source_id:created.id,kind:"meeting",title:created.title,starts_at,ends_at,project_id:null,calendar_id:null,date:null});
 reloadMeetings(); refetch();
@@ -343,6 +367,20 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label>
+{/* A meeting happens on somebody else's service; the address is part of making it,
+    not an afterthought to be added later. */}
+<label>Meeting link<input placeholder="https://meet.google.com/…" aria-label="Meeting link" value={form().meeting_url} onInput={e=>setForm({...form(),meeting_url:e.currentTarget.value})}/></label>
+<fieldset class="cal-people-field">
+<legend>Participants</legend>
+<Show when={invitable().length} fallback={<p class="hint">No other profiles to invite yet.</p>}>
+<div class="cal-people">
+<For each={invitable()}>{person=>
+  <label class="cal-person"><input type="checkbox" checked={quickInvitees().includes(person.id)} onChange={()=>toggleQuickInvitee(person.id)}/>{personName(person)}</label>
+}</For>
+</div>
+</Show>
+<p class="hint"><Show when={quickInvitees().length} fallback="Nobody invited yet — you can also invite people after creating.">{quickInvitees().length} invited.</Show></p>
+</fieldset>
 <div class="detail-actions"><button class="primary">Create meeting</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
 </Show>
