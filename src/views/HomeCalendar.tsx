@@ -1,4 +1,5 @@
 import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi, type CalendarItem, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
@@ -195,6 +196,10 @@ export default function HomeCalendar() {
         </>
       }
     />
+
+    {/* What the grid below actually carries — the two facts that bind people to a
+        moment. Tasks live on their project's calendar and in "My tasks" below. */}
+    <ContentHead icon="calendar" title="Your month" line="Meetings and project deadlines you are part of. Pick a day to see it in full." />
 
     <Show when={items.error}><p class="planning-error" role="alert">Dates could not be loaded: {String(items.error)}</p></Show>
     <Show when={dashboard.error}><p class="planning-error" role="alert">Tasks could not be loaded: {String(dashboard.error)}</p></Show>

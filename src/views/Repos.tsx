@@ -9,6 +9,7 @@ import EmptyState from "../components/EmptyState";
 import { GhostPill, IconButton } from "../components/controls";
 import { Icon } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import "./devCards.css";
 import { UI_LOCALE } from "../calendar";
 
@@ -138,6 +139,8 @@ export default function App() {
         <nav class="page-actionbar" aria-label="Repository actions">
           <button class="primary" type="button" onClick={addRepo}>Open a repository…</button>
         </nav>
+        {/* What this surface carries, above the things themselves. */}
+        <ContentHead icon="repo" title="Repositories" line="Local git checkouts this machine knows about." />
       </Show>
 
       <Show when={error()}>

@@ -15,6 +15,7 @@ import { parseMarkdown } from "../markdownLite";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
 import { Icon } from "../components/Icon";
+import ContentHead from "../components/ContentHead";
 
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
@@ -326,13 +327,7 @@ export default function Todo() {
       </Show>
 
       <Show when={openCount() > 0}>
-        <div class="task-board-head">
-          <span class="task-board-icon" aria-hidden="true"><Icon name="alert" size={24} /></span>
-          <div class="task-board-headtext">
-            <h2>Open work</h2>
-            <p>Open a task to edit it, or drag it onto a project in the sidebar to file it there.</p>
-          </div>
-        </div>
+        <ContentHead icon="alert" title="Open work" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
       </Show>
 
       <For each={[

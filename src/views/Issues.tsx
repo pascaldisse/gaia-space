@@ -7,6 +7,7 @@ import IssueCreateDrawer from "../components/IssueCreateDrawer";
 import { humanError, projectId as sessionProject, setProjectId } from "../session";
 import { linkEntity, linkProps, navigate, route, useDeepLink } from "../router";
 import PageHeader, { Chip, useEmbedded } from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { ControlRow, GhostPill, PillMenu, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
@@ -189,6 +190,15 @@ const createStatus = async () => {
         <ProjectPicker labelHidden />
       </span>
     </nav>
+    {/* Which section of Development you are in, and what it carries. Bugs are the
+        same tickets narrowed to one tag, so it says that instead of pretending to be
+        a different store. */}
+    <ContentHead
+      icon="target"
+      title={props.filterTagName === "bug" ? "Bugs" : "Tickets"}
+      line={props.filterTagName === "bug"
+        ? "Tickets tagged bug — the same store, narrowed to what is broken."
+        : "Work with a status: every bug, feature and chore this project tracks."} />
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     {/* Statuses used to be a permanent column; it is the same editor, on demand. */}
     <Show when={statusEditorOpen()}>

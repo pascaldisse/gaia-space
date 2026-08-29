@@ -1,0 +1,31 @@
+/* The measurements are Knowledge's own (`documents-library-head` / `task-board-head`),
+   so the three surfaces that had this shape first and every surface that gets it now
+   cannot drift apart. Structure only — colour comes from tokens both themes define. */
+.content-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--dk-space-lg, 14px);
+  margin: 0 0 var(--dk-space-lg, 14px);
+  min-width: 0;
+}
+.content-head-icon {
+  display: grid; place-items: center;
+  width: 3rem; height: 3rem;
+  border-radius: var(--dk-radius-xl, 16px);
+  border: var(--dk-hairline, 1px) solid var(--dk-field-border, var(--line, #e5ddd3));
+  background: var(--surface, var(--paper, #fff));
+  color: var(--accent-text, var(--teal-ink, #0a7264));
+}
+.content-head-text { display: grid; gap: 0.15rem; min-width: 0; }
+.content-head-text h2 {
+  margin: 0;
+  color: var(--dk-title-ink, var(--ink, #1f2328));
+  font-size: var(--dk-fs-xl, 17px);
+  font-weight: 650;
+}
+.content-head-text p {
+  margin: 0;
+  color: var(--text-muted, var(--muted, #68717d));
+  line-height: 1.5;
+}

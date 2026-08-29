@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { personalApi, type Notification } from "../api/personal";
 import { Icon, type IconName } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import SourceLink from "../components/SourceLink";
@@ -101,6 +102,23 @@ export default function Inbox() {
   const visible = createMemo(() => filterAttention(worklist(), filter()));
   const selectedFilter = createMemo(() => ACTIVITY_FILTERS.find((entry) => entry.id === filter()) ?? ACTIVITY_FILTERS[0]);
   const worklistTitle = () => filter() === "all" ? "Needs you" : selectedFilter().label;
+  /* ONE SENTENCE PER FILTER, because each one answers a different question. A head
+     that repeated "Inbox" under every pill would tell a reader nothing about which
+     of the six lists they are looking at. */
+  const filterIcon = (): IconName =>
+    filter() === "mentions" ? "chat"
+    : filter() === "messages" ? "chat"
+    : filter() === "assigned" ? "check"
+    : filter() === "reviews" ? "review"
+    : filter() === "updates" ? "org"
+    : "inbox";
+  const filterLine = () =>
+    filter() === "mentions" ? "Where somebody named you, and the threads you are in."
+    : filter() === "messages" ? "Conversations with something unread in them."
+    : filter() === "assigned" ? "Tasks and tickets other people put on you."
+    : filter() === "reviews" ? "Changes waiting for your word."
+    : filter() === "updates" ? "What the organisation did, as a stream — not a to-do list."
+    : "Everything waiting for you, newest first — and the organisation's own stream below it.";
   const worklistMeta = () => filter() === "all"
     ? (attentionCount() ? `${attentionCount()} waiting` : "nothing waiting")
     : (visible().length ? `${visible().length} waiting` : "nothing waiting");
@@ -228,6 +246,8 @@ export default function Inbox() {
           </button>
         </nav>
       </Show>
+
+      <ContentHead icon={filterIcon()} title={worklistTitle()} line={filterLine()} />
 
       <Show when={error()}>
         <p class="inbox-error" role="alert">

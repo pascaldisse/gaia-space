@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
+import ContentHead from "../components/ContentHead";
 import { PillMenu } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
@@ -457,6 +458,14 @@ export default function Projects() {
       </form>
       </section>
     </Show>
+    {/* What the grid below carries, and what a card is good for. */}
+    <ContentHead
+      icon="layers"
+      title={portfolioFilter() === "attention" ? "Needs attention" : portfolioFilter() === "due" ? "Due soon" : "All projects"}
+      line={portfolioFilter() === "attention" ? "Projects with open work, unread messages or a deadline in sight."
+        : portfolioFilter() === "due" ? "Projects whose deadline is near or already past."
+        : "Open a project to work in it — its chats, tasks, calendar and knowledge live inside."} />
+
     <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 
 

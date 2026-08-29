@@ -1,6 +1,7 @@
 import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, For, Match, Show, Switch } from "solid-js";
 import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
 import EmptyState from "../components/EmptyState";
@@ -179,6 +180,8 @@ async function togglePinned(v: PackageVersion) {
   return (
     <section class="packages-view">
       <PageHeader icon="package" title="Packages" subline="Publish and browse package versions" />
+      {/* What this surface carries, above the things themselves. */}
+      <ContentHead icon="package" title="Packages" line="Package repositories and the versions published into them." />
 
       <Show when={error()}>
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>

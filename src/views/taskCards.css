@@ -17,17 +17,8 @@
   margin-bottom: var(--view-head-gap, 22px);
 }
 .task-board { width: 100%; display: grid; gap: var(--dk-space-sm); }
-.task-board > .task-board-head { margin-bottom: var(--dk-space-sm); }
+.task-board > .content-head { margin-bottom: var(--dk-space-sm); }
 
-.task-board-head { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--dk-space-lg); }
-.task-board-icon {
-  display: grid; place-items: center; width: 3rem; height: 3rem;
-  border-radius: var(--dk-radius-xl); border: var(--dk-hairline) solid var(--dk-field-border);
-  background: var(--surface); color: var(--accent-text);
-}
-.task-board-headtext { display: grid; gap: 0.15rem; min-width: 0; }
-.task-board-headtext h2 { margin: 0; color: var(--dk-title-ink); font-size: var(--dk-fs-xl); font-weight: 650; }
-.task-board-headtext p { margin: 0; color: var(--text-muted); line-height: 1.5; }
 
 .task-group-heading {
   display: flex; align-items: center; gap: var(--dk-space-sm);

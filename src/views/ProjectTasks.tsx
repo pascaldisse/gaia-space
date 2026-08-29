@@ -11,6 +11,7 @@ import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit"
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import { Icon } from "../components/Icon";
+import ContentHead from "../components/ContentHead";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { takeWorkIntent } from "./workIntent";
 import "./Issues.css";
@@ -352,13 +353,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
           </div>
         </Show>
         <Show when={openTasks().length}>
-          <div class="task-board-head">
-            <span class="task-board-icon" aria-hidden="true"><Icon name="alert" size={24} /></span>
-            <div class="task-board-headtext">
-              <h2>Open work in this project</h2>
-              <p>Open a task to edit it, or drag it onto a project in the sidebar to move it there.</p>
-            </div>
-          </div>
+          <ContentHead icon="alert" title="Open work in this project" line="Open a task to edit it, or drag it onto a project in the sidebar to move it there." />
         </Show>
         <For each={[
           { key: "today", label: "Today", rows: todayList() },

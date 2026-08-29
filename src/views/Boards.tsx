@@ -5,6 +5,7 @@ import "./Boards.css";
 import { ProjectPicker } from "../components/Pickers";
 import IssueDetail from "./IssueDetail";
 import PageHeader, { useEmbedded } from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { GhostPill, PillMenu, PillSelect } from "../components/controls";
 import { Disclosure } from "../components/blocks";
 import EmptyState from "../components/EmptyState";
@@ -254,6 +255,8 @@ return <section class="planning-view boards-view" onClick={dismiss} onKeyDown={e
         </Show>
       </span>
     </nav>
+    {/* What this surface carries, above the things themselves. */}
+    <ContentHead icon="columns" title="Boards" line="Columns are ticket statuses: move a card and the ticket's status moves with it." />
 
     {/* Tier 2 — how this board is read: filters and display, one chip each. */}
     <Show when={board()}>

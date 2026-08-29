@@ -4,6 +4,7 @@ import { reviewApi, type Review } from "../api/review";
 import { projectId as sessionProject } from "../session";
 import { isViewAvailable, linkProps } from "../router";
 import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
@@ -92,6 +93,13 @@ export default function Development(): JSX.Element {
         <nav class="page-actionbar" aria-label="Development sections">
           <span class="actionbar-view-controls">{tabs()}</span>
         </nav>
+        {/* Which of the four sections you are in, and what it is for. */}
+        <ContentHead
+          icon={section() === "pull-requests" ? "review" : "package"}
+          title={section() === "pull-requests" ? "Pull requests" : "Releases"}
+          line={section() === "pull-requests"
+            ? "Merge requests on this project's repositories, newest first."
+            : "A release is a published version — nothing in this workspace records one yet."} />
       </Show>
 
       <Show when={section() === "pull-requests"}>

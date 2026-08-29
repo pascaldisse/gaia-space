@@ -1,6 +1,7 @@
 import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { Icon } from "../components/Icon";
 import "./devCards.css";
 import { createStore, produce } from "solid-js/store";
@@ -77,6 +78,8 @@ export default function Pipelines() {
           </span>
         </span>
       </nav>
+      {/* What this surface carries, above the things themselves. */}
+      <ContentHead icon="pipeline" title="Pipelines" line="Config-as-code automation: scripts you run by hand, and where they deploy." />
 
       <Show when={error()}>
         <div class="pipelines-error" onClick={() => setError(null)}>{error()}</div>

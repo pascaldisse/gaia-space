@@ -11,6 +11,7 @@ import EmptyState from "../components/EmptyState";
 import PageHeader, { Chip } from "../components/PageHeader";
 import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { Icon } from "../components/Icon";
+import ContentHead from "../components/ContentHead";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
 import "../components/TaskList.css";
@@ -266,13 +267,7 @@ export default function TeamTasks() {
             </div>
           </div>
         </Show>
-        <div class="task-board-head">
-          <span class="task-board-icon" aria-hidden="true"><Icon name="users" size={24} /></span>
-          <div class="task-board-headtext">
-            <h2>Who is on what</h2>
-            <p>Open a task to edit it, or drag it onto a project in the sidebar to file it there.</p>
-          </div>
-        </div>
+        <ContentHead icon="users" title="Who is on what" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
         <For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
           {/* The group IS a project, so its heading is the way into that project's
               own task surface — the same link this view has always carried. */}

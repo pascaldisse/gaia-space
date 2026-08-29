@@ -9,6 +9,7 @@ import {
   Show,
 } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect } from "../components/controls";
 import EmptyState from "../components/EmptyState";
@@ -592,6 +593,8 @@ async function removeExternalIssueLink(id: string) {
             </PillSelect>
           </span>
         </nav>
+        {/* What this surface carries, above the things themselves. */}
+        <ContentHead icon="review" title="Pull requests" line="Merge requests on this project's repositories, and what each one is waiting for." />
       </Show>
 
       <Show when={error()}>

@@ -1,5 +1,6 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
@@ -110,6 +111,8 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           </PillSelect>
         </span>
       </nav>
+      {/* What this surface carries, above the things themselves. */}
+      <ContentHead icon="repo" title="Dev environments" line="Cloud workspaces for this project: start one, let it hibernate, claim one from standby." />
 
       <Show when={error()}>
         <p class="error">{error()}</p>
