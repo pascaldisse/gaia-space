@@ -1,12 +1,13 @@
 /* Project cards: the whole card is the target, not the title text. */
 .project-cards { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.project-card { position: relative; display: grid; gap: 8px; padding: 15px 16px; border: 1px solid var(--surface-border); border-left: 3px solid var(--surface-border); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .14s ease, background .14s ease, transform .06s ease; }
+.project-card { position: relative; display: grid; gap: 12px; padding: 18px 20px; border: 1px solid var(--surface-border); border-left: 3px solid var(--surface-border); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .14s ease, background .14s ease, transform .06s ease; }
 .project-card:hover { border-color: var(--surface-border-hover); border-left-color: var(--accent); background: var(--surface-hover); }
 .project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .project-card.active { border-color: var(--accent); border-left-color: var(--accent); background: var(--surface-hover); }
 .project-card.archived { opacity: .55; }
 /* The head leaves room for the deadline pill that floats at the card's edge. */
-.project-card-head { display: flex; align-items: center; gap: 9px; padding-right: 7.5rem; }
+/* The head leaves room for the deadline pill that floats at the card's edge. */
+.project-card-head { display: flex; align-items: center; gap: 11px; padding-right: 8.5rem; min-height: 2.25rem; }
 /* The Knowledge tile, same measures and tokens as `.documents-library-type`
    (Documents.css). Structure, so both themes get it. */
 .project-card-icon {
@@ -25,7 +26,7 @@
 /* THE NOTE ALWAYS FITS. The view already cut it at a word boundary (DESCRIPTION_MAX);
    this clamp is the second guard, for the case a single unbroken word is longer than
    any limit — together they mean a card can never grow a third line of prose. */
-.project-card-note, .project-card > p { margin: 0; color: var(--text-muted); font-size: 13px; }
+.project-card-note, .project-card > p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .project-card-note {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; overflow-wrap: anywhere;
@@ -34,7 +35,8 @@
 /* THE DEADLINE PILL — the same shape and the same three bands as a task's `.task-due`
    (taskCards.css), because it is the same fact. It floats at the card's top-right so it
    can be pressed without following the card's link underneath it. */
-.project-card-edge { position: absolute; top: 15px; right: 16px; display: flex; align-items: center; }
+/* Level with the middle of the name row, not jammed into the corner above it. */
+.project-card-edge { position: absolute; top: 18px; right: 20px; display: flex; align-items: center; min-height: 2.25rem; }
 .project-due {
   display: inline-flex; align-items: center; padding: 0.15rem 0.5rem;
   border: 1px solid transparent; border-radius: 999px;
@@ -121,8 +123,12 @@
 /* ── cards ────────────────────────────────────────────────────────────────── */
 .theme-space-light .project-cards { gap: 14px; }
 .theme-space-light .project-card {
-  gap: 9px;
-  padding: 18px 20px;
+  /* CRAMPED WAS A RHYTHM PROBLEM, NOT A SIZE PROBLEM: name row, note and health line
+     sat 9px apart inside 18px of padding, so the card read as one dense block with a
+     margin around it. The rows now stand apart by the same step the rest of the
+     product uses between a title and its facts. */
+  gap: 14px;
+  padding: 20px 22px;
   border: 1px solid var(--line);
   border-left: 1px solid var(--line);
   border-radius: 20px;
@@ -141,7 +147,7 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1.5px var(--teal), 0 16px 36px rgba(31, 35, 40, .06);
 }
-.theme-space-light .project-card-head strong { font-size: 15.5px; font-weight: 710; letter-spacing: -.02em; color: var(--ink); }
+.theme-space-light .project-card-head strong { font-size: 16px; font-weight: 710; letter-spacing: -.02em; color: var(--ink); }
 .theme-space-light .project-card-head code { color: var(--quiet); font-size: 12px; font-weight: 620; letter-spacing: .04em; }
 .theme-space-light .project-card > p { color: var(--muted); font-size: 13px; }
 .theme-space-light .project-card .pf-open { color: var(--muted); font-size: 12.5px; }
@@ -209,3 +215,17 @@
 /* Archive sits apart from the two ways in — same row, not the same group. */
 .theme-space-light .project-card-aside { margin-left: auto; }
 .theme-space-light .project-card-foot .row-actions { display: flex; align-items: center; gap: 8px; width: 100%; }
+
+
+/* The health line is a row of facts, so it gets the same air between them as any
+   other row of pills in the product — not the 4px that made three chips read as one
+   striped block. */
+.project-health { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.theme-space-light .project-health .paper-pill { padding: 4px 10px; }
+
+
+/* THE ROWS INSIDE THE LINK NEED THE RHYTHM TOO. The card is a grid, but the three
+   things a person reads — name, note, health — live inside ONE anchor, so the card's
+   own gap never reached them: they stacked with the browser's default margins and the
+   card read as one dense block. */
+.project-open-link { display: grid; gap: 10px; text-decoration: none; color: inherit; }
