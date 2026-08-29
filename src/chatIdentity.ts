@@ -27,4 +27,19 @@ const actingProfileId = (): string | null => override() || profileId() || null;
 /** The raw override, for a picker that must show "no explicit choice" as such. */
 const actingOverride = override;
 
-export { actingProfileId, actingOverride, setActingProfileId };
+/**
+ * THE CHANNEL LIST IS READ IN ONE PLACE AND CHANGED IN ANOTHER.
+ *
+ * The shell's sidebar holds the channels as a resource; deleting or renaming one
+ * happens in the shell's own menu OR inside the channel's page. Without a shared
+ * cell the second case cannot reach the first: the row stayed in the list after the
+ * conversation was gone, until somebody reloaded the app. (It was the delete that
+ * looked broken; the delete was fine, the LIST was stale.)
+ *
+ * So every writer bumps this counter and every reader depends on it. It carries no
+ * data — a version, not a cache: the resource re-reads the truth from the backend.
+ */
+const [channelsVersion, setChannelsVersion] = createSignal(0);
+const bumpChannels = () => setChannelsVersion((value) => value + 1);
+
+export { actingProfileId, actingOverride, setActingProfileId, channelsVersion, bumpChannels };

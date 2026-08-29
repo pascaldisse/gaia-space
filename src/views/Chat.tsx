@@ -2,7 +2,7 @@ import { createResource, createSignal, createEffect, onCleanup, For, Show } from
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
 import { navLayout } from "../nav";
-import { actingProfileId, setActingProfileId } from "../chatIdentity";
+import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
 import { Icon } from "../components/Icon";
@@ -850,6 +850,9 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       setNewChannelName("");
       setDirectRecipientId("");
       refetchChannels();
+      // The shell's sidebar keeps its own read of the list — tell it to re-read, or a
+      // conversation created here exists everywhere except in the list beside it.
+      bumpChannels();
       setActiveChannelId(channel.id);
     } catch (e) {
       fail(e);

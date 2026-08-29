@@ -8,7 +8,7 @@ import NewChannelDialog from "./NewChannelDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import PromptDialog from "./PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
-import { actingProfileId as chatActingProfileId, setActingProfileId } from "../chatIdentity";
+import { actingProfileId as chatActingProfileId, bumpChannels, channelsVersion, setActingProfileId } from "../chatIdentity";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { personalApi } from "../api/personal";
 import { documentsApi } from "../api/documents";
@@ -160,8 +160,11 @@ export default function SpaceShell(props: {
   const actingPeople = () => (profiles() ?? []).filter((person) => !person.archived);
   const chatActing = () => chatActingProfileId() ?? actingProfileId() ?? "";
 
-  const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
-    id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([]),
+  /* Keyed on the version too: a channel deleted or renamed on ANOTHER surface bumps
+     it, and this list re-reads instead of showing a conversation that is gone. */
+  const [channels, { refetch: refetchChannels }] = createResource(
+    () => [actingProfileId(), channelsVersion()] as const,
+    ([id]) => (id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([])),
   );
   // projects() is lazy (auth must land first); ask once so group headers can resolve names.
   void reloadProjects().catch(() => undefined);
@@ -210,7 +213,7 @@ export default function SpaceShell(props: {
       const channel = await chatApi.getChannel(summary.id);
       if (!channel) throw new Error("Channel not found");
       await chatApi.updateChannel({ ...channel, name });
-      await refetchChannels();
+      bumpChannels();
       setRenamingChannel(null);
     } catch (reason) {
       // A refusal (no right to manage this channel) is shown, never swallowed.
@@ -239,6 +242,8 @@ export default function SpaceShell(props: {
     try {
       await chatApi.deleteChannel(channel.id, actingProfileId() ?? "");
       setPendingChannel(null);
+      // The list must forget it too, or the delete only looks broken.
+      bumpChannels();
       // Standing in a channel that no longer exists is not a place: leave it.
       if (activeChannelId() === channel.id) navigate({ view: "Chat" });
     } catch (reason) {
@@ -831,7 +836,12 @@ export default function SpaceShell(props: {
           projectId={newChannelFor() || undefined}
           projectLabel={groups().find((group) => group.id === newChannelFor())?.label}
           onClose={() => setNewChannelFor(undefined)}
-          onCreated={(id) => linkEntity("channel", id)}
+          onCreated={(id) => {
+            // The list is this shell's own read: a conversation created in the dialog
+            // is invisible here until that read happens again.
+            bumpChannels();
+            linkEntity("channel", id);
+          }}
         />
       </Show>
 

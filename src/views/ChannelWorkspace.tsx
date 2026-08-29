@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
+import { bumpChannels } from "../chatIdentity";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
@@ -176,6 +177,8 @@ export default function ChannelWorkspace(): JSX.Element {
     try {
       await chatApi.deleteChannel(id, actingProfileId());
       setConfirmDelete(false);
+      // The shell's sidebar reads its own copy of the list: tell it to re-read.
+      bumpChannels();
       // Nothing to return to inside a channel that no longer exists.
       navigate({ view: "Chat" });
     } catch (reason) {

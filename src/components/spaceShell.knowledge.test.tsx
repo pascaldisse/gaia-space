@@ -272,3 +272,61 @@ describe("renaming a conversation", () => {
     expect(entries()).not.toContain("Rename…");
   });
 });
+
+
+// A DELETE THAT LEAVES THE ROW IN THE LIST LOOKS LIKE A DELETE THAT DID NOT HAPPEN.
+// The sidebar holds the channels as its own read; deleting one — here or inside the
+// channel's own page — has to make that read happen again, or the conversation is gone
+// everywhere except on screen.
+describe("the sidebar forgets a deleted conversation", () => {
+  test("after the delete the list is read again, without the deleted row", async () => {
+    setProfileId("me");
+    let channels = [
+      { id: "c1", name: "general", project_id: null, unread_count: 0, archived: false, last_message_at: 2, content_type: "text" },
+      { id: "c2", name: "loose talk", project_id: null, unread_count: 0, archived: false, last_message_at: 1, content_type: "text" },
+    ];
+    let reads = 0;
+    globalThis.fetch = (async (url: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "list_channels_with_meta") reads += 1;
+      if (cmd === "delete_channel") {
+        channels = channels.filter((channel) => channel.id !== "c2");
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = { list_channels_with_meta: channels, list_projects: [] };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    registerViews(["Chat", "Documents", "Projects"]);
+    setAvailableViews(null);
+    window.history.replaceState({}, "", "/chat");
+    dispose = render(
+      () => (
+        <SpaceShell views={[{ name: "Chat", icon: "chat" }]} active="Chat" onOpenSearch={() => {}}>
+          <div />
+        </SpaceShell>
+      ),
+      host,
+    );
+    navigate({ view: "Chat" });
+    await settle();
+    expect([...host.querySelectorAll(".channel")].some((row) => row.textContent?.includes("loose talk"))).toBe(true);
+    const readsBefore = reads;
+
+    const row = [...host.querySelectorAll(".channel")].find((a) => a.textContent?.includes("loose talk")) as HTMLElement;
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 }));
+    await settle();
+    ([...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === "Delete conversation…") as HTMLButtonElement).click();
+    await settle();
+    (document.querySelector("button.confirm-danger") as HTMLButtonElement).click();
+    await settle();
+
+    // The list was read again …
+    expect(reads).toBeGreaterThan(readsBefore);
+    // … and the conversation is gone from it.
+    expect([...host.querySelectorAll(".channel")].some((r) => r.textContent?.includes("loose talk"))).toBe(false);
+    expect([...host.querySelectorAll(".channel")].some((r) => r.textContent?.includes("general"))).toBe(true);
+  });
+});
