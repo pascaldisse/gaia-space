@@ -233,3 +233,49 @@
   align-items: center;
   gap: var(--dk-space-sm, 8px);
 }
+
+
+/* ── ONE SIZE FOR EVERY CONTROL IN THE ROW ───────────────────────────────────
+   The button rule (spaceTheme.css `--btn-*`) only reached controls that opted in,
+   so one row could hold six heights at once — measured in the running app:
+   34 · 35 · 36 · 37 · 39 · 40 px, and two type sizes (13 / 13.5). A row of controls
+   that do the same kind of work must be one row, not a staircase.
+
+   SIZE is enforced here for everything in an action row; SHAPE is not. A pill is
+   still a pill and a button still a button — that difference carries meaning (a
+   filter vs. an act), the height difference carried none. */
+/* A picker is a `<span class="pill-select">` wrapping the real `<select>`; the
+   wrapper must take the height too, or the row shows a 34px control in a 37px line. */
+/* The pill primitives take the row's height from the one size system (see
+   controls.css: `--pillctl-h` now reads `--btn-height`), so nothing is restated
+   here — only the wrapper needs telling, because it is not a control itself. */
+.page-actionbar :is(.pill-select, .pill-menu),
+.documents-actionbar :is(.pill-select, .pill-menu),
+.container-tabs :is(.pill-select, .pill-menu) { min-height: var(--btn-height, 37px); }
+.page-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.documents-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.task-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.container-tabs :is(button, .btn, a.ghost-pill, label, select),
+.page-actionbar input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.documents-actionbar input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.container-tabs input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+  min-height: var(--btn-height, 37px);
+  height: auto;
+  font-size: var(--btn-font-size, 13px);
+  line-height: 1.15;
+}
+.page-actionbar :is(button, .btn, a.ghost-pill),
+.documents-actionbar :is(button, .btn, a.ghost-pill),
+.task-actionbar :is(button, .btn, a.ghost-pill),
+.container-tabs :is(button, .btn, a.ghost-pill) {
+  font-weight: var(--btn-font-weight, 650);
+}
+/* A checkbox label is a control too: it sits on the row's baseline instead of
+   floating at 22px in a 37px row, and it reads at the row's own size. */
+.page-actionbar label:has(input[type="checkbox"]),
+.documents-actionbar label:has(input[type="checkbox"]),
+.container-tabs label:has(input[type="checkbox"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}

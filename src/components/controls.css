@@ -125,12 +125,19 @@
 .control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .control-row .control-row-gap { flex: 1 1 auto; min-width: 0; }
 
+/* ONE SIZE SYSTEM, NOT TWO. These tokens used to name their own height, type size
+   and weight (36px / 13.5px / 620) beside the button rule's (37px / 13px / 650), so
+   a single action row could hold both and read as a staircase — measured in the
+   running app: 34 · 35 · 36 · 37 · 39 · 40px in six rows.
+   SIZE now comes from the one button rule (spaceTheme.css `--btn-*`); SHAPE stays
+   the pill's own, because a pill-vs-button difference carries meaning (a filter is
+   not an act) while a height difference carried none. */
 .theme-space-light {
-  --pillctl-h: 36px;
+  --pillctl-h: var(--btn-height, 37px);
   --pillctl-r: 999px;
   --pillctl-pad-x: 14px;
-  --pillctl-font: 13.5px;
-  --pillctl-weight: 620;
+  --pillctl-font: var(--btn-font-size, 13px);
+  --pillctl-weight: var(--btn-font-weight, 650);
 }
 
 /* Every primitive answers to this: same box model, same focus ring, same
