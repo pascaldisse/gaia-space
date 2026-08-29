@@ -475,6 +475,7 @@ pub fn run() {
             documents::move_document,
             documents::archive_document,
             documents::export_document_file,
+            chat::stage_message_attachment,
             documents::delete_document,
             documents::save_document,
             events::list_event_types,

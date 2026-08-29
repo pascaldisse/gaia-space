@@ -272,6 +272,42 @@ pub fn measure_data_url(data_url: &str, declared: i64) -> Result<i64> {
 /// octets once, here — never in the webview, which would mean shipping the blob back out
 /// and trusting what comes in. `measure_data_url` runs first, so an oversized or malformed
 /// payload is refused by arithmetic before anything is allocated.
+/// PUT AN ATTACHMENT ON DISK SO THE SYSTEM CAN OPEN IT.
+///
+/// In the browser a `<a download>` on a data URL is a download; in the desktop shell
+/// it is nothing at all — WKWebView has no download manager, so clicking a file in a
+/// message did exactly nothing. The bytes live in the row as a data URL, so the way
+/// to open a document is to write it where the operating system can reach it and hand
+/// the path to the default application.
+///
+/// The name is the attachment's own, sanitised: a file called `../../space.db` must
+/// land in the staging directory, not on top of the database.
+///
+/// Desktop only, and deliberately so: the web build has a real browser under it, which
+/// downloads the data URL by itself — there is nothing for a server to do.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn stage_message_attachment(attachment_id: String) -> Result<String> {
+    let c = db::conn()?;
+    let (file_name, byte_length, data_url): (String, i64, String) = c
+        .query_row(
+            "SELECT file_name,byte_length,data_url FROM message_attachments WHERE id=?1",
+            [&attachment_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| "attachment not found".to_string())?;
+    let bytes = decode_data_url(&data_url, byte_length)?;
+    let dir = db::data_dir()?.join("attachment_opens");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create staging directory: {e}"))?;
+    let safe: String = file_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || "._- ".contains(c) { c } else { '_' })
+        .collect();
+    let safe = if safe.trim().is_empty() { "attachment".to_string() } else { safe };
+    let target = dir.join(format!("{attachment_id}-{safe}"));
+    std::fs::write(&target, bytes).map_err(|e| format!("write attachment: {e}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 pub fn decode_data_url(data_url: &str, declared: i64) -> Result<Vec<u8>> {
     measure_data_url(data_url, declared)?;
     let rest = data_url

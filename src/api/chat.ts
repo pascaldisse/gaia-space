@@ -169,6 +169,10 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   /** Ends a conversation for everyone: the channel, its messages and everything
    *  hanging off them. Always ask first (ConfirmDialog). */
   deleteChannel: (id: string, actorId: string) => invoke<void>("delete_channel", { id, actorId }),
+  /** Desktop only: write an attachment's bytes to a real path and return it, so the
+   *  operating system can open the file. In the browser the anchor's own download
+   *  does the job — there the webview IS a browser. */
+  stageAttachment: (attachmentId: string) => invoke<string>("stage_message_attachment", { attachmentId }),
   joinChannel: (channelId: string, profileId: string) =>
     invoke<void>("join_channel", { channelId, profileId }),
   leaveChannel: (channelId: string, profileId: string) =>

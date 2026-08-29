@@ -5,6 +5,7 @@ import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Icon } from "../components/Icon";
 import "../App.css";
 import "./Chat.css";
@@ -756,6 +757,17 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     }
   }
 
+  /** Open a file from a message the way the system opens files. A failure is said out
+   *  loud — a click that quietly does nothing is what this replaces. */
+  async function openAttachment(attachment: { id: string; file_name: string }) {
+    try {
+      const path = await chatApi.stageAttachment(attachment.id);
+      await openPath(path);
+    } catch (reason) {
+      fail(`Could not open ${attachment.file_name}: ${String(reason)}`);
+    }
+  }
+
   async function deleteAttachment(messageId: string, id: string) {
     try {
       await chatApi.removeMessageAttachment(messageId, id);
@@ -981,7 +993,21 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                     <Show when={kind() === "video"}><video controls src={attachment.data_url} /></Show>
                     <Show when={kind() === "audio"}><audio controls src={attachment.data_url} /></Show>
                     <div class="attachment-line">
-                      <a class="attachment-link" href={attachment.data_url} download={attachment.file_name}>
+                      {/* THE DESKTOP HAS NO DOWNLOAD MANAGER. `<a download>` on a data
+                          URL is a download in a browser and NOTHING in WKWebView, which
+                          is why clicking a file in a message did nothing at all. On the
+                          desktop the bytes are written to a real path and handed to the
+                          system's default application; the web build keeps the anchor. */}
+                      <a
+                        class="attachment-link"
+                        href={attachment.data_url}
+                        download={attachment.file_name}
+                        onClick={(event) => {
+                          if (isWeb()) return;
+                          event.preventDefault();
+                          void openAttachment(attachment);
+                        }}
+                      >
                         <Icon name="paperclip" size={14} />
                         <span class="attachment-name">{attachment.file_name}</span>
                       </a>
