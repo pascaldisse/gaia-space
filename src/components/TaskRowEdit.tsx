@@ -2,6 +2,7 @@ import { Show, createResource, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { TODO_CATEGORIES, personalApi, type Todo, type TodoContentKind } from "../api/personal";
 import { AssigneeControl, CategoryControl, DueDateControl, ProjectControl } from "./TaskMeta";
+import { Icon } from "./Icon";
 import { humanError, profiles, projects } from "../session";
 /* The editor's control language IS My tasks' composer language — the same
    `.composer-title`, `.composer-meta`, `.composer-actions`, chips and folds that
@@ -201,16 +202,20 @@ export default function TaskRowEdit(props: {
           thing under two names, so the field was looked straight at and not
           recognised. The wire name stays `notes`; only the word a person reads
           changed. */}
+      {/* THE SWITCH SITS ON THE FIELD IT ACTUALLY GOVERNS — and that field is the
+          TITLE, not the description. `content_kind` decides how `content` is rendered
+          on the tile (Todo.tsx: `content_kind==="markdown" ? markdownBody(content) :
+          content`); `notes` is never parsed as markdown anywhere. Parked on the
+          description's label line it stated the opposite of what it does, which is a
+          worse fault than the loose checkbox it replaced. */}
+      <Show when={props.advanced}>
+        <label class="task-edit-md task-edit-md-title"><input type="checkbox" checked={form().content_kind === "markdown"}
+          onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} />
+          Read the title as Markdown</label>
+      </Show>
       <div class="todo-field todo-field-notes">
-        {/* THE SWITCH SITS ON THE FIELD IT DESCRIBES. "Markdown body" stood below as a
-            bare checkbox level with "Done", so a question about how ONE field is read
-            looked like a property of the whole task, ranked beside its state. */}
         <div class="task-edit-field-head">
           <span class="field-label" id={`desc-${props.task.id}`}>Description</span>
-          <Show when={props.advanced}>
-            <label class="task-edit-md"><input type="checkbox" checked={form().content_kind === "markdown"}
-              onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} /> Markdown</label>
-          </Show>
         </div>
         <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task description" placeholder="A line on what this is about"
           value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
@@ -228,9 +233,23 @@ export default function TaskRowEdit(props: {
         loose checkbox floating above the buttons and Delete hung in a strip BELOW the
         card, outside its border — three decisions in three unrelated places. */}
     <div class="composer-actions task-edit-actions">
+      {/* A BARE CHECKBOX IS NOT A PEER OF Save AND Delete. Ticking a task off is one of
+          the two things anybody comes to this editor to do, and it sat here as the
+          smallest, lightest thing in a row of proper buttons — read as a setting rather
+          than an act. It is now the same shape, height and weight as its neighbours and
+          says which way it goes: "Mark done" while open, "Done" once it is.
+
+          It is a TOGGLE, not a form field, so it states its own pressed state
+          (`aria-pressed`) instead of hiding it in a checkbox a screen reader must
+          hunt for. */}
       <Show when={props.canComplete}>
-        <label class="task-edit-done"><input type="checkbox" aria-label="Task done" checked={form().done}
-          onChange={event => props.canEdit ? patch({ done: event.currentTarget.checked }) : void completeOnly(event.currentTarget.checked)} /> Done</label>
+        <button type="button" class="task-edit-done" classList={{ on: form().done }}
+          aria-pressed={form().done} disabled={busy()}
+          title={form().done ? "Mark this task not done" : "Mark this task done"}
+          onClick={() => { const next = !form().done; props.canEdit ? patch({ done: next }) : void completeOnly(next); }}>
+          <span class="task-edit-done-mark" aria-hidden="true"><Show when={form().done}><Icon name="check" size={13} /></Show></span>
+          {form().done ? "Done" : "Mark done"}
+        </button>
       </Show>
       <Show when={props.danger}><span class="task-edit-danger">{props.danger}</span></Show>
       <span class="task-edit-spacer" />

@@ -145,3 +145,97 @@ describe("the tile's meta line joins itself", () => {
     expect(meta.textContent).toBe("Create·Me·Draft it");
   });
 });
+
+describe("Done is a button, not a setting", () => {
+  afterEach(() => {
+    dispose?.(); dispose = undefined;
+    document.body.innerHTML = "";
+    delete (window as any).__TAURI_INTERNALS__;
+    setProfileId("");
+  });
+
+  /** Ticking work off is one of the two reasons anybody opens this editor. As a bare
+   *  checkbox beside Save and Delete it was the lightest thing in a row of proper
+   *  buttons, so it read as a setting rather than an act. */
+  const openEditor = async () => {
+    todos = [{ ...base }];
+    const host = await mount();
+    host.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    return host;
+  };
+
+  test("it is a real button in the footer, and states its own pressed state", async () => {
+    const host = await openEditor();
+    const done = host.querySelector<HTMLButtonElement>(".task-edit-actions .task-edit-done")!;
+    expect(done).toBeTruthy();
+    expect(done.tagName).toBe("BUTTON");
+    // A toggle says whether it is on; it does not hide that inside a checkbox.
+    expect(done.getAttribute("aria-pressed")).toBe("false");
+    expect(done.querySelector("input")).toBeNull();
+  });
+
+  test("it says which way it goes, and flips when pressed", async () => {
+    const host = await openEditor();
+    const done = () => host.querySelector<HTMLButtonElement>(".task-edit-done")!;
+    expect(done().textContent).toContain("Mark done");
+
+    done().click();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(done().getAttribute("aria-pressed")).toBe("true");
+    expect(done().textContent).toContain("Done");
+    expect(done().className).toContain("on");
+  });
+
+  test("Done, Delete, Cancel and Save sit in ONE row, in that order", async () => {
+    const host = await openEditor();
+    const footer = host.querySelector(".task-edit-actions")!;
+    const labels = Array.from(footer.children)
+      .map(child => (child.textContent ?? "").trim())
+      .filter(text => text.length);
+    // State · destroy · (spacer) · leave · keep. Delete is handed in by My tasks, which
+    // owns deletion; it belongs in this row, not in a strip below the card.
+    expect(labels).toEqual(["Mark done", "Delete", "Cancel", "Save"]);
+  });
+});
+
+/** THE MARKDOWN SWITCH GOVERNS THE TITLE. `content_kind` decides how `content` is
+ *  rendered on the tile; `notes` is never parsed as markdown anywhere in the app.
+ *  A switch that names the wrong field is worse than no switch: it teaches something
+ *  untrue, and the person only finds out by not getting what they asked for. */
+describe("the markdown switch says which field it changes", () => {
+  afterEach(() => {
+    dispose?.(); dispose = undefined;
+    document.body.innerHTML = "";
+    delete (window as any).__TAURI_INTERNALS__;
+    setProfileId("");
+  });
+
+  test("it names the title, and does not sit on the description's label", async () => {
+    todos = [{ ...base }];
+    const host = await mount();
+    host.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
+    await new Promise(resolve => setTimeout(resolve, 60));
+
+    const toggle = host.querySelector<HTMLElement>(".task-edit-md")!;
+    expect(toggle.textContent).toContain("title");
+    expect(toggle.textContent).not.toContain("Description");
+    // It must not live inside the description field's header.
+    expect(host.querySelector(".task-edit-field-head .task-edit-md")).toBeNull();
+  });
+
+  test("a title stored as markdown is rendered as markdown on the tile", async () => {
+    todos = [{ ...base, content: "Ship **the** draft", content_kind: "markdown" }];
+    const host = await mount();
+    const title = host.querySelector(".task-tile-title")!;
+    expect(title.querySelector("strong")?.textContent).toBe("the");
+  });
+
+  test("a plain title is shown verbatim, asterisks and all", async () => {
+    todos = [{ ...base, content: "Ship **the** draft", content_kind: "text" }];
+    const host = await mount();
+    const title = host.querySelector(".task-tile-title")!;
+    expect(title.querySelector("strong")).toBeNull();
+    expect(title.textContent).toBe("Ship **the** draft");
+  });
+});

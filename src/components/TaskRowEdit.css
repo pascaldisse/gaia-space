@@ -11,13 +11,42 @@
    is gone — with four items it spread them evenly and the pairs stopped reading as pairs. */
 .task-edit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .task-edit-spacer { flex: 1 1 auto; }
-.task-edit-done { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
-.task-edit-done input { cursor: pointer; }
+/* DONE IS A BUTTON, built from the same tokens as Save and Delete so the three read
+   as one family: same height, same radius, same type. Teal, because ticking work off
+   is the affirmative act on this surface — but a WASH at rest, never solid, so it
+   cannot outrank Save, which is the page's one primary. Pressed, it fills. */
+.task-edit-done {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: 1px solid var(--accent, #2f8f83);
+  border-radius: var(--btn-radius, 11px);
+  background: color-mix(in srgb, var(--accent, #2f8f83) 10%, transparent);
+  color: var(--accent, #2f8f83);
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  line-height: 1; cursor: pointer;
+}
+.task-edit-done:hover:not(:disabled) { background: var(--accent, #2f8f83); color: #fff; }
+.task-edit-done:focus-visible { outline: 2px solid var(--accent, #2f8f83); outline-offset: 2px; }
+.task-edit-done:disabled { opacity: .55; cursor: default; }
+/* The mark holds its box whether or not it carries a tick, so the label never shifts
+   sideways as the state flips. */
+.task-edit-done-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 4px;
+  border: 1.5px solid currentColor;
+}
+.task-edit-done.on { background: var(--accent, #2f8f83); color: #fff; border-color: var(--accent, #2f8f83); }
+.task-edit-done.on .task-edit-done-mark { background: #fff; color: var(--accent, #2f8f83); border-color: #fff; }
 .task-edit-danger { display: inline-flex; }
 
-/* The switch belongs to the field above it, so it sits ON that field's label line. */
 .task-edit-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+/* Directly under the title it governs, and quiet: it changes how ONE line is read,
+   which is nowhere near as important as anything else in this editor. */
 .task-edit-md { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); cursor: pointer; }
+.task-edit-md-title { justify-self: start; margin: -4px 0 0 2px; }
 
 /* THE ROW KEEPS ITS PLACE WHILE OPEN. The editor is rendered inside the same <li>
    the row occupies, so the list never re-orders under the person editing it; this
@@ -41,7 +70,4 @@
 }
 .theme-space-light .task-edit .composer-title { color: var(--ink); }
 .theme-space-light .task-edit-readonly { color: var(--muted); }
-.theme-space-light .task-edit-done { color: var(--muted); font-weight: 600; }
 .theme-space-light .task-edit-md { color: var(--muted); }
-/* A ticked task says so in the accent it wears everywhere else, not in plain grey. */
-.theme-space-light .task-edit-done:has(input:checked) { color: var(--ink); }
