@@ -54,10 +54,16 @@
 .timeoff-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
 .timeoff-empty-card p { max-width: 560px; margin: 0; color: var(--text-muted); line-height: 1.5; }
 .timeoff-empty-cta { margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; }
-/* One column while empty, and the lead sits where reading starts — not centred in
-   a page-sized void. */
+/* One column while empty — the rail summarises records, and there are none.
+
+   THE 640px CAP IS GONE. It was meant to keep the lead "where reading starts", but
+   `EmptyState` centres itself (`justify-items: center; text-align: center`), so the
+   cap did not left-align anything: it centred a 423px box inside a 640px column that
+   was itself pinned left, landing the whole thing off-centre on a 1282px page —
+   aligned to neither edge nor middle. Every other surface lets the same component
+   centre across the page's own measure; this one now does too. */
 .timeoff-onboarding { display: block; }
-.timeoff-onboarding .view-main { display: grid; gap: 0; align-content: start; max-width: 640px; }
+.timeoff-onboarding .view-main { display: grid; gap: 0; align-content: start; }
 .timeoff-onboarding .rail-card + .rail-card { margin-top: 12px; }
 
 /* ── availability panels ── the page's working surface: current coverage,
