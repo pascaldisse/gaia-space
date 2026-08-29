@@ -43,10 +43,7 @@
 .task-edit-danger { display: inline-flex; }
 
 .task-edit-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-/* Directly under the title it governs, and quiet: it changes how ONE line is read,
-   which is nowhere near as important as anything else in this editor. */
-.task-edit-md { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); cursor: pointer; }
-.task-edit-md-title { justify-self: start; margin: -4px 0 0 2px; }
+
 
 /* THE ROW KEEPS ITS PLACE WHILE OPEN. The editor is rendered inside the same <li>
    the row occupies, so the list never re-orders under the person editing it; this
@@ -70,4 +67,3 @@
 }
 .theme-space-light .task-edit .composer-title { color: var(--ink); }
 .theme-space-light .task-edit-readonly { color: var(--muted); }
-.theme-space-light .task-edit-md { color: var(--muted); }

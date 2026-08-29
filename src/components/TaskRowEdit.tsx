@@ -202,17 +202,16 @@ export default function TaskRowEdit(props: {
           thing under two names, so the field was looked straight at and not
           recognised. The wire name stays `notes`; only the word a person reads
           changed. */}
-      {/* THE SWITCH SITS ON THE FIELD IT ACTUALLY GOVERNS — and that field is the
-          TITLE, not the description. `content_kind` decides how `content` is rendered
-          on the tile (Todo.tsx: `content_kind==="markdown" ? markdownBody(content) :
-          content`); `notes` is never parsed as markdown anywhere. Parked on the
-          description's label line it stated the opposite of what it does, which is a
-          worse fault than the loose checkbox it replaced. */}
-      <Show when={props.advanced}>
-        <label class="task-edit-md task-edit-md-title"><input type="checkbox" checked={form().content_kind === "markdown"}
-          onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} />
-          Read the title as Markdown</label>
-      </Show>
+      {/* THE MARKDOWN SWITCH IS GONE (product owner, 2026-08-29). It asked a person to
+          declare a STORAGE FORMAT for a task's title — a question about the machine,
+          not about the work, and one nobody could answer without knowing what
+          `content_kind` is. A task name is one line; bold and bullets in it buy
+          nothing.
+
+          THE DATA IS UNTOUCHED. `content_kind` still travels through `form()` and is
+          still saved, and the tile still renders a title stored as markdown as
+          markdown — so tasks written before today keep reading exactly as they did.
+          Only the way to CHANGE it has been withdrawn. */}
       <div class="todo-field todo-field-notes">
         <div class="task-edit-field-head">
           <span class="field-label" id={`desc-${props.task.id}`}>Description</span>

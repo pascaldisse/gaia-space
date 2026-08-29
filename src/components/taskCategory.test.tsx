@@ -33,6 +33,7 @@ const base = {
 
 let todos: Record<string, unknown>[] = [];
 let dispose: (() => void) | undefined;
+const calls: { cmd: string; args: Record<string, unknown> }[] = [];
 
 const reply = (cmd: string): unknown => {
   if (cmd === "list_profiles") return profiles;
@@ -44,7 +45,14 @@ const reply = (cmd: string): unknown => {
 
 const mount = async () => {
   (window as any).__TAURI_INTERNALS__ = {
-    invoke: (cmd: string) => Promise.resolve(reply(cmd)),
+    invoke: (cmd: string, args: Record<string, unknown>) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (cmd === "update_todo") {
+        const patch = (args?.todo ?? {}) as Record<string, unknown>;
+        return Promise.resolve({ ...todos[0], ...patch });
+      }
+      return Promise.resolve(reply(cmd));
+    },
   };
   registerViews(["My Tasks", "Projects"]);
   setAvailableViews(null);
@@ -63,6 +71,7 @@ describe("a task's category", () => {
     document.body.innerHTML = "";
     delete (window as any).__TAURI_INTERNALS__;
     setProfileId("");
+    calls.length = 0;
   });
 
   test("the closed list is ONE list, and every value is lowercase and unique", () => {
@@ -116,6 +125,7 @@ describe("the tile's meta line joins itself", () => {
     document.body.innerHTML = "";
     delete (window as any).__TAURI_INTERNALS__;
     setProfileId("");
+    calls.length = 0;
   });
 
   /** A separator is a thing BETWEEN two facts. Placed by hand beside each fact, it
@@ -152,6 +162,7 @@ describe("Done is a button, not a setting", () => {
     document.body.innerHTML = "";
     delete (window as any).__TAURI_INTERNALS__;
     setProfileId("");
+    calls.length = 0;
   });
 
   /** Ticking work off is one of the two reasons anybody opens this editor. As a bare
@@ -199,36 +210,36 @@ describe("Done is a button, not a setting", () => {
   });
 });
 
-/** THE MARKDOWN SWITCH GOVERNS THE TITLE. `content_kind` decides how `content` is
- *  rendered on the tile; `notes` is never parsed as markdown anywhere in the app.
- *  A switch that names the wrong field is worse than no switch: it teaches something
- *  untrue, and the person only finds out by not getting what they asked for. */
-describe("the markdown switch says which field it changes", () => {
+/** THE MARKDOWN SWITCH WAS WITHDRAWN, THE DATA WAS NOT.
+ *
+ *  The control asked for a STORAGE FORMAT ("Markdown body") — a question about the
+ *  machine rather than the work. It is gone from both task surfaces. What must NOT
+ *  follow is a silent rewrite of history: a title written as markdown before today
+ *  still renders as markdown, so nobody's task suddenly sprouts raw asterisks. */
+describe("the markdown switch is gone, and old tasks still read correctly", () => {
   afterEach(() => {
     dispose?.(); dispose = undefined;
     document.body.innerHTML = "";
     delete (window as any).__TAURI_INTERNALS__;
     setProfileId("");
+    calls.length = 0;
   });
 
-  test("it names the title, and does not sit on the description's label", async () => {
+  test("the opened editor offers no markdown control at all", async () => {
     todos = [{ ...base }];
     const host = await mount();
     host.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
     await new Promise(resolve => setTimeout(resolve, 60));
 
-    const toggle = host.querySelector<HTMLElement>(".task-edit-md")!;
-    expect(toggle.textContent).toContain("title");
-    expect(toggle.textContent).not.toContain("Description");
-    // It must not live inside the description field's header.
-    expect(host.querySelector(".task-edit-field-head .task-edit-md")).toBeNull();
+    expect(host.querySelector(".task-edit")).toBeTruthy();
+    expect(host.querySelector(".task-edit-md")).toBeNull();
+    expect(host.textContent).not.toContain("Markdown");
   });
 
-  test("a title stored as markdown is rendered as markdown on the tile", async () => {
+  test("a title stored as markdown STILL renders as markdown", async () => {
     todos = [{ ...base, content: "Ship **the** draft", content_kind: "markdown" }];
     const host = await mount();
-    const title = host.querySelector(".task-tile-title")!;
-    expect(title.querySelector("strong")?.textContent).toBe("the");
+    expect(host.querySelector(".task-tile-title strong")?.textContent).toBe("the");
   });
 
   test("a plain title is shown verbatim, asterisks and all", async () => {
@@ -237,5 +248,19 @@ describe("the markdown switch says which field it changes", () => {
     const title = host.querySelector(".task-tile-title")!;
     expect(title.querySelector("strong")).toBeNull();
     expect(title.textContent).toBe("Ship **the** draft");
+  });
+
+  test("saving an untouched task does not change its stored kind", async () => {
+    todos = [{ ...base, content_kind: "markdown" }];
+    const host = await mount();
+    host.querySelector<HTMLButtonElement>(".task-tile-body")!.click();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    host.querySelector<HTMLButtonElement>(".composer-submit")!.click();
+    await new Promise(resolve => setTimeout(resolve, 60));
+
+    const sent = calls.filter(call => call.cmd === "update_todo").pop();
+    expect(sent).toBeTruthy();
+    // The field the person can no longer see must survive the save untouched.
+    expect((sent!.args.todo as Record<string, unknown>).content_kind).toBe("markdown");
   });
 });
