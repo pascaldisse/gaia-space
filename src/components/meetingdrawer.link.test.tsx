@@ -87,17 +87,25 @@ test("participants are picked from the profile list, archived people excluded, a
   const sink = { added: [] as string[], removed: [] as string[], fields: [] as [string, unknown][] };
   const host = await mount(blank(), ["mia"], sink);
 
-  const boxes = [...host.querySelectorAll<HTMLInputElement>('.mtd-people input[type="checkbox"]')];
-  const names = [...host.querySelectorAll('.mtd-person')].map(node => node.textContent?.trim());
-  expect(names).toEqual(["Me", "Mia Berger"]);
-  expect(boxes).toHaveLength(2);
-  // The already-invited person is shown as invited, not offered as if they were not.
-  expect(boxes[1].checked).toBe(true);
-  expect(boxes[0].checked).toBe(false);
+  /* ADDRESS ONLY: participants are chosen with the product's own picker now — a grid
+     of checkboxes was a panel wearing the shape of a form. The rules under test are
+     unchanged: archived people are not offered, somebody already coming is not offered
+     twice, and adding/removing is reported both ways. */
+  const picker = host.querySelector<HTMLButtonElement>('button[aria-label="Add participant"]')!;
+  const offered = () => {
+    picker.click();
+    return [...document.querySelectorAll('[role="option"]')].map(option => option.textContent);
+  };
+  const chips = () => [...host.querySelectorAll(".mtd-invitee")].map(chip => chip.textContent?.replace("×", "").trim());
+  // "Mia Berger" is already coming, so she stands as a chip and is not offered again.
+  expect(chips()).toEqual(["Mia Berger"]);
+  expect(offered()).toEqual(["Me"]);
 
-  boxes[0].click();
+  ([...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "Me") as HTMLElement)
+    .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
   expect(sink.added).toEqual(["me"]);
-  boxes[1].click();
+
+  (host.querySelector<HTMLButtonElement>('.mtd-invitee button[aria-label="Remove Mia Berger"]'))!.click();
   expect(sink.removed).toEqual(["mia"]);
   // Choosing WHO COMES must not have touched WHO CAN SEE IT: they are separate facts.
   expect(sink.fields.map(([field]) => field)).not.toContain("visibility");

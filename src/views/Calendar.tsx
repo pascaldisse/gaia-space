@@ -111,6 +111,9 @@ const [people] = createResource(() => platformApi.profiles().catch(() => []));
 const invitable = () => (people() ?? []).filter(person => !person.archived && person.id !== (profileId() || ""));
 const personName = (person:{display_name?:string|null;username?:string|null;id:string}) => person.display_name || person.username || person.id;
 const toggleQuickInvitee = (id:string) => setQuickInvitees(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
+/** Only people who are not already coming: a menu that offers what is already true
+ *  makes the reader check the list twice. */
+const addable = () => invitable().filter(person => !quickInvitees().includes(person.id));
 const range = () => { const at=cursor(); switch (view()) { case "month": return monthRange(at); case "week": return weekRange(at); case "day": return dayRange(at); case "schedule": return scheduleRange(at); } };
 // The day window is sent as local day keys as well as instants: date-only items are
 // calendar days, and their day must not be re-derived from a UTC instant (H4).
@@ -363,24 +366,40 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
     keeps deciding whether the end really follows the start. */}
 <div class="cal-field"><span>Start</span><DateTimeField label="Start" value={form().starts_at} onChange={value=>setForm({...form(),starts_at:value})} clearable={false}/></div>
 <div class="cal-field"><span>End</span><DateTimeField label="End" value={form().ends_at} onChange={value=>setForm({...form(),ends_at:value})} clearable={false}/></div>
-<label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
-<label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
-<label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
-<label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label>
+{/* THE ORDER IS THE ORDER A PERSON DECIDES IN: when, then who is coming, then how
+    to get in (a link, or a place), then how often — and only then the rules that
+    are rarely touched. Visibility and 'who can edit' used to stand between the
+    time and the people, which is nobody's second question. */}
+{/* A FIELD LIKE THE OTHERS. A grid of checkboxes was a panel wearing the shape of
+    a form — it broke the rhythm of the rows above it and grew with the
+    organisation. This is the same control every other picker in the product uses:
+    choose a person, they appear as a chip, press × to take them off again. */}
+<div class="cal-field"><span>Participants</span>
+<PillMenu
+  label="Add participant"
+  value=""
+  placeholder={invitable().length ? "Add someone…" : "No other profiles yet"}
+  disabled={!addable().length}
+  options={addable().map(person => ({ value: person.id, label: personName(person) }))}
+  onChange={id => id && toggleQuickInvitee(id)}
+/>
+</div>
+<Show when={quickInvitees().length}>
+<ul class="cal-invitees" aria-label="Invited people">
+<For each={quickInvitees()}>{id=>
+  <li class="cal-invitee">{personName(invitable().find(person => person.id === id) ?? { id })}
+    <button type="button" aria-label={`Remove ${personName(invitable().find(person => person.id === id) ?? { id })}`} onClick={()=>toggleQuickInvitee(id)}>×</button>
+  </li>
+}</For>
+</ul>
+</Show>
 {/* A meeting happens on somebody else's service; the address is part of making it,
     not an afterthought to be added later. */}
 <label>Meeting link<input placeholder="https://meet.google.com/…" aria-label="Meeting link" value={form().meeting_url} onInput={e=>setForm({...form(),meeting_url:e.currentTarget.value})}/></label>
-<fieldset class="cal-people-field">
-<legend>Participants</legend>
-<Show when={invitable().length} fallback={<p class="hint">No other profiles to invite yet.</p>}>
-<div class="cal-people">
-<For each={invitable()}>{person=>
-  <label class="cal-person"><input type="checkbox" checked={quickInvitees().includes(person.id)} onChange={()=>toggleQuickInvitee(person.id)}/>{personName(person)}</label>
-}</For>
-</div>
-</Show>
-<p class="hint"><Show when={quickInvitees().length} fallback="Nobody invited yet — you can also invite people after creating.">{quickInvitees().length} invited.</Show></p>
-</fieldset>
+<label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
+<label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label>
+<label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
+<label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
 <div class="detail-actions"><button class="primary">Create meeting</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
 </Show>

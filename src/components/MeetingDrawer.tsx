@@ -80,6 +80,9 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
   const invitable = () => (profiles() ?? []).filter((person) => !person.archived);
   const nameOf = (person: { display_name: string | null; username: string }) => person.display_name || person.username;
   const toggleInvitee = (id: string) => (props.invitees.includes(id) ? props.removeInvitee(id) : props.addInvitee(id));
+  /** Only people who are not already coming — a menu that offers what is already true
+   *  makes the reader check the list twice. */
+  const addable = () => invitable().filter((person) => !props.invitees.includes(person.id));
   /* Said while it is typed, not at submit: a link that will be refused must not look
      accepted for the rest of the form. `meetings::normalize_meeting_url` enforces the
      same rule natively, so this is the early word, not the only guard. */
@@ -158,26 +161,37 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
               command needs a meeting id, which create() mints. WHO IS COMING and WHO CAN
               SEE IT are two different facts — `visibility` stays where it is, under More
               options, and neither field explains the other. */}
-          <fieldset class="mtd-field mtd-people-field">
-            <legend>Participants</legend>
-            <Show when={invitable().length} fallback={<p class="mtd-hint">No profiles available to invite yet.</p>}>
-              <div class="mtd-people">
-                <For each={invitable()}>
-                  {(person) => (
-                    <label class="mtd-person">
-                      <input type="checkbox" checked={props.invitees.includes(person.id)} onChange={() => toggleInvitee(person.id)} />
-                      {nameOf(person)}
-                    </label>
-                  )}
+          {/* A FIELD LIKE THE OTHERS. A grid of checkboxes was a panel wearing the
+              shape of a form; this is the picker every other field uses — choose a
+              person, they stand as a chip, press × to take them off again. WHO IS
+              COMING and WHO MAY SEE IT stay two facts: `visibility` is untouched. */}
+          <div class="mtd-field">
+            <span class="mtd-caption">Participants</span>
+            <PillMenu
+              label="Add participant"
+              value=""
+              placeholder={invitable().length ? "Add someone…" : "No profiles available yet"}
+              disabled={!addable().length}
+              options={addable().map((person) => ({ value: person.id, label: nameOf(person) }))}
+              onChange={(id) => id && toggleInvitee(id)}
+            />
+            <Show when={props.invitees.length}>
+              <ul class="mtd-invitees" aria-label="Invited people">
+                <For each={props.invitees}>
+                  {(id) => {
+                    const person = () => invitable().find((candidate) => candidate.id === id);
+                    const label = () => (person() ? nameOf(person()!) : id);
+                    return (
+                      <li class="mtd-invitee">
+                        {label()}
+                        <button type="button" aria-label={`Remove ${label()}`} onClick={() => props.removeInvitee(id)}>×</button>
+                      </li>
+                    );
+                  }}
                 </For>
-              </div>
+              </ul>
             </Show>
-            <p class="mtd-hint">
-              <Show when={props.invitees.length} fallback="Nobody invited yet — you can also invite people after creating.">
-                {props.invitees.length} invited.
-              </Show>
-            </p>
-          </fieldset>
+          </div>
 
           {/* Rare-but-real settings. Collapsed, in the DOM, one disclosure. */}
           <details class="mtd-more">

@@ -112,53 +112,19 @@
    a scrolling column of checkboxes, so the answer to "who is coming" is read rather
    than typed. A fieldset carries the caption because a `<legend>` is what names a
    group of checkboxes; it is stripped of the browser's box and re-dressed as a field. */
-.mtd-root .mtd-people-field { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
-.mtd-root .mtd-people-field > legend {
-  padding: 0; margin-bottom: 6px;
-  color: var(--mtd-muted); font-size: 12.5px; font-weight: 620;
+.mtd-root .mtd-caption { font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+/* Chips, not a panel: each chosen person is one small removable fact, so the field
+   grows by a line instead of a box and the drawer's own actions stay in reach. */
+.mtd-root .mtd-invitees { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.mtd-root .mtd-invitee {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--mtd-line); border-radius: 999px;
+  background: var(--mtd-paper); font-size: 12.5px; font-weight: 600;
 }
-.mtd-root .mtd-people {
-  display: grid; gap: 2px; margin: 0 0 6px; padding: 4px;
-  max-height: 168px; overflow-y: auto;
-  border: 1px solid var(--mtd-line); border-radius: 11px; background: #fbfaf8;
+.mtd-root .mtd-invitee button {
+  display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 999px; background: none;
+  color: var(--mtd-muted); font-size: 14px; line-height: 1; cursor: pointer;
 }
-.mtd-root .mtd-person {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; border-radius: 8px;
-  font-size: 14px; color: var(--mtd-ink); cursor: pointer;
-}
-.mtd-root .mtd-person:hover { background: var(--mtd-wash); }
-.mtd-root .mtd-person input[type="checkbox"] { accent-color: var(--mtd-teal); width: 15px; height: 15px; margin: 0; }
-.mtd-root .mtd-hint { margin: 0; color: var(--mtd-muted); font-size: 13px; line-height: 1.45; }
-/* A refused value says so where it was typed. Same red as the form-level banner,
-   quieter box: this is one field's objection, not the whole form's. */
-.mtd-root .mtd-field-error { color: var(--mtd-red); font-size: 13px; line-height: 1.45; font-weight: 400; }
-.mtd-root .mtd-input[aria-invalid="true"] { border-color: var(--mtd-red); background: var(--mtd-red-soft); }
-
-/* One disclosure, closed by default: the surface asks five questions, not ten. */
-.mtd-root .mtd-more { border: 1px solid var(--mtd-line); border-radius: 11px; background: var(--mtd-wash); padding: 0 12px; }
-.mtd-root .mtd-more > summary {
-  cursor: pointer; padding: 11px 0; list-style: none;
-  font-size: 14px; font-weight: 640; color: var(--mtd-ink);
-}
-.mtd-root .mtd-more > summary::-webkit-details-marker { display: none; }
-.mtd-root .mtd-more > summary::before { content: "▸ "; color: var(--mtd-muted); }
-.mtd-root .mtd-more[open] > summary::before { content: "▾ "; }
-.mtd-root .mtd-more[open] { padding-bottom: 12px; }
-.mtd-root .mtd-more > .mtd-field { margin-top: 12px; }
-
-.mtd-root .mtd-error {
-  margin: 0; border: 1px solid var(--mtd-red); border-radius: 11px;
-  background: var(--mtd-red-soft); color: var(--mtd-red); padding: 9px 11px; font-size: 13px;
-}
-
-.mtd-root .mtd-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
-.mtd-root .mtd-btn {
-  min-height: 40px; border: 1px solid var(--mtd-line); border-radius: 11px;
-  padding: 0 15px; background: var(--mtd-paper); color: var(--mtd-ink);
-  font: inherit; font-size: 14px; font-weight: 640; cursor: pointer;
-}
-.mtd-root .mtd-btn:hover:not(:disabled) { background: var(--mtd-wash); }
-.mtd-root .mtd-primary { background: var(--mtd-teal); border-color: var(--mtd-teal-dark); color: #05302a; }
-.mtd-root .mtd-primary:hover:not(:disabled) { background: var(--mtd-teal-dark); color: var(--mtd-teal-soft); }
-.mtd-root .mtd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.mtd-root .mtd-invitee button:hover { background: var(--mtd-wash); color: var(--mtd-red, #c2384a); }

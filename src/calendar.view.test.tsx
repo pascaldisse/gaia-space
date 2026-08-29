@@ -357,15 +357,28 @@ describe("the day composer invites people", () => {
 
   test("other people are offered, the organizer is not, and each one is invited on create", async () => {
     const host = await openComposer();
-    const people = [...host.querySelectorAll(".cal-person")].map((label) => label.textContent?.trim());
+    /* ADDRESS ONLY: participants are chosen with the product's own picker now, and
+       each chosen person stands as a removable chip — a grid of checkboxes was a
+       panel wearing the shape of a form. The rule under test is unchanged. */
+    const picker = host.querySelector('button[aria-label="Add participant"]') as HTMLButtonElement;
+    const offered = async () => {
+      picker.click();
+      await settle();
+      return [...document.querySelectorAll('[role="option"]')].map((option) => option.textContent);
+    };
+    const choose = async (name: string) => {
+      ([...document.querySelectorAll('[role="option"]')].find((option) => option.textContent === name) as HTMLElement)
+        .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      await settle();
+    };
     // The acting profile is the organizer; inviting yourself is not a choice.
-    expect(people).toEqual(["Bob", "Carol"]);
-
-    const boxes = host.querySelectorAll<HTMLInputElement>(".cal-person input");
-    boxes[0].click();
-    boxes[1].click();
-    await settle();
-    expect(host.querySelector(".cal-people-field .hint")?.textContent).toContain("2 invited");
+    expect(await offered()).toEqual(["Bob", "Carol"]);
+    await choose("Bob");
+    // Somebody already coming is not offered again.
+    expect(await offered()).toEqual(["Carol"]);
+    await choose("Carol");
+    expect([...host.querySelectorAll(".cal-invitee")].map((chip) => chip.textContent?.replace("×", "").trim()))
+      .toEqual(["Bob", "Carol"]);
 
     (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
     (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
