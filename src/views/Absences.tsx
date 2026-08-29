@@ -7,6 +7,7 @@ import {
 import { platformApi, type CfDefinition } from "../api/platform";
 import { Icon } from "../components/Icon";
 import { ProfilePicker } from "../components/Pickers";
+import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
 import { MetricGrid, MetricTile } from "../components/blocks";
 import { metricTone } from "../statusTone";
@@ -232,26 +233,27 @@ export default function Absences() {
                 <For each={leaveTypes}>{(type) => <option value={type} />}</For>
               </datalist>
             </label>
-            <label class="fld">
-              From
-              <input
-                type="date"
+            {/* Captions stay; the wrappers become divs, because a <label> may not
+                wrap a button that opens the product's own month grid. Leave is a
+                span with two ends, so neither end offers Clear. */}
+            <div class="fld">
+              <span>From</span>
+              <DateField
+                label="From"
+                clearable={false}
                 value={draft().date_from}
-                onInput={(event) =>
-                  setDraft({ ...draft(), date_from: event.currentTarget.value })
-                }
+                onChange={(value) => setDraft({ ...draft(), date_from: value })}
               />
-            </label>
-            <label class="fld">
-              To
-              <input
-                type="date"
+            </div>
+            <div class="fld">
+              <span>To</span>
+              <DateField
+                label="To"
+                clearable={false}
                 value={draft().date_to}
-                onInput={(event) =>
-                  setDraft({ ...draft(), date_to: event.currentTarget.value })
-                }
+                onChange={(value) => setDraft({ ...draft(), date_to: value })}
               />
-            </label>
+            </div>
           </div>
           <div class="timeoff-form-grid">
             <label class="fld">

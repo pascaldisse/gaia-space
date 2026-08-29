@@ -5,6 +5,7 @@ import { personalApi } from "../api/personal";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import { linkEntity } from "../router";
 import SourceLink from "../components/SourceLink";
+import DateField from "../components/DateField";
 import "./IssueDetail.css";
 
 /** An issue IS the card: title, description, assignee, due date, status,
@@ -141,9 +142,11 @@ const transferIssue = async () => { const current = issue(), target = targetProj
             </Show>
             <Show when={!members.loading && !candidates().length && !mayAdmit()}><p class="hint">Only project members can be assigned — the project owner adds people in Project settings.</p></Show>
           </div>
-          <label>Due date
-            <input type="date" value={item().due_date ?? ""} onChange={e => { patch({ due_date: e.currentTarget.value || null }); void save(); }} />
-          </label>
+          {/* The caption stays, the wrapper does not: the date is a button now. */}
+          <div class="idp-field"><span class="field-label">Due date</span>
+            <DateField label="Due date" value={item().due_date ?? ""} placeholder="No due date"
+              onChange={value => { patch({ due_date: value || null }); void save(); }} />
+          </div>
           <label>Priority
             <select value={item().priority ?? ""} onChange={e => { patch({ priority: e.currentTarget.value || null }); void save(); }}>
               <option value="">None</option>
@@ -200,7 +203,7 @@ const transferIssue = async () => { const current = issue(), target = targetProj
 
         <section class="idp-section">
           <h3>Time tracking <small>{detail()?.time_total_minutes ?? 0} min</small></h3>
-          <div class="time-form"><input aria-label="Work date" type="date" value={workDate()} onInput={event => setWorkDate(event.currentTarget.value)} /><input aria-label="Duration in minutes" type="number" min="1" step="1" placeholder="Minutes" value={minutes()} onInput={event => setMinutes(event.currentTarget.value)} /><input aria-label="Work description" placeholder="What did you do?" value={workDescription()} onInput={event => setWorkDescription(event.currentTarget.value)} /><button type="button" onClick={logTime}>Log time</button></div>
+          <div class="time-form"><DateField label="Work date" value={workDate()} onChange={setWorkDate} clearable={false} /><input aria-label="Duration in minutes" type="number" min="1" step="1" placeholder="Minutes" value={minutes()} onInput={event => setMinutes(event.currentTarget.value)} /><input aria-label="Work description" placeholder="What did you do?" value={workDescription()} onInput={event => setWorkDescription(event.currentTarget.value)} /><button type="button" onClick={logTime}>Log time</button></div>
           <Show when={timeEntries()?.length}><ul class="time-entries"><For each={timeEntries()}>{entry => <TimeEntryRow entry={entry} nameOf={nameOf} />}</For></ul></Show>
         </section>
 

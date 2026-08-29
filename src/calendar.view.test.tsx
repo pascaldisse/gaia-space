@@ -260,8 +260,13 @@ test("quick create offers a meeting, a task and a deadline form on the chosen da
     const title = form.querySelector("input") as HTMLInputElement;
     title.value = "Sync";
     title.dispatchEvent(new Event("input", { bubbles: true }));
-    const end = form.querySelectorAll("input[type=datetime-local]")[1] as HTMLInputElement;
-    const start = form.querySelectorAll("input[type=datetime-local]")[0] as HTMLInputElement;
+    /* ADDRESS ONLY (date-field pass): an instant is two halves now — the day is chosen in
+       the product's own month grid (components/DateField.tsx), the clock stays a time input.
+       Both quick-create times sit on the SAME day, so making the end equal the start is done
+       where it always was: on the clock. The draft still carries `YYYY-MM-DDTHH:mm`, and
+       meetingDraftError is the same judge of it. */
+    const clocks = form.querySelectorAll<HTMLInputElement>("input.date-time-clock");
+    const [start, end] = [clocks[0], clocks[1]];
     end.value = start.value;
     end.dispatchEvent(new Event("input", { bubbles: true }));
     await settle();

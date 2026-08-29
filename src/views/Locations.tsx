@@ -5,6 +5,7 @@ import EmptyState from "../components/EmptyState";
 import { Disclosure, SectionHeading } from "../components/blocks";
 import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import DateField from "../components/DateField";
 import { humanError } from "../session";
 import "../components/paper.css";
 import "./operatorForm.css";
@@ -152,15 +153,22 @@ function Field(props: {
   hint?: JSX.Element;
   grow?: boolean;
   wide?: boolean;
+  /** The control is a BUTTON (a picker), so the caption may not wrap it: a
+   *  <label> around a button is a wrong statement, and the control names itself. */
+  button?: boolean;
   children: (describedBy: string | undefined) => JSX.Element;
 }): JSX.Element {
   const hintId = () => `${props.id}-hint`;
+  const Caption = (inner: { children: JSX.Element }) =>
+    props.button
+      ? <div class="op-field">{inner.children}</div>
+      : <label class="op-field">{inner.children}</label>;
   return (
     <div class="locations-field" classList={{ grow: !!props.grow, wide: !!props.wide }}>
-      <label class="op-field">
+      <Caption>
         <span>{props.label}</span>
         {props.children(props.hint ? hintId() : undefined)}
-      </label>
+      </Caption>
       <Show when={props.hint}>
         <p class="op-hint" id={hintId()}>{props.hint}</p>
       </Show>
@@ -618,30 +626,27 @@ export default function Locations() {
               )}
             </Field>
 
-            <Field id="desk-from" label="From">
+            <Field id="desk-from" label="From" button>
               {() => (
-                <input
-                  class="op-input op-date"
-                  aria-label="Assigned from"
-                  required
-                  type="date"
+                /* An assignment must start somewhere, so this date has no Clear. */
+                <DateField
+                  class="op-date"
+                  label="Assigned from"
+                  clearable={false}
                   value={desk().since_date}
-                  onInput={(event) => setDesk({ ...desk(), since_date: event.currentTarget.value })}
+                  onChange={(value) => setDesk({ ...desk(), since_date: value })}
                 />
               )}
             </Field>
 
-            <Field id="desk-until" label="Until" hint="Leave empty while the desk is still theirs.">
-              {(describedBy) => (
-                <input
-                  class="op-input op-date"
-                  aria-label="Assigned until"
-                  aria-describedby={describedBy}
-                  type="date"
+            <Field id="desk-until" label="Until" hint="Leave empty while the desk is still theirs." button>
+              {() => (
+                <DateField
+                  class="op-date"
+                  label="Assigned until"
+                  placeholder="Open-ended"
                   value={desk().till_date ?? ""}
-                  onInput={(event) =>
-                    setDesk({ ...desk(), till_date: event.currentTarget.value || null })
-                  }
+                  onChange={(value) => setDesk({ ...desk(), till_date: value || null })}
                 />
               )}
             </Field>

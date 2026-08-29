@@ -1,6 +1,7 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
 import { PillMenu } from "./controls";
+import DateField from "./DateField";
 import { ProfilePicker } from "./Pickers";
 import { humanError } from "../session";
 import "./WorkItemDrawer.css";
@@ -108,9 +109,11 @@ export default function IssueCreateDrawer(props: {
         <div class="wid-field"><span>Priority</span>
           <PillMenu label="Ticket priority" value={priority()} onChange={setPriority} options={[...PRIORITIES]} />
         </div>
-        <label class="wid-field"><span>Due date</span>
-          <input class="wid-input" type="date" aria-label="Due date" value={dueDate()} onInput={(event) => setDueDate(event.currentTarget.value)} />
-        </label>
+        {/* A div, not a label: the date is a button that opens the product's own
+            month grid, and a <label> around a button is a wrong statement. */}
+        <div class="wid-field"><span>Due date</span>
+          <DateField label="Due date" value={dueDate()} onChange={setDueDate} placeholder="No due date" />
+        </div>
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">
           <button type="button" class="wid-btn" onClick={close} disabled={busy()}>Cancel</button>

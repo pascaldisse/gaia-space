@@ -71,7 +71,11 @@ describe("issue detail contract", () => {
     expect(host.textContent).toContain("#3");
     expect((host.querySelector(".idp-title") as HTMLInputElement).value).toBe("test issue");
     expect((host.querySelector(".idp-description") as HTMLTextAreaElement).value).toBe("the body");
-    expect((host.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-08-30");
+    /* ADDRESS ONLY (date-field pass): the due date is picked in the product's own month
+       grid now (components/DateField.tsx) — a native `<input type=date>` drew its calendar
+       in a layer no CSS reaches. The stored value is the same ISO string; what a test can
+       read is the WRITTEN form the trigger shows, which is the point of the control. */
+    expect(host.querySelector('.idp-field button.date-trigger')?.textContent).toContain("Aug 30, 2026");
     // status, priority, sub-items and time all belong to the same one surface
     expect(host.textContent).toContain("Acceptance");
     expect(host.textContent).toContain("#4 sub work");
@@ -142,7 +146,8 @@ test("an issue carries several people, and only project members can be added", a
 
     // It is a full issue surface: its own number, description, dates, assignees.
     expect((host.querySelector(".idp-title") as HTMLInputElement).value).toBe("sub work");
-    expect((host.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-09-01");
+    // ADDRESS ONLY (date-field pass), as above: the trigger states the date in words.
+    expect(host.querySelector('.idp-field button.date-trigger')?.textContent).toContain("Sep 1, 2026");
     expect([...host.querySelectorAll(".assignee-chip")].map(c => c.textContent).join(" ")).toContain("Bob");
 
     serve({ get_issue_detail: flat, list_profiles: people, list_project_member_ids: ["pa", "pb"] });

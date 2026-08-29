@@ -5,6 +5,8 @@ import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { humanError, profileId, profiles } from "../session";
 import { PillMenu } from "./controls";
+import DateField from "./DateField";
+import DateTimeField from "./DateTimeField";
 import "./WorkItemDrawer.css";
 
 /** The three shapes a message can become. "Pull Request" is in the briefing's field
@@ -171,7 +173,8 @@ export default function WorkItemDrawer(props: {
         }>
           <div class="wid-field wid-when"><span>Time</span>
             <div class="wid-when-row">
-              <input class="wid-input" type="datetime-local" aria-label="Time" value={startsAt()} onInput={event => setStartsAt(event.currentTarget.value)} />
+              {/* The day is chosen in the product's grid, the clock stays a wheel. */}
+              <DateTimeField label="Time" timeLabel="Time of day" value={startsAt()} onChange={setStartsAt} clearable={false} />
               <PillMenu label="Duration" value={String(minutes())} onChange={value => setMinutes(Number(value))}
                 options={[15, 30, 45, 60, 90, 120].map(value => ({ value: String(value), label: `${value} min` }))} />
             </div>
@@ -196,9 +199,11 @@ export default function WorkItemDrawer(props: {
           </fieldset>
         </Show>
         <Show when={props.kind === "task"}>
-          <label class="wid-field"><span>Due</span>
-            <input class="wid-input" type="date" value={dueDate()} onInput={event => setDueDate(event.currentTarget.value)} />
-          </label>
+          {/* A caption plus a BUTTON: a <label> may not wrap a control that opens a
+              popover, so the field is a div and the control carries its own name. */}
+          <div class="wid-field"><span>Due</span>
+            <DateField label="Due" value={dueDate()} onChange={setDueDate} placeholder="No due date" />
+          </div>
         </Show>
         <Show when={props.kind === "ticket"}>
           <div class="wid-field"><span>Priority</span>

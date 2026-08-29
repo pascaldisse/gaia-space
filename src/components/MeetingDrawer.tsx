@@ -1,9 +1,10 @@
-import { For, Show, createSignal, type JSX } from "solid-js";
-import type { Meeting } from "../api/meetings";
+import { For, Show, createEffect, type JSX } from "solid-js";
+import { meetingLinkError, type Meeting } from "../api/meetings";
 import { localInput } from "../calendar";
 import { PillMenu } from "./controls";
+import DateTimeField from "./DateTimeField";
 import { ProfilePicker } from "./Pickers";
-import { profileId } from "../session";
+import { profileId, profiles, reloadProfiles } from "../session";
 import "./MeetingDrawer.css";
 
 /** ── WHY A DRAWER ───────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ import "./MeetingDrawer.css";
 
 export type MeetingForm = Pick<
   Meeting,
-  "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference"
+  "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference" | "meeting_url"
 >;
 
 /** The repeats a person picks from a menu, each paired with the RRULE it means.
@@ -69,10 +70,20 @@ export type MeetingDrawerProps = {
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 
 export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
-  const [invitee, setInvitee] = createSignal("");
   // The menu reflects the rule, so a hand-written RRULE shows as "Custom" rather
   // than snapping the display back to one of the presets.
   const preset = () => repeatPresetOf(props.form.rrule);
+  /* Anyone in the workspace may be invited to a meeting — unlike a task assignee, whom
+     the owning project's membership limits. So the list is the profiles minus archived
+     ones, in TaskDrawer's control: pick people from a list, never type their ids. */
+  createEffect(() => { void reloadProfiles(); });
+  const invitable = () => (profiles() ?? []).filter((person) => !person.archived);
+  const nameOf = (person: { display_name: string | null; username: string }) => person.display_name || person.username;
+  const toggleInvitee = (id: string) => (props.invitees.includes(id) ? props.removeInvitee(id) : props.addInvitee(id));
+  /* Said while it is typed, not at submit: a link that will be refused must not look
+     accepted for the rest of the form. `meetings::normalize_meeting_url` enforces the
+     same rule natively, so this is the early word, not the only guard. */
+  const linkError = () => meetingLinkError(props.form.meeting_url);
 
   return (
     <div class="mtd-root" role="dialog" aria-modal="true" aria-label="New meeting">
@@ -104,49 +115,69 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
           </label>
 
           <div class="mtd-when">
-            <label class="mtd-field">
+            {/* Divs, not labels: the day half is a button that opens the product's own
+                month grid. A meeting must have both ends, so neither offers Clear —
+                that is what `required` said on the native control. */}
+            <div class="mtd-field">
               <span>Start</span>
-              <input class="mtd-input" type="datetime-local" required value={localInput(props.form.starts_at)}
-                onInput={(event) => props.setField("starts_at", epoch(event.currentTarget.value))} />
-            </label>
-            <label class="mtd-field">
+              <DateTimeField label="Start" clearable={false} value={localInput(props.form.starts_at)}
+                onChange={(value) => props.setField("starts_at", epoch(value))} />
+            </div>
+            <div class="mtd-field">
               <span>End</span>
-              <input class="mtd-input" type="datetime-local" required value={localInput(props.form.ends_at)}
-                onInput={(event) => props.setField("ends_at", epoch(event.currentTarget.value))} />
-            </label>
+              <DateTimeField label="End" clearable={false} value={localInput(props.form.ends_at)}
+                onChange={(value) => props.setField("ends_at", epoch(value))} />
+            </div>
           </div>
 
           <label class="mtd-field">
             <span>Location</span>
-            <input class="mtd-input" placeholder="Room, video link, or hybrid details"
+            <input class="mtd-input" placeholder="Room or building — where people physically go"
               value={props.form.location ?? ""}
               onInput={(event) => props.setField("location", event.currentTarget.value || null)} />
           </label>
 
-          {/* Invitees are collected here but sent after the meeting exists: the
-              invite command needs a meeting id, which create() mints. */}
-          <div class="mtd-field">
-            <span>Participants</span>
-            <div class="mtd-invite">
-              <ProfilePicker label="Participant" value={invitee()} onChange={setInvitee} />
-              <button type="button" class="mtd-btn" disabled={!invitee().trim()}
-                onClick={() => { const id = invitee().trim(); if (id) { props.addInvitee(id); setInvitee(""); } }}>
-                Add
-              </button>
-            </div>
-            <Show when={props.invitees.length} fallback={<p class="mtd-hint">Nobody invited yet — you can also invite people after creating.</p>}>
-              <ul class="mtd-people">
-                <For each={props.invitees}>
-                  {(id) => (
-                    <li class="mtd-person">
-                      <span>{id}</span>
-                      <button type="button" class="mtd-remove" aria-label={`Remove ${id}`} onClick={() => props.removeInvitee(id)}>Remove</button>
-                    </li>
+          {/* THE MEETING HAPPENS ON SOMEBODY ELSE'S SERVICE. This product runs no
+              conferencing of its own for these dates, so the honest field is the plain
+              URL a person pastes out of Google Calendar, Zoom or Teams. No vendor is
+              parsed out of it: a URL is a URL, and a guessed provider would only be a
+              second, wrong truth beside `video_provider`. */}
+          <label class="mtd-field">
+            <span>Meeting link</span>
+            <input class="mtd-input" type="url" inputmode="url" aria-label="Meeting link"
+              aria-invalid={linkError() ? "true" : undefined}
+              placeholder="https://meet.google.com/abc-defg-hij"
+              value={props.form.meeting_url ?? ""}
+              onInput={(event) => props.setField("meeting_url", event.currentTarget.value || null)} />
+            <Show when={linkError()} fallback={<span class="mtd-hint">Paste the Google Meet, Zoom or Teams address — the meeting then shows a Join button.</span>}>
+              <span class="mtd-field-error" role="alert">{linkError()}</span>
+            </Show>
+          </label>
+
+          {/* Invitees are collected here but sent after the meeting exists: the invite
+              command needs a meeting id, which create() mints. WHO IS COMING and WHO CAN
+              SEE IT are two different facts — `visibility` stays where it is, under More
+              options, and neither field explains the other. */}
+          <fieldset class="mtd-field mtd-people-field">
+            <legend>Participants</legend>
+            <Show when={invitable().length} fallback={<p class="mtd-hint">No profiles available to invite yet.</p>}>
+              <div class="mtd-people">
+                <For each={invitable()}>
+                  {(person) => (
+                    <label class="mtd-person">
+                      <input type="checkbox" checked={props.invitees.includes(person.id)} onChange={() => toggleInvitee(person.id)} />
+                      {nameOf(person)}
+                    </label>
                   )}
                 </For>
-              </ul>
+              </div>
             </Show>
-          </div>
+            <p class="mtd-hint">
+              <Show when={props.invitees.length} fallback="Nobody invited yet — you can also invite people after creating.">
+                {props.invitees.length} invited.
+              </Show>
+            </p>
+          </fieldset>
 
           {/* Rare-but-real settings. Collapsed, in the DOM, one disclosure. */}
           <details class="mtd-more">

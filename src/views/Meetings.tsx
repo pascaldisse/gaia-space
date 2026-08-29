@@ -1,7 +1,8 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import { hasMeetingLink, meetingLinkError, meetingsApi, openMeetingLink, type Meeting, type MeetingParticipant } from "../api/meetings";
 import { localInput, meetingDraftError, UI_LOCALE} from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
+import DateTimeField from "../components/DateTimeField";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { SectionHeading } from "../components/blocks";
@@ -47,8 +48,28 @@ import "./Meetings.css";
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
   const start = Math.floor(Date.now() / 1000) + 3600;
-  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only" };
+  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only", meeting_url: null };
 };
+/** ── JOIN ─────────────────────────────────────────────────────────────────────
+ *  One affordance, two implementations, because the two runtimes differ in ONE
+ *  respect that matters: in the desktop app `window.open` opens the address inside
+ *  the webview — a browser with no URL bar, no Google session and no camera
+ *  permission prompt — so the desktop hands the URL to the operating system's
+ *  default browser (`tauri-plugin-opener`). In the web build a link is already a
+ *  link and needs no plugin. Anything without a valid link renders NOTHING here:
+ *  a Join button that leads nowhere is worse than no button. */
+function JoinLink(props: { meeting: Meeting; class?: string; onError: (message: string) => void }) {
+  const url = () => props.meeting.meeting_url!.trim();
+  return <Show when={hasMeetingLink(props.meeting)}>
+    <Show
+      when={isWeb()}
+      fallback={<button type="button" class={props.class ?? "meeting-join"} title={url()}
+        onClick={() => { void openMeetingLink(url()).catch((reason) => props.onError(humanError(reason))); }}>Join</button>}
+    >
+      <a class={props.class ?? "meeting-join"} href={url()} target="_blank" rel="noopener" title={url()}>Join</a>
+    </Show>
+  </Show>;
+}
 const recurrenceLabel = (rrule: string | null) => {
   if (!rrule) return "Does not repeat";
   const frequency = rrule.match(/FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/)?.[1]?.toLowerCase();
@@ -118,13 +139,15 @@ export default function Meetings() {
     const meeting = selected();
     if (meeting) setSelected({ ...meeting, [field]: value });
   };
-  const validate = (meeting: Pick<Meeting, "title" | "starts_at" | "ends_at" | "location" | "rrule">) => meetingDraftError({
+  // The link is refused HERE as well as natively, so a bad address is named before a
+  // round trip — and the meeting is never saved with a Join button that goes nowhere.
+  const validate = (meeting: Pick<Meeting, "title" | "starts_at" | "ends_at" | "location" | "rrule" | "meeting_url">) => meetingDraftError({
     title: meeting.title,
     starts_at: localInput(meeting.starts_at),
     ends_at: localInput(meeting.ends_at),
     location: meeting.location ?? "",
     rrule: meeting.rrule ?? "",
-  });
+  }) || meetingLinkError(meeting.meeting_url);
   const selectMeeting = (meeting: Meeting) => {
     setError("");
     setNotice("");
@@ -148,6 +171,7 @@ export default function Meetings() {
         channel_id: draft.channel_id || null,
         visibility: draft.visibility,
         modification_preference: draft.modification_preference,
+        meeting_url: draft.meeting_url?.trim() || null,
         archived: false,
         // A new meeting has no room yet: the room is minted and bound at the first join.
         video_provider: null,
@@ -324,7 +348,11 @@ export default function Meetings() {
         </Show>
         {/* The Knowledge card, not a bare row: tile · title · ONE meta line · arrow.
             The date and the place used to be two stacked muted lines; they are one. */}
-        <div class="meeting-rows"><For each={visibleMeetings()}>{(meeting) => <button type="button" classList={{ "meeting-row": true, active: selected()?.id === meeting.id }} onClick={() => selectMeeting(meeting)}><span class="meeting-row-icon" aria-hidden="true"><Icon name="calendar" size={20} /></span><span class="meeting-row-copy"><strong>{meeting.title}</strong><small><time datetime={new Date(meeting.starts_at * 1000).toISOString()}>{displayDate(meeting.starts_at)}</time> · {meeting.location || "No location"} · {recurrenceLabel(meeting.rrule)}</small></span><span class="meeting-row-open" aria-hidden="true">→</span></button>}</For></div>
+        {/* Join is a SECOND act on the card, so it cannot live inside the card's own
+            button (a button may not contain a button). The card chrome moved out to
+            `.meeting-row-shell`; selecting the meeting and joining it now sit side by
+            side in it, and the row keeps exactly the shape it had. */}
+        <div class="meeting-rows"><For each={visibleMeetings()}>{(meeting) => <div classList={{ "meeting-row-shell": true, active: selected()?.id === meeting.id }}><button type="button" class="meeting-row" onClick={() => selectMeeting(meeting)}><span class="meeting-row-icon" aria-hidden="true"><Icon name="calendar" size={20} /></span><span class="meeting-row-copy"><strong>{meeting.title}</strong><small><time datetime={new Date(meeting.starts_at * 1000).toISOString()}>{displayDate(meeting.starts_at)}</time> · {meeting.location || "No location"} · {recurrenceLabel(meeting.rrule)}</small></span><span class="meeting-row-open" aria-hidden="true">→</span></button><JoinLink meeting={meeting} onError={setError} /></div>}</For></div>
       </main>
 
       <aside class="meeting-detail" aria-label="Meeting details">
@@ -333,8 +361,16 @@ export default function Meetings() {
             <div class="detail-actions"><a class="meeting-permalink" {...linkProps({ view: "Calendar", entityType: "meeting", entityId: meeting().id })}>Open on calendar</a><Show when={meeting().channel_id} fallback={<button type="button" onClick={async () => { try { const channel_id = await meetingsApi.attachChannel(meeting().id); setSelected({ ...meeting(), channel_id }); await refetch(); } catch (reason) { setError(humanError(reason)); } }}>Attach discussion</button>}><a {...linkProps({ view: "Chat", entityType: "channel", entityId: meeting().channel_id! })}>Open discussion</a></Show><button type="button" onClick={save}>Save</button><button type="button" class="danger" onClick={archive}>Archive</button></div>
             <label>Title<input class="meeting-title" value={meeting().title} onInput={(event) => setMeetingField("title", event.currentTarget.value)}/></label>
             <label>Description<textarea value={meeting().description ?? ""} onInput={(event) => setMeetingField("description", event.currentTarget.value || null)}/></label>
-            <div class="meeting-detail-when"><label>Start<input type="datetime-local" value={localInput(meeting().starts_at)} onInput={(event) => setMeetingField("starts_at", epoch(event.currentTarget.value))}/></label><label>End<input type="datetime-local" value={localInput(meeting().ends_at)} onInput={(event) => setMeetingField("ends_at", epoch(event.currentTarget.value))}/></label></div>
+            {/* Divs, not labels: the day is chosen with a button (components/DateField). The
+    epoch seconds the view stores are untouched, so meetingDraftError still rules
+    on "the end must follow the start" when Save is pressed. */}
+<div class="meeting-detail-when"><div class="when-field"><span>Start</span><DateTimeField label="Start" clearable={false} value={localInput(meeting().starts_at)} onChange={(value) => setMeetingField("starts_at", epoch(value))}/></div><div class="when-field"><span>End</span><DateTimeField label="End" clearable={false} value={localInput(meeting().ends_at)} onChange={(value) => setMeetingField("ends_at", epoch(value))}/></div></div>
             <label>Location<input value={meeting().location ?? ""} onInput={(event) => setMeetingField("location", event.currentTarget.value || null)}/></label>
+            {/* The external address, editable here and joinable right beside it — the
+                one place that both holds the fact and acts on it. */}
+            <label>Meeting link<input type="url" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" aria-invalid={meetingLinkError(meeting().meeting_url) ? "true" : undefined} value={meeting().meeting_url ?? ""} onInput={(event) => setMeetingField("meeting_url", event.currentTarget.value || null)}/></label>
+            <Show when={meetingLinkError(meeting().meeting_url)}><p class="meeting-link-error" role="alert">{meetingLinkError(meeting().meeting_url)}</p></Show>
+            <Show when={hasMeetingLink(meeting())}><div class="meeting-link-actions"><JoinLink meeting={meeting()} onError={setError} /><span class="meeting-link-url">{meeting().meeting_url}</span></div></Show>
             <label>Visibility<select value={meeting().visibility} onChange={(event) => setMeetingField("visibility", event.currentTarget.value as Meeting["visibility"])}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
             <label>Who can edit?<select value={meeting().modification_preference} onChange={(event) => setMeetingField("modification_preference", event.currentTarget.value as Meeting["modification_preference"])}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
             <label>RRULE<input placeholder="FREQ=WEEKLY;COUNT=4" value={meeting().rrule ?? ""} onInput={(event) => setMeetingField("rrule", event.currentTarget.value || null)}/></label>

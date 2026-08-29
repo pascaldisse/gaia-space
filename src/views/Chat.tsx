@@ -4,6 +4,7 @@ import { currentUser, isWeb } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
+import DateTimeField from "../components/DateTimeField";
 import "../App.css";
 import "./Chat.css";
 import {
@@ -1288,11 +1289,14 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </Show>
           <Show when={scheduleOpen()}>
             <div class="schedule-form">
-              <input
-                type="datetime-local"
-                aria-label="Send at"
+              {/* The day is chosen in the product's own month grid; the clock stays
+                  a wheel. The stored value is the same `YYYY-MM-DDTHH:mm` as before,
+                  and an incomplete pair writes nothing, so Schedule stays disabled. */}
+              <DateTimeField
+                label="Send at"
+                timeLabel="Send at time"
                 value={scheduleAt()}
-                onInput={(e) => setScheduleAt(e.currentTarget.value)}
+                onChange={setScheduleAt}
               />
               <button type="button" class="primary" onClick={submitSchedule} disabled={!scheduleAt()}>
                 {scheduleEditId() ? "Reschedule" : "Schedule"}

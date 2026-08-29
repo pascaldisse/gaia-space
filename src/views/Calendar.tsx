@@ -10,6 +10,8 @@ import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
 import { GhostPill, PillMenu } from "../components/controls";
 import SourceLink from "../components/SourceLink";
+import DateField from "../components/DateField";
+import DateTimeField from "../components/DateTimeField";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
 import "../components/paper.css";
 import "./Calendar.css";
@@ -331,8 +333,11 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 {/* The title carries a caption like every other field in this form; the
     aria-label stays, because it is the name tests and assistive tech use. */}
 <label>Title<input autofocus placeholder="What is the meeting about?" aria-label="Meeting title" value={form().title} onInput={e=>setForm({...form(),title:e.currentTarget.value})}/></label>
-<label>Start<input type="datetime-local" value={form().starts_at} onInput={e=>setForm({...form(),starts_at:e.currentTarget.value})}/></label>
-<label>End<input type="datetime-local" value={form().ends_at} onInput={e=>setForm({...form(),ends_at:e.currentTarget.value})}/></label>
+{/* Divs, not labels: a day is chosen with a button now (see components/DateField).
+    The draft still carries the same `YYYY-MM-DDTHH:mm` strings, so meetingDraftError
+    keeps deciding whether the end really follows the start. */}
+<div class="cal-field"><span>Start</span><DateTimeField label="Start" value={form().starts_at} onChange={value=>setForm({...form(),starts_at:value})} clearable={false}/></div>
+<div class="cal-field"><span>End</span><DateTimeField label="End" value={form().ends_at} onChange={value=>setForm({...form(),ends_at:value})} clearable={false}/></div>
 <label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
 <label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
@@ -344,7 +349,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <form onSubmit={createTask} aria-label="New task">
 <h2>New task — {day().toLocaleDateString(UI_LOCALE)}</h2>
 <label>Title<input autofocus placeholder="What needs doing?" aria-label="Task title" value={taskForm().title} onInput={e=>setTaskForm({...taskForm(),title:e.currentTarget.value})}/></label>
-<label>Due<input type="date" value={taskForm().day} onInput={e=>setTaskForm({...taskForm(),day:e.currentTarget.value})}/></label>
+<div class="cal-field"><span>Due</span><DateField label="Due" value={taskForm().day} onChange={value=>setTaskForm({...taskForm(),day:value})} clearable={false}/></div>
 <div class="detail-actions"><button class="primary">Add task</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
 </Show>
@@ -355,7 +360,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <option value="">Select a project…</option>
 <For each={deadlineProjects()}>{project=><option value={project.id}>{project.name}</option>}</For>
 </select></label>
-<label>Date<input type="date" value={deadlineForm().day} onInput={e=>setDeadlineForm({...deadlineForm(),day:e.currentTarget.value})}/></label>
+<div class="cal-field"><span>Date</span><DateField label="Date" value={deadlineForm().day} onChange={value=>setDeadlineForm({...deadlineForm(),day:value})} clearable={false}/></div>
 <p class="hint">Only projects you own that have no deadline yet are listed — edit an existing deadline in Projects.</p>
 <div class="detail-actions"><button class="primary">Set deadline</button><button type="button" onClick={()=>setComposerDay(undefined)}>Cancel</button></div>
 </form>
@@ -368,8 +373,8 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 {item=><div class="meeting-detail">
 <div class="detail-actions"><button onClick={save}>Save</button><button class="danger" onClick={archive}>Archive</button><button onClick={()=>{setSelected(undefined);setDraft(undefined)}}>Close</button></div>
 <label>Title<input class="meeting-title" aria-label="Meeting title" value={item().title} onInput={e=>setDraft({...item(),title:e.currentTarget.value})}/></label>
-<label>Start<input type="datetime-local" value={localInput(item().starts_at)} onInput={e=>setDraft({...item(),starts_at:epoch(e.currentTarget.value)})}/></label>
-<label>End<input type="datetime-local" value={localInput(item().ends_at)} onInput={e=>setDraft({...item(),ends_at:epoch(e.currentTarget.value)})}/></label>
+<div class="cal-field"><span>Start</span><DateTimeField label="Start" value={localInput(item().starts_at)} onChange={value=>setDraft({...item(),starts_at:epoch(value)})} clearable={false}/></div>
+<div class="cal-field"><span>End</span><DateTimeField label="End" value={localInput(item().ends_at)} onChange={value=>setDraft({...item(),ends_at:epoch(value)})} clearable={false}/></div>
 <label>Location<input value={item().location??""} onInput={e=>setDraft({...item(),location:e.currentTarget.value||null})}/></label>
 <label>Visibility<select value={item().visibility} onChange={e=>setDraft({...item(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={item().modification_preference} onChange={e=>setDraft({...item(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>

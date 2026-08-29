@@ -522,3 +522,32 @@
 }
 .theme-space-light .calendar-detail .inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .theme-space-light .calendar-detail .participant { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+
+/* ── A DATE IS A BUTTON NOW ────────────────────────────────────────────────
+   The day halves of this view's forms are DateField/DateTimeField, so the caption
+   can no longer be a <label> wrapping the control: `.cal-field` is that caption
+   plus its control. UNSCOPED ON PURPOSE — this is structure, and the dark shell
+   needs the stacking exactly as much as the light one. */
+.cal-field { display: grid; gap: 6px; }
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > .cal-field {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 11px);
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+/* The shipped controls keep their own geometry: the clock half is a pill of the
+   button height, not a full-width field box. */
+.calendar-detail .date-time-field input.date-time-clock { width: auto; }
+.theme-space-light .calendar-detail .date-time-field input.date-time-clock {
+  min-height: var(--btn-height, 37px);
+  border-radius: var(--pillctl-r, 999px);
+  border-color: var(--ctl-border, var(--line));
+  background: var(--ctl-bg, var(--paper));
+  font-family: var(--font-head);
+  font-size: var(--btn-font-size, 13px);
+  letter-spacing: normal;
+  text-transform: none;
+}

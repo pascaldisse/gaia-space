@@ -58,14 +58,23 @@
    icon tile left, title bold, ONE quiet meta line (when · where · recurrence),
    arrow right. Repeated measures, identical tokens — no second raster.
    UNSCOPED: structure belongs to both themes. */
-.meetings-view .meeting-row {
+/* The card is the SHELL, not the button: a card that carries two acts (open it,
+   join it) cannot be one button, because a button may not contain another. So the
+   border, background and hover live on the shell and the selecting button fills it. */
+.meetings-view .meeting-row-shell {
   display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
   padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
-  border-radius: var(--dk-radius-lg); background: var(--surface); text-align: left;
+  border-radius: var(--dk-radius-lg); background: var(--surface);
 }
-.meetings-view .meeting-row:hover {
+.meetings-view .meeting-row-shell:hover {
   border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent);
 }
+.meetings-view .meeting-row-shell.active { border-color: var(--accent); background: var(--accent-soft); }
+.meetings-view .meeting-row {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0; flex: 1;
+  padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left;
+}
+.meetings-view .meeting-row:hover { border-color: transparent; box-shadow: none; background: transparent; }
 .meeting-row-icon {
   display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
   border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
@@ -79,4 +88,29 @@
 .meetings-view .meeting-row-copy small,
 .meetings-view .meeting-row-copy small time { color: var(--text-muted); font-size: var(--dk-fs-xs); font-weight: 400; }
 .meeting-row-open { margin-left: auto; color: var(--accent-text); }
-.meetings-view .meeting-row.active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── JOIN ─────────────────────────────────────────────────────────────────────
+   The act that takes you to the meeting itself. An act-button, so its size, weight,
+   height and radius come from the `--btn-*` tokens like every other one; the anchor
+   form (web) is dressed identically, because the runtime must not change how the
+   same act looks. UNSCOPED: this is structure, not a theme's opinion. */
+.meetings-view .meeting-join {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--btn-height); padding: 0 var(--btn-pad-x);
+  border: var(--dk-hairline) solid var(--accent); border-radius: var(--btn-radius);
+  background: var(--accent-soft); color: var(--accent-text);
+  font-family: var(--font-body); font-size: var(--btn-font-size); font-weight: var(--btn-font-weight);
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.meetings-view .meeting-join:hover { background: var(--accent); color: var(--surface); }
+.meeting-link-actions { display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0; }
+.meeting-link-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--dk-fs-xs); }
+.meeting-link-error { margin: 0; color: var(--status-danger-ink); font-size: var(--dk-fs-xs); }
+
+/* ── A DATE IS A BUTTON NOW ────────────────────────────────────────────────
+   Start and End are DateTimeField (day = the product's month grid, clock = a time
+   input), so their captions stopped being <label>s wrapping a control. Structure,
+   unscoped: the dark detail pane stacks caption over control just like the light one,
+   and the blanket `.meetings-view input` rule must not repaint the clock half. */
+.meeting-detail-when .when-field { display: grid; gap: 6px; font-family: var(--font-head); font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
+.meetings-view .date-time-field input.date-time-clock { width: auto; font-family: var(--font-head); font-size: var(--btn-font-size, 13px); letter-spacing: normal; text-transform: none; }

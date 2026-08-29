@@ -6,6 +6,7 @@ import PageHeader from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
+import DateField from "../components/DateField";
 import { humanError, profileId } from "../session";
 import { linkEntity, linkProps, useDeepLink } from "../router";
 import "../components/WorkItemDrawer.css";
@@ -123,9 +124,10 @@ function BlogComposeDrawer(props:{
         <label class="wid-field"><span>Calendar announcement (optional)</span>
           <input class="wid-input" value={props.calendarEventTitle} onInput={event=>props.setCalendarEventTitle(event.currentTarget.value)} placeholder="Calendar event title" aria-label="Calendar event title"/>
         </label>
-        <label class="wid-field"><span>Announcement date</span>
-          <input class="wid-input" type="date" value={props.calendarEventDate} onInput={event=>props.setCalendarEventDate(event.currentTarget.value)} aria-label="Calendar event date"/>
-        </label>
+        {/* A div, not a label: the date is a button opening the product's grid. */}
+        <div class="wid-field"><span>Announcement date</span>
+          <DateField label="Calendar event date" value={props.calendarEventDate} onChange={props.setCalendarEventDate} placeholder="No date"/>
+        </div>
         <label class="wid-field"><span>Team</span>
           <select class="wid-input" value={props.team} onChange={event=>props.setTeam(event.currentTarget.value)}>
             <option value="">Organization-wide</option>
