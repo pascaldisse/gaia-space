@@ -109,3 +109,39 @@ describe("a task's category", () => {
     expect(host.querySelector(".task-tile-cat")?.textContent).toBe("sonstiges");
   });
 });
+
+describe("the tile's meta line joins itself", () => {
+  afterEach(() => {
+    dispose?.(); dispose = undefined;
+    document.body.innerHTML = "";
+    delete (window as any).__TAURI_INTERNALS__;
+    setProfileId("");
+  });
+
+  /** A separator is a thing BETWEEN two facts. Placed by hand beside each fact, it
+   *  outlives whatever it was meant to separate: the category printed "Review ·" with
+   *  nothing after it, and a notes-only task printed "· notes". */
+  test("a lone fact carries no separator, on either side", async () => {
+    todos = [{ ...base, category: "review" }];
+    const host = await mount();
+    const meta = host.querySelector(".task-tile-meta")!;
+    expect(meta.textContent).toBe("Review");
+    expect(meta.querySelectorAll(".sep").length).toBe(0);
+  });
+
+  test("a task with only notes does not start with a separator", async () => {
+    todos = [{ ...base, category: null, notes: "Just a note" }];
+    const host = await mount();
+    const meta = host.querySelector(".task-tile-meta")!;
+    expect(meta.textContent).toBe("Just a note");
+    expect(meta.querySelectorAll(".sep").length).toBe(0);
+  });
+
+  test("three facts are joined by exactly two separators", async () => {
+    todos = [{ ...base, category: "create", assignee_ids: ["me"], notes: "Draft it" }];
+    const host = await mount();
+    const meta = host.querySelector(".task-tile-meta")!;
+    expect(meta.querySelectorAll(".sep").length).toBe(2);
+    expect(meta.textContent).toBe("Create·Me·Draft it");
+  });
+});

@@ -46,6 +46,22 @@ export default function Todo() {
   /** An unknown category still shows its stored value rather than vanishing: a row
    *  that silently drops a fact is worse than one that shows a word we did not plan. */
   const categoryLabel=(id:string)=>TODO_CATEGORIES.find(option=>option.id===id)?.label??id;
+  /** THE QUIET LINE UNDER A TASK'S NAME, in the order it is read: what KIND of act,
+   *  then where it lives, then who carries it, then what it is about.
+   *
+   *  The category leads because it is the one fact that says what sort of work this
+   *  is — and it carries NO COLOUR. Both coloured things on this tile (the state mark
+   *  and the due date) come from `deadlineBand()`/`urgencyOf()`; a category palette
+   *  beside them would be a second colour rule on one card, and "what kind of work"
+   *  would compete with "how late". One colour rule per tile. */
+  const metaParts=(todo:TodoItem)=>{
+    const parts:{cls:string;text:string}[]=[];
+    if(todo.category) parts.push({cls:"task-tile-cat",text:categoryLabel(todo.category)});
+    if(todo.project_id) parts.push({cls:"",text:projectName(todo.project_id)});
+    if(todo.assignee_ids.length) parts.push({cls:"",text:todo.assignee_ids.map(nameOf).join(", ")});
+    if(todo.notes) parts.push({cls:"",text:todo.notes.length>60?todo.notes.slice(0,60)+"…":todo.notes});
+    return parts;
+  };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
   /* ── EDIT AN EXISTING TASK: IN THE ROW ──────────────────────────────────────
@@ -175,26 +191,18 @@ export default function Todo() {
         <span class="task-tile-title">
           <Show when={todo.content_kind==="markdown"} fallback={todo.content}>{markdownBody(todo.content)}</Show>
         </span>
-        <Show when={todo.project_id||todo.assignee_ids.length||todo.notes||todo.source_entity_type||todo.category}>
+        {/* THE META LINE JOINS ITSELF. Every separator used to be placed by hand next
+            to the fact it followed, so each new fact had to guess what might come
+            before it — and got it wrong: a category with nothing after it printed
+            "Review ·", and a task carrying only notes printed "· notes". Facts are
+            collected first, then joined, so a dot can only ever appear BETWEEN two of
+            them. */}
+        <Show when={metaParts(todo).length}>
           <span class="task-tile-meta">
-            {/* A CATEGORY YOU CANNOT SEE IS NOT WORTH SETTING — so it leads the meta
-                line, as the one fact saying what KIND of act this is.
-
-                IT CARRIES NO COLOUR, and that is the whole point. Both coloured things
-                on this tile — the state mark and the due date — are driven by
-                `deadlineBand()`/`urgencyOf()`. A category hue would be a SECOND,
-                unrelated palette on one card, and a person would have to learn which
-                colours mean "late" and which merely mean "a review". One colour rule
-                per tile. The dots live in the picker menu, where five options are
-                being scanned and no deadline competes with them. */}
-            <Show when={todo.category}>{value=><>
-              <span class="task-tile-cat">{categoryLabel(value())}</span>
-              <span class="sep">·</span>
-            </>}</Show>
-            <Show when={todo.project_id}>{id=><span>{projectName(id())}</span>}</Show>
-            <Show when={todo.project_id&&todo.assignee_ids.length}><span class="sep">·</span></Show>
-            <Show when={todo.assignee_ids.length}><span>{todo.assignee_ids.map(nameOf).join(", ")}</span></Show>
-            <Show when={todo.notes}>{notes=><><span class="sep">·</span><span>{notes().length>60?notes().slice(0,60)+"…":notes()}</span></>}</Show>
+            <For each={metaParts(todo)}>{(part,index)=><>
+              <Show when={index()>0}><span class="sep">·</span></Show>
+              <span class={part.cls}>{part.text}</span>
+            </>}</For>
           </span>
         </Show>
       </button>
