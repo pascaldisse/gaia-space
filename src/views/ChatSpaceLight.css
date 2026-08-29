@@ -140,3 +140,79 @@
 
 .theme-space-light .chat-empty-state h2 { color: var(--ink); }
 .theme-space-light .chat-empty-state p { color: var(--ink-muted); }
+
+
+/* ── THE COMPOSER IS ONE SURFACE, AND ITS ACTS ARE OUR OWN ICONS ─────────────
+   Two stacked boxes (a hint bar with its own border, then the message box) read as
+   two controls; there is one. The hint keeps its line INSIDE the card, and the three
+   affordances are the product's line icons instead of the operating system's emoji
+   (📎 🕒 📊), which were the one place in the app where the icon set was not the icon
+   set. */
+.theme-space-light .composer .attachment-button,
+.theme-space-light .composer .schedule-button,
+.theme-space-light .composer .poll-button {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; padding: 0;
+  border: 1px solid transparent; border-radius: 10px;
+  background: none; color: var(--muted); cursor: pointer;
+}
+.theme-space-light .composer .attachment-button:hover,
+.theme-space-light .composer .schedule-button:hover,
+.theme-space-light .composer .poll-button:hover { border-color: var(--line); background: var(--wash); color: var(--ink); }
+.theme-space-light .composer .attachment-link { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── A POLL IS A FORM, SO IT LOOKS LIKE THE PRODUCT'S FORMS ──────────────────
+   Bare inputs and unstyled buttons sat inside the composer card; every other form in
+   the product uses the same field shape and the one button rule (spaceTheme.css). */
+.theme-space-light .poll-form,
+.theme-space-light .schedule-form {
+  margin: 0 24px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.theme-space-light .schedule-form { grid-auto-flow: column; justify-content: start; align-items: center; }
+.theme-space-light .poll-form input[type="text"],
+.theme-space-light .poll-form-option input {
+  min-height: var(--btn-height, 37px);
+  padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 11px;
+  background: var(--ctl-bg, #fbfaf8); color: var(--ink);
+  font-family: var(--font-head); font-size: var(--btn-font-size, 13px);
+}
+.theme-space-light .poll-form input:focus-visible,
+.theme-space-light .poll-form-option input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.theme-space-light .poll-form-option { gap: 8px; }
+.theme-space-light .poll-form-option button {
+  width: var(--btn-height, 37px); height: var(--btn-height, 37px); padding: 0;
+  border: 1px solid var(--line); border-radius: 11px; background: var(--paper);
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.theme-space-light .poll-form-option button:hover { color: var(--red, #c2384a); border-color: color-mix(in srgb, var(--red, #c2384a) 45%, transparent); }
+.theme-space-light .poll-form-actions { gap: 8px; }
+.theme-space-light .poll-form-actions button,
+.theme-space-light .schedule-form button {
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: 1px solid var(--line); border-radius: var(--btn-radius, 11px);
+  background: var(--paper); color: var(--ink);
+  font-family: var(--font-head); font-size: var(--btn-font-size, 13px); font-weight: var(--btn-font-weight, 650);
+  cursor: pointer;
+}
+.theme-space-light .poll-form-actions button.primary,
+.theme-space-light .schedule-form button.primary {
+  border-color: transparent; background: var(--teal); color: var(--brand-navy);
+  width: auto; height: auto; border-radius: var(--btn-radius, 11px);
+}
+/* The round teal send glyph belongs to the composer alone; a form's primary is a
+   button with a word in it. */
+.theme-space-light .poll-form-actions button.primary:after,
+.theme-space-light .schedule-form button.primary:after { content: none; }
+.theme-space-light .poll-form-actions label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--btn-font-size, 13px); color: var(--ink);
+}

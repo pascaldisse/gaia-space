@@ -5,6 +5,7 @@ import { navLayout } from "../nav";
 import { actingProfileId, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
+import { Icon } from "../components/Icon";
 import "../App.css";
 import "./Chat.css";
 import {
@@ -917,7 +918,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                 {(poll) => (
                   <div class="poll-card">
                     <div class="poll-question">
-                      📊 {poll().question}
+                      <Icon name="poll" size={15} /> {poll().question}
                       <Show when={poll().multiple_choice}><span class="hint"> · pick several</span></Show>
                       <Show when={poll().anonymous}><span class="hint"> · anonymous</span></Show>
                       <Show when={!pollIsOpen(poll())}><span class="hint"> · closed</span></Show>
@@ -964,7 +965,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
               )}</For></div></Show>
               <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
                 <div class="attachment-card">
-                  <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
+                  <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a class="attachment-link" href={attachment.data_url} download={attachment.file_name}><Icon name="paperclip" size={14} /> {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
                   <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
                   <Show when={attachment.upload_state !== "completed"}>
                     <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
@@ -1307,7 +1308,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           <div class="composer composer-wrap">
             {/* Real affordances only: this line states what the composer actually does.
                 Hidden by default; the light shell shows it as the prototype's hint row. */}
-            <div class="composer-hint" aria-hidden="true">Enter to send · Shift+Enter for a new line · 📎 file · 🕒 later · 📊 poll</div>
+            {/* The hint says what the KEYBOARD does. It used to list "📎 file · 🕒 later
+                · 📊 poll" as well — the same three acts that sit as buttons two
+                centimetres below, in emoji the operating system draws in its own
+                colours. A caption that repeats its own controls is furniture. */}
+            <div class="composer-hint" aria-hidden="true">Enter to send · Shift+Enter for a new line</div>
             <textarea
               placeholder="Message…"
               value={draft()}
@@ -1319,10 +1324,13 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                 }
               }}
             />
-            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
+            <label class="attachment-button" title="Attach files" aria-label="Attach files">
+              <Icon name="paperclip" size={17} />
+              <input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} />
+            </label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
-            <button type="button" class="schedule-button" title="Send later" onClick={() => { setScheduleThreadOf(null); setScheduleOpen((v) => !v); }}>🕒</button>
-            <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
+            <button type="button" class="schedule-button" title="Send later" aria-label="Send later" onClick={() => { setScheduleThreadOf(null); setScheduleOpen((v) => !v); }}><Icon name="clock" size={17} /></button>
+            <button type="button" class="poll-button" title="Create a poll" aria-label="Create a poll" onClick={() => setPollOpen((v) => !v)}><Icon name="poll" size={17} /></button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">
@@ -1421,7 +1429,10 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                 }
               }}
             />
-            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
+            <label class="attachment-button" title="Attach files" aria-label="Attach files">
+              <Icon name="paperclip" size={17} />
+              <input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} />
+            </label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadChannel() || (!threadDraft().trim() && !threadAttachments().length)}>Reply</button>
             <button type="button" class="schedule-button" title="Schedule reply" onClick={() => { setScheduleThreadOf(threadRoot()!.id); setScheduleOpen(true); }}>🕒</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>

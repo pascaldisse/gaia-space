@@ -124,6 +124,12 @@ const PATHS = {
       <circle cx="12" cy="15.8" r="0.85" fill="currentColor" stroke="none" />
     </>
   ),
+  /* Composer affordances. They used to be literal emoji (📎 🕒 📊), which the OS draws
+     in full colour and its own shape — the one place in the product where the icon set
+     was not the icon set. */
+  paperclip: () => <path d="M18.5 11.5 12 18a4 4 0 0 1-5.7-5.7l7.1-7.1a2.7 2.7 0 0 1 3.8 3.8l-7.1 7.1a1.4 1.4 0 0 1-2-2l6.5-6.5" />,
+  poll: () => <path d="M5 20V11M12 20V4M19 20v-6M3.5 20h17" />,
+  send: () => <path d="M5 12h13M12.5 5.5 19 12l-6.5 6.5" />,
   trash: () => <path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
