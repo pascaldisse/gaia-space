@@ -138,7 +138,24 @@ const [participants,{refetch:reloadParticipants}] = createResource(() => draft()
 // Reading `items()` after a failed load re-throws inside the render; the visible
 // alert is the answer for that case, and the grid stays empty rather than crashing.
 const loaded = () => { if (items.error) return []; return items() ?? []; };
-const scoped = () => { const project=scopeProjectId(); const base=project ? loaded().filter(item=>item.project_id===project) : loaded(); const selected=calendarFilter(); const filtered=selected==="all" ? base : base.filter(item=>item.calendar_id===null || item.calendar_id===selected); const active=prefs(); return filtered.filter(item => (active?.show_todos !== false || item.kind!=="task") && (!active?.working_hours_only || item.kind!=="meeting" || (()=>{const hour=new Date(item.starts_at*1000).getHours();return hour>=active.working_hours_start&&hour<active.working_hours_end;})())); };
+/* A TASK IS A PROJECT'S BUSINESS. The organisation's calendar carries what binds
+   people to a moment — meetings and project deadlines; a due date belongs on the
+   calendar of the project that owns it, where the people working on it look. So
+   tasks are drawn ONLY in a project-scoped calendar, and there only that project's.
+   Who sees what is still the backend's word (`calendar_aggregate`): a deadline or a
+   task reaches the owner, the members and the assignee, nobody else. */
+const scoped = () => {
+  const project = scopeProjectId();
+  const base = project
+    ? loaded().filter(item => item.project_id === project)
+    : loaded().filter(item => item.kind !== "task");
+  const selected = calendarFilter();
+  const filtered = selected === "all" ? base : base.filter(item => item.calendar_id === null || item.calendar_id === selected);
+  const active = prefs();
+  return filtered.filter(item =>
+    (active?.show_todos !== false || item.kind !== "task")
+    && (!active?.working_hours_only || item.kind !== "meeting" || (() => { const hour = new Date(item.starts_at * 1000).getHours(); return hour >= active.working_hours_start && hour < active.working_hours_end; })()));
+};
 // Each view steps by its own span: a month, a week, a day, or a schedule window.
 const shift = (amount:number) => { const next=new Date(cursor()); const step={month:0,week:7,day:1,schedule:SCHEDULE_DAYS} as const; if(view()==="month") next.setMonth(next.getMonth()+amount); else next.setDate(next.getDate()+step[view() as "week"|"day"|"schedule"]*amount); setCursor(next); if(view()==="day") setSelectedDay(next); };
 const days = () => { const [start,end]=range(); const result:Date[]=[]; for(const day=new Date(start);day<end;day.setDate(day.getDate()+1)) if(prefs()?.show_weekends!==false || (day.getDay()!==0&&day.getDay()!==6)) result.push(new Date(day)); return result; };

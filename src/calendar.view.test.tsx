@@ -82,8 +82,12 @@ describe("calendar day agenda", () => {
     const request = calls.find((c) => c.cmd === "calendar_aggregate");
     expect(request?.args.rangeStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(request?.args.rangeEndDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    /* A TASK IS A PROJECT'S BUSINESS: the organisation-wide calendar carries what
+       binds people to a moment — meetings and project deadlines. A due date is drawn
+       on the calendar of the project that owns it (see the project-scoped test
+       below), so the unscoped grid shows two kinds, not three. */
     const agenda = [...host.querySelectorAll(".cal-agenda li")];
-    expect(agenda.map((li) => li.className.split(" ")[0]).sort()).toEqual(["deadline", "meeting", "task"]);
+    expect(agenda.map((li) => li.className.split(" ")[0]).sort()).toEqual(["deadline", "meeting"]);
     // Every agenda item leaves through a real anchor, never a click handler on a div.
     for (const li of agenda) expect(li.querySelector("a")?.getAttribute("href")).toBeTruthy();
     // The typed legend still names all three kinds — it moved out from under the
@@ -195,7 +199,10 @@ filter.click(); await settle();
 ([...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "Work") as HTMLElement)
   .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
 await settle();
-expect(host.querySelector(".cal-agenda")?.textContent).toContain("Local");
+/* "Local" is a TASK: it belongs to the project calendar, not to this one. What the
+   filter must still do is keep the chosen calendar's external events and drop the
+   other calendar's — that is the rule under test. */
+expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Local");
 expect(host.querySelector(".cal-agenda")?.textContent).toContain("Work event");
 expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Personal event");
 });
@@ -411,5 +418,56 @@ describe("the day composer invites people", () => {
 
     expect(host.querySelector(".calendar-error")?.textContent).toContain("http");
     expect(calls.some((entry) => entry.cmd === "create_meeting")).toBe(false);
+  });
+});
+
+// WHERE A DUE DATE BELONGS. The organisation's calendar shows what binds people to a
+// moment: meetings and project deadlines. A task is the business of its project, so it
+// is drawn on THAT project's calendar — and there only that project's, never another's.
+// Who may see any of it stays the backend's word (`calendar_aggregate` answers with the
+// owner's, the members' and the assignee's rows only).
+describe("a task is drawn on its project's calendar and nowhere else", () => {
+  const feed = () => {
+    const today = new Date();
+    const key = dateKey(today);
+    return [
+      { id: "m1", source_id: "m1", kind: "meeting", title: "Standup", starts_at: Math.floor(today.getTime() / 1000), ends_at: Math.floor(today.getTime() / 1000) + 3600, project_id: null, calendar_id: null, date: null },
+      { id: "t-mine", source_id: "t-mine", kind: "task", title: "Ship the draft", starts_at: 0, ends_at: null, project_id: "p1", calendar_id: null, date: key },
+      { id: "t-other", source_id: "t-other", kind: "task", title: "Somebody else's project task", starts_at: 0, ends_at: null, project_id: "p2", calendar_id: null, date: key },
+      { id: "deadline-p1", source_id: "p1", kind: "deadline", title: "Apollo deadline", starts_at: 0, ends_at: null, project_id: "p1", calendar_id: null, date: key },
+    ];
+  };
+
+  test("the organisation calendar carries meetings and deadlines, not tasks", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: feed() } };
+    const host = mount();
+    await settle();
+    const agenda = host.querySelector(".cal-agenda")?.textContent ?? "";
+    expect(agenda).toContain("Standup");
+    expect(agenda).toContain("Apollo deadline");
+    expect(agenda).not.toContain("Ship the draft");
+    unmount(host);
+  });
+
+  test("the project's calendar carries its own tasks, and only its own", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: feed() } };
+    // The view reads its scope from the route; the router module is the only place
+    // that owns it, so the test speaks through it rather than through a prop.
+    const { navigate, registerViews, setAvailableViews } = await import("./router");
+    registerViews(["Calendar"]);
+    setAvailableViews(null);
+    navigate({ view: "Calendar", projectId: "p1" });
+    const host = mount();
+    await settle();
+    const agenda = host.querySelector(".cal-agenda")?.textContent ?? "";
+    expect(agenda).toContain("Ship the draft");
+    expect(agenda).toContain("Apollo deadline");
+    // Another project's work never leaks onto this grid.
+    expect(agenda).not.toContain("Somebody else's project task");
+    (await import("./router")).navigate({ view: "Calendar" });
   });
 });

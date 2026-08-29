@@ -105,8 +105,16 @@ export default function HomeCalendar() {
     // card underneath it showed real counts: the loading line's owner was dead, not
     // the data. A preference that could not be read is not a reason to stop drawing
     // a calendar, so it degrades to the default (show everything).
-    const prefs = options.error ? undefined : options();
-    return prefs?.show_todos === false ? all.filter(item => item.kind !== "task") : all;
+    void (options.error ? undefined : options());
+    /* HOME IS THE ORGANISATION'S DIARY, NOT A TO-DO LIST. Only the two facts that
+       bind other people to a moment live here: meetings, and the deadlines of the
+       projects you are in. A task belongs to its PROJECT's calendar (Calendar.tsx
+       scopes tasks to `project_id`), and to "My tasks" below the grid — which is
+       where this page already lists them, once. The `show_todos` preference is
+       therefore not read here any more: there are no tasks to hide.
+       Visibility is the backend's, unchanged: `calendar_aggregate` returns a
+       deadline only to the project's owner and members. */
+    return all.filter(item => item.kind === "meeting" || item.kind === "deadline");
   };
   const todos = (): Todo[] => (dashboard.error ? [] : dashboard()?.open_todos ?? []);
   const loading = () => items.loading || dashboard.loading;
