@@ -208,6 +208,13 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={project()}>{(value) => <div class="cw-kicker">{value().name}</div>}</Show>
             <h1># {channel()?.name ?? "Channel"}</h1>
             <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
+            {/* A FACT IS NOT A LABEL ON A CONTROL. "Not part of a project yet" used to
+                be glued to the left of the picker in a row of its own; it belongs with
+                the channel's other facts, and the ACT belongs in the action row below —
+                the same rule every other surface follows. */}
+            <Show when={!project() && channel()?.content_type !== "dm"}>
+              <p class="cw-subtitle">Not part of a project yet</p>
+            </Show>
           </div>
           <div class="cw-metrics">
             <Show when={memberCount() > 0}>
@@ -237,11 +244,11 @@ export default function ChannelWorkspace(): JSX.Element {
           <p class="cw-error" role="alert">{deleteError()}</p>
         </Show>
 
-        {/* A channel without a project has no work surfaces: the row is not drawn.
-            In its place, the one act that would create them. */}
+        {/* A channel without a project has no work surfaces. The one act that would
+            create them lives where every act lives: the action row under the
+            introduction, in the one size system, not floating in the header. */}
         <Show when={!project() && channel()?.content_type !== "dm"}>
-          <div class="cw-attach">
-            <span class="cw-attach-lead">Not part of a project yet</span>
+          <nav class="page-actionbar cw-actionbar">
             <PillMenu
               label="Attach to project"
               value=""
@@ -256,7 +263,7 @@ export default function ChannelWorkspace(): JSX.Element {
               ]}
             />
             <Show when={bindError()}><span class="cw-attach-error" role="alert">{bindError()}</span></Show>
-          </div>
+          </nav>
         </Show>
         {/* NO TAB ROW. The one link out is to the project this conversation belongs
             to — where its tasks, calendar, knowledge and overview all live, under the

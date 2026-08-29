@@ -119,10 +119,20 @@ describe("calendar day agenda", () => {
     // The creation act is the row's primary, on the left, outside the view controls.
     const create = host.querySelector(".page-actionbar > button.primary") as HTMLButtonElement;
     expect(create?.textContent).toBe("New meeting");
-    const location = actions.querySelector("select[aria-label='Location calendar']") as HTMLSelectElement;
-    expect(actions.querySelector("select[aria-label='Member calendar']")).toBeTruthy();
+    /* ADDRESS ONLY (picker pass): these filters are PillMenus now, not native
+       selects. A `<select>`'s OPEN state belongs to the operating system — grey
+       system rows in a layer no CSS reaches — so the product's own filters looked
+       redesigned until they were clicked. The control is a named button that opens
+       a listbox we draw; the keyboard contract is covered by
+       controls.pillmenu.test.tsx. */
+    const location = actions.querySelector("button[aria-label='Location calendar']") as HTMLButtonElement;
+    expect(actions.querySelector("button[aria-label='Member calendar']")).toBeTruthy();
     expect(location).toBeTruthy();
-    expect([...location.options].map((option) => option.textContent)).toEqual(["All locations", "Berlin HQ"]);
+    location.click();
+    await settle();
+    expect([...document.querySelectorAll('[role="option"]')].map((option) => option.textContent)).toEqual(["All locations", "Berlin HQ"]);
+    location.click();
+    await settle();
     // A caption above a filter is what was removed; none may come back.
     for (const label of actions.querySelectorAll("label")) expect(label.textContent?.trim()).toBe("");
   });
@@ -174,8 +184,17 @@ replies = { calendar_aggregate: { ok: true, value: [
 { id: "personal", source_id: "personal", kind: "external", title: "Personal event", starts_at: 0, ends_at: null, project_id: null, calendar_id: "personal", date: key },
 ] }, list_calendars: { ok: true, value: [{ id: "work", profile_id: "pa", name: "Work", color: "#2563eb", visible: true }, { id: "personal", profile_id: "pa", name: "Personal", color: "#2563eb", visible: true }] } };
 const host = mount(); await settle();
-const filter = host.querySelector("select[aria-label='Calendar filter']") as HTMLSelectElement;
-expect(filter).toBeTruthy(); filter.value = "work"; filter.dispatchEvent(new Event("change", { bubbles: true })); await settle();
+/* ADDRESS ONLY (picker pass): a PillMenu is chosen by clicking the option we draw,
+   not by writing a value into a native select. What is under test is unchanged —
+   choosing "Work" hides the other calendar's events and keeps the local ones. */
+const filter = host.querySelector("button[aria-label='Calendar filter']") as HTMLButtonElement;
+expect(filter).toBeTruthy();
+filter.click(); await settle();
+/* A PillMenu commits on MOUSEDOWN, not click: it keeps the focus story its own
+   (see controls.tsx), which a bare .click() would skip. */
+([...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "Work") as HTMLElement)
+  .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+await settle();
 expect(host.querySelector(".cal-agenda")?.textContent).toContain("Local");
 expect(host.querySelector(".cal-agenda")?.textContent).toContain("Work event");
 expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Personal event");

@@ -81,10 +81,12 @@ describe("team tasks", () => {
     // Only the caller's own identity is sent (authorization subject), never an
     // assignee narrowing — the default view is everybody's work.
     expect(call.args).toMatchObject({ profileId: "me", includeDone: false });
-    // The assignee filter is a PillSelect now (value-as-label); it is still the
-    // same native <select>, named by aria-label instead of a caption beside it.
-    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Assignee"]')!;
-    expect(picker.value).toBe("");
+    /* ADDRESS ONLY (picker pass): the assignee filter is a PillMenu now — the
+       product draws its open state instead of handing it to the operating system.
+       The resting control is a named button whose LABEL is the current value, so
+       "no narrowing" is readable without opening it. */
+    const picker = host.querySelector<HTMLButtonElement>('button[aria-label="Assignee"]')!;
+    expect(picker.textContent).toContain("All profiles");
     /* ADDRESS ONLY (task-card pass): "Show completed" is a toggle BUTTON in the one
        action row now, beside "New task" — it only ever ADDS rows, so it never belonged
        behind the "Filter" disclosure. Off is still the default, which is the fact

@@ -8,7 +8,7 @@ import { humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
-import { GhostPill, PillSelect } from "../components/controls";
+import { GhostPill, PillMenu } from "../components/controls";
 import SourceLink from "../components/SourceLink";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
 import "../components/paper.css";
@@ -209,15 +209,22 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <button type="button" class="primary" onClick={()=>openComposer(selectedDay())}>New meeting</button>
 <span class="actionbar-view-controls">
 <ProfilePicker label="Member calendar" labelHidden value={targetProfile() || profileId()} onChange={id=>setTargetProfile(id===profileId()?"":id)}/>
-<PillSelect label="Location calendar" value={targetLocation()} onChange={setTargetLocation}>
-<option value="">All locations</option>
-<For each={locationOptions()}>{location=><option value={location}>{location}</option>}</For>
-</PillSelect>
+{/* The product's OWN open state, not the operating system's: a native select
+    draws its list in a system layer no CSS reaches, which is why these filters
+    looked redesigned until the moment they were clicked. */}
+<PillMenu
+  label="Location calendar"
+  value={targetLocation()}
+  onChange={setTargetLocation}
+  options={[{ value: "", label: "All locations" }, ...locationOptions().map(location => ({ value: location, label: location }))]}
+/>
 <Show when={(calendars() ?? []).length}>
-<PillSelect label="Calendar filter" value={calendarFilter()} onChange={setCalendarFilter}>
-<option value="all">All calendars</option>
-<For each={calendars() ?? []}>{calendar=><option value={calendar.id}>{calendar.name}</option>}</For>
-</PillSelect>
+<PillMenu
+  label="Calendar filter"
+  value={calendarFilter()}
+  onChange={setCalendarFilter}
+  options={[{ value: "all", label: "All calendars" }, ...(calendars() ?? []).map(calendar => ({ value: calendar.id, label: calendar.name }))]}
+/>
 </Show>
 {/* WHY THE LEGEND IS IN HERE AND NOT UNDER THE TITLE.
     It is a lookup table, consulted once and then never again — and only for
