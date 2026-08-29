@@ -265,6 +265,53 @@ pub fn measure_data_url(data_url: &str, declared: i64) -> Result<i64> {
     Ok(measured)
 }
 
+/// THE BYTES BEHIND A DATA URL, decoded server side.
+///
+/// A chat attachment stores its payload as a data URL in the row; the document library
+/// stores files on disk. Filing a chat upload into a project library therefore needs the
+/// octets once, here — never in the webview, which would mean shipping the blob back out
+/// and trusting what comes in. `measure_data_url` runs first, so an oversized or malformed
+/// payload is refused by arithmetic before anything is allocated.
+pub fn decode_data_url(data_url: &str, declared: i64) -> Result<Vec<u8>> {
+    measure_data_url(data_url, declared)?;
+    let rest = data_url
+        .strip_prefix("data:")
+        .ok_or_else(|| "invalid attachment: not a data URL".to_string())?;
+    let comma = rest
+        .find(',')
+        .ok_or_else(|| "invalid attachment: data URL has no payload".to_string())?;
+    let (meta, payload) = rest.split_at(comma);
+    let payload = &payload[1..];
+    if meta.ends_with(";base64") {
+        use base64::Engine as _;
+        return base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .map_err(|_| "invalid attachment: bad base64 payload".to_string());
+    }
+    let bytes = payload.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = bytes
+                .get(i + 1..i + 3)
+                .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+                .ok_or_else(|| "invalid attachment: bad percent escape".to_string())?;
+            let value = u8::from_str_radix(
+                std::str::from_utf8(hex).map_err(|_| "invalid attachment: bad percent escape")?,
+                16,
+            )
+            .map_err(|_| "invalid attachment: bad percent escape".to_string())?;
+            out.push(value);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageAttachment {
     pub id: String,
@@ -2798,6 +2845,20 @@ fn resolve_source_ref_impl(
 ) -> Result<SourceRef> {
     match entity_type {
         "message" => resolve_message_source(c, entity_id),
+        // A file filed out of a conversation points back at the MESSAGE it arrived in:
+        // the attachment is not a place a person can stand, the message is.
+        crate::documents::CHAT_ATTACHMENT_SOURCE => {
+            let message_id: String = c
+                .query_row(
+                    "SELECT message_id FROM message_attachments WHERE id=?1",
+                    [entity_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("No attachment found for source anchor {entity_id}"))?;
+            resolve_message_source(c, &message_id)
+        }
         other => Err(format!("Cannot resolve a {other} source anchor")),
     }
 }
@@ -3055,8 +3116,89 @@ pub fn create_message(message: Message) -> Result<MessageView> {
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
+/// Where a channel's uploads belong in the library, if anywhere: the project behind the
+/// message's channel, plus the channel's name for the shelf label. `None` for a channel
+/// with no project — there is no library to file into, so nothing is filed anywhere.
+fn library_target_for_message(c: &Connection, message_id: &str) -> Result<Option<(String, String, String)>> {
+    c.query_row(
+        "SELECT ch.id, ch.project_id, ch.name FROM messages m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1",
+        [message_id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+    .map(|found| {
+        found.and_then(|(channel_id, project_id, name)| {
+            project_id
+                .filter(|id| !id.trim().is_empty())
+                .map(|project_id| (channel_id, project_id, name))
+        })
+    })
+}
+
+/// A FILE SHARED IN A PROJECT CHANNEL IS ALSO THE PROJECT'S FILE.
+///
+/// The attachment row is left exactly as it is; the library gets its own copy of the
+/// bytes on disk, on the channel's shelf. Failure here never costs the person their
+/// message: the attachment is already stored, so a library that cannot be written is
+/// reported to the log and the send still succeeds.
+fn file_attachment_into_library(
+    c: &Connection,
+    store: Option<&std::path::Path>,
+    message_id: &str,
+    attachment: &MessageAttachment,
+) -> Result<Option<String>> {
+    let Some(store) = store else {
+        return Ok(None);
+    };
+    let Some((channel_id, project_id, channel_name)) = library_target_for_message(c, message_id)?
+    else {
+        return Ok(None);
+    };
+    let author: Option<String> = c
+        .query_row(
+            "SELECT author_id FROM messages WHERE id=?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    let bytes = decode_data_url(&attachment.data_url, attachment.byte_length)?;
+    crate::documents::file_chat_attachment_tx(
+        c,
+        store,
+        crate::documents::ChatAttachmentFiling {
+            attachment_id: &attachment.id,
+            project_id: &project_id,
+            channel_id: &channel_id,
+            channel_name: &channel_name,
+            file_name: &attachment.file_name,
+            created_by: author.as_deref(),
+        },
+        &bytes,
+    )
+    .map(Some)
+}
+
 fn add_message_attachment_impl(
     c: &Connection,
+    message_id: &str,
+    attachment: NewMessageAttachment,
+) -> Result<MessageAttachment> {
+    let store = crate::documents::upload_dir().ok();
+    add_message_attachment_in(c, store.as_deref(), message_id, attachment)
+}
+
+fn add_message_attachment_in(
+    c: &Connection,
+    store: Option<&std::path::Path>,
     message_id: &str,
     attachment: NewMessageAttachment,
 ) -> Result<MessageAttachment> {
@@ -3076,6 +3218,14 @@ fn add_message_attachment_impl(
             && existing.byte_length == attachment.byte_length
             && existing.data_url == attachment.data_url;
         return if same {
+            // A retry files nothing twice: the anchor already exists, so this is a no-op
+            // that simply repairs a first attempt whose library copy failed.
+            if let Err(e) = file_attachment_into_library(c, store, message_id, &existing) {
+                eprintln!(
+                    "attachment {} not filed into the project library: {e}",
+                    existing.id
+                );
+            }
             Ok(existing)
         } else {
             Err(format!(
@@ -3085,10 +3235,14 @@ fn add_message_attachment_impl(
         };
     }
     c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url, state]).map_err(|e| e.to_string())?;
-    attachments_for_impl(c, message_id)?
+    let stored = attachments_for_impl(c, message_id)?
         .into_iter()
         .find(|item| item.id == attachment.id)
-        .ok_or_else(|| "attachment missing".into())
+        .ok_or_else(|| "attachment missing".to_string())?;
+    if let Err(e) = file_attachment_into_library(c, store, message_id, &stored) {
+        eprintln!("attachment {} not filed into the project library: {e}", stored.id);
+    }
+    Ok(stored)
 }
 
 fn attachment_by_id_impl(c: &Connection, id: &str) -> Result<Option<MessageAttachment>> {
@@ -3786,6 +3940,151 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// A channel that belongs to a project, plus one message in it. The project row is
+    /// created here because `channels.project_id` is a real foreign key.
+    fn seed_project_message(c: &Connection, channel: &str, id: &str, project: Option<&str>) {
+        if let Some(project) = project {
+            c.execute(
+                "INSERT INTO projects(id,name,key,created_at) VALUES(?1,'Filing','FIL',unixepoch())",
+                [project],
+            )
+            .unwrap();
+        }
+        seed_message(c, channel, id);
+        c.execute(
+            "UPDATE channels SET project_id=?2, name='general' WHERE id=?1",
+            rusqlite::params![channel, project],
+        )
+        .unwrap();
+    }
+
+    fn library_documents(c: &Connection, project: &str) -> Vec<(String, String, String)> {
+        let mut s = c
+            .prepare(
+                "SELECT d.id, d.title, f.name FROM documents d JOIN document_folders f ON f.id=d.folder_id \
+                 WHERE d.container_type='project' AND d.container_id=?1 ORDER BY d.id",
+            )
+            .unwrap();
+        let rows = s
+            .query_map([project], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        rows
+    }
+
+    /// A FILE SHARED IN A PROJECT CHANNEL IS THE PROJECT'S FILE. It appears on the
+    /// channel's own shelf under the project root — not loose in the root, where chat
+    /// screenshots would bury the written documents — and it carries the same bytes.
+    #[test]
+    fn an_attachment_in_a_project_channel_is_filed_on_the_channels_library_shelf() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-lib", "msg-lib", Some("proj-lib"));
+        add_message_attachment_in(
+            &c,
+            Some(&store),
+            "msg-lib",
+            NewMessageAttachment {
+                id: "att-lib".into(),
+                file_name: "plan.txt".into(),
+                mime_type: "text/plain".into(),
+                byte_length: 5,
+                data_url: "data:text/plain;base64,aGVsbG8=".into(),
+                upload_state: None,
+            },
+        )
+        .expect("attachment stored");
+
+        let filed = library_documents(&c, "proj-lib");
+        assert_eq!(filed.len(), 1, "exactly one library document");
+        assert_eq!(filed[0].1, "plan.txt", "the title is the file name");
+        assert_eq!(filed[0].2, "From #general", "filed on the channel's shelf");
+
+        // The shelf hangs under the project root, never beside it.
+        let (parent, container): (Option<String>, Option<String>) = c
+            .query_row(
+                "SELECT parent_id, container_id FROM document_folders WHERE name='From #general'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(container.as_deref(), Some("proj-lib"));
+        assert!(parent.is_some(), "the shelf sits under the project root");
+
+        // Origin is recorded and resolves back to the message it arrived in.
+        let anchor: (String, String) = c
+            .query_row(
+                "SELECT source_entity_type, source_entity_id FROM documents WHERE id=?1",
+                [&filed[0].0],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(anchor, ("message-attachment".to_string(), "att-lib".into()));
+        let back = resolve_source_ref_impl(&c, "message-attachment", "att-lib").expect("back-link");
+        assert_eq!(back.channel_id, "chan-lib");
+
+        // Bytes on disk ARE the attachment's bytes, stored once.
+        let stored_path: String = c
+            .query_row(
+                "SELECT stored_path FROM document_files WHERE document_id=?1",
+                [&filed[0].0],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(std::fs::read(stored_path).unwrap(), b"hello");
+        drop(c);
+        drop(path);
+    }
+
+    /// A RETRY IS NOT A SECOND DOCUMENT. The client repeats an upload it lost the answer
+    /// to; the library must not grow a duplicate card for it.
+    #[test]
+    fn refiling_the_same_attachment_leaves_one_library_document() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-twice", "msg-twice", Some("proj-twice"));
+        let attachment = || NewMessageAttachment {
+            id: "att-twice".into(),
+            file_name: "shot.png".into(),
+            mime_type: "image/png".into(),
+            byte_length: 5,
+            data_url: "data:image/png;base64,aGVsbG8=".into(),
+            upload_state: None,
+        };
+        add_message_attachment_in(&c, Some(&store), "msg-twice", attachment()).unwrap();
+        add_message_attachment_in(&c, Some(&store), "msg-twice", attachment()).unwrap();
+        assert_eq!(
+            library_documents(&c, "proj-twice").len(),
+            1,
+            "the same attachment files once"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    /// NO PROJECT, NO FILING. A channel without a project has no library to file into,
+    /// so the upload stays what it is: an attachment on a message.
+    #[test]
+    fn an_attachment_in_a_projectless_channel_creates_no_document() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-loose", "msg-loose", None);
+        add_message_attachment_in(
+            &c,
+            Some(&store),
+            "msg-loose",
+            new_attachment("att-loose", "data:text/plain;base64,aGVsbG8=", 5, None),
+        )
+        .unwrap();
+        let documents: i64 = c
+            .query_row("SELECT count(*) FROM documents", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(documents, 0, "nothing is filed anywhere");
+        drop(c);
+        drop(path);
     }
 
     fn new_attachment(

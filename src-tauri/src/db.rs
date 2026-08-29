@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 136;
+pub const SCHEMA_VERSION: i64 = 137;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1023,6 +1023,20 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // allowed to grow without rewriting a table, and the write path is the single gate.
     if version < 136 && table_exists(&tx, "todos")? {
         add_column_if_missing(&tx, "todos", "category", "TEXT")?;
+    }
+    // V137: where a document CAME FROM. A file dropped into a project channel is filed
+    // into that project's library too, and the library must be able to say so instead of
+    // showing an orphan card. Same anchor pair the rest of the product already uses
+    // (`meetings`, `issues`, `channel_notes`), resolvable through `chat::resolve_source_ref`.
+    // The partial UNIQUE index is the DEDUPE ITSELF: one chat attachment can produce at
+    // most one library document, enforced by the database rather than by a read-then-write
+    // race in Rust. NULL anchors stay unconstrained — the normal case is no source.
+    if version < 137 && table_exists(&tx, "documents")? {
+        add_column_if_missing(&tx, "documents", "source_entity_type", "TEXT")?;
+        add_column_if_missing(&tx, "documents", "source_entity_id", "TEXT")?;
+        tx.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source_anchor ON documents(source_entity_type,source_entity_id) WHERE source_entity_type IS NOT NULL AND source_entity_id IS NOT NULL;",
+        )?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -2432,7 +2446,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 136);
+        assert_eq!(SCHEMA_VERSION, 137);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2472,14 +2486,16 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 136);
-        assert_eq!(SCHEMA_VERSION, 136);
+        assert_eq!(head("after climb from 100"), 137);
+        assert_eq!(SCHEMA_VERSION, 137);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
             ("issues", "source_entity_type"),
             ("meetings", "source_entity_type"),
             ("todos", "category"),
+            ("documents", "source_entity_type"),
+            ("documents", "source_entity_id"),
         ] {
             let present: i64 = conn
                 .query_row(
@@ -2492,7 +2508,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 136);
+        assert_eq!(head("after second run at head"), 137);
     }
 
     #[test]

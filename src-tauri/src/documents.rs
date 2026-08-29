@@ -52,6 +52,13 @@ pub struct Document {
     pub version: i64,
     pub archived: bool,
     pub created_by: Option<String>,
+    /// Where this document CAME FROM, when it was not typed here: the same anchor pair
+    /// meetings and notes carry, resolvable through `chat::resolve_source_ref`. A chat
+    /// attachment filed into a project library keeps `('message-attachment', <id>)`.
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,11 +111,13 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
         version: r.get(8)?,
         archived: r.get(9)?,
         created_by: r.get(10)?,
+        source_entity_type: r.get(11)?,
+        source_entity_id: r.get(12)?,
     })
 }
 
 const DOC_COLUMNS: &str =
-    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by";
+    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id";
 
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
@@ -607,8 +616,8 @@ pub fn create_document(mut document: Document) -> Result<()> {
         document.folder_id.as_deref(),
     )?;
     c.execute(
-"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by],
+"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by, &document.source_entity_type, &document.source_entity_id],
 ).map_err(|e| e.to_string())?;
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
@@ -1748,7 +1757,7 @@ pub fn mime_for(filename: &str) -> String {
     .to_string()
 }
 
-fn upload_dir() -> Result<std::path::PathBuf> {
+pub(crate) fn upload_dir() -> Result<std::path::PathBuf> {
     let dir = db::data_dir()?.join("document_files");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create upload directory: {e}"))?;
     Ok(dir)
@@ -1834,6 +1843,165 @@ pub fn upload_document_file_bytes(
     .map_err(|e| e.to_string())?;
     c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![document_id, filename, mime, bytes.len() as i64, target.to_string_lossy().to_string(), request.created_by]).map_err(|e| e.to_string())?;
     get_document_file_tx(&c, &document_id)?.ok_or_else(|| "stored upload vanished".into())
+}
+
+/// The anchor a library document filed out of a chat upload carries. One attachment,
+/// one document: the partial UNIQUE index on `(source_entity_type, source_entity_id)`
+/// is what makes the second attempt a no-op instead of a duplicate shelf entry.
+pub const CHAT_ATTACHMENT_SOURCE: &str = "message-attachment";
+
+/// Everything the library needs to know about one chat upload. The BYTES are passed
+/// separately and decoded by the caller (`chat::decode_data_url`), because the chat row
+/// stores a data URL and the library stores a file — the translation happens once,
+/// server side, and the blob is written exactly once, here.
+pub(crate) struct ChatAttachmentFiling<'a> {
+    pub attachment_id: &'a str,
+    pub project_id: &'a str,
+    pub channel_id: &'a str,
+    pub channel_name: &'a str,
+    pub file_name: &'a str,
+    pub created_by: Option<&'a str>,
+}
+
+/// The shelf a channel's uploads land on. Keyed by CHANNEL ID, not by name, so renaming
+/// `#general` moves the shelf's label instead of splitting its contents into two.
+pub(crate) fn chat_shelf_id(project_id: &str, channel_id: &str) -> String {
+    format!("project-doc-chat-{project_id}-{channel_id}")
+}
+
+/// The project's canonical root, created if missing, on a plain connection.
+///
+/// `ensure_project_document_root_tx` opens its own transaction and therefore needs
+/// `&mut Connection`; the chat write path already holds a borrowed connection. Same
+/// three idempotent statements, no nested transaction.
+pub(crate) fn ensure_project_root_folder_conn(
+    c: &rusqlite::Connection,
+    project_id: &str,
+) -> Result<String> {
+    let root_id = project_root_id(project_id);
+    let project_exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1)",
+            [project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !project_exists {
+        return Err("project not found".into());
+    }
+    c.execute(
+"INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'project',?2,NULL,'Documents',NULL,0)",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    c.execute(
+"UPDATE document_folders SET parent_id=?1 WHERE container_type='project' AND container_id=?2 AND parent_id IS NULL AND id<>?1",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    c.execute(
+"UPDATE documents SET folder_id=?1 WHERE container_type='project' AND container_id=?2 AND folder_id IS NULL",
+rusqlite::params![root_id, project_id],
+).map_err(|e| e.to_string())?;
+    Ok(root_id)
+}
+
+/// FILE A CHAT UPLOAD INTO THE PROJECT'S LIBRARY.
+///
+/// A library is CURATED. Screenshots pasted into a conversation must be findable there
+/// without burying the written documents, so they land on their own shelf — `From
+/// #general`, one per channel, created on first use — under the project root, never in
+/// the root itself.
+///
+/// Returns the document id, existing or new. Called only for channels that HAVE a
+/// project: a channel without one has no library to file into and nothing happens.
+pub(crate) fn file_chat_attachment_tx(
+    c: &rusqlite::Connection,
+    store: &std::path::Path,
+    filing: ChatAttachmentFiling<'_>,
+    bytes: &[u8],
+) -> Result<String> {
+    // Already filed? Then this is a retried upload, not a second document.
+    if let Some(existing) = c
+        .query_row(
+            "SELECT id FROM documents WHERE source_entity_type=?1 AND source_entity_id=?2",
+            rusqlite::params![CHAT_ATTACHMENT_SOURCE, filing.attachment_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(existing);
+    }
+    let root_id = ensure_project_root_folder_conn(c, filing.project_id)?;
+    let shelf_id = chat_shelf_id(filing.project_id, filing.channel_id);
+    let shelf_name = format!("From #{}", filing.channel_name);
+    c.execute(
+"INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'project',?2,?3,?4,'Files shared in this channel',0)",
+rusqlite::params![shelf_id, filing.project_id, root_id, shelf_name],
+).map_err(|e| e.to_string())?;
+    // A renamed channel renames its shelf; the documents on it stay put.
+    c.execute(
+        "UPDATE document_folders SET name=?2 WHERE id=?1 AND name<>?2",
+        rusqlite::params![shelf_id, shelf_name],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let source = std::path::Path::new(filing.file_name);
+    let filename = source
+        .file_name()
+        .filter(|_| source.components().count() == 1)
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "attachment".to_string());
+    let document_id = generated_id("doc");
+    let mime = mime_for(&filename);
+    let target = store.join(stored_name(&document_id, &filename));
+    std::fs::create_dir_all(store).map_err(|e| format!("create upload directory: {e}"))?;
+    std::fs::write(&target, bytes).map_err(|e| format!("store upload: {e}"))?;
+    let body = format!(
+        "{filename} ({} bytes, {mime})\nFrom #{}",
+        bytes.len(),
+        filing.channel_name
+    );
+    let insert = c.execute(
+        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id) VALUES(?1,'project',?2,?3,'file','text',?4,?5,1,0,?6,?7,?8)",
+        rusqlite::params![
+            document_id,
+            filing.project_id,
+            shelf_id,
+            filename,
+            body,
+            filing.created_by,
+            CHAT_ATTACHMENT_SOURCE,
+            filing.attachment_id
+        ],
+    );
+    if let Err(e) = insert {
+        let _ = std::fs::remove_file(&target);
+        return Err(e.to_string());
+    }
+    c.execute(
+        "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
+        rusqlite::params![
+            generated_id("docver"),
+            document_id,
+            body,
+            filing.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES(?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![
+            document_id,
+            filename,
+            mime,
+            bytes.len() as i64,
+            target.to_string_lossy().to_string(),
+            filing.created_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(document_id)
 }
 
 pub fn read_document_file_bytes(document_id: &str) -> Result<(DocumentFile, Vec<u8>)> {
