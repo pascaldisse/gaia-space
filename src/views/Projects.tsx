@@ -448,7 +448,12 @@ export default function Projects() {
           </Show>
           <span class="project-members-hint">You are on this project because you create it.</span>
         </div>
-        <footer class="wid-actions"><button type="button" class="wid-btn" onClick={closeCreate}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
+        {/* The drawer's own button classes went with the drawer: out here the acts are
+            the product's ordinary buttons, so they obey the one button rule. */}
+        <footer class="wid-actions">
+          <button type="button" onClick={closeCreate}>Cancel</button>
+          <button class="primary">Create project</button>
+        </footer>
       </form>
       </section>
     </Show>

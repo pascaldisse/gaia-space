@@ -235,23 +235,42 @@
    Structure, never scoped to a theme: one pill per chosen person, the role menu
    beside it, × to take them off again — the same shape the meeting drawer's
    participants wear, drawn from the drawer's own tokens. */
-.project-members-field { display: grid; gap: 8px; }
-.project-members { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.project-members-field { display: grid; gap: 10px; }
+
+/* ── A MEMBER IS A ROW, NOT A PILL INSIDE A PILL ─────────────────────────────
+   The role menu used to sit INSIDE the person's pill: a second, differently
+   coloured pill inside the first, with an × hanging off the end. Two shapes for
+   two facts about one person, neither readable. A member is now one line — who,
+   what they do here, and the way to take them off — the same shape the project's
+   settings use for its member table. */
+.project-members { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .project-member {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 6px 4px 10px;
-  border: 1px solid var(--surface-border); border-radius: 999px;
-  background: var(--surface); font-size: 12.5px; font-weight: 600;
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--surface-border); border-radius: var(--dk-radius-lg, 12px);
+  background: var(--surface); font-size: 13px;
 }
-/* A name is one token: it breaks the pill in two when it wraps. */
-.project-member-name { color: var(--text-strong); white-space: nowrap; }
+.project-member-name {
+  flex: 1 1 auto; min-width: 0;
+  color: var(--text-strong); font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The role is a quiet statement at the end of the line, not a badge shouting from
+   the middle of a name. */
+.project-member .pill-menu { flex: 0 0 auto; background: none; border-color: transparent; }
+.project-member .pill-menu button {
+  border-color: transparent; background: none; color: var(--text-muted); font-weight: 600;
+}
+.project-member .pill-menu button:hover { border-color: var(--surface-border); background: var(--surface-hover); color: var(--text-strong); }
 .project-member-remove {
-  display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
-  border: 0; border-radius: 999px; background: none;
-  color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
+  flex: 0 0 auto;
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: none;
+  color: var(--text-muted); font-size: 15px; line-height: 1; cursor: pointer;
 }
-.project-member-remove:hover { background: var(--surface-hover); color: var(--danger, #c2384a); }
-.project-members-hint { color: var(--text-muted); font-size: 11.5px; }
+.project-member-remove:hover { border-color: var(--surface-border); background: var(--surface-hover); color: var(--danger, #c2384a); }
+.project-members-hint { color: var(--text-muted); font-size: 12.5px; font-weight: 500; }
+.theme-space-light .project-member { border-color: var(--line); background: var(--paper); }
 
 
 /* ── MAKING A PROJECT HAPPENS IN THE LIST ────────────────────────────────────
@@ -283,7 +302,12 @@
   .project-create .project-members-field,
   .project-create .wid-actions { grid-column: 1 / -1; }
 }
-.project-create .wid-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.project-create .wid-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 2px; }
+.project-create .wid-actions button {
+  min-height: var(--btn-height, 37px); padding: 0 var(--btn-pad-x, 12px);
+  border-radius: var(--btn-radius, 11px);
+  font-family: var(--font-head, inherit); font-size: var(--btn-font-size, 13px); font-weight: var(--btn-font-weight, 650);
+}
 
 /* The one quiet fact in the form stays quiet — it is a statement, not a caption. */
 .project-create .project-members-hint { color: var(--text-muted); font-size: 12.5px; font-weight: 500; }

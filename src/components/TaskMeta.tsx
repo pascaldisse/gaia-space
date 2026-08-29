@@ -74,8 +74,10 @@ export type MetaPerson = { id: string; label: string; sub?: string };
 /** Project chooser — one project or none (a personal task). */
 export function ProjectControl(props: { value: string; projects: MetaProject[]; onChange: (id: string) => void }) {
   const selected = createMemo(() => props.projects.find(project => project.id === props.value));
+  // The mark of a PROJECT is the rail's own layers glyph — `grid` was a generic
+  // placeholder that said nothing about the thing it stands for.
   return (
-    <MetaControl icon="grid" label="Project" placeholder="No project — personal"
+    <MetaControl icon="layers" label="Project" placeholder="No project — personal"
       value={selected()?.name} set={Boolean(props.value)} menuLabel="Choose project">
       {close => (
         <ul class="tm-list" role="listbox" aria-label="Project">

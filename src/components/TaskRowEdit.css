@@ -58,12 +58,22 @@
 .task-list-plain > li:first-child > .task-row-editing { border-top: 0; }
 
 /* ══ Space-light restyle ═══════════════════════════════════════════════════ */
-.theme-space-light .task-row-editing {
-  border-left: 0;
+/* THE OPEN TASK IS PAPER, LIKE EVERY OTHER CARD. It used to be a teal-tinted block
+   with a top hairline — the one surface in the product that answered an act with a
+   coloured panel instead of a card. It now wears exactly what a project card wears:
+   white paper, one hairline, the same radius and the same lift, so opening a task
+   does not change the material the page is made of. */
+.theme-space-light .task-row-editing,
+.theme-space-light .task-card-editing {
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   border-top: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--teal-soft);
-  padding: 16px 14px;
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+  padding: 20px 22px;
 }
+/* Field rows breathe like the project form's do. */
+.theme-space-light .task-edit { gap: 14px; }
 .theme-space-light .task-edit .composer-title { color: var(--ink); }
 .theme-space-light .task-edit-readonly { color: var(--muted); }

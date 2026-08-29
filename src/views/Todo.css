@@ -146,7 +146,9 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 .theme-space-light .task-list .task-card:first-of-type { border-top: 0; }
 .theme-space-light .task-card:hover { border-color: var(--line); border-left-color: transparent; background: var(--wash); }
 .theme-space-light .task-card.focused,
-.theme-space-light .task-card-editing { background: var(--teal-soft); border-left-color: transparent; }
+/* Paper, not a tinted block — the shared rule in TaskRowEdit.css owns the look now,
+   so this only stops the old left accent from returning. */
+.theme-space-light .task-card-editing { border-left-color: transparent; }
 .theme-space-light .task-title { font-size: 14.5px; font-weight: 710; letter-spacing: -.015em; color: var(--ink); }
 .theme-space-light .task-card.done { opacity: .55; border-left-color: transparent; }
 .theme-space-light .task-card.done .task-title { color: var(--quiet); }
