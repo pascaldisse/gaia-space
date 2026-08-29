@@ -357,6 +357,7 @@ mod tests {
             video_provider: None,
             video_room_id: None,
             join_url: None,
+            meeting_url: None,
             video_status: "scheduled".into(),
             video_started_at: None,
             video_ended_at: None,

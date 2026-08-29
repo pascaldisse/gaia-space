@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 134;
+pub const SCHEMA_VERSION: i64 = 135;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1003,6 +1003,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         && table_exists(&tx, "documents")?
     {
         tx.execute_batch(SCHEMA_V134)?;
+    }
+    // V135: the EXTERNAL meeting link. Most meetings in this product happen on someone
+    // else's conferencing service (Google Meet, Zoom, Teams), so a meeting must be able
+    // to carry a plain URL a person pasted. Deliberately NOT `join_url`: that column is
+    // native-owned — `calls::bind` writes it when a LiveKit room is minted, and
+    // `update_meeting` ignores it precisely so the webview cannot repoint a call at
+    // another room. Reusing it would both break that invariant and let the first native
+    // join silently overwrite the link a person typed. Two different facts, two columns.
+    if version < 135 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "meeting_url", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -2363,6 +2373,37 @@ mod tests {
     }
 
     #[test]
+    fn v135_adds_the_external_meeting_link_beside_the_native_join_url() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(SCHEMA_V1).expect("v1 meetings");
+        conn.pragma_update(None, "user_version", 134)
+            .expect("stamp v134");
+
+        migrate(&conn).expect("v135");
+        let columns = conn
+            .prepare("PRAGMA table_info(meetings)")
+            .expect("meeting columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("column rows")
+            .collect::<Result<Vec<_>>>()
+            .expect("column names");
+        // Both must exist: the pasted external link and the native call's join url are
+        // two different facts and neither may stand in for the other.
+        for expected in ["meeting_url", "join_url"] {
+            assert!(
+                columns.iter().any(|column| column == expected),
+                "missing {expected}"
+            );
+        }
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version"),
+            SCHEMA_VERSION
+        );
+        migrate(&conn).expect("V135 re-run is idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -2381,7 +2422,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 134);
+        assert_eq!(SCHEMA_VERSION, 135);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2406,7 +2447,7 @@ mod tests {
     /// ours stacked V133 (source anchors) and V134 (`channel_notes`) on top. The ladder
     /// must therefore still be LINEAR from an old stamp and runnable twice.
     #[test]
-    fn the_merged_ladder_climbs_from_an_old_stamp_to_134_and_survives_a_second_run() {
+    fn the_merged_ladder_climbs_from_an_old_stamp_to_135_and_survives_a_second_run() {
         let temp = TempDb::new("gaia-space-merged-ladder");
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
@@ -2421,8 +2462,8 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 134);
-        assert_eq!(SCHEMA_VERSION, 134);
+        assert_eq!(head("after climb from 100"), 135);
+        assert_eq!(SCHEMA_VERSION, 135);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
@@ -2440,7 +2481,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 134);
+        assert_eq!(head("after second run at head"), 135);
     }
 
     #[test]

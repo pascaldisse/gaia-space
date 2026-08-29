@@ -74,7 +74,6 @@
    who-can-edit, repeat) take the field's shape, and the native selects that
    stay native get the chevron that says "this opens". */
 .mtd-root select.mtd-input,
-.mtd-root .mtd-invite .picker select,
 .mtd-root .mtd-organizer .picker select {
   appearance: none; -webkit-appearance: none;
   padding-right: 34px;
@@ -100,9 +99,6 @@
    stacks them when the panel is narrow instead of pushing out of the drawer. */
 .mtd-root .mtd-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); gap: 10px; }
 
-.mtd-root .mtd-invite { display: flex; align-items: center; gap: 8px; }
-.mtd-root .mtd-invite .picker { flex: 1; min-width: 0; display: grid; gap: 4px; font-size: 12px; color: var(--mtd-muted); }
-.mtd-root .mtd-invite .picker select,
 .mtd-root .mtd-organizer .picker select {
   min-height: 40px; width: 100%;
   border: 1px solid var(--mtd-line); border-radius: 11px; padding: 9px 10px;
@@ -112,14 +108,32 @@
   display: grid; gap: 6px;
   font-size: 12.5px; font-weight: 620; text-transform: none; letter-spacing: 0; color: var(--mtd-muted);
 }
-/* The invite picker prints its own caption too; it speaks in the form's voice
-   or the row reads as two different kinds of label. */
-.mtd-root .mtd-invite .picker { font-size: 12.5px; font-weight: 620; color: var(--mtd-muted); }
-.mtd-root .mtd-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.mtd-root .mtd-person { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
-.mtd-root .mtd-remove { border: 0; background: transparent; color: var(--mtd-muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
-.mtd-root .mtd-remove:hover { color: var(--mtd-red); }
+/* Participants are CHOSEN FROM A LIST, the same control TaskDrawer gives assignees:
+   a scrolling column of checkboxes, so the answer to "who is coming" is read rather
+   than typed. A fieldset carries the caption because a `<legend>` is what names a
+   group of checkboxes; it is stripped of the browser's box and re-dressed as a field. */
+.mtd-root .mtd-people-field { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+.mtd-root .mtd-people-field > legend {
+  padding: 0; margin-bottom: 6px;
+  color: var(--mtd-muted); font-size: 12.5px; font-weight: 620;
+}
+.mtd-root .mtd-people {
+  display: grid; gap: 2px; margin: 0 0 6px; padding: 4px;
+  max-height: 168px; overflow-y: auto;
+  border: 1px solid var(--mtd-line); border-radius: 11px; background: #fbfaf8;
+}
+.mtd-root .mtd-person {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 8px;
+  font-size: 14px; color: var(--mtd-ink); cursor: pointer;
+}
+.mtd-root .mtd-person:hover { background: var(--mtd-wash); }
+.mtd-root .mtd-person input[type="checkbox"] { accent-color: var(--mtd-teal); width: 15px; height: 15px; margin: 0; }
 .mtd-root .mtd-hint { margin: 0; color: var(--mtd-muted); font-size: 13px; line-height: 1.45; }
+/* A refused value says so where it was typed. Same red as the form-level banner,
+   quieter box: this is one field's objection, not the whole form's. */
+.mtd-root .mtd-field-error { color: var(--mtd-red); font-size: 13px; line-height: 1.45; font-weight: 400; }
+.mtd-root .mtd-input[aria-invalid="true"] { border-color: var(--mtd-red); background: var(--mtd-red-soft); }
 
 /* One disclosure, closed by default: the surface asks five questions, not ten. */
 .mtd-root .mtd-more { border: 1px solid var(--mtd-line); border-radius: 11px; background: var(--mtd-wash); padding: 0 12px; }
