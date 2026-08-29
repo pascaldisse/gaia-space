@@ -474,6 +474,7 @@ pub fn run() {
             documents::update_document,
             documents::move_document,
             documents::archive_document,
+            documents::export_document_file,
             documents::delete_document,
             documents::save_document,
             events::list_event_types,

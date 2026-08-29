@@ -1851,6 +1851,22 @@ pub fn read_document_file_bytes(document_id: &str) -> Result<(DocumentFile, Vec<
     Ok((file, bytes))
 }
 
+/// SAVE A COPY WHERE THE PERSON ASKED FOR IT.
+///
+/// An uploaded file lives beside the database (`document_files/…`), reachable by the
+/// app and by nothing else — which is why a document could be READ in the window but
+/// never used anywhere: no path a person owns ever held it. This copies the stored
+/// bytes to a path the caller chose (the native save dialog picks it), leaving the
+/// stored file untouched.
+///
+/// The web build needs nothing here: it already serves `/api/documents/files/{id}`.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn export_document_file(document_id: String, target_path: String) -> Result<()> {
+    let (_file, bytes) = read_document_file_bytes(&document_id)?;
+    std::fs::write(&target_path, bytes).map_err(|e| format!("write copy: {e}"))?;
+    Ok(())
+}
+
 pub(crate) fn upload_document_file_tx(
     c: &rusqlite::Connection,
     store: &std::path::Path,

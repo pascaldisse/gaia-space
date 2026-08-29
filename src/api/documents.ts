@@ -245,6 +245,12 @@ attachDocumentDiscussion: (documentId: string, meetingId: string | null = null) 
     invoke<DocumentFile | null>("get_document_file", { documentId }),
   readDocumentFile: (documentId: string, maxBytes: number | null = null) =>
     invoke<DocumentFilePreview>("read_document_file", { documentId, maxBytes }),
+  /** Desktop only: copy the stored upload to a path the person chose. The web build
+   *  downloads through `api/documents/files/<id>` instead — see `fileDownloadUrl`. */
+  exportFile: (documentId: string, targetPath: string) =>
+    invoke<void>("export_document_file", { documentId, targetPath }),
+  /** The web route that serves the stored bytes with their own filename. */
+  fileDownloadUrl: (documentId: string) => `${import.meta.env.BASE_URL}api/documents/files/${encodeURIComponent(documentId)}`,
 
   importFolder: (request: DocumentImportRequest) =>
     invoke<DocumentImportSummary>("import_document_folder", { request }),

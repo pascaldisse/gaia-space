@@ -545,6 +545,11 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
    glyphs (pencil / ✕ / bin) that used to hang off a shelf: two of them were read as
    something they were not. */
 .card-menu-button {
+  /* Text glyph, not an svg: the icon-button rule in controls.css cannot see it, so
+     the padding of the global button rule is cancelled here (it pushed the ⋯ into
+     the lower right corner of its own box). */
+  padding: 0;
+  line-height: 1;
   /* ABSOLUTE ON PURPOSE. A hover-only button that still occupies width squeezes the
      text beside it — that is how "Empty shelf" became "Empty …". It floats over the
      card's own padding instead. */

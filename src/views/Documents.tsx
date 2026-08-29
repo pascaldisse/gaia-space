@@ -1,7 +1,7 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
 import PageHeader from "../components/PageHeader";
 import { marked } from "marked";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
@@ -510,6 +510,7 @@ const [showArchived, setShowArchived] = createSignal(false);
   ];
   const documentMenu = (document: Document): ContextMenuItem[] => [
     { label: "Open", onSelect: () => navigate(docRoute(document.id)) },
+    ...(document.doc_type === "file" ? [{ label: "Download…", onSelect: () => void downloadFile(document) }] : []),
     { label: document.archived ? "Restore" : "Archive", onSelect: () => void archiveDocumentRow(document) },
     ...(canDeleteDocument(document)
       ? [{ label: "Delete document…", danger: true, onSelect: () => setPendingDelete({ kind: "document", id: document.id, name: document.title }) }]
@@ -782,6 +783,38 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
    *  drag-and-drop of dropped bytes stays gated on `isWeb()` further down: the
    *  web transport can post the bytes, the invoke command cannot receive them.
    *  Nothing here fakes a path for a dropped file. */
+  /** ── TAKE A COPY WITH YOU ──────────────────────────────────────────────────
+   *  Opening a file in the window was the whole story until now: the bytes live
+   *  beside the database, so nothing outside the app could ever use them. On the
+   *  desktop the native save dialog names the destination and the backend copies
+   *  the stored file there; in the browser the same act is the server's own file
+   *  route, which sends the bytes with their filename. */
+  const [downloading, setDownloading] = createSignal(false);
+  async function downloadFile(doc: Document) {
+    if (doc.doc_type !== "file") return;
+    const name = filePreview()?.filename ?? doc.title;
+    if (isWeb()) {
+      const link = window.document.createElement("a");
+      link.href = documentsApi.fileDownloadUrl(doc.id);
+      link.download = name;
+      link.rel = "noopener";
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return;
+    }
+    setDownloading(true);
+    try {
+      const target = await saveDialog({ defaultPath: name, title: `Save ${name}` });
+      if (typeof target !== "string") return;
+      await documentsApi.exportFile(doc.id, target);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function pickAndUploadFile() {
     try {
       const picked = await openDialog({ directory: false, multiple: false, title: "Upload a file" });
@@ -1773,6 +1806,12 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     <option value={activeContainer() === "project" ? rootParentId() ?? "" : ""}>{activeContainer() === "project" ? "Documents" : "(root)"}</option>
                     <For each={displayFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
                   </select>
+                  {/* A file you can only look at is a file you do not have. */}
+                  <Show when={doc().doc_type === "file"}>
+                    <button class="ghost small" disabled={downloading()} onClick={() => void downloadFile(doc())}>
+                      {downloading() ? "Saving…" : "Download"}
+                    </button>
+                  </Show>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
                   </button>

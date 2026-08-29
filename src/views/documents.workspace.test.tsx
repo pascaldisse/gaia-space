@@ -418,6 +418,57 @@ test("a folder opens and closes from the keyboard, and its documents follow", as
     expect(owned.querySelector("button.delete-button")).not.toBeNull();
   });
 
+  // A FILE YOU CAN ONLY LOOK AT IS A FILE YOU DO NOT HAVE. The bytes live beside the
+  // database, so without this act nothing outside the app can ever use them. On the
+  // desktop the native save dialog names the destination and the backend copies the
+  // stored file there.
+  test("an uploaded file can be taken out of the app; a written document cannot", async () => {
+    setProfileId("me");
+    const exported: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const cmd = String(url).split("api/cmd/")[1] ?? String(url);
+      if (cmd === "export_document_file") {
+        exported.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ ok: true, value: null }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const table: Record<string, unknown> = {
+        list_document_folders: [],
+        list_documents: [
+          { id: "up1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "file", body_format: "text", title: "logo.png", body: "", version: 1, archived: false, created_by: "me" },
+          { id: "d1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "text", title: "Draft", body: "", version: 1, archived: false, created_by: "me" },
+        ],
+        read_document_file: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, truncated: false, text: null, data_base64: "iVBORw==" },
+      };
+      return new Response(JSON.stringify({ ok: true, value: table[cmd] ?? [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as any;
+    const host = await mount();
+    registerViews(["Documents"]);
+    navigate({ view: "Documents", containerType: "my-docs", containerId: "me" });
+    await settle();
+
+    // The card's menu offers it for the FILE …
+    const fileCard = [...host.querySelectorAll("a.documents-library-card")].find(a => a.textContent?.includes("logo.png")) as HTMLElement;
+    fileCard.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 30, clientY: 30 }));
+    await settle();
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(i => i.textContent)).toContain("Download…");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+
+    // … and NOT for a document that was written in Space: there is no file to take.
+    const textCard = [...host.querySelectorAll("a.documents-library-card")].find(a => a.textContent?.includes("Draft")) as HTMLElement;
+    textCard.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 30, clientY: 30 }));
+    await settle();
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(i => i.textContent)).not.toContain("Download…");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+
+    // Opened, the file carries the act in its own toolbar.
+    navigate({ view: "Documents", entityType: "document", entityId: "up1", containerType: "my-docs", containerId: "me" });
+    await settle();
+    const button = [...host.querySelectorAll("button")].find(b => b.textContent === "Download");
+    expect(button).not.toBeUndefined();
+  });
+
   // The source (My Documents / organization book / project library) is chosen in the
   // shell's Knowledge sidebar, so this page shows no tabs and no picker.
   test("the source picker belongs to the shell, not to the page", async () => {

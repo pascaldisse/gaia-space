@@ -102,6 +102,9 @@
 .task-due.today, .task-due.soon { background: color-mix(in srgb, var(--amber, #b8791f) 16%, transparent); color: var(--amber-ink, #8a5a12); }
 
 .task-tile-menu {
+  /* Same as .card-menu-button: a text glyph needs the button padding cancelled. */
+  padding: 0;
+  line-height: 1;
   position: absolute; top: 50%; right: var(--dk-space-sm); transform: translateY(-50%);
   display: grid; place-items: center; width: 1.9rem; height: 1.9rem;
   border: var(--dk-hairline) solid transparent; border-radius: var(--dk-radius-sm);

@@ -448,3 +448,19 @@
   padding: 12px 4px;
   margin-bottom: 6px;
 }
+
+
+/* ── AN ICON BUTTON IS A BOX WITH A GLYPH IN THE MIDDLE ──────────────────────
+   The global `button` rule pays 10px/11px of padding, which is right for a button
+   with words and wrong for one with a single glyph: inside a fixed 30px box that
+   padding pushes the glyph down and to the right (measured: 12px from the left,
+   4px from the right). Every round icon control in the shell had it.
+   `:has(> svg:only-child)` states the case exactly — a button whose whole content
+   IS the icon — so no view has to remember this and no new one can get it wrong. */
+button:has(> svg:only-child),
+a:has(> svg:only-child) {
+  padding: 0;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
