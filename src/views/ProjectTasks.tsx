@@ -251,20 +251,18 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
           and takes the whole row so the fields have the width they need. */}
       <div class="task-open">
         <div class="task-row-editing">
+          {/* The one act that removes the task rides in the editor's own footer beside
+              Done, Cancel and Save — not in a strip of its own below the card. */}
           <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
             ownerName={nameOf(task.profile_id)}
             onCancel={() => closeEdit(task.id)}
             onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
-            onError={setError} />
-          {/* The opened task's own facts carry the one act that removes them all —
-              at rest, in the same red it wears everywhere else. */}
-          <div class="task-danger-row">
-            <DeleteButton
+            onError={setError}
+            danger={<DeleteButton
               label={`Delete ${task.content}`}
               canDelete={owns(task)}
               deniedReason="Only the owner can delete this"
-              onRequest={() => setPendingDelete(task)} />
-          </div>
+              onRequest={() => setPendingDelete(task)} />} />
         </div>
       </div>
     </Show>;

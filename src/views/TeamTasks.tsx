@@ -312,19 +312,19 @@ export default function TeamTasks() {
                     grid cell it occupied, and the editor takes the whole row. */}
                 <div class="task-open">
                   <div class="task-row-editing">
+                    {/* Delete travels INTO the editor's own footer, the same as on the
+                        other two task surfaces — all three open one editor, so all three
+                        must end in one row of buttons rather than a floating red strip. */}
                     <TaskRowEdit task={task} canEdit={owns(task)} canComplete={mayComplete(task)}
                       ownerName={nameOf(task.profile_id)}
                       onCancel={() => closeEdit(task.id)}
                       onSaved={() => { closeEdit(task.id); void reloadTasks(); }}
-                      onError={setRowError} />
-                    {/* The opened task's facts, and beside them the act that removes them. */}
-                    <div class="task-danger-row">
-                      <DeleteButton
+                      onError={setRowError}
+                      danger={<DeleteButton
                         label={`Delete ${task.content}`}
                         canDelete={owns(task)}
                         deniedReason="Only the owner can delete this"
-                        onRequest={() => setPendingDelete(task)} />
-                    </div>
+                        onRequest={() => setPendingDelete(task)} />} />
                   </div>
                 </div>
               </Show>;

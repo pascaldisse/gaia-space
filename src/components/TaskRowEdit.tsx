@@ -1,6 +1,7 @@
-import { For, Show, createResource, createSignal, onMount } from "solid-js";
-import { personalApi, type Todo, type TodoContentKind } from "../api/personal";
-import { AssigneeControl, DueDateControl, ProjectControl } from "./TaskMeta";
+import { Show, createResource, createSignal, onMount } from "solid-js";
+import type { JSX } from "solid-js";
+import { TODO_CATEGORIES, personalApi, type Todo, type TodoContentKind } from "../api/personal";
+import { AssigneeControl, CategoryControl, DueDateControl, ProjectControl } from "./TaskMeta";
 import { humanError, profiles, projects } from "../session";
 /* The editor's control language IS My tasks' composer language — the same
    `.composer-title`, `.composer-meta`, `.composer-actions`, chips and folds that
@@ -62,6 +63,11 @@ export default function TaskRowEdit(props: {
   canComplete: boolean;
   /** Who owns it, for the one line that explains a read-only form. */
   ownerName: string;
+  /** THE ONE ACT THAT REMOVES THE TASK, handed in by the surface that owns deletion.
+   *  It is a slot rather than a flag because only the host knows who may delete and
+   *  what the confirmation is — but it belongs in THIS row of buttons, not floating
+   *  under the card in a strip of its own. */
+  danger?: JSX.Element;
   onCancel: () => void;
   onSaved: (task: Todo) => void;
   onError: (message: string) => void;
@@ -73,6 +79,7 @@ export default function TaskRowEdit(props: {
     project_id: props.task.project_id ?? "",
     assignee_ids: [...props.task.assignee_ids],
     content_kind: (props.task.content_kind ?? "text") as TodoContentKind,
+    category: props.task.category ?? "",
     source_entity_type: props.task.source_entity_type ?? "",
     source_entity_id: props.task.source_entity_id ?? "",
     done: props.task.done,
@@ -138,6 +145,7 @@ export default function TaskRowEdit(props: {
         project_id: values.project_id || null,
         assignee_ids: values.assignee_ids,
         content_kind: values.content_kind,
+        category: values.category || null,
         done: values.done,
         ...(props.advanced
           ? { source_entity_type: values.source_entity_type || null, source_entity_id: values.source_entity_id || null }
@@ -175,42 +183,57 @@ export default function TaskRowEdit(props: {
           <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject} />
         </Show>
         <DueDateControl value={form().due_date} onChange={iso => patch({ due_date: iso })} />
-        <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee}
+        <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee} nameOf={nameOf}
           disabled={!form().project_id} disabledReason="Select a project before assigning members"
           emptyNote={membersFailed() ? `The project's members could not be loaded: ${membersFailed()}` : "This project has no members available for assignment."} />
+        {/* WHAT KIND OF ACT THIS IS — optional, and last, because it is the only one of
+            the four that changes nothing about who sees the task or when it is due. */}
+        <CategoryControl value={form().category} options={TODO_CATEGORIES}
+          onChange={value => patch({ category: value })} />
       </div>
       <Show when={membersFailed()}>{reason => <p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
-      <Show when={form().assignee_ids.length}>
-        <ul class="assignee-chips"><For each={form().assignee_ids}>{id => <li class="assignee-chip">{nameOf(id)}
-          <button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={() => toggleAssignee(id)}>×</button>
-        </li>}</For></ul>
-      </Show>
+      {/* THE CHIP ROW IS GONE. It listed exactly what the Assignee control above it
+          already summarises — one fact stated twice, in two different widths, and
+          (while the name lookup was broken) with two different answers. Removing an
+          assignee is where adding one is: inside the control, by untick. */}
       {/* Called DESCRIPTION, because that is what the row invites you to add. It was
           labelled "Notes" while the affordance said "add a short description" — one
           thing under two names, so the field was looked straight at and not
           recognised. The wire name stays `notes`; only the word a person reads
           changed. */}
-      <label class="todo-field todo-field-notes"><span class="field-label">Description</span>
+      <div class="todo-field todo-field-notes">
+        {/* THE SWITCH SITS ON THE FIELD IT DESCRIBES. "Markdown body" stood below as a
+            bare checkbox level with "Done", so a question about how ONE field is read
+            looked like a property of the whole task, ranked beside its state. */}
+        <div class="task-edit-field-head">
+          <span class="field-label" id={`desc-${props.task.id}`}>Description</span>
+          <Show when={props.advanced}>
+            <label class="task-edit-md"><input type="checkbox" checked={form().content_kind === "markdown"}
+              onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} /> Markdown</label>
+          </Show>
+        </div>
         <textarea class="composer-notes" ref={notesField} rows="3" aria-label="Task description" placeholder="A line on what this is about"
           value={form().notes} onInput={event => patch({ notes: event.currentTarget.value })} />
-      </label>
-      <Show when={props.advanced}>
-        <label class="fld-check"><input type="checkbox" checked={form().content_kind === "markdown"}
-          onChange={event => patch({ content_kind: event.currentTarget.checked ? "markdown" : "text" })} /> Markdown body</label>
-        {/* The source anchor is NOT hand-editable, and it never should have been.
+      </div>
+      {/* The source anchor is NOT hand-editable, and it never should have been.
             It is set by the act that creates the work — "Create task" on a message
             writes it — and it is READ back as a link on the row (SourceLink). Two raw
             fields asking a person to type an entity type and a UUID could only ever
             produce a broken link, and they were the most confusing thing on this
             surface. The value still travels through `form()` untouched, so editing a
             task that HAS a source no longer risks erasing it by hand. */}
-      </Show>
     </Show>
-    <Show when={props.canComplete}>
-      <label class="fld-check task-edit-done"><input type="checkbox" aria-label="Task done" checked={form().done}
-        onChange={event => props.canEdit ? patch({ done: event.currentTarget.checked }) : void completeOnly(event.currentTarget.checked)} /> Done</label>
-    </Show>
+    {/* ONE ROW CARRIES EVERY WAY OUT of this editor, in the order they are weighed:
+        the state of the work, the act that destroys it, then leave-or-keep. Done was a
+        loose checkbox floating above the buttons and Delete hung in a strip BELOW the
+        card, outside its border — three decisions in three unrelated places. */}
     <div class="composer-actions task-edit-actions">
+      <Show when={props.canComplete}>
+        <label class="task-edit-done"><input type="checkbox" aria-label="Task done" checked={form().done}
+          onChange={event => props.canEdit ? patch({ done: event.currentTarget.checked }) : void completeOnly(event.currentTarget.checked)} /> Done</label>
+      </Show>
+      <Show when={props.danger}><span class="task-edit-danger">{props.danger}</span></Show>
+      <span class="task-edit-spacer" />
       <button type="button" class="ghost" onClick={() => props.onCancel()} disabled={busy()}>Cancel</button>
       <Show when={props.canEdit}>
         <button type="button" class="primary composer-submit" onClick={() => void save()} disabled={busy() || !form().content.trim()}>Save</button>

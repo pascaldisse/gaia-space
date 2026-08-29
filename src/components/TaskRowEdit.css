@@ -7,9 +7,17 @@
 .task-edit { display: grid; gap: 12px; min-width: 0; }
 .task-edit .composer-title { font-size: 16px !important; }
 .task-edit-readonly { margin: 0; color: var(--text-muted); font-size: 12px; }
-.task-edit-done { justify-self: start; }
-/* Cancel left, Save right — the same footer the composer has. */
-.task-edit-actions { display: flex; justify-content: space-between; gap: 10px; }
+/* ONE FOOTER, READ LEFT TO RIGHT: state · destroy · spacer · leave · keep. `space-between`
+   is gone — with four items it spread them evenly and the pairs stopped reading as pairs. */
+.task-edit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.task-edit-spacer { flex: 1 1 auto; }
+.task-edit-done { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.task-edit-done input { cursor: pointer; }
+.task-edit-danger { display: inline-flex; }
+
+/* The switch belongs to the field above it, so it sits ON that field's label line. */
+.task-edit-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.task-edit-md { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); cursor: pointer; }
 
 /* THE ROW KEEPS ITS PLACE WHILE OPEN. The editor is rendered inside the same <li>
    the row occupies, so the list never re-orders under the person editing it; this
@@ -33,3 +41,7 @@
 }
 .theme-space-light .task-edit .composer-title { color: var(--ink); }
 .theme-space-light .task-edit-readonly { color: var(--muted); }
+.theme-space-light .task-edit-done { color: var(--muted); font-weight: 600; }
+.theme-space-light .task-edit-md { color: var(--muted); }
+/* A ticked task says so in the accent it wears everywhere else, not in plain grey. */
+.theme-space-light .task-edit-done:has(input:checked) { color: var(--ink); }

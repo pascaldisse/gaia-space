@@ -102,3 +102,17 @@
 .theme-space-light .tm-value.placeholder { color: var(--muted); }
 .theme-space-light .tm-chevron { color: var(--muted); }
 .theme-space-light .tm-date-caption { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* ── Category ──────────────────────────────────────────────────────────────
+   THE DOTS LIVE ONLY IN THE PICKER, never on a task tile. Inside this menu five
+   options are scanned at once and nothing else here carries colour, so a hue helps.
+   On a tile it would be a SECOND colour rule beside deadlineBand()/urgencyOf(), and
+   "what kind of act" would compete with "how late" — so the tile shows the word
+   alone. The hues avoid teal/amber/red, which are spoken for (open · due soon ·
+   blocked); the label always shows, so the colour is never the only carrier. */
+.tm-cat-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
+.tm-cat-dot.cat-create  { background: #6f7bd6; }
+.tm-cat-dot.cat-improve { background: #4fa3a0; }
+.tm-cat-dot.cat-review  { background: #b07cc6; }
+.tm-cat-dot.cat-decide  { background: #c98a4b; }
+.tm-cat-dot.cat-admin   { background: #8b8f9a; }

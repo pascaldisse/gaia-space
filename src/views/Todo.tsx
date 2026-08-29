@@ -1,5 +1,5 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
-import { personalApi, type Todo as TodoItem } from "../api/personal";
+import { TODO_CATEGORIES, personalApi, type Todo as TodoItem } from "../api/personal";
 import "../components/paper.css";
 import "./Todo.css";
 import "./taskCards.css";
@@ -43,6 +43,9 @@ export default function Todo() {
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
+  /** An unknown category still shows its stored value rather than vanishing: a row
+   *  that silently drops a fact is worse than one that shows a word we did not plan. */
+  const categoryLabel=(id:string)=>TODO_CATEGORIES.find(option=>option.id===id)?.label??id;
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
   /* ── EDIT AN EXISTING TASK: IN THE ROW ──────────────────────────────────────
@@ -129,19 +132,18 @@ export default function Todo() {
           source bookmark, so it is the one that asks for them (`advanced`).
           This is the caller's OWN list, so the caller owns every row in it — the
           server's owner rule (TodoOwnerWrite) is satisfied by construction here. */}
+      {/* THE ONE ACT THAT REMOVES THE TASK travels INTO the editor's own row of
+          buttons. It used to sit in a strip below the card, outside its border, so the
+          opened task ended in a floating red button that belonged to nothing. */}
       <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)} focusField={editIntent()}
         onCancel={()=>closeEdit(todo.id)}
         onSaved={()=>{ closeEdit(todo.id); refetch(); }}
-        onError={setError}/>
-      {/* THE OPENED TASK'S OWN FACTS carry the one act that removes them all —
-          beside them, at rest, in the same red it wears everywhere else. */}
-      <div class="task-danger-row">
-        <DeleteButton
+        onError={setError}
+        danger={<DeleteButton
           label={`Delete ${todo.content}`}
           canDelete={ownsTask(todo)}
           deniedReason="Only the owner can delete this"
-          onRequest={()=>setPendingDelete(todo)}/>
-      </div>
+          onRequest={()=>setPendingDelete(todo)}/>}/>
     </div>
   </article>;
   /** THE TASK TILE — Knowledge's card, in the vocabulary of work: the check is the
@@ -173,8 +175,22 @@ export default function Todo() {
         <span class="task-tile-title">
           <Show when={todo.content_kind==="markdown"} fallback={todo.content}>{markdownBody(todo.content)}</Show>
         </span>
-        <Show when={todo.project_id||todo.assignee_ids.length||todo.notes||todo.source_entity_type}>
+        <Show when={todo.project_id||todo.assignee_ids.length||todo.notes||todo.source_entity_type||todo.category}>
           <span class="task-tile-meta">
+            {/* A CATEGORY YOU CANNOT SEE IS NOT WORTH SETTING — so it leads the meta
+                line, as the one fact saying what KIND of act this is.
+
+                IT CARRIES NO COLOUR, and that is the whole point. Both coloured things
+                on this tile — the state mark and the due date — are driven by
+                `deadlineBand()`/`urgencyOf()`. A category hue would be a SECOND,
+                unrelated palette on one card, and a person would have to learn which
+                colours mean "late" and which merely mean "a review". One colour rule
+                per tile. The dots live in the picker menu, where five options are
+                being scanned and no deadline competes with them. */}
+            <Show when={todo.category}>{value=><>
+              <span class="task-tile-cat">{categoryLabel(value())}</span>
+              <span class="sep">·</span>
+            </>}</Show>
             <Show when={todo.project_id}>{id=><span>{projectName(id())}</span>}</Show>
             <Show when={todo.project_id&&todo.assignee_ids.length}><span class="sep">·</span></Show>
             <Show when={todo.assignee_ids.length}><span>{todo.assignee_ids.map(nameOf).join(", ")}</span></Show>

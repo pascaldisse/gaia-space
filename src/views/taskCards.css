@@ -116,3 +116,10 @@
 .task-tile-menu:focus-visible { opacity: 1; }
 .task-tile-menu:hover { border-color: var(--surface-border); background: var(--surface); color: var(--accent-text); }
 .task-tile:hover .task-tile-edge { padding-right: 1.9rem; }
+
+/* THE CATEGORY ON A TILE IS A WORD, AND ONLY A WORD. No badge, no dot, no hue: the
+   state mark and the due date already carry this card's colour and both come from
+   deadlineBand()/urgencyOf(). A category palette beside them would be a second
+   colour rule on one tile, and "what kind of work" would start competing with
+   "how late". It reads as slight emphasis inside the muted meta line instead. */
+.task-tile-cat { font-weight: 620; }

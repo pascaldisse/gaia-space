@@ -89,6 +89,12 @@ const menuEntries = () => Array.from(document.querySelectorAll<HTMLElement>(".co
 const menuEntry = (label: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu button.context-item")).find(item => item.textContent === label);
 const deleteCalls = () => calls.filter(call => call.cmd === "delete_todo");
+/* THE SELECTOR MOVED, THE GUARANTEE DID NOT. Delete used to sit in `.task-danger-row`,
+   a strip below the editor card and outside its border; it now rides in the editor's
+   own footer (`.task-edit-danger`) beside Done, Cancel and Save, on all three task
+   surfaces. What is asserted below is unchanged: an owner gets the red button, a
+   non-owner gets no button and a reason, cancel deletes nothing, and confirming sends
+   exactly one delete_todo. */
 const confirmDanger = () => document.querySelector(".confirm-danger") as HTMLButtonElement;
 
 /** Both surfaces open a task by clicking its row body; the danger row lives there. */
@@ -105,7 +111,7 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
   test("the opened task I created carries the red button", async () => {
     const host = await mount(() => <Todo /> as any);
     await openRow(host, "Mine alone");
-    const button = host.querySelector<HTMLButtonElement>(".task-danger-row .delete-button");
+    const button = host.querySelector<HTMLButtonElement>(".task-edit-danger .delete-button");
     expect(button).toBeTruthy();
     expect(button!.getAttribute("aria-label")).toBe("Delete Mine alone");
   });
@@ -113,8 +119,8 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
   test("a SHARED task somebody else created shows no button, and says why", async () => {
     const host = await mount(() => <Todo /> as any);
     await openRow(host, "Theirs on me");
-    expect(host.querySelector(".task-danger-row .delete-button")).toBeNull();
-    expect(host.querySelector(".task-danger-row .delete-denied")?.textContent).toBe("Only the owner can delete this");
+    expect(host.querySelector(".task-edit-danger .delete-button")).toBeNull();
+    expect(host.querySelector(".task-edit-danger .delete-denied")?.textContent).toBe("Only the owner can delete this");
   });
 
   test("right-click offers Delete task… on mine only", async () => {
@@ -136,7 +142,7 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
   test("cancelling deletes nothing", async () => {
     const host = await mount(() => <Todo /> as any);
     await openRow(host, "Mine alone");
-    host.querySelector<HTMLButtonElement>(".task-danger-row .delete-button")!.click();
+    host.querySelector<HTMLButtonElement>(".task-edit-danger .delete-button")!.click();
     await settle();
     expect(deleteCalls()).toHaveLength(0);
     expect(document.querySelector(".confirm-body")?.textContent).toContain("Mine alone");
@@ -149,7 +155,7 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
   test("confirming sends exactly one delete_todo with the id and the actor", async () => {
     const host = await mount(() => <Todo /> as any);
     await openRow(host, "Mine alone");
-    host.querySelector<HTMLButtonElement>(".task-danger-row .delete-button")!.click();
+    host.querySelector<HTMLButtonElement>(".task-edit-danger .delete-button")!.click();
     await settle();
     confirmDanger().click();
     await settle();
@@ -183,11 +189,11 @@ describe("Team tasks: other people's work is not yours to delete", () => {
   test("the task I created carries the button; the one put on me does not", async () => {
     const host = await mount(() => <TeamTasks /> as any);
     await openRow(host, "Mine alone");
-    expect(host.querySelector<HTMLButtonElement>(".task-danger-row .delete-button")?.getAttribute("aria-label"))
+    expect(host.querySelector<HTMLButtonElement>(".task-edit-danger .delete-button")?.getAttribute("aria-label"))
       .toBe("Delete Mine alone");
     await openRow(host, "Theirs on me");
-    expect(host.querySelector(".task-danger-row .delete-button")).toBeNull();
-    expect(host.querySelector(".task-danger-row .delete-denied")?.textContent).toBe("Only the owner can delete this");
+    expect(host.querySelector(".task-edit-danger .delete-button")).toBeNull();
+    expect(host.querySelector(".task-edit-danger .delete-denied")?.textContent).toBe("Only the owner can delete this");
   });
 
   test("right-click on a row I do not own has no Delete entry", async () => {

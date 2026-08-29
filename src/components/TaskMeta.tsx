@@ -143,6 +143,47 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
 }
 
 /**
+ * Category chooser — what KIND of act this task is. Optional by design: most tasks
+ * never get one, and a task without a category must never look unfinished, so the
+ * resting state is a plain "No category" and the control offers a way back to it.
+ *
+ * The list is CLOSED and lives in one place (`api/personal`), shared with the server
+ * that validates it. A free text field here would produce "Review", "review" and
+ * "Reviewing" within a week and no two of them would group together.
+ */
+export function CategoryControl(props: {
+  value: string;
+  options: readonly { id: string; label: string }[];
+  onChange: (id: string) => void;
+}) {
+  const selected = createMemo(() => props.options.find(option => option.id === props.value));
+  return (
+    <MetaControl icon="tag" label="Category" placeholder="No category"
+      value={selected()?.label} set={Boolean(props.value)} menuLabel="Choose category">
+      {close => (
+        <ul class="tm-list" role="listbox" aria-label="Category">
+          <li role="option" aria-selected={props.value === ""}
+            classList={{ "tm-opt": true, selected: props.value === "" }}
+            onMouseDown={event => { event.preventDefault(); props.onChange(""); close(); }}>
+            <span class="tm-opt-text"><span class="tm-opt-name">No category</span></span>
+            <Show when={props.value === ""}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
+          </li>
+          <For each={props.options}>{option =>
+            <li role="option" aria-selected={option.id === props.value}
+              classList={{ "tm-opt": true, selected: option.id === props.value }}
+              onMouseDown={event => { event.preventDefault(); props.onChange(option.id); close(); }}>
+              <span class={`tm-cat-dot cat-${option.id}`} aria-hidden="true" />
+              <span class="tm-opt-text"><span class="tm-opt-name">{option.label}</span></span>
+              <Show when={option.id === props.value}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
+            </li>}
+          </For>
+        </ul>
+      )}
+    </MetaControl>
+  );
+}
+
+/**
  * Assignee chooser — several people, because a task carries `assignee_ids`.
  * The list is whatever the caller hands in; the composer hands in the project's
  * members only, since assigning somebody who is not on the project is refused.
@@ -150,8 +191,16 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
 export function AssigneeControl(props: {
   value: string[]; people: MetaPerson[]; onToggle: (id: string) => void;
   disabled?: boolean; disabledReason?: string; emptyNote?: string;
+  /** NAMING IS NOT THE SAME QUESTION AS ASSIGNING. `people` is who you MAY assign —
+   *  the project's members — but a task already assigned to somebody outside that
+   *  list (a personal task, or a member since removed) still has to say WHO. Without
+   *  this resolver the control fell back to the raw `profile-19fe6e19f53`, while the
+   *  chip row beside it read "Jannes": one fact, two answers, one of them a database
+   *  key shown to a person. */
+  nameOf?: (id: string) => string;
 }) {
-  const names = createMemo(() => props.value.map(id => props.people.find(person => person.id === id)?.label ?? id));
+  const names = createMemo(() => props.value.map(id =>
+    props.people.find(person => person.id === id)?.label ?? props.nameOf?.(id) ?? id));
   const summary = createMemo(() => {
     const list = names();
     if (!list.length) return "";

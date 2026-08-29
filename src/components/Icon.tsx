@@ -128,6 +128,10 @@ const PATHS = {
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,
+  /* A category IS a tag, so it is drawn as one. Every other glyph in this set was
+     already spoken for by a rail mode (layers = Projects, target = Development), and
+     a category wearing the Projects icon would have read as a second project field. */
+  tag: () => <><path d="M3 12.5V4.5A1.5 1.5 0 0 1 4.5 3h8L21 11.5 13.5 19 3 12.5Z" /><circle cx="7.5" cy="7.5" r="1.2" /></>,
 } satisfies Record<string, () => JSX.Element>;
 
 export type IconName = keyof typeof PATHS;
