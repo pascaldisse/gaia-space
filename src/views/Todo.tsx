@@ -9,8 +9,7 @@ import EmptyState from "../components/EmptyState";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import DeleteButton from "../components/DeleteButton";
-import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
@@ -284,6 +283,30 @@ export default function Todo() {
     </Show>
 
     <div class="task-board">
+      {/* A NEW TASK IS BORN WHERE IT WILL LIVE. It used to be made in a panel that slid
+          in from the right — a different place, a different shape, for the same object
+          the list edits in place. The editor opens at the top of the list instead, in
+          the row the task will occupy a second later. */}
+      <Show when={creating()}>
+        <div class="task-grid task-create-grid" aria-label="New task">
+          <div class="task-open">
+            <article class="task-card task-card-editing">
+              <div class="task-body">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(profileId())}
+                  advanced
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(profileId())}
+                  onCancel={()=>setCreating(false)}
+                  onSaved={()=>{ setCreating(false); refetch(); }}
+                  onError={setError} />
+              </div>
+            </article>
+          </div>
+        </div>
+      </Show>
       <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
       <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
         <EmptyState
@@ -337,9 +360,5 @@ export default function Todo() {
       </Show>
     </div>
 
-    {/* THE SAME DRAWER the project and team surfaces open. `advanced` because this is
-        the surface that has always carried the markdown switch and the source
-        bookmark — the drawer does not grow fields anywhere they never existed. */}
-    <Show when={creating()}><TaskDrawer advanced authorId={profileId()} onClose={()=>setCreating(false)} onSaved={()=>refetch()}/></Show>
   </section>;
 }

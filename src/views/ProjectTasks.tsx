@@ -7,8 +7,7 @@ import DeleteButton from "../components/DeleteButton";
 import { ProfilePicker } from "../components/Pickers";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
-import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import { Icon } from "../components/Icon";
@@ -332,6 +331,26 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         />
       </Show>
       <div class="task-board">
+        {/* The same editor the rows open, at the top of the list. The project is this
+            surface's own and stays inherited, never asked. */}
+        <Show when={creating()}>
+          <div class="task-grid task-create-grid" aria-label="New task">
+            <div class="task-open">
+              <div class="task-row-editing">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(profileId(), selectedProject())}
+                  fixedProject
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(profileId())}
+                  onCancel={() => setCreating(false)}
+                  onSaved={() => { setCreating(false); void reloadTasks(); void reloadDashboard(); }}
+                  onError={setError} />
+              </div>
+            </div>
+          </div>
+        </Show>
         <Show when={openTasks().length}>
           <div class="task-board-head">
             <span class="task-board-icon" aria-hidden="true"><Icon name="alert" size={24} /></span>
@@ -374,11 +393,6 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
       busy={deleting()}
       onConfirm={() => void deleteTask()}
       onCancel={() => setPendingDelete(null)} />
-    <Show when={creating()}><TaskDrawer
-      projectId={selectedProject()}
-      authorId={profileId()}
-      onClose={() => setCreating(false)}
-      onSaved={() => { void reloadTasks(); void reloadDashboard(); }}
-    /></Show>
+    
   </section>;
 }

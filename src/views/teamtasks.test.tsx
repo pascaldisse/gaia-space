@@ -152,12 +152,12 @@ describe("informational-lead law", () => {
        lives in the surface's ONE action row (`.task-actionbar`), as on My tasks. */
     host.querySelector<HTMLButtonElement>(".task-actionbar .doc-action-primary")!.click();
     await settle();
-    const assignee = [...host.querySelectorAll<HTMLButtonElement>(".wid-panel .tm-trigger")]
+    const assignee = [...host.querySelectorAll<HTMLButtonElement>(".task-create-grid .tm-trigger")]
       .find(button => button.querySelector(".tm-label")?.textContent === "Assignee")!;
     expect(assignee.disabled).toBe(false);
     assignee.click();
     await settle();
-    const others = Array.from(host.querySelectorAll(".wid-panel .tm-menu [role=option]"));
+    const others = Array.from(host.querySelectorAll(".tm-menu [role=option]"));
     expect(others.map(node => node.querySelector(".tm-opt-name")?.textContent)).toEqual(["Me", "Other Person"]);
   });
 });

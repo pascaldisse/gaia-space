@@ -9,8 +9,7 @@ import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import DeleteButton from "../components/DeleteButton";
 import EmptyState from "../components/EmptyState";
 import PageHeader, { Chip } from "../components/PageHeader";
-import TaskDrawer from "../components/TaskDrawer";
-import TaskRowEdit, { focusTaskRow } from "../components/TaskRowEdit";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { Icon } from "../components/Icon";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import "../components/paper.css";
@@ -248,6 +247,25 @@ export default function TeamTasks() {
     </Show>
     <Show when={!loadError() && !projectsLoading() && !!groups().length}>
       <div class="task-board">
+        {/* A new task is born where it will live — the same editor the rows open, at
+            the top of the list, instead of a panel sliding in from the right. */}
+        <Show when={creating()}>
+          <div class="task-grid task-create-grid" aria-label="New task">
+            <div class="task-open">
+              <div class="task-row-editing">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(profileId())}
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(profileId())}
+                  onCancel={() => setCreating(false)}
+                  onSaved={() => { setCreating(false); void reloadTasks(); }}
+                  onError={setRowError} />
+              </div>
+            </div>
+          </div>
+        </Show>
         <div class="task-board-head">
           <span class="task-board-icon" aria-hidden="true"><Icon name="users" size={24} /></span>
           <div class="task-board-headtext">
@@ -337,8 +355,5 @@ export default function TeamTasks() {
         </section>}</For>
       </div>
     </Show>
-    {/* One creation act, one shape, on every task surface. Cross-project, so the
-        drawer draws its project chooser and reads that project's members. */}
-    <Show when={creating()}><TaskDrawer authorId={profileId()} onClose={() => setCreating(false)} onSaved={() => void reloadTasks()} /></Show>
   </section>;
 }

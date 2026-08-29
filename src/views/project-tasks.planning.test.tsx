@@ -137,8 +137,8 @@ test("project work can add a project task without pretending it is an issue", as
   // when the write lands — see `create_todo` above.
   /* MOVED (stage 20): the composer's address changed, not the act. "Add task" opened
      an inline form in the detail pane (`form.project-work-form`); the primary is now
-     "New task" and opens the shared TaskDrawer (`form.task-drawer-form`), the same
-     shape tickets, meetings and documents are created in. The write asserted below is
+     "New task" and opens THE EDITOR at the head of the list (`form.task-edit`), the
+     same form a row opens when it is changed — a task is made where it will live. The write asserted below is
      unchanged: a title typed into the task composer reaches the backend as
      `create_todo`, scoped to this project and to the caller. */
   await until(() => host.textContent?.includes("New task") === true);
@@ -146,7 +146,7 @@ test("project work can add a project task without pretending it is an issue", as
   const title = host.querySelector('input[aria-label="Task title"]') as HTMLInputElement;
   title.value = "Ship the fix";
   title.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "Ship the fix" }));
-  (host.querySelector("form.task-drawer-form") as HTMLFormElement).dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+  (host.querySelector("form.task-edit") as HTMLFormElement).dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
   await until(() => calls.some(call => call.command === "create_todo"));
   const write = calls.find(call => call.command === "create_todo")!;
   expect(write.body.input).toMatchObject({ profile_id: "pa", project_id: "p1", content: "Ship the fix", done: false });

@@ -396,62 +396,61 @@ export default function Projects() {
       </Show>
     </nav>
     <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
+    {/* A NEW PROJECT IS MADE WHERE IT WILL LIVE. It used to be a panel sliding in from
+        the right — a different place and a different shape for the thing the list right
+        below already shows. The form stands at the head of the list instead, in the
+        same paper the cards are made of, exactly as a task is created in its own list. */}
     <Show when={createOpen()}>
-      <div class="wid-root">
-        <div class="wid-backdrop" aria-hidden="true" onClick={closeCreate} />
-        <aside class="wid-panel" role="dialog" aria-modal="true" aria-label="New project" onKeyDown={event => { if (event.key === "Escape") closeCreate(); }}>
-          <header class="wid-head"><h2>New project</h2><p>A project carries the tickets, boards, tasks and documents of one piece of work.</p></header>
-          {/* Captions belong INSIDE a drawer: here they are the only thing that says
-              what an empty field wants. */}
-          <form class="wid-form project-form" onSubmit={save}>
-            <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => setForm({ ...form(), name: e.currentTarget.value })} /></label>
-            {/* NO KEY FIELD: nobody is asked for an identifier the product never shows.
-                It is derived from the name (unique against the projects that exist) and
-                stays editable in Project settings, where it is an operator's field. */}
-            <label class="wid-field"><span>Description <em>optional</em></span><input class="wid-input" placeholder="What this project is" aria-label="Project description" value={form().description} onInput={e => setForm({ ...form(), description: e.currentTarget.value })} /></label>
-            <div class="wid-field"><span>Deadline <em>optional</em></span><DateField label="Project deadline" value={form().deadline} onChange={value => setForm({ ...form(), deadline: value })} /></div>
-            {/* MEMBERS, in the order a person decides: what the project is, then who is
-                on it, then Create. Chosen exactly the way a meeting's participants are
-                chosen — one menu, one pill per person, × to take them off again. The
-                role beside each pill is the SAME vocabulary and the SAME command the
-                project's settings use, so both surfaces can never disagree. */}
-            <div class="wid-field project-members-field">
-              <span>Members <em>optional</em></span>
-              <PillMenu
-                label="Add project member"
-                value=""
-                placeholder={invitable().length ? "Add someone…" : "No other profiles yet"}
-                disabled={!addableMembers().length}
-                options={addableMembers().map(person => ({ value: person.id, label: person.display_name || person.username }))}
-                onChange={addMember}
-              />
-              <Show when={draftMembers().length}>
-                <ul class="project-members" aria-label="Project members">
-                  <For each={draftMembers()}>{member =>
-                    <li class="project-member">
-                      <span class="project-member-name">{personName(member.id)}</span>
-                      {/* NO ROLE MENU WITHOUT ROLES: an empty menu, or an invented
-                          "Member" role, would both be a lie about this workspace. */}
-                      <Show when={assignableRoles().length}>
-                        <PillMenu
-                          label={`Role for ${personName(member.id)}`}
-                          value={member.roleId}
-                          placeholder="No role"
-                          options={[{ value: "", label: "No role" }, ...assignableRoles().map(role => ({ value: role.id, label: role.name }))]}
-                          onChange={roleId => setMemberRole(member.id, roleId)}
-                        />
-                      </Show>
-                      <button type="button" class="project-member-remove" aria-label={`Remove ${personName(member.id)}`} onClick={() => removeMember(member.id)}>×</button>
-                    </li>
-                  }</For>
-                </ul>
-              </Show>
-              <span class="project-members-hint">You are on this project because you create it.</span>
-            </div>
-            <footer class="wid-actions"><button type="button" class="wid-btn" onClick={closeCreate}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
-          </form>
-        </aside>
-      </div>
+      <section class="project-create" aria-label="New project" onKeyDown={event => { if (event.key === "Escape") closeCreate(); }}>
+        <header class="project-create-head"><h2>New project</h2><p>A project carries the tickets, boards, tasks and documents of one piece of work.</p></header>
+      <form class="wid-form project-form project-create-form" onSubmit={save}>
+        <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => setForm({ ...form(), name: e.currentTarget.value })} /></label>
+        {/* NO KEY FIELD: nobody is asked for an identifier the product never shows.
+        It is derived from the name (unique against the projects that exist) and
+        stays editable in Project settings, where it is an operator's field. */}
+        <label class="wid-field"><span>Description <em>optional</em></span><input class="wid-input" placeholder="What this project is" aria-label="Project description" value={form().description} onInput={e => setForm({ ...form(), description: e.currentTarget.value })} /></label>
+        <div class="wid-field"><span>Deadline <em>optional</em></span><DateField label="Project deadline" value={form().deadline} onChange={value => setForm({ ...form(), deadline: value })} /></div>
+        {/* MEMBERS, in the order a person decides: what the project is, then who is
+        on it, then Create. Chosen exactly the way a meeting's participants are
+        chosen — one menu, one pill per person, × to take them off again. The
+        role beside each pill is the SAME vocabulary and the SAME command the
+        project's settings use, so both surfaces can never disagree. */}
+        <div class="wid-field project-members-field">
+          <span>Members <em>optional</em></span>
+          <PillMenu
+        label="Add project member"
+        value=""
+        placeholder={invitable().length ? "Add someone…" : "No other profiles yet"}
+        disabled={!addableMembers().length}
+        options={addableMembers().map(person => ({ value: person.id, label: person.display_name || person.username }))}
+        onChange={addMember}
+          />
+          <Show when={draftMembers().length}>
+        <ul class="project-members" aria-label="Project members">
+          <For each={draftMembers()}>{member =>
+            <li class="project-member">
+          <span class="project-member-name">{personName(member.id)}</span>
+          {/* NO ROLE MENU WITHOUT ROLES: an empty menu, or an invented
+              "Member" role, would both be a lie about this workspace. */}
+          <Show when={assignableRoles().length}>
+            <PillMenu
+              label={`Role for ${personName(member.id)}`}
+              value={member.roleId}
+              placeholder="No role"
+              options={[{ value: "", label: "No role" }, ...assignableRoles().map(role => ({ value: role.id, label: role.name }))]}
+              onChange={roleId => setMemberRole(member.id, roleId)}
+            />
+          </Show>
+          <button type="button" class="project-member-remove" aria-label={`Remove ${personName(member.id)}`} onClick={() => removeMember(member.id)}>×</button>
+            </li>
+          }</For>
+        </ul>
+          </Show>
+          <span class="project-members-hint">You are on this project because you create it.</span>
+        </div>
+        <footer class="wid-actions"><button type="button" class="wid-btn" onClick={closeCreate}>Cancel</button><button class="wid-btn wid-primary">Create project</button></footer>
+      </form>
+      </section>
     </Show>
     <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 

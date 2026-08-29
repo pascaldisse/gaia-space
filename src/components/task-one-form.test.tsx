@@ -117,7 +117,11 @@ describe("one form, two acts", () => {
     host.querySelector<HTMLButtonElement>(".task-edit-actions .ghost")!.click();
     await settle();
 
-    // CREATE: the same editor, over a blank draft, inside the drawer.
+    /* ADDRESS ONLY: creating happens IN THE LIST now, not in a panel sliding in from
+       the right — the product owner asked for the same shape the row editing has, and
+       a thing should be made where it will live. The form is the same one; only its
+       host moved, so the test looks for it at the top of the list. */
+    // CREATE: the same editor, over a blank draft, at the head of the list.
     click(newTask(host));
     await settle();
     const creating = fieldNames(host);
@@ -127,9 +131,9 @@ describe("one form, two acts", () => {
     expect(creating).toEqual(["Title", "Description", "Due date", "Project", "Assignee", "Category"]);
     // The only differences are what the ACTS differ in: nothing to tick done, nothing
     // to delete, and the primary says which act it is.
-    expect(host.querySelector(".wid-panel .task-edit-done")).toBeNull();
-    expect(host.querySelector(".wid-panel .task-edit-danger")).toBeNull();
-    expect(host.querySelector<HTMLButtonElement>(".wid-panel .composer-submit")!.textContent).toContain("Create task");
+    expect(host.querySelector(".task-create-grid .task-edit-done")).toBeNull();
+    expect(host.querySelector(".task-create-grid .task-edit-danger")).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>(".task-create-grid .composer-submit")!.textContent).toContain("Create task");
   });
 
   test("the editing form's primary is Save, and it carries Done and Delete", async () => {
@@ -169,7 +173,7 @@ describe("one form, two acts", () => {
     press(option(host, "Review"));
     await settle();
 
-    host.querySelector<HTMLButtonElement>(".wid-panel .composer-submit")!.click();
+    host.querySelector<HTMLButtonElement>(".task-create-grid .composer-submit")!.click();
     await settle();
 
     const writes = calls.filter(call => call.cmd === "create_todo");
@@ -184,7 +188,7 @@ describe("one form, two acts", () => {
     // Identity is the server's to mint: the blank draft's empty id never goes out.
     expect(input.id).toBeUndefined();
     // The drawer closes on a successful write.
-    expect(host.querySelector(".wid-panel")).toBeNull();
+    expect(host.querySelector(".task-create-grid")).toBeNull();
   });
 
   test("cancelling writes nothing", async () => {
@@ -192,9 +196,9 @@ describe("one form, two acts", () => {
     click(newTask(host));
     await settle();
     type(host.querySelector('input[aria-label="Task title"]')!, "Never mind");
-    host.querySelector<HTMLButtonElement>(".wid-panel .task-edit-actions .ghost")!.click();
+    host.querySelector<HTMLButtonElement>(".task-create-grid .task-edit-actions .ghost")!.click();
     await settle();
-    expect(host.querySelector(".wid-panel")).toBeNull();
+    expect(host.querySelector(".task-create-grid")).toBeNull();
     expect(calls.some(call => call.cmd === "create_todo")).toBe(false);
     expect(calls.some(call => call.cmd === "update_todo")).toBe(false);
   });
@@ -206,10 +210,10 @@ describe("one form, two acts", () => {
 
     // The context is a fact here, so it is not asked: no Project control at all.
     expect(fieldNames(host)).toEqual(["Title", "Description", "Due date", "Assignee", "Category"]);
-    expect(host.querySelector(".wid-panel")!.textContent).not.toContain("No project — personal");
+    expect(host.querySelector(".task-create-grid")!.textContent).not.toContain("No project — personal");
 
     type(host.querySelector('input[aria-label="Task title"]')!, "Ship the fix");
-    host.querySelector<HTMLButtonElement>(".wid-panel .composer-submit")!.click();
+    host.querySelector<HTMLButtonElement>(".task-create-grid .composer-submit")!.click();
     await settle();
 
     const writes = calls.filter(call => call.cmd === "create_todo");
