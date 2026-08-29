@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 135;
+pub const SCHEMA_VERSION: i64 = 136;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1013,6 +1013,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // join silently overwrite the link a person typed. Two different facts, two columns.
     if version < 135 && table_exists(&tx, "meetings")? {
         add_column_if_missing(&tx, "meetings", "meeting_url", "TEXT")?;
+    }
+    // V136: what KIND of work a task is — create, improve, review, decide, admin. One
+    // nullable TEXT column, because having no category is the NORMAL case, not a defect:
+    // most tasks are just tasks. Deliberately a CLOSED short list validated in Rust
+    // (`personal::TODO_CATEGORIES`), never free text: a free field produces five
+    // spellings of the same word within a week and nothing can be grouped afterwards.
+    // No CHECK constraint, for the same reason every other rung avoids one — the list is
+    // allowed to grow without rewriting a table, and the write path is the single gate.
+    if version < 136 && table_exists(&tx, "todos")? {
+        add_column_if_missing(&tx, "todos", "category", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
@@ -2422,7 +2432,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 135);
+        assert_eq!(SCHEMA_VERSION, 136);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2447,7 +2457,7 @@ mod tests {
     /// ours stacked V133 (source anchors) and V134 (`channel_notes`) on top. The ladder
     /// must therefore still be LINEAR from an old stamp and runnable twice.
     #[test]
-    fn the_merged_ladder_climbs_from_an_old_stamp_to_135_and_survives_a_second_run() {
+    fn the_merged_ladder_climbs_from_an_old_stamp_to_136_and_survives_a_second_run() {
         let temp = TempDb::new("gaia-space-merged-ladder");
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
@@ -2462,13 +2472,14 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 135);
-        assert_eq!(SCHEMA_VERSION, 135);
+        assert_eq!(head("after climb from 100"), 136);
+        assert_eq!(SCHEMA_VERSION, 136);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
             ("issues", "source_entity_type"),
             ("meetings", "source_entity_type"),
+            ("todos", "category"),
         ] {
             let present: i64 = conn
                 .query_row(
@@ -2481,7 +2492,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 135);
+        assert_eq!(head("after second run at head"), 136);
     }
 
     #[test]
@@ -2819,6 +2830,42 @@ mod tests {
         assert_eq!(title, "Legacy meeting", "meeting content untouched");
         assert_eq!((kind, anchor), (None, None));
         migrate(&conn).expect("V133 re-run is idempotent");
+    }
+
+    /// V136 is additive: a database stamped at V135 gains a nullable `todos.category`,
+    /// every existing row keeps its content, and an uncategorised task stays NULL —
+    /// that is the normal state, not a migration that failed halfway.
+    #[test]
+    fn v135_database_gains_a_nullable_todo_category_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO todos(id,profile_id,content,done) VALUES('legacy-todo','default-org','Legacy task',0)", []).unwrap();
+        conn.pragma_update(None, "user_version", 135)
+            .expect("V135 stamp");
+        migrate(&conn).expect("V136 migration");
+        let (content, category): (String, Option<String>) = conn
+            .query_row(
+                "SELECT content,category FROM todos WHERE id='legacy-todo'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(content, "Legacy task", "todo content untouched");
+        assert_eq!(category, None, "a task without a category is normal");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        migrate(&conn).expect("V136 re-run is idempotent");
+        let present: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='category'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1, "the column exists exactly once");
     }
 
     #[test]

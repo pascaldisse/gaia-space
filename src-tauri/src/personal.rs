@@ -40,6 +40,10 @@ pub struct Todo {
     /// How the body is meant to be read: `text` (verbatim) or `markdown`.
     #[serde(default = "default_content_kind")]
     pub content_kind: String,
+    /// What KIND of work this is, out of [`TODO_CATEGORIES`]. None = uncategorised,
+    /// which is the NORMAL case: most tasks are just tasks.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -58,9 +62,34 @@ pub struct TodoInput {
     pub assignee_ids: Vec<String>,
     #[serde(default = "default_content_kind")]
     pub content_kind: String,
+    /// See [`Todo::category`]. Absent in a payload = uncategorised.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 fn default_content_kind() -> String {
     "text".into()
+}
+/// The ONE list of task categories, named ONCE. A category says what kind of work a task
+/// is; it is deliberately a CLOSED, short list rather than a free text field, because a
+/// free field immediately yields five spellings of the same word ("Review", "review",
+/// "reviewing", …) and then nothing can be grouped or counted. The frontend mirror lives
+/// in `src/api/personal.ts` (`TODO_CATEGORIES`) and must stay identical.
+pub const TODO_CATEGORIES: [&str; 5] = ["create", "improve", "review", "decide", "admin"];
+/// Blank category normalizes to NULL — no empty-string variant ever reaches storage — and
+/// anything outside [`TODO_CATEGORIES`] is REFUSED instead of silently dropped: a client
+/// sending a category the server does not know is a bug that must be visible.
+fn normalized_category(category: Option<String>) -> Result<Option<String>> {
+    let Some(value) = category else {
+        return Ok(None);
+    };
+    let trimmed = value.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if !TODO_CATEGORIES.contains(&trimmed.as_str()) {
+        return Err(format!("Unknown to-do category: {trimmed}"));
+    }
+    Ok(Some(trimmed))
 }
 /// Only two bodies exist; anything else is a client bug, not a new format.
 fn normalized_content_kind(kind: &str) -> Result<String> {
@@ -83,6 +112,7 @@ fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
         notes: row.get(8)?,
         assignee_ids: Vec::new(),
         content_kind: row.get(9)?,
+        category: row.get(10)?,
     })
 }
 /// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
@@ -268,7 +298,7 @@ pub fn remove_project_member(project_id: String, member_id: String) -> Result<Ve
     project_member_ids(project_id)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => {
             todo.assignee_ids = assignees_on(c, id)?;
@@ -280,7 +310,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(
         params![profile_id, include_done.unwrap_or(false)],
         read_todo,
@@ -309,7 +339,8 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
     let content_kind = normalized_content_kind(&input.content_kind)?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind]))?;
+    let category = normalized_category(input.category)?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind, category]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
     let todo = todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".to_string())?;
@@ -391,7 +422,8 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
     let content_kind = normalized_content_kind(&todo.content_kind)?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,content_kind=?10,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone()), content_kind]))?;
+    let category = normalized_category(todo.category.clone())?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,content_kind=?10,category=?11,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone()), content_kind, category]))?;
     if updated == 0 {
         return Err("Todo not found".into());
     }
@@ -442,7 +474,7 @@ pub fn list_project_todos(
 /// only rows they own or are assigned to. `projects.lead_id` appears nowhere: the lead is
 /// informational and grants no extra reach.
 const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id={p} OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by={p} OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id={p}))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id={p}))";
-const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind";
+const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category";
 const TODO_ORDER: &str = "ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at";
 fn project_todo_visibility(profile_param: &str) -> String {
     PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
@@ -2086,7 +2118,7 @@ mod tests {
 
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement
             .query_map(params![profile_id, include_done], read_todo)
             .unwrap()
@@ -2111,6 +2143,7 @@ mod tests {
             source_entity_id: None,
             assignee_ids: assignees.iter().map(|x| x.to_string()).collect(),
             content_kind: default_content_kind(),
+            category: None,
         }
     }
     /// Project work is a SHARED surface, and naming a lead changes nothing about it.
@@ -2333,6 +2366,59 @@ mod tests {
             .contains("assignment requires a project todo"));
         assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
+    /// A category is OPTIONAL and comes out of a CLOSED list. The four facts that matter:
+    /// a known value survives the round trip, an unknown one is REFUSED (never silently
+    /// dropped, or the screen would lie about what was saved), no category stays no
+    /// category, and a blank string becomes NULL so "" never reaches storage.
+    #[test]
+    fn a_todo_category_is_optional_closed_and_never_silently_swallowed() {
+        let mut c = conn();
+        let mut input = todo_input("t-cat", "p", &[]);
+        input.category = Some("review".into());
+        let created = create_todo_on(&mut c, input).unwrap();
+        assert_eq!(created.category.as_deref(), Some("review"));
+        // Read paths agree: single fetch and list both carry it.
+        assert_eq!(
+            todo_on(&c, "t-cat").unwrap().unwrap().category.as_deref(),
+            Some("review")
+        );
+        assert_eq!(
+            list_todos_on(&c, "p", true)
+                .iter()
+                .find(|t| t.id == "t-cat")
+                .and_then(|t| t.category.clone())
+                .as_deref(),
+            Some("review")
+        );
+        // Unknown value: an error, not a shrug.
+        let mut invalid = created.clone();
+        invalid.category = Some("urgent".into());
+        assert!(update_todo_on(&mut c, invalid)
+            .unwrap_err()
+            .contains("Unknown to-do category"));
+        assert_eq!(
+            todo_on(&c, "t-cat").unwrap().unwrap().category.as_deref(),
+            Some("review"),
+            "a refused write changes nothing"
+        );
+        // Blank normalizes to NULL, never to "".
+        let mut blanked = created.clone();
+        blanked.category = Some("   ".into());
+        assert_eq!(update_todo_on(&mut c, blanked).unwrap().category, None);
+        let stored: Option<String> = c
+            .query_row("SELECT category FROM todos WHERE id='t-cat'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(stored, None, "no empty string in storage");
+        // No category at all is the normal case and stays that way.
+        let plain = create_todo_on(&mut c, todo_input("t-plain", "p", &[])).unwrap();
+        assert_eq!(plain.category, None);
+        let mut invalid_create = todo_input("t-bad", "p", &[]);
+        invalid_create.category = Some("Review!".into());
+        assert!(create_todo_on(&mut c, invalid_create).is_err());
+    }
+
     /// ORGANISATION NEWS, not work. The feed was half-blind without these two
     /// events: a task appearing and a task finishing are the commonest facts in
     /// a workspace and nothing emitted them.
@@ -2353,6 +2439,7 @@ mod tests {
                 notes: None,
                 assignee_ids: vec!["q".into()],
                 content_kind: "text".into(),
+                category: None,
             },
         )
         .unwrap();
@@ -2404,6 +2491,7 @@ mod tests {
                 notes: None,
                 assignee_ids: vec![],
                 content_kind: "text".into(),
+                category: None,
             },
         )
         .unwrap();

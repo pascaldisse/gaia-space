@@ -1,7 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type TodoContentKind = "text"|"markdown";
-export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind };
+/** The ONE list of task categories on the client. A category says what KIND of work a
+ *  task is; it is a CLOSED short list, not free text, because a free field produces five
+ *  spellings of the same word and then nothing can be grouped. Mirror of
+ *  `personal::TODO_CATEGORIES` in src-tauri — the server refuses anything else. */
+export const TODO_CATEGORIES = [{id:"create",label:"Create"},{id:"improve",label:"Improve"},{id:"review",label:"Review"},{id:"decide",label:"Decide"},{id:"admin",label:"Admin"}] as const;
+export type TodoCategory = typeof TODO_CATEGORIES[number]["id"];
+/** `category` is OPTIONAL: absent or null means uncategorised, which is the normal case. */
+export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind; category?:string|null };
 export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"blog"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
 export type AbsenceAvailability = "away"|"partial"|"available";
 // `reason_type` arrives as "Private" when the owner marked it confidential and the
