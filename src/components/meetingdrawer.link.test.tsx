@@ -99,14 +99,14 @@ test("participants are picked from the profile list, archived people excluded, a
   const chips = () => [...host.querySelectorAll(".mtd-invitee")].map(chip => chip.textContent?.replace("×", "").trim());
   // "Mia Berger" is already coming, so she stands as a chip and is not offered again.
   expect(chips()).toEqual(["Mia Berger"]);
-  expect(offered()).toEqual(["Me"]);
-
-  ([...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "Me") as HTMLElement)
-    .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-  expect(sink.added).toEqual(["me"]);
+  // Nobody else is left: the organizer is not offered (you are in your own meeting by
+  // making it) and the archived person never was.
+  expect(offered()).toEqual([]);
+  expect(picker.disabled).toBe(true);
 
   (host.querySelector<HTMLButtonElement>('.mtd-invitee button[aria-label="Remove Mia Berger"]'))!.click();
   expect(sink.removed).toEqual(["mia"]);
+  expect(sink.added).toEqual([]);
   // Choosing WHO COMES must not have touched WHO CAN SEE IT: they are separate facts.
   expect(sink.fields.map(([field]) => field)).not.toContain("visibility");
 });

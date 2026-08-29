@@ -77,7 +77,10 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
      the owning project's membership limits. So the list is the profiles minus archived
      ones, in TaskDrawer's control: pick people from a list, never type their ids. */
   createEffect(() => { void reloadProfiles(); });
-  const invitable = () => (profiles() ?? []).filter((person) => !person.archived);
+  /* Everyone in the workspace EXCEPT the organizer: you are in your own meeting by
+     making it, so offering to invite yourself is an option that means nothing. The
+     day composer in the calendar draws the same line. */
+  const invitable = () => (profiles() ?? []).filter((person) => !person.archived && person.id !== (profileId() || ""));
   const nameOf = (person: { display_name: string | null; username: string }) => person.display_name || person.username;
   const toggleInvitee = (id: string) => (props.invitees.includes(id) ? props.removeInvitee(id) : props.addInvitee(id));
   /** Only people who are not already coming — a menu that offers what is already true
