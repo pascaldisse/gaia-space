@@ -84,7 +84,7 @@ export default function TeamTasks() {
      filter rest behind one "Filter" pill; they are worth keeping on a cross-project
      list that can grow long, but they are not what this page IS. A filter that is ON
      forces the row back open — a short list must always be able to explain why it is
-     short. "Show completed" is NOT one of them any more: it sits in the action row
+     short. "Show done" is NOT one of them any more: it sits in the action row
      beside "New task", because it only ever ADDS rows and can never be the reason a
      list looks short. */
   const toolsOpen = () => filtersOpen() || filtered();
@@ -216,7 +216,7 @@ export default function TeamTasks() {
       <nav class="documents-actionbar task-actionbar">
         <button type="button" class="primary doc-action-primary" onClick={() => setCreating(true)}>New task</button>
         <button type="button" class="doc-action-secondary" aria-pressed={includeDone()} onClick={() => setIncludeDone(open => !open)}>
-          {includeDone() ? "Hide completed" : "Show completed"}
+          {includeDone() ? "Hide done" : "Show done"}
         </button>
         <GhostPill aria-expanded={toolsOpen()} onClick={() => setFiltersOpen(!toolsOpen())}>Filter</GhostPill>
       </nav>
@@ -297,9 +297,13 @@ export default function TeamTasks() {
                   <button type="button" class="task-tile-body" data-task-row={task.id} aria-label={`Open ${task.content}`} onClick={() => editTask(task)}>
                     <span class="task-tile-title">{task.content}</span>
                     <span class="task-tile-meta">
-                      <span class="tt-author">{nameOf(task.profile_id)}</span>
+                      {/* TWO NAMES, TWO ROLES, SAID OUT LOUD. The line used to read
+                          "Jannes · Unassigned", which reads as a contradiction: the
+                          first name is the AUTHOR, not the person carrying it. Each
+                          fact now carries the word that makes it readable. */}
+                      <span class="tt-author">by {nameOf(task.profile_id)}</span>
                       <span class="sep">·</span>
-                      <span class="tt-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
+                      <span class="tt-assignees">{task.assignee_ids.length ? `for ${task.assignee_ids.map(nameOf).join(", ")}` : "nobody assigned"}</span>
                     </span>
                   </button>
                   <span class="task-tile-edge">

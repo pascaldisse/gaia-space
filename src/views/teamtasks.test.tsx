@@ -87,11 +87,11 @@ describe("team tasks", () => {
        "no narrowing" is readable without opening it. */
     const picker = host.querySelector<HTMLButtonElement>('button[aria-label="Assignee"]')!;
     expect(picker.textContent).toContain("All profiles");
-    /* ADDRESS ONLY (task-card pass): "Show completed" is a toggle BUTTON in the one
+    /* ADDRESS ONLY (task-card pass): "Show done" is a toggle BUTTON in the one
        action row now, beside "New task" — it only ever ADDS rows, so it never belonged
        behind the "Filter" disclosure. Off is still the default, which is the fact
        under test. */
-    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show completed")!;
+    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show done")!;
     expect(done.getAttribute("aria-pressed")).toBe("false");
     expect(host.querySelectorAll(".task-tile").length).toBe(3);
   });
@@ -118,11 +118,11 @@ describe("team tasks", () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
-  test("show completed re-reads with include_done", async () => {
+  test("show done re-reads with include_done", async () => {
     const host = await mount(() => <TeamTasks /> as any);
     // ADDRESS ONLY: the toggle is a button in the action row (see above); the write it
     // triggers — a re-read with include_done — is unchanged.
-    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show completed")!;
+    const done = [...host.querySelectorAll<HTMLButtonElement>(".task-actionbar button")].find(button => button.textContent === "Show done")!;
     done.click();
     await settle();
     expect(calls.filter(entry => entry.cmd === "list_team_todos").some(entry => entry.args.includeDone === true)).toBe(true);

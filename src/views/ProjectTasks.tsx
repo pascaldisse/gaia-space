@@ -236,9 +236,11 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         <button type="button" class="task-tile-body" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => editTask(task)}>
           <span class="task-tile-title">{task.content}</span>
           <span class="task-tile-meta">
-            <span class="ptask-author">{nameOf(task.profile_id)}</span>
+            {/* Two names, two roles, said out loud — "Jannes · Unassigned" read as a
+                contradiction, because the first name is the AUTHOR, not the carrier. */}
+            <span class="ptask-author">by {nameOf(task.profile_id)}</span>
             <span class="sep">·</span>
-            <span class="ptask-assignees">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}</span>
+            <span class="ptask-assignees">{task.assignee_ids.length ? `for ${task.assignee_ids.map(nameOf).join(", ")}` : "nobody assigned"}</span>
           </span>
         </button>
         <span class="task-tile-edge">
