@@ -966,16 +966,35 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                   </Show>
                 </div>
               )}</For></div></Show>
-              <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
-                <div class="attachment-card">
-                  <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a class="attachment-link" href={attachment.data_url} download={attachment.file_name}><Icon name="paperclip" size={14} /> {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
-                  <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
-                  <Show when={attachment.upload_state !== "completed"}>
-                    <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
-                  </Show>
-                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
-                </div>
-              )}</For></div></Show>
+              <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => {
+                /* ONE FILE, ONE NAME. The card printed the file name TWICE for anything
+                   that is not an image: once inside the paperclip link (the fallback)
+                   and again in a second link below it — which reads as two uploads.
+                   The name is stated once, beside the paperclip; a picture, a video or
+                   a sound shows itself and carries the name under the preview. */
+                const kind = () => attachment.mime_type.startsWith("image/") ? "image"
+                  : attachment.mime_type.startsWith("video/") ? "video"
+                  : attachment.mime_type.startsWith("audio/") ? "audio" : "file";
+                return (
+                  <div class="attachment-card" classList={{ [`is-${kind()}`]: true }}>
+                    <Show when={kind() === "image"}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
+                    <Show when={kind() === "video"}><video controls src={attachment.data_url} /></Show>
+                    <Show when={kind() === "audio"}><audio controls src={attachment.data_url} /></Show>
+                    <div class="attachment-line">
+                      <a class="attachment-link" href={attachment.data_url} download={attachment.file_name}>
+                        <Icon name="paperclip" size={14} />
+                        <span class="attachment-name">{attachment.file_name}</span>
+                      </a>
+                      <Show when={attachment.upload_state !== "completed"}>
+                        <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `Upload failed: ${attachment.error ?? "unknown reason"}` : "Uploading…"}</span>
+                      </Show>
+                      {/* Quiet until wanted: removing somebody's file is not an act to
+                          offer as loudly as opening it. */}
+                      <button class="attachment-remove" title="Remove attachment" aria-label={`Remove ${attachment.file_name}`} onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
+                    </div>
+                  </div>
+                );
+              }}</For></div></Show>
             </>
           }
         >

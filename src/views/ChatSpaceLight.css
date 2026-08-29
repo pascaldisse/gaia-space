@@ -216,3 +216,38 @@
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--btn-font-size, 13px); color: var(--ink);
 }
+
+
+/* ── AN ATTACHMENT IS A FILE ON A LINE, NOT A COLUMN OF FRAGMENTS ────────────
+   The card stacked its parts as blocks — paperclip on one line, the name on the
+   next, the remove × on a third, all at 0.8em — so a single document read as a
+   pile of pieces in a thin grey voice. One line: the paperclip and the name
+   together, at the message's own size, and the remove quiet at the end. */
+.theme-space-light .attachment-card { max-width: 420px; gap: 6px; color: var(--ink); font-size: 14px; }
+.theme-space-light .attachment-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.theme-space-light .attachment-link {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); color: var(--ink);
+  font-size: 14px; font-weight: 600; text-decoration: none;
+}
+.theme-space-light .attachment-link:hover { border-color: var(--teal); }
+.theme-space-light .attachment-link .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-space-light .attachment-card.is-image .attachment-link,
+.theme-space-light .attachment-card.is-video .attachment-link,
+.theme-space-light .attachment-card.is-audio .attachment-link {
+  /* The preview already IS the file; the line under it only names it. */
+  border-color: transparent; background: none; padding: 0; font-weight: 500; color: var(--muted);
+}
+.theme-space-light .attachment-remove {
+  margin-left: auto;
+  display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: none;
+  color: var(--quiet); font-size: 15px; line-height: 1; cursor: pointer;
+  opacity: 0;
+}
+.theme-space-light .attachment-card:hover .attachment-remove,
+.theme-space-light .attachment-remove:focus-visible { opacity: 1; }
+.theme-space-light .attachment-remove:hover { border-color: var(--line); color: var(--red, #c2384a); }
+.theme-space-light .attachment-state { color: var(--muted); font-size: 12.5px; }
