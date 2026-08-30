@@ -13,12 +13,17 @@
  */
 import { createSignal, createEffect } from "solid-js";
 
-export type PaletteId = "paper" | "sand" | "dusk";
+export type PaletteId = "paper" | "sand" | "dusk" | "lagoon" | "deep";
 
+/* Two axes: the CANVAS (light or dark) and the CHROME (the rail, sidebar and
+   command bar: purple or teal). Every entry says both, because that is the whole
+   difference between them. */
 export const PALETTES: { id: PaletteId; label: string; hint: string }[] = [
-  { id: "paper", label: "Paper", hint: "White cards on a warm off-white canvas — the default." },
-  { id: "sand", label: "Sand", hint: "The same light scheme, warmer and a shade deeper — easier in a bright room." },
-  { id: "dusk", label: "Dusk", hint: "Dark canvas, light text. Teal, amber and red keep their meaning." },
+  { id: "paper", label: "Paper", hint: "Light canvas, purple navigation — the default." },
+  { id: "sand", label: "Sand", hint: "Light canvas, warmer and a shade deeper. Purple navigation." },
+  { id: "dusk", label: "Dusk", hint: "Dark canvas, light text, purple navigation." },
+  { id: "lagoon", label: "Lagoon", hint: "Light canvas, teal navigation — one colour family throughout." },
+  { id: "deep", label: "Deep", hint: "Dark canvas, teal navigation." },
 ];
 
 const KEY = "space.theme.palette";
@@ -42,7 +47,7 @@ export function applyPalette(id: PaletteId) {
   for (const entry of IDS) root.classList.toggle(`palette-${entry}`, entry === id);
   /* The OS draws scrollbars and form furniture from this, so a dark palette that
      forgot it would keep white scrollbars. */
-  root.style.colorScheme = id === "dusk" ? "dark" : "light";
+  root.style.colorScheme = id === "dusk" || id === "deep" ? "dark" : "light";
 }
 
 export function setPalette(next: PaletteId) {

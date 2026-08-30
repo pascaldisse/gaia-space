@@ -34,18 +34,31 @@
 .palette-choice.selected { border-color: var(--accent); box-shadow: var(--ctl-focus-ring); }
 .palette-choice-text { display: grid; gap: .1rem; min-width: 0; }
 .palette-swatch {
-  display: grid; place-items: center;
-  width: 52px; height: 36px; border-radius: 9px;
+  display: grid; grid-template-columns: 10px 1fr; align-items: center;
+  width: 56px; height: 36px; border-radius: 9px;
   border: 1px solid rgba(0, 0, 0, .12);
+  overflow: hidden;
 }
+/* the navigation strip: the second thing a palette decides, so it is shown */
+.palette-swatch-rail { width: 10px; height: 100%; }
 .palette-swatch-card {
   display: grid; place-items: center;
-  width: 34px; height: 20px; border-radius: 5px;
+  justify-self: center;
+  width: 32px; height: 20px; border-radius: 5px;
 }
 .palette-swatch-accent { width: 14px; height: 4px; border-radius: 2px; background: #00bfa6; }
-.palette-swatch.palette-paper { background: #faf8f4; }
-.palette-swatch.palette-paper .palette-swatch-card { background: #fff; border: 1px solid #e5ddd3; }
-.palette-swatch.palette-sand { background: #f3ece0; }
-.palette-swatch.palette-sand .palette-swatch-card { background: #fffdf7; border: 1px solid #ded2c1; }
-.palette-swatch.palette-dusk { background: #141414; }
-.palette-swatch.palette-dusk .palette-swatch-card { background: #1d1c1b; border: 1px solid #35322e; }
+.palette-swatch.swatch-paper { background: #faf8f4; }
+.palette-swatch.swatch-paper .palette-swatch-rail { background: #4b0646; }
+.palette-swatch.swatch-paper .palette-swatch-card { background: #fff; border: 1px solid #e5ddd3; }
+.palette-swatch.swatch-sand { background: #f3ece0; }
+.palette-swatch.swatch-sand .palette-swatch-rail { background: #4b0646; }
+.palette-swatch.swatch-sand .palette-swatch-card { background: #fffdf7; border: 1px solid #ded2c1; }
+.palette-swatch.swatch-dusk { background: #141414; }
+.palette-swatch.swatch-dusk .palette-swatch-rail { background: #390435; }
+.palette-swatch.swatch-dusk .palette-swatch-card { background: #1d1c1b; border: 1px solid #35322e; }
+.palette-swatch.swatch-lagoon { background: #faf8f4; }
+.palette-swatch.swatch-lagoon .palette-swatch-rail { background: #065047; }
+.palette-swatch.swatch-lagoon .palette-swatch-card { background: #fff; border: 1px solid #e5ddd3; }
+.palette-swatch.swatch-deep { background: #141414; }
+.palette-swatch.swatch-deep .palette-swatch-rail { background: #05413a; }
+.palette-swatch.swatch-deep .palette-swatch-card { background: #1d1c1b; border: 1px solid #35322e; }

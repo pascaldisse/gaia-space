@@ -154,9 +154,7 @@
 
 /* ── sidebar ──────────────────────────────────────────────────────────── */
 .space-chat-shell .space-sidebar {
-  background:
-    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
-    linear-gradient(180deg, var(--purple-2), var(--purple-1) 48%, #3b1242 100%);
+  background: var(--nav-sidebar-gradient);
   color: var(--nav-text);
   border-right: 1px solid rgba(0, 0, 0, .2);
   padding: 18px 16px;
@@ -220,10 +218,10 @@
 .space-chat-shell .side-link strong,
 .space-chat-shell .channel.unread { color: #fff; font-weight: 680; }
 .space-chat-shell .side-link.active,
-.space-chat-shell .channel.active { background: #f3d7ff; color: #1b0e1f; font-weight: 700; }
+.space-chat-shell .channel.active { background: var(--nav-active-bg); color: var(--nav-active-ink); font-weight: 700; }
 .space-chat-shell .side-link.active strong,
 .space-chat-shell .channel.active strong,
-.space-chat-shell .channel.active .hash { color: #1b0e1f; }
+.space-chat-shell .channel.active .hash { color: var(--nav-active-ink); }
 .space-chat-shell .side-link .count,
 .space-chat-shell .channel .count {
   margin-left: auto;
@@ -292,7 +290,7 @@
   gap: 18px;
   align-items: center;
   padding: 10px 24px;
-  background: linear-gradient(90deg, var(--purple-1), #3d073d);
+  background: var(--nav-top-gradient);
   border-bottom: 1px solid rgba(0, 0, 0, .2);
 }
 .space-chat-shell .command-search {

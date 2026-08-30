@@ -49,8 +49,19 @@
   --amber-ink: #7b5207;
   --red-ink: #8a2323;
 
-  /* Prototype rail gradient, kept as a token so rail + badge borders agree. */
+  /* ── NAVIGATION CHROME ────────────────────────────────────────────────────
+     The rail, the sidebar and the command bar are ONE surface family: dark,
+     saturated, the same in every canvas scheme. They are tokens (not literals in
+     SpaceShell.css) so a palette can re-hue the whole chrome in one place —
+     see palettes.css, where canvas and chrome are two independent axes. */
   --rail-gradient: linear-gradient(180deg, #3b0640 0%, #4b0646 56%, #330631 100%);
+  --nav-sidebar-gradient:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
+    linear-gradient(180deg, var(--purple-2), var(--purple-1) 48%, #3b1242 100%);
+  --nav-top-gradient: linear-gradient(90deg, var(--purple-1), #3d073d);
+  /* the one row you are standing on, in the chrome's own light tint */
+  --nav-active-bg: #f3d7ff;
+  --nav-active-ink: #1b0e1f;
 
   /* ── TOKEN REMAP ─────────────────────────────────────────────────────────
      Every colour custom property App.css `:root` defines for the dark theme is

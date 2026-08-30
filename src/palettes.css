@@ -3,6 +3,13 @@
    `spaceTheme.css` derives its ~200 downstream tokens from; nothing here names
    a component, so no view can fall out of a palette by being written later.
 
+   TWO AXES, NOT FIVE THEMES:
+     CANVAS — paper / sand / dusk: what the pages are made of.
+     CHROME — the rail, sidebar and command bar: purple (default) or teal.
+   A palette is a COMBINATION, and the blocks below are shared by whoever needs
+   them (Dusk and Deep are the same dark canvas, Lagoon and Deep the same teal
+   chrome). Writing them out five times would guarantee they drift.
+
    Selector shape: `.palette-x .theme-space-light` — <html> carries the palette
    (see theme.ts), the shell and every portalled layer carry the theme scope, so
    pill menus and dialogs are covered by the same rule. 0-2-0 beats the plain
@@ -10,9 +17,12 @@
 
    THE COLOUR LAW SURVIVES EVERY PALETTE: teal = action/open, amber = due
    soon/waiting, red = critical/blocked. A palette may change what those hues
-   sit ON — never what they mean, and never which of the three is used. */
+   sit ON — never what they mean, and never which of the three is used. The teal
+   chrome is the one place that needs care: the navigation is dark and saturated,
+   never the bright `--teal` an act-button uses, so "teal furniture" can never be
+   mistaken for "teal, therefore clickable". */
 
-/* ── SAND — the light scheme, warmer and one shade deeper ──────────────────── */
+/* ═══ CANVAS: SAND — the light scheme, warmer and one shade deeper ═══════════ */
 .palette-sand .theme-space-light {
   --paper: #fffdf7;
   --wash: #f3ece0;
@@ -25,11 +35,12 @@
   --surface-hover: #f0e7d8;
 }
 
-/* ── DUSK — dark canvas, light text ─────────────────────────────────────────
+/* ═══ CANVAS: DARK — dusk and deep ══════════════════════════════════════════
    Paper is still "the card" and wash is still "the canvas behind it"; only their
    luminance swaps. Because every surface reads those two, cards stay legible as
    cards instead of dissolving into the background the way a blanket invert does. */
-.palette-dusk .theme-space-light {
+.palette-dusk .theme-space-light,
+.palette-deep .theme-space-light {
   --ink: #f1eee8;
   --muted: #a8a29a;
   --quiet: #837e76;
@@ -85,8 +96,44 @@
   --dk-icon-border: rgba(0, 191, 166, .38);
 }
 
-/* The rail is the one surface that was ALREADY dark in every palette (deep
-   purple), so it does not invert — it only loses its glow against a dark page. */
+/* ═══ CHROME: PURPLE (dusk only — Paper and Sand keep the default block) ═════
+   The rail was already dark in every scheme, so it does not invert; it only
+   loses its glow against a dark page. */
 .palette-dusk .theme-space-light {
   --rail-gradient: linear-gradient(180deg, #2c0430 0%, #390435 56%, #260425 100%);
+  --nav-sidebar-gradient:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .10), transparent 34%),
+    linear-gradient(180deg, #4a1a54 0%, #371040 48%, #2a0c31 100%);
+  --nav-top-gradient: linear-gradient(90deg, #370a3c, #2a0530);
+}
+
+/* ═══ CHROME: TEAL — lagoon (light canvas) and deep (dark canvas) ════════════
+   Deep teal, NOT the bright accent: navigation furniture must stay furniture.
+   `--purple-*` keeps its name because ~30 rules across the shell read it as
+   "the chrome ramp, darkest first" — renaming it would touch structure, and a
+   palette is not allowed to. */
+.palette-lagoon .theme-space-light,
+.palette-deep .theme-space-light {
+  --purple-0: #032a26;
+  --purple-1: #06463f;
+  --purple-2: #0a5f55;
+  --purple-3: #12806f;
+  --nav-text: #eefffb;
+  --nav-muted: #a9d8d0;
+  --rail-gradient: linear-gradient(180deg, #053b35 0%, #065047 56%, #04322d 100%);
+  --nav-sidebar-gradient:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .12), transparent 34%),
+    linear-gradient(180deg, #0a5f55, #06463f 48%, #042f2a 100%);
+  --nav-top-gradient: linear-gradient(90deg, #06463f, #03302b);
+  /* The active row is the chrome's own light tint — mint, not the accent, so it
+     does not read as a button. */
+  --nav-active-bg: #c9f6ec;
+  --nav-active-ink: #042521;
+}
+
+/* Deep's chrome sits one step darker still, so the rail stays distinct from the
+   dark canvas it now borders instead of merging with it. */
+.palette-deep .theme-space-light {
+  --rail-gradient: linear-gradient(180deg, #04302b 0%, #05413a 56%, #032723 100%);
+  --nav-top-gradient: linear-gradient(90deg, #053d36, #032b27);
 }

@@ -20,6 +20,10 @@ describe("colour scheme", () => {
   it("tells the OS which scheme to draw its own furniture in", () => {
     applyPalette("dusk");
     expect(document.documentElement.style.colorScheme).toBe("dark");
+    applyPalette("deep");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    applyPalette("lagoon");
+    expect(document.documentElement.style.colorScheme).toBe("light");
     applyPalette("paper");
     expect(document.documentElement.style.colorScheme).toBe("light");
   });
@@ -30,8 +34,8 @@ describe("colour scheme", () => {
     expect(localStorage.getItem("space.theme.palette")).toBe("dusk");
   });
 
-  it("offers Paper, Sand and Dusk — every one with a sentence saying what it is", () => {
-    expect(PALETTES.map((entry) => entry.id)).toEqual(["paper", "sand", "dusk"]);
+  it("offers five palettes — every one with a sentence saying what it is", () => {
+    expect(PALETTES.map((entry) => entry.id)).toEqual(["paper", "sand", "dusk", "lagoon", "deep"]);
     for (const entry of PALETTES) expect(entry.hint.length).toBeGreaterThan(20);
   });
 });

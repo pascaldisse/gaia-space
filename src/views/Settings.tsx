@@ -131,7 +131,8 @@ export default function Settings() {
         <For each={PALETTES}>{option => (
           <label class="palette-choice" classList={{ selected: palette() === option.id }}>
             <input type="radio" name="palette" checked={palette() === option.id} onChange={() => setPalette(option.id)} />
-            <span class={`palette-swatch palette-${option.id}`} aria-hidden="true">
+            <span class={`palette-swatch swatch-${option.id}`} aria-hidden="true">
+              <span class="palette-swatch-rail" />
               <span class="palette-swatch-card"><span class="palette-swatch-accent" /></span>
             </span>
             <span class="palette-choice-text"><strong>{option.label}</strong><em class="settings-sub">{option.hint}</em></span>
