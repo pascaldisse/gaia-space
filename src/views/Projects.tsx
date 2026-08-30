@@ -312,7 +312,7 @@ export default function Projects() {
   const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [pendingDelete, setPendingDelete] = createSignal<Project | null>(null);
   const [deleting, setDeleting] = createSignal(false);
-  const ownsProject = (project: Project) => !!actingProfileId() && project.created_by === actingProfileId();
+  const ownsProject = (project: Project) => !!actor() && project.created_by === actor();
   /* THE CARD CARRIES NO FOOTER. Archive/Restore and the deadline used to sit on every
      card as furniture: a way OUT of the project standing beside the way IN, and a bare
      date field under a card nobody was editing. They are acts on a project, so they live
