@@ -5,26 +5,31 @@
  * Nothing else here carries meaning through colour. */
 
 .home-cal {
-  --ink: #1f2328;
-  --muted: #68717d;
-  --quiet: #8a929d;
-  --paper: #ffffff;
-  --wash: #faf8f4;
-  --line: #e5ddd3;
-  --line-strong: #d2c6b9;
-  --teal: #00bfa6;
-  --teal-dark: #008d7b;
-  --teal-soft: #dcf7f2;
-  --teal-ink: #006b5e;
-  --amber: #d99b24;
-  --amber-soft: #fff1d3;
-  --amber-ink: #7b5207;
-  --red: #bd3f3f;
-  --red-soft: #fbe3e0;
-  --red-ink: #8a2323;
-  --shadow: 0 18px 44px rgba(31, 35, 40, .08);
+  /* LOCAL ALIASES, NOT OVERRIDES. This file used to declare `--ink: #1f2328` and
+     friends on its own root, which PINNED the whole view to the light palette:
+     in a dark scheme the cards stayed white and the page title went dark-on-dark.
+     The literals survive only as the standalone fallback — the app's token wins
+     whenever there is one, which is always inside the shell. */
+  --hc-ink: var(--ink, #1f2328);
+  --hc-muted: var(--muted, #68717d);
+  --hc-quiet: var(--quiet, #8a929d);
+  --hc-paper: var(--paper, #ffffff);
+  --hc-wash: var(--wash, #faf8f4);
+  --hc-line: var(--line, #e5ddd3);
+  --hc-line-strong: var(--line-strong, #d2c6b9);
+  --hc-teal: var(--teal, #00bfa6);
+  --hc-teal-dark: var(--teal-dark, #008d7b);
+  --hc-teal-soft: var(--teal-soft, #dcf7f2);
+  --hc-teal-ink: var(--teal-ink, #006b5e);
+  --hc-amber: var(--amber, #d99b24);
+  --hc-amber-soft: var(--amber-soft, #fff1d3);
+  --hc-amber-ink: var(--amber-ink, #7b5207);
+  --hc-red: var(--red, #bd3f3f);
+  --hc-red-soft: var(--red-soft, #fbe3e0);
+  --hc-red-ink: var(--red-ink, #8a2323);
+  --hc-shadow: var(--shadow, 0 18px 44px rgba(31, 35, 40, .08));
 
-  color: var(--ink);
+  color: var(--hc-ink);
   padding: 18px 28px 32px;
   display: grid;
   gap: 16px;
@@ -40,7 +45,7 @@
 }
 .home-cal .kicker {
   margin-bottom: 5px;
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 12px;
   font-weight: 680;
   text-transform: uppercase;
@@ -55,7 +60,7 @@
 }
 .home-cal .subtitle {
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 14px;
 }
 .home-cal .header-metrics {
@@ -66,34 +71,34 @@
 }
 .home-cal .metric-pill {
   min-height: 34px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--hc-line);
   border-radius: 10px;
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  background: var(--wash);
-  color: var(--muted);
+  background: var(--hc-wash);
+  color: var(--hc-muted);
   font-size: 13px;
   white-space: nowrap;
 }
-.home-cal .metric-pill strong { color: var(--ink); font-weight: 700; }
+.home-cal .metric-pill strong { color: var(--hc-ink); font-weight: 700; }
 
 /* ── states ─────────────────────────────────────────────────────────────── */
-.home-cal .hint { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+.home-cal .hint { margin: 10px 0 0; color: var(--hc-muted); font-size: 13px; }
 .home-cal .empty-state {
   margin: 0;
   padding: 12px 0;
-  color: var(--quiet);
+  color: var(--hc-quiet);
   font-size: 13px;
 }
 .home-cal .planning-error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--red);
+  border: 1px solid var(--hc-red);
   border-radius: 12px;
-  background: var(--red-soft);
-  color: var(--red-ink);
+  background: var(--hc-red-soft);
+  color: var(--hc-red-ink);
   font-size: 13px;
 }
 
@@ -110,11 +115,11 @@
 
 /* ── month ──────────────────────────────────────────────────────────────── */
 .home-cal .premium-month {
-  background: var(--paper);
-  border: 1px solid var(--line);
+  background: var(--hc-paper);
+  border: 1px solid var(--hc-line);
   border-radius: 20px;
   padding: 24px 28px 26px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--hc-shadow);
 }
 .home-cal .month-head {
   display: flex;
@@ -133,14 +138,14 @@
   height: 38px;
   border: 0;
   border-radius: 12px;
-  background: var(--wash);
-  color: var(--ink);
+  background: var(--hc-wash);
+  color: var(--hc-ink);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
 }
-.home-cal .month-arrow:hover { background: var(--teal-soft); color: var(--teal-ink); }
-.home-cal .month-arrow:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.home-cal .month-arrow:hover { background: var(--hc-teal-soft); color: var(--hc-teal-ink); }
+.home-cal .month-arrow:focus-visible { outline: 2px solid var(--hc-teal); outline-offset: 2px; }
 
 .home-cal .month-grid {
   display: grid;
@@ -148,7 +153,7 @@
   gap: 8px 12px;
 }
 .home-cal .weekday {
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 13px;
   font-weight: 680;
   text-align: center;
@@ -162,15 +167,15 @@
   background: transparent;
   display: grid;
   place-items: center;
-  color: var(--ink);
+  color: var(--hc-ink);
   font-size: 16px;
   font-weight: 620;
   font-family: inherit;
   cursor: pointer;
 }
-.home-cal .day:hover { background: var(--wash); }
-.home-cal .day:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-.home-cal .day.outside { color: var(--quiet); }
+.home-cal .day:hover { background: var(--hc-wash); }
+.home-cal .day:focus-visible { outline: 2px solid var(--hc-teal); outline-offset: 2px; }
+.home-cal .day.outside { color: var(--hc-quiet); }
 /* A day that carries something says so with one dot — never a colour block. */
 .home-cal .day.has-event::after {
   content: "";
@@ -179,11 +184,11 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--teal);
+  background: var(--hc-teal);
 }
-.home-cal .day.today { box-shadow: inset 0 0 0 1.5px var(--teal); }
+.home-cal .day.today { box-shadow: inset 0 0 0 1.5px var(--hc-teal); }
 .home-cal .day.selected {
-  background: var(--teal);
+  background: var(--hc-teal);
   color: #04211d;
   box-shadow: 0 10px 22px rgba(0, 191, 166, .22);
 }
@@ -195,8 +200,8 @@
    the top, so an empty day is quiet space rather than stretched rows. */
 .home-cal .premium-agenda > .agenda-card.main { align-self: stretch; }
 .home-cal .agenda-card {
-  background: var(--paper);
-  border: 1px solid var(--line);
+  background: var(--hc-paper);
+  border: 1px solid var(--hc-line);
   border-radius: 20px;
   padding: 18px;
   box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
@@ -215,15 +220,15 @@
   letter-spacing: -.04em;
   line-height: 1.15;
 }
-.home-cal .agenda-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.home-cal .agenda-sub { color: var(--hc-muted); font-size: 13px; margin-top: 4px; }
 .home-cal .agenda-section {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--hc-line);
   padding-top: 14px;
   margin-top: 14px;
 }
 .home-cal .agenda-section:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
 .home-cal .section-title {
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 12px;
   font-weight: 680;
   text-transform: uppercase;
@@ -239,15 +244,15 @@
   gap: 12px;
   align-items: start;
   padding: 11px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--hc-line);
   color: inherit;
   text-decoration: none;
 }
 .home-cal .clean-row:first-of-type { border-top: 0; padding-top: 0; }
-.home-cal .clean-row:hover .clean-title { color: var(--teal-dark); }
-.home-cal .clean-row:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 10px; }
+.home-cal .clean-row:hover .clean-title { color: var(--hc-teal-dark); }
+.home-cal .clean-row:focus-visible { outline: 2px solid var(--hc-teal); outline-offset: 2px; border-radius: 10px; }
 .home-cal .clean-time {
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 13px;
   font-weight: 680;
 }
@@ -260,7 +265,7 @@
   overflow-wrap: anywhere;
 }
 .home-cal .clean-sub {
-  color: var(--muted);
+  color: var(--hc-muted);
   font-size: 12.5px;
   margin-top: 3px;
   line-height: 1.35;
@@ -271,29 +276,29 @@
 .home-cal .tag {
   display: inline-block;
   padding: 3px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--hc-line);
   border-radius: 999px;
-  background: var(--paper);
-  color: var(--muted);
+  background: var(--hc-paper);
+  color: var(--hc-muted);
   font-size: 12px;
   font-weight: 680;
   white-space: nowrap;
 }
-.home-cal .tag.teal { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
-.home-cal .tag.amber { background: var(--amber-soft); color: var(--amber-ink); border-color: transparent; }
-.home-cal .tag.red { background: var(--red-soft); color: var(--red-ink); border-color: transparent; }
+.home-cal .tag.teal { background: var(--hc-teal-soft); color: var(--hc-teal-ink); border-color: transparent; }
+.home-cal .tag.amber { background: var(--hc-amber-soft); color: var(--hc-amber-ink); border-color: transparent; }
+.home-cal .tag.red { background: var(--hc-red-soft); color: var(--hc-red-ink); border-color: transparent; }
 
 /* ── task tiles ─────────────────────────────────────────────────────────── */
 /* The tiles themselves are the shared MetricTile (components/blocks.css); what
    stays here is only how many of them fit on the rail and how the figure sizes
    down to Home's quieter 20px. */
 .home-cal .compact-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-.home-cal .compact-stats .metric-tile { padding: 10px; border-radius: 12px; background: var(--wash); }
+.home-cal .compact-stats .metric-tile { padding: 10px; border-radius: 12px; background: var(--hc-wash); }
 .home-cal .compact-stats .metric-tile-num { font-size: 20px; }
 .home-cal .compact-stats .metric-tile-lbl { font-size: 12px; }
 /* Only a non-zero critical count is allowed to shout — MetricTile's metricTone
    guarantees the class is absent at 0, so this cannot fire on an empty day. */
-.home-cal .compact-stats .metric-tile.red { border-color: transparent; background: var(--red-soft); }
+.home-cal .compact-stats .metric-tile.red { border-color: transparent; background: var(--hc-red-soft); }
 
 /* ── narrow ─────────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
@@ -327,6 +332,6 @@
 .home-cal .home-work > .agenda-card { display: flex; flex-direction: column; }
 .home-cal .home-more {
   display: inline-block; margin-top: 6px;
-  font-size: 12.5px; font-weight: 680; color: var(--muted);
+  font-size: 12.5px; font-weight: 680; color: var(--hc-muted);
 }
-.home-cal .home-more:hover { color: var(--ink); }
+.home-cal .home-more:hover { color: var(--hc-ink); }
