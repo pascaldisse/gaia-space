@@ -51,6 +51,12 @@ pub struct Document {
     pub body: Option<String>,
     pub version: i64,
     pub archived: bool,
+    /// Resolver anchor, stamped only by internal domain actions.
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    /// Paired with source_entity_type; never accepted from generic client mutation.
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
     pub created_by: Option<String>,
 }
 
@@ -103,12 +109,14 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
         body: r.get(7)?,
         version: r.get(8)?,
         archived: r.get(9)?,
-        created_by: r.get(10)?,
+        source_entity_type: r.get(10)?,
+        source_entity_id: r.get(11)?,
+        created_by: r.get(12)?,
     })
 }
 
 const DOC_COLUMNS: &str =
-    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by";
+    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,source_entity_type,source_entity_id,created_by";
 
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
@@ -589,10 +597,40 @@ pub fn ensure_project_document_root(project_id: String) -> Result<DocumentFolder
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn create_document(mut document: Document) -> Result<()> {
+pub fn create_document(document: Document) -> Result<()> {
+    if document.source_entity_type.is_some() || document.source_entity_id.is_some() {
+        return Err("Document source provenance is internal-only".into());
+    }
+    create_document_with_source(document, None, None)
+}
+/// Internal domain entry point for actions that resolve an authoritative source. The
+/// generic public mutation above cannot forge this anchor.
+pub fn create_document_from_source(
+    document: Document,
+    source_entity_type: String,
+    source_entity_id: String,
+) -> Result<()> {
+    create_document_with_source(document, Some(source_entity_type), Some(source_entity_id))
+}
+fn create_document_with_source(
+    mut document: Document,
+    source_entity_type: Option<String>,
+    source_entity_id: Option<String>,
+) -> Result<()> {
+    let anchored = match (source_entity_type, source_entity_id) {
+        (Some(kind), Some(id)) if !kind.trim().is_empty() && !id.trim().is_empty() => {
+            document.source_entity_type = Some(kind.trim().to_owned());
+            document.source_entity_id = Some(id.trim().to_owned());
+            true
+        }
+        (None, None) => {
+            document.source_entity_type = None;
+            document.source_entity_id = None;
+            false
+        }
+        _ => return Err("Document source type and id must be supplied together".into()),
+    };
     let mut c = db::conn()?;
-    // Callers from an older client may still submit `folder_id = null`. The row never
-    // stays direct: select/create the project root first, then persist into that folder.
     if document.container_type == "project" && document.folder_id.is_none() {
         let project_id = document
             .container_id
@@ -607,9 +645,9 @@ pub fn create_document(mut document: Document) -> Result<()> {
         document.folder_id.as_deref(),
     )?;
     c.execute(
-"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by],
-).map_err(|e| e.to_string())?;
+        "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,source_entity_type,source_entity_id,created_by)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.source_entity_type, &document.source_entity_id, &document.created_by],
+    ).map_err(|e| if anchored && matches!(e, rusqlite::Error::SqliteFailure(_, _)) { "Document source anchor already exists".into() } else { e.to_string() })?;
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
         rusqlite::params![
@@ -628,6 +666,9 @@ rusqlite::params![&document.id, &document.container_type, &document.container_id
 /// content change is versioned.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document(document: Document) -> Result<()> {
+    if document.source_entity_type.is_some() || document.source_entity_id.is_some() {
+        return Err("Document source provenance is internal-only".into());
+    }
     let c = db::conn()?;
     validate_document_placement(
         &c,

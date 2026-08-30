@@ -43,6 +43,9 @@ pub struct Meeting {
     pub video_room_id: Option<String>,
     #[serde(default)]
     pub join_url: Option<String>,
+    /// User-facing external HTTP(S) meeting link; never the native LiveKit call URL.
+    #[serde(default)]
+    pub meeting_url: Option<String>,
     #[serde(default = "default_video_status")]
     pub video_status: String,
     /// Native lifecycle audit facts. Input writers never control them.
@@ -91,14 +94,43 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         video_provider: r.get(12)?,
         video_room_id: r.get(13)?,
         join_url: r.get(14)?,
-        video_status: r.get(15)?,
-        video_started_at: r.get(16)?,
-        video_ended_at: r.get(17)?,
-        video_ended_by: r.get(18)?,
+        meeting_url: r.get(15)?,
+        video_status: r.get(16)?,
+        video_started_at: r.get(17)?,
+        video_ended_at: r.get(18)?,
+        video_ended_by: r.get(19)?,
     })
 }
 
+fn validate_external_meeting_url(url: &Option<String>) -> Result<()> {
+    let Some(value) = url.as_ref() else {
+        return Ok(());
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().any(char::is_whitespace)
+        || !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+    {
+        return Err("Meeting URL must be an http(s) URL".into());
+    }
+    let authority = &trimmed[trimmed.find("://").expect("checked scheme") + 3..];
+    if authority.is_empty()
+        || authority.starts_with('/')
+        || authority.split('/').next().is_some_and(str::is_empty)
+    {
+        return Err("Meeting URL must be an http(s) URL".into());
+    }
+    Ok(())
+}
+fn normalize_external_meeting_url(url: &mut Option<String>) -> Result<()> {
+    validate_external_meeting_url(url)?;
+    if let Some(value) = url {
+        *value = value.trim().to_owned();
+    }
+    Ok(())
+}
 fn validate_meeting(meeting: &Meeting) -> Result<()> {
+    validate_external_meeting_url(&meeting.meeting_url)?;
     if meeting.title.trim().is_empty() {
         return Err("Meeting title is required".into());
     }
@@ -127,7 +159,7 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.meeting_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by";
 /// Private meetings are organizer-only; participant meetings additionally expose
 /// themselves to invited people and the legacy project-channel audience; public
 /// meetings are visible to every authenticated profile.
@@ -324,9 +356,10 @@ fn attach_meeting_channel_on(c: &rusqlite::Connection, id: &str) -> Result<Strin
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
+    normalize_external_meeting_url(&mut meeting.meeting_url)?;
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,meeting_url,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.meeting_url, meeting.video_status]).map_err(|e| e.to_string())?;
     if meeting.channel_id.is_none() {
         meeting.channel_id = Some(attach_meeting_channel_on(&c, &meeting.id)?);
     }
@@ -334,7 +367,8 @@ pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_meeting(meeting: Meeting) -> Result<()> {
+pub fn update_meeting(mut meeting: Meeting) -> Result<()> {
+    normalize_external_meeting_url(&mut meeting.meeting_url)?;
     validate_meeting(&meeting)?;
     let c = db::conn()?;
     let current: String = c
@@ -345,7 +379,7 @@ pub fn update_meeting(meeting: Meeting) -> Result<()> {
         )
         .map_err(|_| "Meeting not found".to_string())?;
     validate_calendar_video_status_transition(&current, &meeting.video_status)?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status]).map_err(|e| e.to_string())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,meeting_url=?14,video_status=?15 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.meeting_url, meeting.video_status]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -712,6 +746,7 @@ mod tests {
             video_provider: None,
             video_room_id: None,
             join_url: None,
+            meeting_url: None,
             video_status: default_video_status(),
             video_started_at: None,
             video_ended_at: None,

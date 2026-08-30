@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 132;
+pub const SCHEMA_VERSION: i64 = 133;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -971,6 +971,25 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
+    // V133: external meeting URLs and durable document provenance. Both source fields
+    // remain nullable for legacy rows; the partial index makes duplicate anchored filing
+    // impossible without constraining unanchored documents.
+    if version < 133 {
+        if table_exists(&tx, "meetings")? {
+            add_column_if_missing(&tx, "meetings", "meeting_url", "TEXT")?;
+        }
+        if table_exists(&tx, "documents")? {
+            add_column_if_missing(&tx, "documents", "source_entity_type", "TEXT")?;
+            add_column_if_missing(&tx, "documents", "source_entity_id", "TEXT")?;
+            tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS documents_source_anchor_unique ON documents(source_entity_type, source_entity_id) WHERE source_entity_type IS NOT NULL AND source_entity_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS documents_source_anchor_insert_pair BEFORE INSERT ON documents
+WHEN (NEW.source_entity_type IS NULL) != (NEW.source_entity_id IS NULL)
+BEGIN SELECT RAISE(ABORT, 'document source anchor must be paired'); END;
+CREATE TRIGGER IF NOT EXISTS documents_source_anchor_update_pair BEFORE UPDATE OF source_entity_type, source_entity_id ON documents
+WHEN (NEW.source_entity_type IS NULL) != (NEW.source_entity_id IS NULL)
+BEGIN SELECT RAISE(ABORT, 'document source anchor must be paired'); END;")?;
+        }
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1292,11 +1311,11 @@ CREATE TABLE IF NOT EXISTS review_discussions (id TEXT PRIMARY KEY, review_id TE
 CREATE TABLE IF NOT EXISTS quality_gate_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), branch_pattern TEXT NOT NULL, min_approvals INTEGER NOT NULL DEFAULT 0, required_reviewers_json TEXT, codeowners_required INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS safe_merge_runs (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id), state TEXT NOT NULL, is_dry_run INTEGER NOT NULL DEFAULT 0, log TEXT, started_at INTEGER NOT NULL DEFAULT (unixepoch()), finished_at INTEGER);
 CREATE TABLE IF NOT EXISTS document_folders (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, parent_id TEXT REFERENCES document_folders(id), name TEXT NOT NULL, description TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
-CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, folder_id TEXT REFERENCES document_folders(id), doc_type TEXT NOT NULL CHECK(doc_type IN ('text','file')), title TEXT NOT NULL, body TEXT, version INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, container_type TEXT NOT NULL CHECK(container_type IN ('my-docs','project','kb')), container_id TEXT, folder_id TEXT REFERENCES document_folders(id), doc_type TEXT NOT NULL CHECK(doc_type IN ('text','file')), title TEXT NOT NULL, body TEXT, version INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, source_entity_type TEXT, source_entity_id TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS doc_versions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, body TEXT, created_by TEXT REFERENCES profiles(id), created_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(document_id, version));
 CREATE TABLE IF NOT EXISTS document_permissions (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, recipient_type TEXT NOT NULL CHECK(recipient_type IN ('profile','team')), recipient_id TEXT NOT NULL, access_level TEXT NOT NULL CHECK(access_level IN ('viewer','editor')), PRIMARY KEY(document_id, recipient_type, recipient_id));
 CREATE INDEX IF NOT EXISTS document_permissions_document ON document_permissions(document_id);
-CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), video_provider TEXT, video_room_id TEXT, join_url TEXT, video_status TEXT NOT NULL DEFAULT 'scheduled');
+CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, rrule TEXT, location TEXT, organizer_id TEXT REFERENCES profiles(id), channel_id TEXT REFERENCES channels(id), archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), video_provider TEXT, video_room_id TEXT, join_url TEXT, meeting_url TEXT, video_status TEXT NOT NULL DEFAULT 'scheduled');
 CREATE TABLE IF NOT EXISTS meeting_participants (meeting_id TEXT NOT NULL REFERENCES meetings(id), profile_id TEXT NOT NULL REFERENCES profiles(id), status TEXT NOT NULL DEFAULT 'waiting', PRIMARY KEY(meeting_id, profile_id));
 CREATE TABLE IF NOT EXISTS pipeline_scripts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT, path TEXT NOT NULL DEFAULT '.space.kts', source TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, script_id TEXT NOT NULL REFERENCES pipeline_scripts(id), name TEXT NOT NULL, trigger_type TEXT NOT NULL DEFAULT 'MANUAL', archived INTEGER NOT NULL DEFAULT 0);
@@ -2321,7 +2340,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 132);
+        assert_eq!(SCHEMA_VERSION, 133);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2347,12 +2366,27 @@ mod tests {
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
-        conn.execute("UPDATE projects SET lead_id='default-org' WHERE id='demo-project'", []).expect("set lead");
-        conn.pragma_update(None, "user_version", 131).expect("rewind version");
+        conn.execute(
+            "UPDATE projects SET lead_id='default-org' WHERE id='demo-project'",
+            [],
+        )
+        .expect("set lead");
+        conn.pragma_update(None, "user_version", 131)
+            .expect("rewind version");
         migrate(&conn).expect("V132 migration");
-        let lead: Option<String> = conn.query_row("SELECT lead_id FROM projects WHERE id='demo-project'", [], |row| row.get(0)).expect("lead");
+        let lead: Option<String> = conn
+            .query_row(
+                "SELECT lead_id FROM projects WHERE id='demo-project'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("lead");
         assert_eq!(lead.as_deref(), Some("default-org"));
-        assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).expect("version"), SCHEMA_VERSION);
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .expect("version"),
+            SCHEMA_VERSION
+        );
         migrate(&conn).expect("V132 is idempotent");
     }
 
@@ -3191,5 +3225,50 @@ mod v39_webhook_migration_tests {
             .unwrap();
         assert_eq!(widgets, "[\"inbox\"]", "existing preference survives");
         assert_eq!((weekends, declined, start), (1, 0, 9), "defaults backfill");
+    }
+}
+
+#[cfg(test)]
+mod v133_contract_tests {
+    use super::*;
+
+    #[test]
+    fn v133_upgrade_preserves_legacy_rows_and_is_idempotent() {
+        let temp = TempDb::new("gaia-space-v133");
+        let conn = open_at(&temp).unwrap();
+        migrate(&conn).unwrap();
+        seed(&conn).unwrap();
+        conn.execute("INSERT INTO documents(id,container_type,doc_type,title,body,version,archived) VALUES('legacy-doc','my-docs','text','Legacy','body',1,0)", []).unwrap();
+        conn.pragma_update(None, "user_version", 132).unwrap();
+        migrate(&conn).unwrap();
+        let anchor: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT source_entity_type,source_entity_id FROM documents WHERE id='legacy-doc'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(anchor, (None, None));
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            133
+        );
+        let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
+        migrate(&conn).unwrap();
+        let after: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn v133_anchor_pair_and_unique_index_are_database_enforced() {
+        let conn = open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        for id in ["null-a", "null-b"] {
+            conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived) VALUES(?1,'my-docs','text',?1,1,0)", [id]).unwrap();
+        }
+        assert!(conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type) VALUES('partial','my-docs','text','partial',1,0,'message')", []).is_err());
+        conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type,source_entity_id) VALUES('anchored','my-docs','text','anchored',1,0,'message','m1')", []).unwrap();
+        assert!(conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type,source_entity_id) VALUES('duplicate','my-docs','text','duplicate',1,0,'message','m1')", []).is_err());
     }
 }
