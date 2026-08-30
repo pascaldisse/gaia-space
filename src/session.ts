@@ -48,11 +48,12 @@ const [profileId, setId] = createSignal(localStorage.getItem("space.profile") ??
   };
 
   // Default to the first available entry so nothing starts in an unusable state.
-  const ensureDefaults = () => {
+  // `online` is threaded by the caller — there is no ambient mode singleton.
+  const ensureDefaults = (online = true) => {
     // Identity law (web): you act as your own account's profile — never as the
     // organization profile, never as somebody else. Desktop stays a local
     // operator tool where the profile is a free choice.
-    const own = isWeb() ? currentUser()?.profile_id : undefined;
+    const own = isWeb(online) ? currentUser()?.profile_id : undefined;
     if (own) { if (profileId() !== own) setProfileId(own); }
     else {
       const p = profiles()?.filter((x) => !x.archived);
@@ -80,7 +81,10 @@ profileId, setProfileId, profiles, reloadProfiles,
 /** Web-mode auth session: who is logged in, and gating for the login screen. */
 const auth = createRoot(() => {
   const [currentUser, setCurrentUser] = createSignal<User | null>(null);
-  const [authChecked, setAuthChecked] = createSignal(!isWeb()); // Tauri: nothing to check.
+  // Not derived at module load: the runtime mode is a caller decision, and the
+  // globals it reads may not exist yet. checkAuth(online) is the only setter —
+  // it flips this to true immediately for a non-web (Tauri) caller.
+  const [authChecked, setAuthChecked] = createSignal(false);
 
   const checkAuth = async (online = true) => {
     if (!isWeb(online)) { setAuthChecked(true); return; }
@@ -124,7 +128,7 @@ export const { currentUser, authChecked, checkAuth, login, logout, changePasswor
 
 /** Locked = acting-as profile can't be changed by the user (web member). */
 /** Web sessions are bound to the logged-in account: nobody acts as another profile. */
-export const profileLocked = (): boolean => isWeb();
+export const profileLocked = (online = true): boolean => isWeb(online);
 
 /** Turn raw backend/SQLite failures into something a human can act on. */
 export function humanError(reason: unknown): string {

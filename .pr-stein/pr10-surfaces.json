@@ -1,0 +1,657 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commit": "4b6529d49710026c9f58328789161356c8381363",
+    "blob": "bf7414cf6a1b7a5a5487b2856f307dbdf0cf5453",
+    "path": ".pr-stein/live-ui.md",
+    "review": "completed manual one-time independent reconciliation of 101 curated records against source prose; source has no deterministic extraction grammar, so this records curation rather than automated source-exhaustiveness"
+  },
+  "constraints": {
+    "recordCount": 101,
+    "allowedSections": [
+      "1",
+      "2",
+      "3",
+      "3a",
+      "3b",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12"
+    ],
+    "allowedOwnerAtoms": [
+      "04",
+      "05",
+      "06a",
+      "06b",
+      "06c",
+      "07",
+      "08",
+      "09",
+      "09b",
+      "10",
+      "11",
+      "12a",
+      "12b",
+      "12c"
+    ],
+    "distributionChecksum": {
+      "algorithm": "sha256",
+      "canonical": "04:3,05:12,06a:7,06b:11,06c:2,07:4,08:5,09:7,09b:4,10:7,11:8,12a:17,12b:9,12c:5",
+      "value": "a702e61b4d0f7c6a10e121546297622e6d58e49be2eaaeb77e29d145d46c7c53"
+    }
+  },
+  "records": [
+    {
+      "id": 1,
+      "section": "1",
+      "surface": "icon rail",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 2,
+      "section": "1",
+      "surface": "channel sidebar",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 3,
+      "section": "1",
+      "surface": "command bar",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 4,
+      "section": "1",
+      "surface": "rail More drawer",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 5,
+      "section": "1",
+      "surface": "rail create `+` / help button",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 6,
+      "section": "1",
+      "surface": "rail unread/attention badge",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 7,
+      "section": "1",
+      "surface": "sidebar section head `+` (New channel in scope)",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 8,
+      "section": "1",
+      "surface": "conversation search field",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 9,
+      "section": "1",
+      "surface": "org switcher",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 10,
+      "section": "1",
+      "surface": "nav/canvas palette axes",
+      "ownerAtom": "04"
+    },
+    {
+      "id": 11,
+      "section": "1",
+      "surface": "semantic colour roles teal/amber/red",
+      "ownerAtom": "04"
+    },
+    {
+      "id": 12,
+      "section": "2",
+      "surface": "Home view",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 13,
+      "section": "2",
+      "surface": "PageHeader (kicker/icon tile/title/subtitle)",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 14,
+      "section": "2",
+      "surface": "header metric pills",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 15,
+      "section": "2",
+      "surface": "`Your month` section head",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 16,
+      "section": "2",
+      "surface": "month grid",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 17,
+      "section": "2",
+      "surface": "day panel",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 18,
+      "section": "2",
+      "surface": "month stepper",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 19,
+      "section": "2",
+      "surface": "Home day-panel empty state",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 20,
+      "section": "3",
+      "surface": "chat channel view",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 21,
+      "section": "3",
+      "surface": "channel topbar",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 22,
+      "section": "3",
+      "surface": "pinned/mentions filters",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 23,
+      "section": "3",
+      "surface": "Notifications control",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 24,
+      "section": "3",
+      "surface": "refresh cadence row",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 25,
+      "section": "3",
+      "surface": "chat message list",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 26,
+      "section": "3",
+      "surface": "message row",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 27,
+      "section": "3",
+      "surface": "composer",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 28,
+      "section": "3",
+      "surface": "composer hint line",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 29,
+      "section": "3",
+      "surface": "composer tool cluster",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 30,
+      "section": "3",
+      "surface": "message hover action row",
+      "ownerAtom": "08"
+    },
+    {
+      "id": 31,
+      "section": "3",
+      "surface": "reaction chips",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 32,
+      "section": "3a",
+      "surface": "`make work` menu (Task/Ticket/Date)",
+      "ownerAtom": "08"
+    },
+    {
+      "id": 33,
+      "section": "3a",
+      "surface": "task tile context menu",
+      "ownerAtom": "06c"
+    },
+    {
+      "id": 34,
+      "section": "3b",
+      "surface": "WorkItemDrawer",
+      "ownerAtom": "08"
+    },
+    {
+      "id": 35,
+      "section": "3b",
+      "surface": "drawer Title/Description fields",
+      "ownerAtom": "08"
+    },
+    {
+      "id": 36,
+      "section": "3b",
+      "surface": "Owner field",
+      "ownerAtom": "07"
+    },
+    {
+      "id": 37,
+      "section": "3b",
+      "surface": "Contributors field + inline empty state",
+      "ownerAtom": "07"
+    },
+    {
+      "id": 38,
+      "section": "3b",
+      "surface": "`Due` date trigger",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 39,
+      "section": "3b",
+      "surface": "`Source` quoted block",
+      "ownerAtom": "08"
+    },
+    {
+      "id": 40,
+      "section": "3b",
+      "surface": "drawer footer Cancel / Create task",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 41,
+      "section": "4",
+      "surface": "DateField portal popup",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 42,
+      "section": "4",
+      "surface": "picker month head",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 43,
+      "section": "4",
+      "surface": "`Today` button",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 44,
+      "section": "4",
+      "surface": "dark-palette portal inheritance case",
+      "ownerAtom": "06a"
+    },
+    {
+      "id": 45,
+      "section": "5",
+      "surface": "To-Do view",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 46,
+      "section": "5",
+      "surface": "To-Do header metrics",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 47,
+      "section": "5",
+      "surface": "To-Do action bar (New task / Show done)",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 48,
+      "section": "5",
+      "surface": "`Open work` section head + drag hint",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 49,
+      "section": "5",
+      "surface": "deadline band heading + count chip",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 50,
+      "section": "5",
+      "surface": "task tile",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 51,
+      "section": "5",
+      "surface": "TaskRowEdit inline editor",
+      "ownerAtom": "07"
+    },
+    {
+      "id": 52,
+      "section": "5",
+      "surface": "TaskRowEdit footer",
+      "ownerAtom": "09b"
+    },
+    {
+      "id": 53,
+      "section": "5",
+      "surface": "task menu (Open/Postpone/Delete task...)",
+      "ownerAtom": "06c"
+    },
+    {
+      "id": 54,
+      "section": "5",
+      "surface": "drag-to-file task to sidebar project",
+      "ownerAtom": "07"
+    },
+    {
+      "id": 55,
+      "section": "6",
+      "surface": "ConfirmDialog",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 56,
+      "section": "6",
+      "surface": "PromptDialog",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 57,
+      "section": "6",
+      "surface": "DeleteButton (two-step)",
+      "ownerAtom": "09b"
+    },
+    {
+      "id": 58,
+      "section": "6",
+      "surface": "destructive ellipsis wording",
+      "ownerAtom": "09b"
+    },
+    {
+      "id": 59,
+      "section": "7",
+      "surface": "Knowledge library view",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 60,
+      "section": "7",
+      "surface": "knowledge action bar",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 61,
+      "section": "7",
+      "surface": "SHELVES folder cards",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 62,
+      "section": "7",
+      "surface": "DOCUMENTS cards",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 63,
+      "section": "7",
+      "surface": "document card menu (Open/Archive/Delete...)",
+      "ownerAtom": "09b"
+    },
+    {
+      "id": 64,
+      "section": "7",
+      "surface": "drag-to-file document to shelf",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 65,
+      "section": "7",
+      "surface": "download / upload path",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 66,
+      "section": "8",
+      "surface": "Calendar view",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 67,
+      "section": "8",
+      "surface": "calendar action bar",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 68,
+      "section": "8",
+      "surface": "view toggle Month/Week/Day/Schedule",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 69,
+      "section": "8",
+      "surface": "month grid cell `+` affordance",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 70,
+      "section": "8",
+      "surface": "event chip",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 71,
+      "section": "8",
+      "surface": "selected-day side column",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 72,
+      "section": "9",
+      "surface": "Meetings list pane",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 73,
+      "section": "9",
+      "surface": "meetings filter row + quiet search",
+      "ownerAtom": "12b"
+    },
+    {
+      "id": 74,
+      "section": "9",
+      "surface": "meeting row",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 75,
+      "section": "9",
+      "surface": "Meetings filtered-out empty state",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 76,
+      "section": "9",
+      "surface": "Meetings detail empty state",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 77,
+      "section": "9",
+      "surface": "meeting detail action row",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 78,
+      "section": "9",
+      "surface": "meeting form fields incl. MEETING LINK",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 79,
+      "section": "9",
+      "surface": "`Room booking` group + Reserve",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 80,
+      "section": "9",
+      "surface": "`Participants` group + Invite",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 81,
+      "section": "9",
+      "surface": "`Availability` group + Refresh",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 82,
+      "section": "9",
+      "surface": "LIVEKIT MEETING block + Join call",
+      "ownerAtom": "10"
+    },
+    {
+      "id": 83,
+      "section": "10",
+      "surface": "Settings view",
+      "ownerAtom": "12c"
+    },
+    {
+      "id": 84,
+      "section": "10",
+      "surface": "NAVIGATION LAYOUT group",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 85,
+      "section": "10",
+      "surface": "COLOUR SCHEME group + preview swatches",
+      "ownerAtom": "04"
+    },
+    {
+      "id": 86,
+      "section": "10",
+      "surface": "VISIBLE DESTINATIONS group",
+      "ownerAtom": "11"
+    },
+    {
+      "id": 87,
+      "section": "10",
+      "surface": "ORGANIZATION group",
+      "ownerAtom": "12c"
+    },
+    {
+      "id": 88,
+      "section": "10",
+      "surface": "MY CALENDARS group + empty state",
+      "ownerAtom": "12c"
+    },
+    {
+      "id": 89,
+      "section": "10",
+      "surface": "CONNECTED CALENDARS group + Connect",
+      "ownerAtom": "12c"
+    },
+    {
+      "id": 90,
+      "section": "10",
+      "surface": "SECURITY / Two-factor group",
+      "ownerAtom": "12c"
+    },
+    {
+      "id": 91,
+      "section": "11",
+      "surface": "grouped layout",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 92,
+      "section": "11",
+      "surface": "flat layout",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 93,
+      "section": "11",
+      "surface": "layout switch losslessness",
+      "ownerAtom": "05"
+    },
+    {
+      "id": 94,
+      "section": "12",
+      "surface": "EmptyState pattern",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 95,
+      "section": "12",
+      "surface": "blogs empty",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 96,
+      "section": "12",
+      "surface": "absences empty",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 97,
+      "section": "12",
+      "surface": "locations empty",
+      "ownerAtom": "06b"
+    },
+    {
+      "id": 98,
+      "section": "3",
+      "surface": "public visibility chip",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 99,
+      "section": "3",
+      "surface": "members (n) control",
+      "ownerAtom": "12a"
+    },
+    {
+      "id": 100,
+      "section": "7",
+      "surface": "show archived toggle",
+      "ownerAtom": "09"
+    },
+    {
+      "id": 101,
+      "section": "7",
+      "surface": "My Documents heading + hint",
+      "ownerAtom": "09"
+    }
+  ]
+}
