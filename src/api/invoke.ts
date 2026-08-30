@@ -16,6 +16,8 @@
  * `@tauri-apps/api/core` right back at this file.
  */
 
+import { isTauriRuntime } from "../runtime";
+
 type CmdOk<T> = { ok: true; value: T };
 type CmdErr = { ok: false; error: string };
 type CmdResponse<T> = CmdOk<T> | CmdErr;
@@ -28,7 +30,11 @@ declare global {
   }
 }
 
-const isTauri = () =>
+// One shared runtime predicate (runtime.ts): `__TAURI__` OR `__TAURI_INTERNALS__`.
+// The IPC bridge itself still needs the internals object, so dispatch also
+// checks that it can actually invoke; a `__TAURI__`-only page uses HTTP.
+const isTauri = () => isTauriRuntime();
+const canInvoke = () =>
   typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
 // A remote page inside the mobile shell has Tauri available, but must call its
 // selected server over HTTP rather than the shell's intentionally empty IPC API.
@@ -42,7 +48,7 @@ export async function invoke<T>(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  if (isTauri() && !isMobileServer()) {
+  if (isTauri() && canInvoke() && !isMobileServer()) {
     return window.__TAURI_INTERNALS__!.invoke(cmd, args) as Promise<T>;
   }
   const base = import.meta.env.BASE_URL;
