@@ -14,6 +14,11 @@
   --wid-amber: var(--amber, #d99b24);
   --wid-red: var(--red, #bd3f3f);
   --wid-red-soft: var(--red-soft, #fbe3e0);
+  /* The field fill was the literal `#fbfaf8` in three places — a hair off white, which
+     is right on paper and unreadable on a dark canvas. It reads the control token now,
+     so the drawer follows every palette (src/palettes.css) instead of pinning itself
+     to the light one. */
+  --wid-field: var(--ctl-bg, #fbfaf8);
   /* ONE SILHOUETTE PER DRAWER (stage 13). Every control in this form — text
      field, textarea, native select, PillSelect, PillMenu, button — answers to
      these two numbers. The screenshot that started this: Status and Priority
@@ -81,7 +86,7 @@
   border: 1px solid var(--wid-line);
   border-radius: var(--wid-ctl-r);
   padding: 10px 11px;
-  background: #fbfaf8;
+  background: var(--wid-field);
   color: var(--wid-ink);
   font: inherit;
   font-size: 14px;
@@ -112,12 +117,12 @@
   min-height: var(--wid-ctl-h);
   border: 1px solid var(--wid-line);
   border-radius: var(--wid-ctl-r);
-  background: #fbfaf8;
+  background: var(--wid-field);
   color: var(--wid-ink);
   font-size: 14px;
   font-weight: 400;
 }
-.wid-root .wid-form :is(.pill-select, .pill-menu):hover { border-color: var(--wid-line); background: #fbfaf8; }
+.wid-root .wid-form :is(.pill-select, .pill-menu):hover { border-color: var(--wid-line); background: var(--wid-field); }
 .wid-root .wid-form :is(.pill-select select, .pill-menu-trigger) {
   width: 100%;
   height: calc(var(--wid-ctl-h) - 2px);
@@ -187,6 +192,6 @@
   cursor: pointer;
 }
 .wid-root .wid-btn:hover:not(:disabled) { background: var(--wid-wash); }
-.wid-root .wid-primary { background: var(--wid-teal); border-color: var(--wid-teal-dark); color: #05302a; }
+.wid-root .wid-primary { background: var(--wid-teal); border-color: var(--wid-teal-dark); color: var(--brand-navy, #05302a); }
 .wid-root .wid-primary:hover:not(:disabled) { background: var(--wid-teal-dark); color: var(--wid-teal-soft); }
 .wid-root .wid-btn:disabled { opacity: 0.55; cursor: not-allowed; }

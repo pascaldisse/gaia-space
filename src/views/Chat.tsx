@@ -5,6 +5,8 @@ import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import WorkItemDrawer, { type WorkItemKind } from "../components/WorkItemDrawer";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Icon } from "../components/Icon";
 import "../App.css";
@@ -129,6 +131,36 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+
+  /** ── A MESSAGE BECOMES WORK ────────────────────────────────────────────────
+   *
+   *  The whole machine for this existed and was reachable from nowhere: a finished
+   *  `WorkItemDrawer`, a `resolve_source_ref` command on both backends, and the
+   *  `source_entity_type/_id` anchor on issues, meetings and documents — imported by
+   *  its own test and by nothing else. A channel card even ADVERTISED the mapping
+   *  (Task / Ticket / Date) without offering it.
+   *
+   *  The trigger belongs on the MESSAGE, because that is where the person is when
+   *  they realise the message is work — not on a side card, and not in a page header.
+   *  One entry, three kinds: the reader decides whether this is a task, a defect or
+   *  a date; the application must not guess that from the words. */
+  const [workMenu, setWorkMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [workDraft, setWorkDraft] = createSignal<{ kind: WorkItemKind; messageId: string; excerpt: string } | null>(null);
+  const openWorkMenu = (event: MouseEvent, message: MessageView) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const start = (kind: WorkItemKind) => () =>
+      setWorkDraft({ kind, messageId: message.id, excerpt: (message.text ?? "").trim().slice(0, 120) });
+    setWorkMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        { label: "Task", onSelect: start("task") },
+        { label: "Ticket", onSelect: start("ticket") },
+        { label: "Date", onSelect: start("event") },
+      ],
+    });
+  };
   const preferenceKey = () => { const profile_id=actingProfileId(), channel_id=activeChannelId(); return profile_id&&channel_id ? {profile_id,channel_id} : null; };
   const [notificationPreference, { refetch: refetchNotificationPreference }] = createResource(preferenceKey, key => chatApi.channelNotificationPreference(key.profile_id, key.channel_id));
   const updateNotificationPreference = async (patch: Partial<ChannelNotificationPreference>) => { const current=notificationPreference(); if (!current) return; try { await chatApi.saveChannelNotificationPreference({...current,...patch}); await refetchNotificationPreference(); } catch (e) { fail(e); } };
@@ -1078,6 +1110,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
               reply in thread
             </button>
           </Show>
+          {/* Lowercase like its neighbours: this row is a set of quiet verbs, not a
+              row of act-buttons. */}
+          <button class="ghost small" onClick={(event) => openWorkMenu(event, m)}>
+            make work
+          </button>
         </div></Show>
 
         <Show when={!inThread && m.reply_count > 0}>
@@ -1498,6 +1535,25 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </div>
         </Show>
       </aside>
+      </Show>
+
+      <Show when={workMenu()}>
+        {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setWorkMenu(null)} />}
+      </Show>
+      {/* The drawer is the SECOND step on purpose: the menu decides WHAT is being
+          made, the drawer fills it in. Nothing is written until the person submits,
+          and the created work carries the message as its source anchor. */}
+      <Show when={workDraft()}>
+        {(draft) => (
+          <WorkItemDrawer
+            kind={draft().kind}
+            source={{ entity_type: "message", entity_id: draft().messageId, channel_id: activeChannelId() ?? undefined, excerpt: draft().excerpt }}
+            projectId={activeChannel()?.project_id ?? undefined}
+            prefillTitle={draft().excerpt}
+            onClose={() => setWorkDraft(null)}
+            onCreated={() => setWorkDraft(null)}
+          />
+        )}
       </Show>
     </div>
   );
