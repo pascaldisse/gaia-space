@@ -129,6 +129,7 @@
      does not read as a button. */
   --nav-active-bg: #c9f6ec;
   --nav-active-ink: #042521;
+  --nav-chip-bg: #d8f2ec;
 }
 
 /* Deep's chrome sits one step darker still, so the rail stays distinct from the

@@ -94,7 +94,9 @@
   flex: none;
   border: 0;
   border-radius: 12px;
-  background: #e9e1ea;
+  /* the person's own tile on the chrome: a neutral light chip, so it belongs to
+     whichever chrome hue is in force */
+  background: var(--nav-chip-bg);
   color: var(--purple-0);
   display: grid;
   place-items: center;
@@ -254,13 +256,13 @@
   justify-content: space-between;
   align-items: center;
   padding: 0 9px 7px;
-  color: #cab3cf;
+  color: var(--nav-faint);
   font-size: 11px;
   font-weight: 720;
   text-transform: uppercase;
   letter-spacing: .09em;
 }
-.space-chat-shell .channel .hash { color: #bda7c2; font-weight: 680; }
+.space-chat-shell .channel .hash { color: var(--nav-faint); font-weight: 680; }
 .space-chat-shell .side-empty { padding: 0 9px; color: var(--nav-muted); font-size: 13px; opacity: .8; }
 
 /* The mode body: the part of the sidebar that follows the rail. Structure only —
@@ -387,7 +389,7 @@
    used to be a permanent form in Chat's own sidebar. */
 .space-chat-shell .section-add {
   background: none; border: 0; padding: 0 2px; cursor: pointer;
-  color: #cab3cf; font-size: 14px; font-weight: 700; line-height: 1; opacity: .85;
+  color: var(--nav-faint); font-size: 14px; font-weight: 700; line-height: 1; opacity: .85;
 }
 .space-chat-shell .section-add:hover { opacity: 1; color: #fff; }
 
@@ -404,8 +406,8 @@
   min-height: var(--pillctl-h, 36px);
   border-radius: var(--pillctl-r, 999px);
   background: rgba(255,255,255,.08); border: 1px solid transparent;
-  color: #f4ecf6; font-size: 13px; padding: 0 30px 0 13px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5 6 6.5 11 1.5' stroke='%23dcc5df' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  color: var(--nav-text); font-size: 13px; padding: 0 30px 0 13px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5 6 6.5 11 1.5' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat; background-position: right 12px center;
 }
 .space-chat-shell .side-acting select:hover { border-color: rgba(255,255,255,.22); }

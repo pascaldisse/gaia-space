@@ -24,8 +24,13 @@
   --purple-1: #4a1454;
   --purple-2: #63266f;
   --purple-3: #7a4087;
-  --nav-text: #fff7ff;
-  --nav-muted: #dcc5df;
+  /* The chrome's own inks. NEUTRAL WHITE, not a tint of the chrome hue: the
+     sidebar labels used to be lilac literals, which read as "lilac" rather than
+     as "quiet" — and stayed lilac when the chrome went teal. Opacity carries the
+     rank instead of hue, so every chrome colour gets the same three steps. */
+  --nav-text: rgba(255, 255, 255, .96);
+  --nav-muted: rgba(255, 255, 255, .74);
+  --nav-faint: rgba(255, 255, 255, .58);
 
   /* action / open */
   --teal: #00bfa6;
@@ -61,6 +66,7 @@
   --nav-top-gradient: linear-gradient(90deg, var(--purple-1), #3d073d);
   /* the one row you are standing on, in the chrome's own light tint */
   --nav-active-bg: #f3d7ff;
+  --nav-chip-bg: #e9e1ea;
   --nav-active-ink: #1b0e1f;
 
   /* ── TOKEN REMAP ─────────────────────────────────────────────────────────
