@@ -112,7 +112,7 @@ export default function Projects() {
     const person = profiles()?.find((item) => item.id === id);
     return person?.display_name || person?.username || id;
   };
-  const actingProfileId = () => currentUser()?.profile_id ?? profileId();
+  const actingProfileId = () => isWeb() ? currentUser()?.profile_id ?? profileId() : profileId();
   /* The SAME roles ProjectSettings' member panel offers, assigned with the SAME command
      (create_role_assignment, scope "project"). Two surfaces, one vocabulary. */
   const [orgRoles] = createResource(platformApi.roles);

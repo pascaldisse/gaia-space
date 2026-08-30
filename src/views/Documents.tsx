@@ -1407,16 +1407,20 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
               <label class="primary doc-action-primary doc-action-file">
                 <span class="doc-action-icon" aria-hidden="true">↑</span>
                 <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file or drop it here</small></span>
-                <input
-                  type="file"
-                  aria-label="File to upload"
-                  disabled={uploading() || !projectReady()}
-                  onChange={(e) => {
-                    const picked = e.currentTarget.files?.[0];
-                    e.currentTarget.value = "";
-                    if (picked) void uploadBrowserFile(picked);
-                  }}
-                />
+                <Show
+                  when={!uploading() && projectReady()}
+                  fallback={<input type="file" aria-label="File to upload" disabled />}
+                >
+                  <input
+                    type="file"
+                    aria-label="File to upload"
+                    onChange={(e) => {
+                      const picked = e.currentTarget.files?.[0];
+                      e.currentTarget.value = "";
+                      if (picked) void uploadBrowserFile(picked);
+                    }}
+                  />
+                </Show>
               </label>
             </Show>
             {/* No `.ghost` here on purpose. `.theme-space-light button.ghost`

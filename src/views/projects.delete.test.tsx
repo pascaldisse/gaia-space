@@ -51,8 +51,8 @@ const mount = async (component: () => unknown) => {
   registerViews(["Projects", "Project Workspace", "Project Settings", "Issues"]);
   setAvailableViews(null);
   initRouter(createMemoryAdapter());
-  setProfileId("me");
   await reloadProjects();
+  setProfileId("me");
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(component as any, host);
   await settle();
