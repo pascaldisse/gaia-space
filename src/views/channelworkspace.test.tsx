@@ -23,7 +23,14 @@ const profiles = [
 const channels: Record<string, unknown> = {
   "c-project": { id: "c-project", content_type: "public", name: "video-factory", description: "Skripte und Produktion", project_id: "p1", archived: false },
   "c-loose": { id: "c-loose", content_type: "public", name: "wasserkocher", description: "Kein Projekt", project_id: null, archived: false },
+  "c-dm": { id: "c-dm", content_type: "dm", name: "Other Person", description: null, project_id: null, archived: false },
 };
+
+/** Every command the surface fires, so a membership edit can be proven to reach the
+    backend with the right channel and the right person — and to never be fired at a
+    project channel, where the backend refuses it. */
+const calls: Array<{ cmd: string; args: Record<string, unknown> }> = [];
+const channelMembers: Record<string, string[]> = {};
 
 const reply = (cmd: string, args: Record<string, unknown>) => {
   if (cmd === "get_channel") return channels[String(args.id)] ?? null;
@@ -33,9 +40,20 @@ const reply = (cmd: string, args: Record<string, unknown>) => {
   // project's people, so this answer matches list_project_member_ids below.
   if (cmd === "list_channel_members") {
     const id = String(args.channelId);
-    return id === "c-project"
-      ? [{ channel_id: id, profile_id: "me", administrator: true }, { channel_id: id, profile_id: "other", administrator: false }]
-      : [{ channel_id: id, profile_id: "me", administrator: true }];
+    const roster = channelMembers[id] ?? (id === "c-project" ? ["me", "other"] : ["me"]);
+    return roster.map((profile_id) => ({ channel_id: id, profile_id, administrator: profile_id === "me" }));
+  }
+  if (cmd === "add_channel_member") {
+    const id = String(args.channelId);
+    const roster = channelMembers[id] ?? ["me"];
+    channelMembers[id] = [...roster, String(args.memberId ?? args.profileId)];
+    return null;
+  }
+  if (cmd === "remove_channel_member") {
+    const id = String(args.channelId);
+    const gone = String(args.memberId ?? args.profileId);
+    channelMembers[id] = (channelMembers[id] ?? ["me"]).filter((entry) => entry !== gone);
+    return null;
   }
   if (cmd === "list_mentions_for_profile") return [];
   if (cmd === "list_project_member_ids") return ["me", "other"];
@@ -46,7 +64,12 @@ const reply = (cmd: string, args: Record<string, unknown>) => {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 60));
 const mount = async (channelId: string) => {
-  (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => Promise.resolve(reply(cmd, args ?? {})) };
+  (window as any).__TAURI_INTERNALS__ = {
+    invoke: (cmd: string, args: Record<string, unknown>) => {
+      calls.push({ cmd, args: args ?? {} });
+      return Promise.resolve(reply(cmd, args ?? {}));
+    },
+  };
   registerViews(["Chat", "Project Overview", "Project Tasks", "Calendar", "Documents"]);
   setAvailableViews(null);
   initRouter(createMemoryAdapter());
@@ -58,7 +81,25 @@ const mount = async (channelId: string) => {
   return host;
 };
 
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); });
+afterEach(() => {
+  dispose?.(); dispose = undefined; document.body.innerHTML = "";
+  delete (window as any).__TAURI_INTERNALS__;
+  calls.length = 0;
+  for (const key of Object.keys(channelMembers)) delete channelMembers[key];
+  setProfileId(""); setProjectId("");
+});
+
+/** Click a PillMenu option by its visible label. The list is PORTALLED, so it is
+    searched from document.body, not from the host. */
+const pickFromMenu = async (trigger: HTMLElement, label: string) => {
+  trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  const option = Array.from(document.querySelectorAll(".pill-menu-option"))
+    .find((node) => node.textContent?.trim() === label) as HTMLElement | undefined;
+  expect(option).toBeTruthy();
+  option!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  await settle();
+};
 
 describe("channel workspace", () => {
   test("a channel without a project shows no tab row and no project rail", async () => {
@@ -112,9 +153,63 @@ describe("channel workspace", () => {
     expect(chip?.getAttribute("href")).toBe("/projects/p1/settings");
   });
 
-  test("a channel without a project keeps a plain, unlinked members chip", async () => {
+  test("a channel without a project manages its own members from the header chip", async () => {
+    // THE BUG: membership of a project-LESS conversation was only editable in the old
+    // Chat members panel, which the workspace hides. The chip is now the door.
     const host = await mount("c-loose");
     expect(host.querySelector(".cw-metrics .cw-pill-link")).toBeNull();
+    const chip = host.querySelector<HTMLButtonElement>(".cw-metrics .cw-pill-button");
+    expect(chip?.textContent).toContain("1");
+    expect(chip?.textContent).toContain("manage");
+    expect(chip?.getAttribute("aria-expanded")).toBe("false");
+
+    // Opening the chip opens the Team panel in the rail — the same rail a project
+    // channel has, holding the controls a project channel is refused.
+    chip!.click();
+    await settle();
+    const rail = host.querySelector<HTMLElement>(".cw-rail");
+    expect(rail?.getAttribute("aria-label")).toBe("Channel members");
+    expect(host.querySelector(".cw-body")?.className).toContain("with-rail");
+    expect(rail?.textContent).toContain("Me");
+
+    // ADD: only profiles who are NOT already in are offered, and the add reaches the
+    // backend for THIS channel with THAT person.
+    const trigger = rail!.querySelector<HTMLElement>(".cw-team-add .pill-menu-trigger")!;
+    expect(trigger).toBeTruthy();
+    await pickFromMenu(trigger, "Other Person");
+    const added = calls.find((call) => call.cmd === "add_channel_member");
+    expect(added?.args.channelId).toBe("c-loose");
+    expect(added?.args.memberId ?? added?.args.profileId).toBe("other");
+    expect(host.querySelector(".cw-rail")?.textContent).toContain("Other Person");
+    expect(host.querySelector(".cw-metrics .cw-pill-button")?.textContent).toContain("2");
+
+    // REMOVE is offered per person and reaches the backend too.
+    const remove = Array.from(host.querySelectorAll<HTMLButtonElement>(".cw-person-remove"))
+      .find((button) => button.getAttribute("aria-label") === "Remove Other Person");
+    remove!.click();
+    await settle();
+    const removed = calls.find((call) => call.cmd === "remove_channel_member");
+    expect(removed?.args.channelId).toBe("c-loose");
+    expect(removed?.args.memberId ?? removed?.args.profileId).toBe("other");
+    expect(host.querySelector(".cw-metrics .cw-pill-button")?.textContent).toContain("1");
+  });
+
+  test("a PROJECT channel offers no roster controls — only the project's settings", async () => {
+    // The backend refuses add/remove on an inherited roster; offering the control
+    // would only produce a refusal, so the surface never draws one.
+    const host = await mount("c-project");
+    expect(host.querySelector(".cw-metrics .cw-pill-button")).toBeNull();
+    expect(host.querySelector(".cw-team")).toBeNull();
+    expect(host.querySelector(".cw-person-remove")).toBeNull();
+    expect(host.querySelector(".cw-team-add")).toBeNull();
+    expect(host.querySelector<HTMLAnchorElement>(".cw-metrics .cw-pill-link")?.getAttribute("href"))
+      .toBe("/projects/p1/settings");
+    expect(calls.some((call) => call.cmd === "add_channel_member" || call.cmd === "remove_channel_member")).toBe(false);
+  });
+
+  test("a DM shows no roster controls: its two people ARE the conversation", async () => {
+    const host = await mount("c-dm");
+    expect(host.querySelector(".cw-metrics .cw-pill-button")).toBeNull();
     expect(host.querySelector(".cw-metrics .cw-pill")?.textContent).toContain("1");
   });
 });
