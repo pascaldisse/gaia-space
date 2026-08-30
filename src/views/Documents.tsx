@@ -1889,7 +1889,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   <select value={shareAccessLevel()} onChange={(e) => setShareAccessLevel(e.currentTarget.value as "viewer" | "editor")}><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
                   <button class="primary small" disabled={!shareRecipientId()} onClick={addBookAccessRecipient}>Add</button>
                 </div>
-                <ul class="sharing-list"><For each={bookAccess()}>{(permission) => <li><span class="sharing-recipient">{recipientName(permission)}</span><span class="sharing-kind">{permission.recipient_type}</span><span class="sharing-level">{permission.access_level}</span><button class="ghost small" onClick={() => removeBookAccessRecipient(permission)}>Remove</button></li>}</For></ul>
+                <ul class="sharing-list"><For each={bookAccess() ?? []}>{(permission) => <li><span class="sharing-recipient">{recipientName(permission)}</span><span class="sharing-kind">{permission.recipient_type}</span><span class="sharing-level">{permission.access_level}</span><button class="ghost small" onClick={() => removeBookAccessRecipient(permission)}>Remove</button></li>}</For></ul>
               </section>
             </Show>
             <CommentPanel />
@@ -1926,7 +1926,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
                 <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
                   <ul class="sharing-list">
-                    <For each={access()}>
+                    <For each={access() ?? []}>
                       {(permission) => (
                         <li>
                           <span class="sharing-recipient">{recipientName(permission)}</span>

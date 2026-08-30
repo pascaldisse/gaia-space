@@ -4,6 +4,7 @@ mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Documents from "./Documents";
 import { setProfileId, setProjectId } from "../session";
+import { createMemoryAdapter, initRouter } from "../router";
 
 // A FILE SHARED IN A PROJECT CHANNEL IS THE PROJECT'S FILE. The backend files it onto a
 // shelf of its own — `From #<channel>` under the project root — so chat screenshots stay
@@ -50,6 +51,7 @@ describe("project library shelves", () => {
       ],
     });
 
+    initRouter(createMemoryAdapter());
     const host = document.createElement("div");
     document.body.appendChild(host);
     dispose = render(() => <Documents container="project" containerId="p1" />, host);
